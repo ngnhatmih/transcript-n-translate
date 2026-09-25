@@ -38,15 +38,37 @@ class PhaseQueueWorker:
         *,
         poll_interval: float = 0.05,
         sleeper: Callable[[float], None] = time.sleep,
+        publish: Callable[[dict], None] | None = None,
     ) -> None:
         self.repos = repos
         self.governor = governor
         self.handlers = handlers
         self.poll_interval = poll_interval
         self._sleep = sleeper
+        self._publish = publish or (lambda event: None)
         self.current_phase: str | None = None
         self.phase_switches = 0
         self._stop = threading.Event()
+
+    def _emit(self, job_id: int) -> None:
+        """Đẩy một sự kiện cho job vừa đổi trạng thái.
+
+        Đọc lại hàng thay vì nhận tham số: `set_job_state` không trả về trạng
+        thái, mà sự kiện phải khớp ĐÚNG thứ đã ghi (kể cả `error` do nhánh
+        `except` đặt). Gọi sau MỖI lần ghi, nếu không giao diện đứng im ở trạng
+        thái cũ cho tới khi client tự tải lại.
+
+        Publish KHÔNG được làm chết worker: một subscriber hỏng là lỗi của tầng
+        stream, không phải lý do để hàng đợi dừng giữa job.
+        """
+        try:
+            job = self.repos.get_job(job_id)
+            self._publish({
+                "id": job.id, "state": job.state, "progress": job.progress,
+                "phase": job.phase, "error": job.error,
+            })
+        except Exception:  # noqa: BLE001 - xem docstring
+            pass
 
     # ---------- vòng đời ----------
     def recover(self) -> int:
@@ -128,27 +150,32 @@ class PhaseQueueWorker:
         handler = self.handlers.get(job.type)
 
         self.repos.set_job_state(job.id, js.RUNNING)
+        self._emit(job.id)
 
         if handler is None:
             self.repos.append_job_log(job.id, f"không có handler cho loại {job.type!r}")
             self.repos.set_job_state(
                 job.id, js.FAILED, error=f"không có handler cho loại job {job.type!r}"
             )
+            self._emit(job.id)
             return
 
         def report(progress: float, line: str) -> None:
             self.repos.set_job_progress(job.id, progress)
             self.repos.append_job_log(job.id, line)
+            self._emit(job.id)
 
         try:
             handler.run(job, report)
         except JobCancelled:
             self.repos.append_job_log(job.id, "đã huỷ theo yêu cầu ở checkpoint")
             self.repos.set_job_state(job.id, js.CANCELLED)
+            self._emit(job.id)
             return
         except Exception as exc:  # noqa: BLE001 - phải bắt hết để hàng đợi sống
             self.repos.append_job_log(job.id, f"LỖI: {exc}")
             self.repos.set_job_state(job.id, js.FAILED, error=f"{type(exc).__name__}: {exc}")
+            self._emit(job.id)
             return
 
         # Kiểm tra yêu cầu huỷ ở RANH GIỚI job. Không có đường nào kill tiến trình.
@@ -156,7 +183,9 @@ class PhaseQueueWorker:
         if fresh.cancel_requested:
             self.repos.append_job_log(job.id, "đã huỷ theo yêu cầu")
             self.repos.set_job_state(job.id, js.CANCELLED)
+            self._emit(job.id)
             return
 
         self.repos.set_job_progress(job.id, 1.0)
         self.repos.set_job_state(job.id, js.DONE)
+        self._emit(job.id)

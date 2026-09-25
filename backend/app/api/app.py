@@ -11,6 +11,7 @@ import pathlib
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.api.sse import JobEventBroker
 from app.registry import EngineSpec
 
 # Frontend dev server (Next.js) chạy khác cổng với API nên trình duyệt sẽ chặn
@@ -19,11 +20,15 @@ FRONTEND_DEV_ORIGINS = ["http://localhost:3100", "http://127.0.0.1:3100"]
 
 
 def create_app(*, repos, specs: list[EngineSpec], media_dir, out_dir,
-               worker=None, log_dir=None) -> FastAPI:
+               worker=None, log_dir=None, broker=None) -> FastAPI:
     app = FastAPI(title="phu-de-lab", version="0.1.0")
     app.state.repos = repos
     app.state.specs = specs
     app.state.worker = worker
+    # `broker` là tham số tuỳ chọn để `app/main.py` truyền CÙNG một broker cho
+    # worker: worker publish, route `/api/jobs/stream` đọc. Bỏ trống thì app vẫn
+    # dựng được (test chỉ đọc) và route stream trả về một stream rỗng.
+    app.state.broker = broker or JobEventBroker()
     app.state.dirs = {
         "media": pathlib.Path(media_dir),
         "out": pathlib.Path(out_dir),
@@ -39,8 +44,9 @@ def create_app(*, repos, specs: list[EngineSpec], media_dir, out_dir,
         allow_headers=["*"],
     )
 
-    from app.api import routes_registry, routes_sources
+    from app.api import routes_jobs, routes_registry, routes_sources
 
     app.include_router(routes_registry.router)
     app.include_router(routes_sources.router)
+    app.include_router(routes_jobs.router)
     return app
