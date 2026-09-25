@@ -976,10 +976,11 @@ def test_upload_route_keeps_its_blocking_io_off_the_event_loop(client, monkeypat
     chạy thẳng trong thân route là CHẶN event loop: một tệp 2 GB giữ server đứng
     suốt lượt băm và `/api/jobs/stream` không gửi được gì.
 
-    Test bám vào LUỒNG THẬT thay vì chữ ký: ghi lại luồng của (a) lần mở tệp
-    trong `media/`, (b) `sha256_file`, (c) `Path.replace`, rồi so với luồng chạy
-    thân route (`_safe_name` được gọi ngay trong thân `async def`). Đẩy việc
-    chặn trở lại event loop là đỏ.
+    Test bám vào LUỒNG THẬT thay vì chữ ký: ghi lại luồng của (a) lần MỞ GHI tệp
+    trong `media/` (chế độ `wb`, tức vòng ghi), (b) `sha256_file`, (c) `Path.replace`,
+    rồi so với luồng chạy thân route (`_safe_name` được gọi ngay trong thân
+    `async def`). Đẩy bất kỳ phần nào trở lại event loop là đỏ, và mỗi phần có
+    một khẳng định riêng nên thông báo đỏ chỉ đúng thủ phạm.
     """
     import builtins
     import threading
@@ -988,7 +989,7 @@ def test_upload_route_keeps_its_blocking_io_off_the_event_loop(client, monkeypat
     from app.pipeline import ingest
 
     media_dir = client.tmp / "media"
-    seen: dict = {"open": set()}
+    seen: dict = {}
     real_open = builtins.open
     real_safe = routes_sources._safe_name
     real_hash = ingest.sha256_file
@@ -996,7 +997,8 @@ def test_upload_route_keeps_its_blocking_io_off_the_event_loop(client, monkeypat
 
     def spy_open(file, *args, **kwargs):
         if isinstance(file, pathlib.Path) and file.parent == media_dir:
-            seen["open"].add(threading.get_ident())
+            mode = args[0] if args else kwargs.get("mode", "r")
+            seen.setdefault(f"open:{mode}", set()).add(threading.get_ident())
         return real_open(file, *args, **kwargs)
 
     def spy_safe(*args, **kwargs):
@@ -1021,9 +1023,11 @@ def test_upload_route_keeps_its_blocking_io_off_the_event_loop(client, monkeypat
                        data={"lang": "zh"})
     assert resp.status_code == 201, resp.text
 
-    assert set(seen) == {"open", "route", "hash", "replace"}, seen
-    assert seen["open"], "route upload không mở tệp nào trong media/"
-    for what in ("open", "hash", "replace"):
-        idents = seen["open"] if what == "open" else {seen[what]}
+    # `open:rb` (lần ĐỌC lại để băm) cũng được ghi, nhưng khẳng định của nó nằm
+    # ở chân `hash`; ở đây chỉ đòi ba chân phải có mặt.
+    assert {"open:wb", "route", "hash", "replace"} <= set(seen), seen
+    assert seen["open:wb"], "route upload không mở tệp nào trong media/ để ghi"
+    for what in ("open:wb", "hash", "replace"):
+        idents = seen[what] if what.startswith("open:") else {seen[what]}
         assert seen["route"] not in idents, (
             f"{what} chạy CÙNG luồng với thân route `async def` => đang chặn event loop")
