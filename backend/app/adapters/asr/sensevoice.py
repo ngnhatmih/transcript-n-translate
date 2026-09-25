@@ -14,6 +14,7 @@ from __future__ import annotations
 import math
 from typing import Callable
 
+from app.adapters.asr.cuda_runtime import ensure_cuda_runtime
 from app.domain.models import Segment
 from app.domain.segmentation import normalize
 from app.registry import EngineSpec
@@ -41,6 +42,10 @@ class SenseVoiceEngine:
         if self._model is None:
             factory = self._model_factory
             if factory is None:
+                # R72: cùng lý do như `FasterWhisperEngine._load()` — `funasr`
+                # kéo `torchaudio`/CTranslate2 phụ thuộc `cublas64_12.dll`, thứ
+                # chỉ vào được đường tìm DLL khi torch đã được nạp.
+                ensure_cuda_runtime()
                 from funasr import AutoModel
                 factory = AutoModel
             self._model = factory(

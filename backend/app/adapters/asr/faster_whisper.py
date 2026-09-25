@@ -6,6 +6,7 @@ from __future__ import annotations
 
 from typing import Callable
 
+from app.adapters.asr.cuda_runtime import ensure_cuda_runtime
 from app.domain.models import Segment, Word
 from app.domain.segmentation import normalize
 from app.registry import EngineSpec
@@ -58,6 +59,12 @@ class FasterWhisperEngine:
         if self._model is None:
             factory = self._model_factory
             if factory is None:
+                # R72: PHẢI chạy trước `from faster_whisper import ...`. Thiếu
+                # bước này thì CTranslate2 tạo được model nhưng nổ ở lần
+                # `encode()` đầu tiên: "Library cublas64_12.dll is not found or
+                # cannot be loaded" — cublas chỉ nằm trong `torch/lib` và chỉ
+                # vào được đường tìm DLL khi torch đã được nạp.
+                ensure_cuda_runtime()
                 from faster_whisper import WhisperModel
                 factory = WhisperModel
             self._model = factory(
