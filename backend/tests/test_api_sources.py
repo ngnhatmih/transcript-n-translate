@@ -248,6 +248,34 @@ def test_url_endpoint_reports_download_failure_as_422(client, monkeypatch):
     assert "không tải được video" in resp.text
 
 
+def test_url_endpoint_rejects_a_downloaded_path_outside_the_media_root(client, monkeypatch):
+    """I-6 · tên tệp do yt-dlp sinh ra (từ `%(id)s`, tức do site CHỌN) phải được
+    chứng minh nằm trong `media_dir` TRƯỚC khi nó thành `media_path` trong DB.
+
+    Đường đọc của cùng cột đó đã kiểm (`routes_media.py:125` dùng `resolve_within`);
+    đường ghi thì chưa. Không có guard này, một hàng `sources` trỏ ra ngoài gốc
+    media vẫn được tạo và ffprobe/ffmpeg đọc nó ở tận worker.
+    """
+    outside = client.tmp / "ngoai" / "thoat.mp4"
+    outside.parent.mkdir()
+    outside.write_bytes(b"x")
+
+    def escapes(url, out_dir, on_progress=None, runner=None):
+        return outside
+
+    monkeypatch.setattr("app.api.routes_sources.ingest.download_url", escapes)
+    resp = client.post("/api/sources/url",
+                       json={"url": "https://example.com/v", "lang": "zh"})
+
+    assert resp.status_code == 422, resp.text
+    assert client.repos.list_sources() == [], (
+        "không được lưu một `media_path` nằm ngoài gốc media"
+    )
+    assert [j for j in client.repos.list_jobs() if j.type == "ingest"] == [], (
+        "không được xếp job ingest cho một đường dẫn bị từ chối"
+    )
+
+
 # --------------------------------------------------------------------------
 # Route: list / detail
 # --------------------------------------------------------------------------
@@ -348,6 +376,13 @@ def _ingest_job(source_id: int) -> Job:
     return Job(id=None, workspace=1, type="ingest", engine=None,
                phase=js.phase_of("ingest", None),
                payload={"source_id": source_id})
+
+
+def _fw_tiny_spec() -> EngineSpec:
+    """Một engine asr CÓ THẬT nhưng KHÁC mặc định — để test không xanh do trùng id."""
+    return EngineSpec(id="fw-tiny", label="FW tiny", kind="asr", runtime="inprocess",
+                      model_ref="tiny", vram_mb=200, langs=("zh", "en"),
+                      capabilities={}, opts={})
 
 
 def test_ingest_handler_declares_the_ingest_job_type():
@@ -509,6 +544,85 @@ def test_media_path_is_taken_from_pathlib_not_string_splitting(repos, tmp_path, 
     assert calls == []
 
 
+def test_ingest_handler_refuses_an_asr_engine_absent_from_the_registry(repos, tmp_path,
+                                                                     monkeypatch):
+    """I-3 · đừng xếp một job asr CHẮC CHẮN chết: hỏng ngay, nói rõ id và id có thật.
+
+    Reproduced live: registry chỉ có `fw-tiny`, mặc định trỏ `fw-large-v3-turbo`
+    ⇒ upload → `ingest:done` → `asr:failed` với `KeyError` trần ở tận worker.
+    """
+    from app.pipeline.ingest import IngestError, IngestHandler
+
+    media_dir = tmp_path / "media"
+    media_dir.mkdir()
+    media = media_dir / "v.mp4"
+    media.write_bytes(b"video")
+    _fake_extract(monkeypatch)
+    repos.set_setting("default_asr_engine", "khong-co")
+
+    source_id = repos.add_source(kind="file", origin="v.mp4",
+                                 media_path=str(media), lang="zh")
+    handler = IngestHandler(repos, specs=[_fw_tiny_spec()], media_root=media_dir)
+
+    with pytest.raises(IngestError) as excinfo:
+        handler.run(_ingest_job(source_id), lambda fraction, line: None)
+
+    message = str(excinfo.value)
+    assert "khong-co" in message, f"lỗi phải nêu id không có: {message!r}"
+    assert "fw-tiny" in message, (
+        f"lỗi phải liệt kê engine asr ĐANG CÓ để sửa được ngay: {message!r}"
+    )
+    assert [j for j in repos.list_jobs() if j.type == "asr"] == [], (
+        "không được xếp một job asr đã biết là chết"
+    )
+
+
+def test_ingest_handler_takes_the_default_asr_engine_from_the_registry(repos, tmp_path,
+                                                                      monkeypatch):
+    """I-3 · mặc định đến từ registry.json, không phải hằng số trong code."""
+    from app.pipeline.ingest import IngestHandler
+
+    media_dir = tmp_path / "media"
+    media_dir.mkdir()
+    media = media_dir / "v.mp4"
+    media.write_bytes(b"video")
+    _fake_extract(monkeypatch)
+
+    source_id = repos.add_source(kind="file", origin="v.mp4",
+                                 media_path=str(media), lang="zh")
+    handler = IngestHandler(repos, specs=[_fw_tiny_spec()],
+                            declared_default_asr="fw-tiny", media_root=media_dir)
+    handler.run(_ingest_job(source_id), lambda fraction, line: None)
+
+    asr = [j for j in repos.list_jobs() if j.type == "asr"]
+    assert [j.engine for j in asr] == ["fw-tiny"], (
+        "engine mặc định phải là dữ liệu của registry, không phải literal trong code"
+    )
+    assert asr[0].phase == js.phase_of("asr", "fw-tiny")
+
+
+def test_ingest_handler_refuses_media_outside_the_media_root(repos, tmp_path, monkeypatch):
+    """I-6 · `media_path` là DỮ LIỆU: ngoài gốc media ⇒ từ chối trước ffprobe/ffmpeg."""
+    from app.pipeline.ingest import IngestError, IngestHandler
+
+    media_dir = tmp_path / "media"
+    media_dir.mkdir()
+    secret = tmp_path / "ngoai" / "secret.mp4"
+    secret.parent.mkdir()
+    secret.write_bytes(b"video")
+    calls = _fake_extract(monkeypatch)
+
+    source_id = repos.add_source(kind="file", origin="secret.mp4",
+                                 media_path=str(secret), lang="zh")
+    handler = IngestHandler(repos, media_root=media_dir)
+
+    with pytest.raises(IngestError, match="ngoài"):
+        handler.run(_ingest_job(source_id), lambda fraction, line: None)
+
+    assert calls == [], "không được đưa đường dẫn ngoài gốc cho ffmpeg/ffprobe"
+    assert [j for j in repos.list_jobs() if j.type == "asr"] == []
+
+
 # --------------------------------------------------------------------------
 # main.build_components — dây nối governor, và cấu hình chống job dịch chết
 # --------------------------------------------------------------------------
@@ -559,6 +673,68 @@ def built(tmp_path, monkeypatch):
     monkeypatch.setattr(main, "_engine_factory", lambda spec: engine, raising=False)
     repos, specs, worker, broker = main.build_components()
     return main, repos, specs, worker, engine, broker
+
+
+def test_build_components_refuses_a_registry_that_cannot_satisfy_the_default_asr(
+        monkeypatch, tmp_path):
+    """I-3 · registry không có engine mặc định ⇒ hỏng NGAY lúc dựng, không tạo job chết.
+
+    Đây là chỗ SỚM NHẤT có thể phát hiện: một tiến trình server dựng xong với
+    cấu hình này sẽ nhận upload rồi đẻ ra job asr chắc chắn `KeyError` tận worker.
+    """
+    from app import config, main
+
+    data = tmp_path / "data"
+    monkeypatch.setattr(config, "DATA_DIR", data)
+    monkeypatch.setattr(config, "MEDIA_DIR", data / "media")
+    monkeypatch.setattr(config, "LOG_DIR", data / "logs")
+    monkeypatch.setattr(config, "OUTPUT_DIR", data / "output")
+    monkeypatch.setattr(main, "DB_PATH", data / "app.db")
+    monkeypatch.setattr(main, "MEDIA_DIR", data / "media")
+    monkeypatch.setattr(main, "OUTPUT_DIR", data / "output")
+    monkeypatch.setattr(main, "LOG_DIR", data / "logs")
+    # Registry THẬT khai báo `default_asr = fw-large-v3-turbo`; danh sách dưới
+    # đây không có nó -> dựng app phải hỏng kèm chỉ dẫn.
+    monkeypatch.setattr(main, "load_registry", lambda: [MT_SPEC])
+
+    with pytest.raises(RuntimeError) as excinfo:
+        main.build_components()
+
+    message = str(excinfo.value)
+    assert "fw-large-v3-turbo" in message, message
+    assert "default_asr" in message, f"lỗi phải chỉ đúng khoá cần sửa: {message!r}"
+
+
+def test_build_components_wires_the_ingest_guards_into_the_real_handler(built, tmp_path):
+    """I-3 + I-6 · dây nối THẬT của `build_components()` phải mang hai guard theo.
+
+    Không có bài này thì bỏ `specs=`/`media_root=` ở `main.py` vẫn xanh toàn bộ
+    suite: handler vẫn dựng được, chỉ là nó không còn biết registry và gốc media.
+    """
+    from app.pipeline.ingest import IngestError
+
+    main, repos, specs, worker, engine, broker = built
+    handler = worker.handlers["ingest"]
+
+    # I-6: media nằm NGOÀI gốc media -> từ chối trước khi chạm ffmpeg/ffprobe.
+    outside = tmp_path / "ngoai" / "secret.mp4"
+    outside.parent.mkdir()
+    outside.write_bytes(b"video")
+    sid = repos.add_source(kind="file", origin="secret.mp4",
+                           media_path=str(outside), lang="zh")
+    with pytest.raises(IngestError, match="ngoài"):
+        handler.run(_ingest_job(sid), lambda fraction, line: None)
+
+    # I-3: setting trỏ engine không có trong registry -> hỏng ngay, không xếp job asr.
+    repos.set_setting("default_asr_engine", "khong-co")
+    inside = pathlib.Path(main.MEDIA_DIR) / "trong.mp4"
+    inside.write_bytes(b"video")
+    sid2 = repos.add_source(kind="file", origin="trong.mp4",
+                            media_path=str(inside), lang="zh")
+    with pytest.raises(IngestError) as excinfo:
+        handler.run(_ingest_job(sid2), lambda fraction, line: None)
+    assert "khong-co" in str(excinfo.value)
+    assert [j for j in repos.list_jobs() if j.type == "asr"] == []
 
 
 def test_build_components_registers_every_asr_engine_with_the_governor(built):

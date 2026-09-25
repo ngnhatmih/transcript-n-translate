@@ -16,7 +16,7 @@ from starlette.concurrency import run_in_threadpool
 from app.api.deps import get_dirs, get_repos
 from app.domain import job_state as js
 from app.domain.models import Job, Source
-from app.domain.paths import InvalidBasename, safe_basename
+from app.domain.paths import InvalidBasename, PathOutsideRoot, resolve_within, safe_basename
 from app.pipeline import ingest
 
 router = APIRouter(prefix="/api/sources", tags=["sources"])
@@ -145,6 +145,17 @@ def add_url(payload: UrlIn, repos=Depends(get_repos), dirs=Depends(get_dirs)):
     except ingest.IngestError as exc:
         # Mất mạng / video bị chặn là lỗi ĐẦU VÀO, không phải lỗi máy chủ.
         raise HTTPException(422, str(exc)) from exc
+
+    # I-6: tên tệp do yt-dlp sinh ra từ `%(id)s`, tức do SITE TỪ XA chọn, nên nó
+    # là DỮ LIỆU chứ không phải quyền. Đây là CÙNG một luật mà `routes_media` đã
+    # áp cho chính cột này khi ĐỌC (`resolve_within`): không chứng minh được nó
+    # nằm trong `media_dir` thì không lưu — nếu không, ffprobe/ffmpeg ở worker sẽ
+    # mở một đường dẫn ngoài gốc media.
+    try:
+        path = resolve_within(media_dir, path)
+    except PathOutsideRoot as exc:
+        raise HTTPException(
+            422, f"tệp tải về nằm ngoài thư mục media: {exc}") from exc
 
     source_id = repos.add_source(kind="url", origin=payload.url,
                                  media_path=str(path), lang=payload.lang)
