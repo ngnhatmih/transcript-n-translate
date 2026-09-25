@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess
+import sys
 
 import pytest
 
@@ -113,3 +114,47 @@ def test_download_url_uses_injected_runner(tmp_path):
     assert path == tmp_path / "video.mp4"
     assert seen == [0.5, 1.0]
     assert "yt-dlp" in calls[0][0] or "yt_dlp" in calls[0][0]
+
+
+def test_run_keeps_child_stderr_when_a_byte_cannot_be_decoded():
+    """_run() must keep the child's diagnostic even if stderr holds a bad byte.
+
+    ffmpeg/ffprobe emit UTF-8, but `text=True` without `encoding=` decodes with
+    the *locale* codec (cp1252 on this machine). The Vietnamese sequences this
+    project meets daily encode as E1 BB xx, and cp1252 leaves exactly five bytes
+    undefined: 0x81, 0x8D, 0x8F, 0x90, 0x9D. So a filename holding e.g. "o" with
+    dot below or "e" with circumflex and grave kills the subprocess reader
+    thread: `exc.stderr` comes back as None and `(exc.stderr or '')` collapses
+    the reason to nothing -- the job still fails, but the "why" is lost.
+
+    This test is environment-independent by construction. The child writes the
+    single byte 0x8D, which is BOTH undefined in cp1252 AND an invalid
+    standalone byte in UTF-8, so the decode fails under either locale. With
+    `encoding="utf-8", errors="replace"` it is absorbed and replaced either way.
+    An explicit `encoding=` would also work if the locale were UTF-8, but here
+    the locale is the bug, so the test cannot lean on it.
+
+    Note the assertion that matters is the stderr CONTENT, not the exception
+    type: without the fix _run still raises IngestError, just an empty one.
+    """
+    # bytes([0x8d]) rather than a "\x8d" string literal: a literal would be
+    # rewritten into a real U+008D character while this source is read, and the
+    # child would then reject it as a non-ASCII byte literal.
+    child = (
+        "import sys; "
+        "sys.stderr.buffer.write(b'stderr-before' + bytes([0x8d]) + b'stderr-after'); "
+        "sys.exit(1)"
+    )
+    with pytest.raises(ingest.IngestError) as excinfo:
+        ingest._run([sys.executable, "-c", child])
+
+    message = str(excinfo.value)
+    # ascii() in the messages: the failure path must stay printable on a cp1252
+    # console, and `message` itself can hold non-ASCII text.
+    assert "stderr-before" in message, f"child stderr was lost: {ascii(message)}"
+    assert "stderr-after" in message, f"child stderr was lost: {ascii(message)}"
+    # Proves the bad byte was REPLACED rather than dropped or swallowed whole:
+    # errors="replace" maps an undecodable byte to U+FFFD.
+    assert "stderr-before\ufffdstderr-after" in message, (
+        f"the undecodable byte was not replaced in place: {ascii(message)}"
+    )

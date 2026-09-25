@@ -36,7 +36,10 @@ def sha256_file(path: str | pathlib.Path) -> str:
 
 def _run(cmd: list[str]) -> subprocess.CompletedProcess:
     try:
-        return subprocess.run(cmd, capture_output=True, text=True, check=True)
+        return subprocess.run(
+            cmd, capture_output=True, text=True,
+            encoding="utf-8", errors="replace", check=True,
+        )
     except FileNotFoundError as exc:
         raise IngestError(f"không tìm thấy chương trình: {cmd[0]}") from exc
     except subprocess.CalledProcessError as exc:
