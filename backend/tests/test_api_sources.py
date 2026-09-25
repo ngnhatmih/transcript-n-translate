@@ -533,15 +533,24 @@ def built(tmp_path, monkeypatch):
     """Dựng `build_components()` thật, chỉ thay registry, engine nặng và đường dẫn.
 
     `DB_PATH`/`MEDIA_DIR` bị chuyển vào `tmp_path` để test không bao giờ đụng
-    vào `data/` thật của repo.
+    vào `data/` thật của repo. Phải vá CẢ `app.config`: `ensure_dirs()`
+    (`config.py:38-40`) đọc biến toàn cục của chính module đó, nên vá mỗi tên đã
+    import vào `main` là không đủ — `main.build_components()` vẫn tạo `data/`
+    THẬT của repo (đúng cái bẫy đã biết ở Q5 của review Task 19).
     """
-    from app import main
+    from app import config, main
+
+    data = tmp_path / "data"
+    monkeypatch.setattr(config, "DATA_DIR", data)
+    monkeypatch.setattr(config, "MEDIA_DIR", data / "media")
+    monkeypatch.setattr(config, "LOG_DIR", data / "logs")
+    monkeypatch.setattr(config, "OUTPUT_DIR", data / "output")
 
     engine = _RecordingEngine()
-    monkeypatch.setattr(main, "DB_PATH", tmp_path / "app.db")
-    monkeypatch.setattr(main, "MEDIA_DIR", tmp_path / "media")
-    monkeypatch.setattr(main, "OUTPUT_DIR", tmp_path / "output")
-    monkeypatch.setattr(main, "LOG_DIR", tmp_path / "logs")
+    monkeypatch.setattr(main, "DB_PATH", data / "app.db")
+    monkeypatch.setattr(main, "MEDIA_DIR", data / "media")
+    monkeypatch.setattr(main, "OUTPUT_DIR", data / "output")
+    monkeypatch.setattr(main, "LOG_DIR", data / "logs")
     monkeypatch.setattr(main, "load_registry", lambda: [ASR_SPEC, MT_SPEC])
     monkeypatch.setattr(main, "_engine_factory", lambda spec: engine, raising=False)
     repos, specs, worker, broker = main.build_components()
@@ -616,13 +625,18 @@ def test_build_components_does_not_overwrite_an_auto_forward_choice(built):
 
 def test_build_components_only_registers_asr_engines(monkeypatch, tmp_path):
     """Engine MT không được đăng ký: GĐ1a chạy nó qua Ollama, không qua handler này."""
-    from app import main
+    from app import config, main
 
+    data = tmp_path / "data"
+    monkeypatch.setattr(config, "DATA_DIR", data)
+    monkeypatch.setattr(config, "MEDIA_DIR", data / "media")
+    monkeypatch.setattr(config, "LOG_DIR", data / "logs")
+    monkeypatch.setattr(config, "OUTPUT_DIR", data / "output")
     monkeypatch.setattr(main, "load_registry", lambda: [ASR_SPEC, MT_SPEC])
-    monkeypatch.setattr(main, "DB_PATH", tmp_path / "app.db")
-    monkeypatch.setattr(main, "MEDIA_DIR", tmp_path / "media")
-    monkeypatch.setattr(main, "OUTPUT_DIR", tmp_path / "output")
-    monkeypatch.setattr(main, "LOG_DIR", tmp_path / "logs")
+    monkeypatch.setattr(main, "DB_PATH", data / "app.db")
+    monkeypatch.setattr(main, "MEDIA_DIR", data / "media")
+    monkeypatch.setattr(main, "OUTPUT_DIR", data / "output")
+    monkeypatch.setattr(main, "LOG_DIR", data / "logs")
     repos, specs, worker, broker = main.build_components()
 
     assert set(worker.governor._loaded) == {ASR_SPEC.phase_key}
