@@ -28,11 +28,9 @@ from app.registry import EngineSpec
 from tests.fakes import RecordingHandler, a_job
 
 
-@pytest.fixture()
-def client(tmp_path):
-    repos = SqliteRepos(tmp_path / "t.db", clock=SystemClock())
-    repos.init_schema()
-    specs = [
+def _engine_specs() -> list[EngineSpec]:
+    """Hai engine tối thiểu để `create_app()` dựng được app đầy đủ, không model."""
+    return [
         EngineSpec(id="fw-large-v3-turbo", label="FW turbo", kind="asr",
                    runtime="inprocess", model_ref="large-v3-turbo", vram_mb=1600,
                    langs=("zh", "en"),
@@ -41,7 +39,13 @@ def client(tmp_path):
                    model_ref="qwen2.5:7b", vram_mb=5200, langs=("zh", "en"),
                    capabilities={"glossary_prompt": True}, opts={}),
     ]
-    app = create_app(repos=repos, specs=specs, media_dir=tmp_path / "media",
+
+
+@pytest.fixture()
+def client(tmp_path):
+    repos = SqliteRepos(tmp_path / "t.db", clock=SystemClock())
+    repos.init_schema()
+    app = create_app(repos=repos, specs=_engine_specs(), media_dir=tmp_path / "media",
                      out_dir=tmp_path / "out")
     with TestClient(app) as c:
         c.repos = repos          # type: ignore[attr-defined]
@@ -792,3 +796,234 @@ def test_run_api_entrypoint_exists_and_defers_to_main():
     text = (backend / "run_api.py").read_text(encoding="utf-8")
     assert "from app.main import main" in text
     assert "__main__" in text
+
+
+# --------------------------------------------------------------------------
+# C-1 / API-01: tên tệp client gửi lên phải DÙNG ĐƯỢC trên hệ tệp này
+#
+# `safe_basename` chỉ cắt đường dẫn, nên `a*b?.mp4` đi thẳng vào `open()` (500)
+# và `CON` biến thành thiết bị console: `open("CON", "rb")` chặn VÔ HẠN, trên
+# event loop, nên cả server đứng. Hai nhóm test ở đây khoá cả hai nửa: vị từ
+# từ chối (unit) và route thật trả 4xx kịp thời (tích hợp).
+# --------------------------------------------------------------------------
+
+#: Ký tự nằm NGOÀI bộ cho phép `[A-Za-z0-9._-]`: nhóm Windows-illegal, ký tự
+#: điều khiển, và các ký tự "hợp lệ trên POSIX nhưng bị bộ hẹp từ chối".
+_UNSAFE_FILENAMES = [
+    "a*b.mp4", "a?b.mp4", "a|b.mp4", "a<b.mp4", "a>b.mp4", 'a"b.mp4',
+    "ab:c.mp4", "a.b:c.mp4", "a\x01b.mp4", "a b.mp4", "a(b).mp4", "a[b].mp4",
+    "ảnh.mp4",
+]
+
+#: Thiết bị dành riêng của Windows: trần, có đuôi, và HOA/thường trộn — Windows
+#: so khớp không phân biệt hoa/thường và bỏ qua phần mở rộng.
+_RESERVED_DEVICE_FILENAMES = [
+    "CON", "con", "Con", "CON.mp4", "con.mp4", "Con.TXT", "CON.tar.gz",
+    "PRN", "prn.wav", "AUX", "aux.mp4", "NUL", "nul.mp4",
+    "COM1", "com1", "COM1.mp4", "COM9", "com9.wav",
+    "LPT1", "lpt1", "LPT1.mp4", "LPT9", "lpt9.wav",
+]
+
+#: Windows cắt khoảng trắng/dấu chấm cuối tên, nên `x.mp4.` mở ra `x.mp4`:
+#: tên gửi lên và tên trên đĩa không còn là một.
+_TRAILING_DOT_OR_SPACE_FILENAMES = ["trailing.", "trailing ", "x.mp4."]
+
+_REJECTED_FILENAMES = (
+    _UNSAFE_FILENAMES + _RESERVED_DEVICE_FILENAMES + _TRAILING_DOT_OR_SPACE_FILENAMES
+)
+
+
+@pytest.mark.parametrize("name", _UNSAFE_FILENAMES)
+def test_safe_basename_rejects_characters_that_are_not_safe_on_disk(name):
+    """Bộ ký tự hẹp: `* ? | < > : "` nổ 500 trong `open()` (đã đo)."""
+    from app.domain.paths import InvalidBasename, safe_basename
+
+    with pytest.raises(InvalidBasename) as excinfo:
+        safe_basename(name)
+    assert "tên tệp" in str(excinfo.value)
+
+
+@pytest.mark.parametrize("name", _RESERVED_DEVICE_FILENAMES)
+def test_safe_basename_rejects_windows_reserved_device_names(name):
+    """`open("CON", "rb")` không mở tệp mà mở THIẾT BỊ console và chặn vô hạn."""
+    from app.domain.paths import InvalidBasename, safe_basename
+
+    with pytest.raises(InvalidBasename) as excinfo:
+        safe_basename(name)
+    assert "tên tệp" in str(excinfo.value)
+
+
+@pytest.mark.parametrize("name", _TRAILING_DOT_OR_SPACE_FILENAMES)
+def test_safe_basename_rejects_a_trailing_dot_or_space(name):
+    from app.domain.paths import InvalidBasename, safe_basename
+
+    with pytest.raises(InvalidBasename) as excinfo:
+        safe_basename(name)
+    assert "tên tệp" in str(excinfo.value)
+
+
+def test_safe_basename_keeps_every_legitimate_name():
+    """Siết tên KHÔNG được làm rơi tên thật, `None` hay phép cắt đường dẫn."""
+    from app.domain.paths import safe_basename
+
+    assert safe_basename("bai-giang.mp4") == "bai-giang.mp4"
+    assert safe_basename("bai_giang-01.tar.gz") == "bai_giang-01.tar.gz"
+    assert safe_basename(r"C:\media\x.mp4") == "x.mp4"
+    assert safe_basename("a/b/x.mp4") == "x.mp4"
+    assert safe_basename(None) == "upload.bin"
+    assert safe_basename(None, fallback="khac.bin") == "khac.bin"
+
+
+def test_safe_basename_treats_a_leading_colon_prefix_as_a_drive():
+    """`a:b.mp4` là ổ đĩa `a:` + tên `b.mp4` với `pathlib`, y như `C:\\...`.
+
+    Dấu hai chấm chỉ "sống sót" khi nó KHÔNG phải tiền tố ổ đĩa (`ab:c.mp4`,
+    đã nằm trong bảng từ chối ở trên); còn tiền tố ổ đĩa thì bị cắt như mọi
+    thành phần đường dẫn khác — hành vi `C:\\media\\x.mp4` mà repo đã chốt.
+    """
+    from app.domain.paths import safe_basename
+
+    assert safe_basename("a:b.mp4") == "b.mp4"
+    assert safe_basename("x:y.mp4") == "y.mp4"
+
+
+async def _post_upload(media_root: pathlib.Path, filename: str,
+                       payload: bytes = b"x") -> int:
+    """Upload qua ĐÚNG app ASGI, trong tiến trình; trả về mã trạng thái.
+
+    `raise_app_exceptions=False`: lỗi máy chủ phải hiện ra thành 500 để test
+    khẳng định được "4xx, không phải 500" thay vì chỉ thấy traceback.
+    """
+    import httpx
+
+    repos = SqliteRepos(media_root / "upload-probe.db", clock=SystemClock())
+    repos.init_schema()
+    app = create_app(repos=repos, specs=_engine_specs(),
+                     media_dir=media_root / "media", out_dir=media_root / "out")
+    transport = httpx.ASGITransport(app=app, raise_app_exceptions=False)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.post(
+            "/api/sources/upload",
+            files={"file": (filename, payload, "video/mp4")},
+            data={"lang": "zh"},
+        )
+    return resp.status_code
+
+
+def _upload_status_within(media_root: pathlib.Path, filename: str,
+                          timeout: float = 5.0) -> int:
+    """Gọi upload trong MỘT LUỒNG DAEMON có trần thời gian.
+
+    Không dùng `client` fixture cho nhóm ca này: `TestClient.__exit__` phải join
+    đúng event loop, nên nếu request treo thì teardown treo luôn cả suite. Một
+    luồng daemon thì bỏ rơi được, nên "treo vô hạn" trở thành "test đỏ".
+    """
+    import threading
+
+    result: dict = {}
+
+    def run() -> None:
+        try:
+            result["status"] = asyncio.run(_post_upload(media_root, filename))
+        except BaseException as exc:  # noqa: BLE001 - chuyển nguyên vẹn sang luồng test
+            result["error"] = exc
+
+    thread = threading.Thread(target=run, daemon=True)
+    thread.start()
+    thread.join(timeout)
+    if thread.is_alive():
+        pytest.fail(f"upload(filename={filename!r}) không trả về trong {timeout}s — "
+                    "request đang chặn event loop (đúng ca `CON` của C-1)")
+    if "error" in result:
+        raise result["error"]
+    return result["status"]
+
+
+@pytest.mark.parametrize("name", _REJECTED_FILENAMES)
+def test_upload_answers_422_for_an_unsafe_filename_and_never_hangs(tmp_path, name):
+    """Lỗi ĐẦU VÀO phải là 422 — không 500, và tuyệt đối không treo (C-1)."""
+    status = _upload_status_within(tmp_path, name)
+    assert status == 422, f"filename={name!r} -> {status}, phải là 422"
+
+
+@pytest.mark.parametrize("name", ["CON", "con.mp4"])
+def test_upload_answers_422_promptly_for_a_reserved_device_name(tmp_path, name):
+    """Ca nặng nhất của C-1, đo riêng: `CON` từng không bao giờ trả về."""
+    status = _upload_status_within(tmp_path, name, timeout=5.0)
+    assert status == 422, f"filename={name!r} -> {status}, phải là 422"
+
+
+def test_upload_still_accepts_a_normal_filename(client):
+    """Siết tên không được chặn tên thật: 201 + tên theo nội dung như cũ."""
+    import hashlib
+
+    payload = b"du-lieu-that"
+    resp = client.post("/api/sources/upload",
+                       files={"file": ("bai_giang-01.mp4", io.BytesIO(payload), "video/mp4")},
+                       data={"lang": "zh"})
+    assert resp.status_code == 201, resp.text
+    stored = pathlib.Path(resp.json()["source"]["media_path"])
+    assert stored.parent == client.tmp / "media"
+    assert stored.name == f"{hashlib.sha256(payload).hexdigest()[:16]}.mp4"
+    assert stored.read_bytes() == payload
+
+
+def test_upload_route_keeps_its_blocking_io_off_the_event_loop(client, monkeypatch):
+    """I-1 / API-01(b): bản tương đương của test route media
+    (`test_api_media_range.py::test_the_media_endpoint_is_sync_so_fastapi_runs_it_in_a_threadpool`).
+
+    Route là `async def`, nên `open()`/`write()`, `sha256_file` và `Path.replace`
+    chạy thẳng trong thân route là CHẶN event loop: một tệp 2 GB giữ server đứng
+    suốt lượt băm và `/api/jobs/stream` không gửi được gì.
+
+    Test bám vào LUỒNG THẬT thay vì chữ ký: ghi lại luồng của (a) lần mở tệp
+    trong `media/`, (b) `sha256_file`, (c) `Path.replace`, rồi so với luồng chạy
+    thân route (`_safe_name` được gọi ngay trong thân `async def`). Đẩy việc
+    chặn trở lại event loop là đỏ.
+    """
+    import builtins
+    import threading
+
+    from app.api import routes_sources
+    from app.pipeline import ingest
+
+    media_dir = client.tmp / "media"
+    seen: dict = {"open": set()}
+    real_open = builtins.open
+    real_safe = routes_sources._safe_name
+    real_hash = ingest.sha256_file
+    real_replace = pathlib.Path.replace
+
+    def spy_open(file, *args, **kwargs):
+        if isinstance(file, pathlib.Path) and file.parent == media_dir:
+            seen["open"].add(threading.get_ident())
+        return real_open(file, *args, **kwargs)
+
+    def spy_safe(*args, **kwargs):
+        seen["route"] = threading.get_ident()
+        return real_safe(*args, **kwargs)
+
+    def spy_hash(*args, **kwargs):
+        seen["hash"] = threading.get_ident()
+        return real_hash(*args, **kwargs)
+
+    def spy_replace(self, target):
+        seen["replace"] = threading.get_ident()
+        return real_replace(self, target)
+
+    monkeypatch.setattr(builtins, "open", spy_open)
+    monkeypatch.setattr(routes_sources, "_safe_name", spy_safe)
+    monkeypatch.setattr(ingest, "sha256_file", spy_hash)
+    monkeypatch.setattr(pathlib.Path, "replace", spy_replace)
+
+    resp = client.post("/api/sources/upload",
+                       files={"file": ("bai-giang.mp4", io.BytesIO(b"du-lieu"), "video/mp4")},
+                       data={"lang": "zh"})
+    assert resp.status_code == 201, resp.text
+
+    assert set(seen) == {"open", "route", "hash", "replace"}, seen
+    assert seen["open"], "route upload không mở tệp nào trong media/"
+    for what in ("open", "hash", "replace"):
+        idents = seen["open"] if what == "open" else {seen[what]}
+        assert seen["route"] not in idents, (
+            f"{what} chạy CÙNG luồng với thân route `async def` => đang chặn event loop")

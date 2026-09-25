@@ -7,9 +7,11 @@ không giữ request HTTP mở suốt thời gian bóc âm thanh.
 from __future__ import annotations
 
 import pathlib
+from typing import BinaryIO
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel, field_validator
+from starlette.concurrency import run_in_threadpool
 
 from app.api.deps import get_dirs, get_repos
 from app.domain import job_state as js
@@ -86,6 +88,23 @@ def _safe_name(name: str | None, fallback: str = "upload.bin") -> str:
         raise HTTPException(422, str(exc)) from exc
 
 
+def _copy_upload(src: BinaryIO, target: pathlib.Path) -> int:
+    """Chép tệp tải lên xuống đĩa, trả về số byte. Hàm ĐỒNG BỘ (chạy threadpool).
+
+    Cả vòng lặp nằm trong MỘT hàm đồng bộ, không phải `await file.read()` từng
+    khối: `open()` và từng `write()` đều là lệnh chặn, nên nếu chúng chạy trong
+    thân route `async def` thì mỗi khối 1 MiB lại treo event loop một nhịp.
+    `UploadFile.file` là tệp tạm mà Starlette đã ghi xong TRƯỚC khi route chạy,
+    nên đọc nó chỉ là đọc tệp thường — không cần `await`.
+    """
+    size = 0
+    with open(target, "wb") as fh:
+        while chunk := src.read(_CHUNK):
+            size += len(chunk)
+            fh.write(chunk)
+    return size
+
+
 @router.post("/upload", status_code=201)
 async def upload(file: UploadFile = File(...), lang: str = Form(DEFAULT_LANG),
                  repos=Depends(get_repos), dirs=Depends(get_dirs)):
@@ -93,23 +112,24 @@ async def upload(file: UploadFile = File(...), lang: str = Form(DEFAULT_LANG),
 
     media_dir: pathlib.Path = dirs["media"]
     target = media_dir / _safe_name(file.filename)
-    size = 0
-    with open(target, "wb") as fh:
-        while chunk := await file.read(_CHUNK):
-            size += len(chunk)
-            fh.write(chunk)
+    # Mọi thứ chạm đĩa đi qua threadpool. Route này là `async def`, nên `open()`,
+    # vòng `write`, `sha256_file` và `replace` chạy thẳng ở đây sẽ chặn event
+    # loop: một tệp 2 GB giữ server đứng suốt lượt băm, `/api/jobs/stream` không
+    # gửi được gì. `run_in_threadpool` cũng là chốt chặn cuối: kể cả một tên tệp
+    # lọt qua `_safe_name` mà chặn đĩa thì chỉ một worker đứng, không phải server.
+    size = await run_in_threadpool(_copy_upload, file.file, target)
     if size == 0:
         # Xoá tệp rỗng vừa tạo: để lại thì `media_dir` đầy rác 0 byte và lần tải
         # sau trùng tên sẽ gặp một tệp cũ vô nghĩa.
-        target.unlink(missing_ok=True)
+        await run_in_threadpool(target.unlink, True)
         raise HTTPException(422, "tệp rỗng")
 
-    digest = ingest.sha256_file(target)
+    digest = await run_in_threadpool(ingest.sha256_file, target)
     stem = digest[:16]
     final = media_dir / f"{stem}{target.suffix}"
     # Tên theo nội dung: hai lần tải cùng một video dùng chung một tệp, và lần
     # tải lại không đẻ ra bản sao thứ hai.
-    target.replace(final)
+    await run_in_threadpool(target.replace, final)
 
     source_id = repos.add_source(kind="file", origin=file.filename or final.name,
                                  media_path=str(final), lang=lang)

@@ -4,7 +4,11 @@ Hai chiều của cùng một mối lo:
 
 * `safe_basename` dùng khi ta GHI: ghép thẳng một chuỗi bên ngoài vào `Path` của
   máy chủ thì `../` ghi được ra ngoài thư mục dự định (R76). Dùng ở route upload
-  (`filename` của client) và handler export (`stem` trong payload job).
+  (`filename` của client) và handler export (`stem` trong payload job). Cắt
+  đường dẫn là chưa đủ: tên trần vẫn có thể không mở được thành tệp (`CON` là
+  thiết bị console và chặn vô hạn, `a*b.mp4` làm `open()` ném `OSError`), nên
+  hàm này còn TỪ CHỐI những tên như vậy — xem `_SAFE_CHARS`,
+  `_RESERVED_DEVICE_NAMES`.
 * `resolve_within` dùng khi ta ĐỌC: `media_path` lấy từ DB vẫn là dữ liệu, nên
   trước khi mở tệp phải phân giải đường dẫn rồi chứng minh nó vẫn nằm trong
   thư mục gốc. So chuỗi tiền tố là không đủ: `..` và symlink/junction đều đi
@@ -13,22 +17,68 @@ Hai chiều của cùng một mối lo:
 from __future__ import annotations
 
 import pathlib
+import re
 
 #: `.name` không bao giờ trả về `"."`, nhưng nó trả `""` cho `"."` và `".."` cho
 #: `"x/.."`; cả ba đều KHÔNG phải tên tệp dùng được mà lại trỏ vào thư mục.
 _INVALID = frozenset({"", ".", ".."})
 
+#: Ký tự được phép trong tên tệp do BÊN NGOÀI gửi vào.
+#:
+#: Chọn bộ HẸP (chữ, số, `.`, `-`, `_`) thay vì liệt kê cái xấu: danh sách đen
+#: luôn thiếu một ký tự — đúng thứ đã xảy ra (`* ? | < > : "` lọt qua phép cắt
+#: đường dẫn rồi làm `open()` nổ 500). Tên tệp trên Windows còn có luật riêng
+#: (thiết bị, dấu chấm cuối) mà một danh sách đen không kể hết. Bộ hẹp này đủ
+#: cho tên tệp thật và từ chối mọi thứ còn lại, kể cả khoảng trắng và chữ có
+#: dấu — người dùng đổi tên là xong, còn máy chủ thì không đoán.
+_SAFE_CHARS = re.compile(r"\A[A-Za-z0-9._-]+\Z")
+
+#: Thiết bị của Windows: `open()` trên tên này KHÔNG mở tệp mà mở thiết bị
+#: (console, cổng nối tiếp). `open("CON", "rb")` chặn VÔ HẠN, nên chỉ một
+#: request cũng đủ giữ event loop của server. Windows so khớp KHÔNG phân biệt
+#: hoa/thường và bỏ qua phần mở rộng (`CON.mp4` vẫn là thiết bị), nên phải cắt
+#: tại dấu chấm ĐẦU TIÊN rồi mới so.
+_RESERVED_DEVICE_NAMES = frozenset(
+    {"CON", "PRN", "AUX", "NUL"}
+    | {f"COM{i}" for i in range(1, 10)}
+    | {f"LPT{i}" for i in range(1, 10)}
+)
+
 
 class InvalidBasename(ValueError):
-    """Không phải tên tệp: rỗng, `.` hay `..` (trỏ vào một thư mục)."""
+    """Tên tệp do bên ngoài gửi vào không dùng được trên hệ tệp này.
+
+    Gồm: rỗng/`.`/`..`, ký tự ngoài bộ an toàn, tên thiết bị dành riêng của
+    Windows, và tên kết thúc bằng dấu chấm hoặc khoảng trắng.
+    """
+
+
+def _reject_unsafe_name(plain: str, original: str) -> None:
+    """Ném `InvalidBasename` nếu `plain` không mở được thành tệp trên Windows."""
+    if plain[-1] in " .":
+        # Windows cắt khoảng trắng/dấu chấm cuối tên: `x.mp4.` mở ra `x.mp4`,
+        # tức tên client gửi lên và tên trên đĩa không còn là một.
+        raise InvalidBasename(
+            f"tên tệp kết thúc bằng dấu chấm hoặc khoảng trắng: {original!r}")
+    if plain.split(".", 1)[0].upper() in _RESERVED_DEVICE_NAMES:
+        raise InvalidBasename(
+            f"tên tệp là thiết bị dành riêng của Windows: {original!r}")
+    if not _SAFE_CHARS.match(plain):
+        raise InvalidBasename(f"tên tệp chứa ký tự không an toàn: {original!r}")
 
 
 def safe_basename(name: str | None, fallback: str = "upload.bin") -> str:
-    """Cắt mọi thành phần đường dẫn, chỉ giữ tên tệp cuối cùng.
+    """Cắt mọi thành phần đường dẫn và TỪ CHỐI tên không dùng được trên đĩa.
 
     Đổi cả `\\` thành `/` TRƯỚC khi cắt: tên client gửi lên có thể mang dấu phân
     cách Windows, mà trên POSIX `pathlib.Path` coi `\\` là ký tự thường nên
     `"..\\..\\x.mp4"` sẽ lọt nguyên xi qua `.name`.
+
+    Cắt đường dẫn là CHƯA ĐỦ: `CON` là tên trần hợp lệ với `pathlib` nhưng mở ra
+    thiết bị console, còn `a*b.mp4` làm `open()` ném `OSError`. Tên như vậy là
+    lỗi ĐẦU VÀO của client, nên bị từ chối ngay ở đây — trước khi bất kỳ ai
+    chạm vào đĩa. Bộ ký tự cho phép và các tên bị cấm: xem `_SAFE_CHARS` và
+    `_RESERVED_DEVICE_NAMES`.
 
     `name is None` (không có tên) dùng `fallback`. Mọi tên KHÔNG hợp lệ đều ném
     `InvalidBasename`, không âm thầm đổi thành `fallback`: nuốt lỗi ở đây thì
@@ -39,6 +89,7 @@ def safe_basename(name: str | None, fallback: str = "upload.bin") -> str:
     plain = pathlib.PurePath(name.replace("\\", "/")).name
     if plain in _INVALID:
         raise InvalidBasename(f"tên tệp không hợp lệ: {name!r}")
+    _reject_unsafe_name(plain, name)
     return plain
 
 
