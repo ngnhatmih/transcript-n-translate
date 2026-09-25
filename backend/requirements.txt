@@ -1,0 +1,21 @@
+# --- API ---
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+python-multipart==0.0.20
+
+# --- ASR ---
+# faster-whisper dùng CTranslate2, KHÔNG cần torch
+faster-whisper==1.1.1
+
+# --- SenseVoice (torch PHẢI cài riêng trước, xem scripts/install.ps1) ---
+funasr==1.2.6
+modelscope==1.22.0
+
+# --- Tiện ích ---
+httpx==0.28.1
+yt-dlp==2025.1.15
+soundfile==0.12.1
+numpy==1.26.4
+
+# --- Test ---
+pytest==8.3.4
