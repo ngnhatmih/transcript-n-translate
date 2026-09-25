@@ -15,7 +15,7 @@ from fastapi import FastAPI
 from app.adapters.clock_system import SystemClock
 from app.adapters.governor.single_gpu import SingleGpuGovernor
 from app.adapters.persist.sqlite_repos import SqliteRepos
-from app.adapters.registry_file import load_registry
+from app.adapters.registry_file import load_default_asr, load_registry
 from app.api.app import create_app
 from app.api.sse import JobEventBroker
 from app.config import (API_HOST, API_PORT, DB_PATH, HF_HOME, LOG_DIR, MEDIA_DIR,
@@ -23,6 +23,7 @@ from app.config import (API_HOST, API_PORT, DB_PATH, HF_HOME, LOG_DIR, MEDIA_DIR
 from app.pipeline.export import ExportHandler
 from app.pipeline.ingest import IngestHandler
 from app.pipeline.transcribe import AUTO_FORWARD_SETTING, TranscribeHandler
+from app.registry import ASR_DEFAULT_SETTING, default_asr_engine
 from app.worker import PhaseQueueWorker
 
 # MT là Giai đoạn 2.
@@ -43,11 +44,27 @@ def build_components():
     specs = load_registry()
     governor = SingleGpuGovernor(repos)
 
+    # I-3: engine ASR mặc định là DỮ LIỆU (registry/setting), và nó phải có thật.
+    # Kiểm NGAY tại đây — chỗ sớm nhất — vì một tiến trình dựng xong với cấu hình
+    # này sẽ nhận upload rồi đẻ ra job asr chắc chắn `KeyError` ở tận worker.
+    declared_asr = load_default_asr()
+    try:
+        default_asr_engine(specs, declared=declared_asr,
+                           configured=repos.get_setting(ASR_DEFAULT_SETTING))
+    except KeyError as exc:
+        raise RuntimeError(
+            f"cấu hình engine ASR mặc định không dùng được: {exc}"
+        ) from exc
+
     transcribe_handler = TranscribeHandler(
         repos, specs, engine_factory=_engine_factory, workdir=MEDIA_DIR
     )
     handlers = {
-        "ingest": IngestHandler(repos),
+        # I-3 + I-6: handler thật nhận registry và gốc media; thiếu chúng thì nó
+        # không thể từ chối sớm một engine mặc định không có, hay một media_path
+        # nằm ngoài gốc media.
+        "ingest": IngestHandler(repos, specs=specs, media_root=MEDIA_DIR,
+                                declared_default_asr=declared_asr),
         "asr": transcribe_handler,
         "export": ExportHandler(repos, out_dir=OUTPUT_DIR),
     }
@@ -98,18 +115,16 @@ def _prepare_local_model_caches() -> None:
 
 
 def _engine_factory(spec):
-    """EngineSpec -> adapter ASR. Import ở trong hàm: `funasr`/`torch` rất nặng."""
-    from app.adapters.asr.faster_whisper import FasterWhisperEngine
-    from app.adapters.asr.sensevoice import SenseVoiceEngine
+    """EngineSpec -> adapter ASR.
+
+    Ánh xạ id -> adapter nằm ở `app.adapters.asr.factory.engine_for`, dùng CHUNG
+    với `scripts/smoke_asr.py`: hai bản sao của ánh xạ này là đúng lỗi I-2 (script
+    smoke luôn dựng faster-whisper nên báo hỏng sai cho `sensevoice-small`).
+    """
+    from app.adapters.asr.factory import engine_for
 
     _prepare_local_model_caches()
-    if spec.id.startswith("fw-"):
-        return FasterWhisperEngine(spec, download_root=HF_HOME)
-    if spec.id == "sensevoice-small":
-        # `SenseVoiceEngine` KHÔNG có tham số `download_root`; nó để FunASR tự
-        # quyết định qua `MODELSCOPE_CACHE` đã đặt ở trên.
-        return SenseVoiceEngine(spec)
-    raise KeyError(f"không có adapter cho engine {spec.id!r}")
+    return engine_for(spec, download_root=HF_HOME)
 
 
 def main() -> None:

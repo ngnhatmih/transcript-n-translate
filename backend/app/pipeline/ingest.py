@@ -10,11 +10,14 @@ import json
 import pathlib
 import shutil
 import subprocess
-from typing import Callable, Protocol
+from typing import Callable, Iterable, Protocol
 
 from app.domain import job_state as _job_state
 from app.domain.models import Job
+from app.domain.paths import PathOutsideRoot, resolve_within
 from app.ports.repos import Repos
+from app.registry import (ASR_DEFAULT_SETTING, FALLBACK_ASR_ENGINE_ID, EngineSpec,
+                          default_asr_engine)
 
 
 class IngestError(RuntimeError):
@@ -157,7 +160,8 @@ def free_space_gb(path: str | pathlib.Path) -> float:
     return usage.free / (1024 ** 3)
 
 
-DEFAULT_ASR_ENGINE = "fw-large-v3-turbo"
+#: Giữ tên cũ cho ai còn import; giá trị thật nằm ở `app.registry` (I-3).
+DEFAULT_ASR_ENGINE = FALLBACK_ASR_ENGINE_ID
 DEFAULT_LANG = "zh"
 
 
@@ -167,19 +171,60 @@ class IngestHandler:
     Đây là mắt đầu tiên của cả pipeline. Nó KHÔNG tải media: việc tải (tệp lên
     hay link) xảy ra ở route, trước khi job tồn tại, để request HTTP không phải
     giữ một tệp 2 GB trong lúc bóc âm thanh.
+
+    Hai tham số chỉ có `app/main.py` truyền (composition root) — chúng biến hai
+    luật của tầng này từ "hy vọng người gọi nhớ" thành thứ chạy được:
+
+    * `media_root` (I-6): gốc media. Mọi `media_path` đọc từ DB phải được
+      `resolve_within` gốc này TRƯỚC khi đưa cho ffprobe/ffmpeg, đúng luật mà
+      route media đã áp cho chính cột đó khi ĐỌC.
+    * `specs` + `declared_default_asr` (I-3): registry đã nạp và engine ASR mặc
+      định do registry khai báo. Có chúng thì một engine mặc định không tồn tại
+      bị từ chối NGAY, thay vì xếp một job asr chắc chắn `KeyError` ở worker.
+
+    `specs=None` nghĩa là "không có registry để đối chiếu" (test dựng handler
+    trần); production luôn truyền cả ba.
     """
 
-    def __init__(self, repos: Repos, *, audio_dir=None) -> None:
+    def __init__(self, repos: Repos, *, audio_dir=None, media_root=None,
+                 specs: Iterable[EngineSpec] | None = None,
+                 declared_default_asr: str | None = None) -> None:
         self._repos = repos
         self._audio_dir = audio_dir
+        self._media_root = media_root
+        self._specs = list(specs) if specs is not None else None
+        self._declared_default_asr = declared_default_asr
 
     def handles(self) -> str:
         return "ingest"
 
+    def _resolve_asr_engine(self, source_id: int) -> str:
+        """Engine ASR mặc định, đã kiểm nếu biết registry (I-3)."""
+        configured = self._repos.get_setting(ASR_DEFAULT_SETTING)
+        if self._specs is None:
+            return configured or self._declared_default_asr or DEFAULT_ASR_ENGINE
+        try:
+            return default_asr_engine(self._specs, declared=self._declared_default_asr,
+                                      configured=configured)
+        except KeyError as exc:
+            raise IngestError(f"source {source_id}: {exc}") from exc
+
+    def _contained_media(self, source_id: int, media: pathlib.Path) -> pathlib.Path:
+        """Chứng minh `media_path` vẫn nằm trong gốc media trước khi mở nó (I-6)."""
+        if self._media_root is None:
+            return media
+        try:
+            return resolve_within(self._media_root, media)
+        except PathOutsideRoot as exc:
+            raise IngestError(
+                f"source {source_id}: media_path nằm ngoài gốc media "
+                f"({self._media_root}): {exc}"
+            ) from exc
+
     def run(self, job: Job, report: Callable[[float, str], None]) -> None:
         source_id = int(job.payload["source_id"])
         source = self._repos.get_source(source_id)
-        media = pathlib.Path(source.media_path)
+        media = self._contained_media(source_id, pathlib.Path(source.media_path))
         if not media.exists():
             # Nêu cả đường dẫn LẪN source id: người vận hành cần biết tệp nào
             # mất và hàng `sources` nào đang trỏ tới nó. Ném lỗi ở đây cũng là
@@ -189,6 +234,11 @@ class IngestHandler:
                 f"source {source_id}: tệp media không tồn tại: {media}. "
                 "Kiểm tra `media_path` trong bảng sources, hoặc nạp lại nguồn."
             )
+
+        # I-3: chọn engine mặc định TRƯỚC khi bóc âm thanh. Id không có trong
+        # registry nghĩa là job asr chắc chắn chết, nên đừng làm việc nặng rồi
+        # mới phát hiện — và tuyệt đối đừng xếp job đó vào hàng đợi.
+        engine_id = self._resolve_asr_engine(source_id)
 
         out_dir = pathlib.Path(self._audio_dir) if self._audio_dir else media.parent
         report(0.2, f"extract audio từ {media.name}")
@@ -207,7 +257,7 @@ class IngestHandler:
             lang = DEFAULT_LANG
             report(0.8, f"nguồn chưa khai báo ngôn ngữ — dùng mặc định {lang}")
 
-        engine_id = self._repos.get_setting("default_asr_engine") or DEFAULT_ASR_ENGINE
+        engine_id = self._resolve_asr_engine(source_id)
         self._repos.add_job(Job(
             id=None, workspace=1, type="asr", engine=engine_id,
             phase=_job_state.phase_of("asr", engine_id),

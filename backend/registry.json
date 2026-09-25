@@ -1,5 +1,7 @@
 {
   "_ghi_chu": "Thêm model mới = sửa file này. KHÔNG hard-code ở pipeline hay giao diện. Frontend đọc qua GET /api/registry.",
+  "_ghi_chu_default_asr": "I-3: engine ASR mặc định của mọi upload là DỮ LIỆU ở đây (đổi được không cần sửa code). Id phải có trong danh sách `asr` bên dưới, nếu không tiến trình sẽ từ chối khởi động kèm chỉ dẫn.",
+  "default_asr": "fw-large-v3-turbo",
   "asr": [
     {
       "id": "fw-large-v3-turbo",

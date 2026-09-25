@@ -58,6 +58,52 @@ def by_id(specs: Iterable[EngineSpec], engine_id: str) -> EngineSpec:
     raise KeyError(f"engine {engine_id!r} không có trong registry")
 
 
+#: Khoá trong `registry.json` khai báo engine ASR mặc định.
+DEFAULT_ASR_KEY = "default_asr"
+
+#: Khoá trong bảng `settings` cho phép người dùng đè lên khai báo của registry.
+ASR_DEFAULT_SETTING = "default_asr_engine"
+
+#: Giá trị dùng khi registry KHÔNG khai báo `default_asr` (giữ nguyên hành vi
+#: của GĐ1a). Nó chỉ là ĐIỂM RƠI, không phải nguồn: hàm dưới vẫn phải chứng minh
+#: id này có thật trong registry, nếu không thì hỏng ngay và nói rõ.
+FALLBACK_ASR_ENGINE_ID = "fw-large-v3-turbo"
+
+
+def default_asr_engine(specs: Iterable[EngineSpec], *, declared: str | None = None,
+                       configured: str | None = None) -> str:
+    """Engine ASR mặc định, đã CHỨNG MINH là có trong registry.
+
+    Thứ tự ưu tiên: setting của người dùng (`configured`) -> khai báo của registry
+    (`declared`) -> hằng số dự phòng của GĐ1a.
+
+    Ném `KeyError` nêu ĐÚNG id, NGUỒN của nó, các engine đang có, và chỗ cần sửa.
+    Đây là điểm hỏng SỚM: `ingest.py` từng hard-code `fw-large-v3-turbo` và tạo
+    job asr với một id không có trong registry, nên upload xong mới nổ ở tận
+    worker bằng `KeyError: engine 'fw-large-v3-turbo' không có trong registry`.
+    """
+    specs = list(specs)
+    if configured:
+        source = f"setting {ASR_DEFAULT_SETTING!r}"
+        engine_id = configured
+    elif declared:
+        source = f"khoá {DEFAULT_ASR_KEY!r} trong registry"
+        engine_id = declared
+    else:
+        source = "giá trị dự phòng của GĐ1a"
+        engine_id = FALLBACK_ASR_ENGINE_ID
+
+    available = [s.id for s in specs if s.kind == "asr"]
+    if engine_id not in {s.id for s in specs}:
+        raise KeyError(
+            f"engine ASR mặc định {engine_id!r} ({source}) không có trong registry; "
+            f"các engine asr đang có: {available}. "
+            f"Sửa {DEFAULT_ASR_KEY!r} trong registry.json hoặc setting "
+            f"{ASR_DEFAULT_SETTING!r} cho khớp."
+        )
+    return engine_id
+
+
 def estimate_vram_mb(specs: Iterable[EngineSpec], engine_ids: Iterable[str]) -> int:
     specs = list(specs)
     return sum(by_id(specs, eid).vram_mb for eid in engine_ids)

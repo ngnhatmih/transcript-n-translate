@@ -81,6 +81,70 @@ def test_shipped_registry_file_is_valid():
     assert not any("moonshine" in s.id.lower() for s in specs)
 
 
+def test_shipped_registry_declares_the_default_asr_engine():
+    """I-3 · engine ASR mặc định là DỮ LIỆU của registry, không phải literal.
+
+    `ingest.py` từng có `DEFAULT_ASR_ENGINE = "fw-large-v3-turbo"` là thứ DUY NHẤT
+    quyết định engine của mọi job ASR do upload sinh ra, nên một registry không có
+    id đó vẫn tạo ra job chết (`KeyError` tận worker). Bài này ghim nguồn dữ liệu.
+    """
+    from app.adapters.registry_file import load_default_asr
+
+    declared = load_default_asr()
+    assert declared == "fw-large-v3-turbo"
+    assert declared in {s.id for s in load_registry()}, (
+        "registry.json phải khai báo một engine asr CÓ THẬT trong danh sách"
+    )
+
+
+def test_default_asr_engine_is_registry_data_and_is_proven_to_exist(tmp_path):
+    """I-3 · chọn mặc định từ dữ liệu, và TỪ CHỐI id không có trong registry.
+
+    Đây đúng hình dạng repro đã đo được: một registry chỉ có `fw-tiny` mà vẫn
+    khai báo mặc định `fw-large-v3-turbo` phải hỏng NGAY và NÓI RÕ, thay vì để
+    job asr chết ở tận worker.
+    """
+    from app.adapters.registry_file import load_default_asr
+    from app.registry import default_asr_engine
+
+    data = {
+        "default_asr": "fw-tiny",
+        "asr": [{"id": "fw-tiny", "label": "tiny", "runtime": "inprocess",
+                 "model_ref": "tiny", "vram_mb": 200, "langs": ["zh"],
+                 "capabilities": {}, "opts": {}}],
+        "mt": [],
+    }
+    p = tmp_path / "registry.json"
+    p.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+    specs = load_registry(p)
+
+    assert load_default_asr(p) == "fw-tiny", "mặc định phải đọc từ registry"
+    assert default_asr_engine(specs, declared=load_default_asr(p)) == "fw-tiny"
+
+    # Setting của người dùng thắng khai báo, nhưng vẫn phải có thật.
+    assert default_asr_engine(specs, declared="fw-tiny", configured="fw-tiny") == "fw-tiny"
+    with pytest.raises(KeyError, match="khong-co") as excinfo:
+        default_asr_engine(specs, declared="fw-tiny", configured="khong-co")
+    assert "fw-tiny" in str(excinfo.value), (
+        "lỗi phải liệt kê các engine asr ĐANG CÓ để người vận hành sửa được ngay"
+    )
+
+
+def test_default_asr_engine_falls_back_and_refuses_a_registry_without_it(tmp_path):
+    """I-3 · khoá `default_asr` vắng ⇒ giữ hành vi cũ, nhưng VẪN phải có thật."""
+    from app.registry import default_asr_engine
+
+    data = {"asr": [{"id": "fw-tiny", "label": "tiny", "runtime": "inprocess",
+                     "model_ref": "tiny", "vram_mb": 200, "langs": ["zh"],
+                     "capabilities": {}, "opts": {}}], "mt": []}
+    p = tmp_path / "registry.json"
+    p.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+    specs = load_registry(p)
+
+    with pytest.raises(KeyError, match="fw-large-v3-turbo"):
+        default_asr_engine(specs)
+
+
 # Loại job THẬT của từng kind (plan §"JOB_TYPES"): job dịch tên là `translate`,
 # KHÔNG phải `mt`. Bảng này cố ý viết lại tại đây thay vì import từ app.registry,
 # để test bắt được cả trường hợp bảng ánh xạ trong code bị đổi sai.
