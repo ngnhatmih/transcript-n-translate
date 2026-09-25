@@ -5639,10 +5639,24 @@ def test_patch_rejects_malformed_segment(client):
 
 
 def test_readability_endpoint_flags_long_line(client):
-    body = client.get(f"/api/transcripts/{client.tid}/readability").json()
+    """Số đo THẬT của fixture, tính bằng `reading_cps` (không đoán):
+
+        đoạn 0 · 大家好 · 3 ký tự / 3,0 s = **1,00 CPS**
+        đoạn 1 · 今天我们要聊的是人工智能 · 12 ký tự / 2,0 s = **6,00 CPS**
+        đoạn 2 · 这个模型它其实…… · 9 ký tự / 3,0 s = **3,00 CPS**
+
+    `CPS_WARN = 20,0` nên ở ngưỡng mặc định **không đoạn nào** bị gắn cờ và phép
+    kiểm vô nghĩa. Hạ ngưỡng xuống **5,0** — nằm giữa 3,00 và 6,00 — thì đúng đoạn
+    1 bị gắn cờ. (Bản trước của plan khẳng định ngưỡng mặc định, kèm thông báo
+    "19 ký tự trong 2 giây" — con số đó = 9,5 CPS, **cũng không đạt** 20,0, tức
+    plan sai ở cả phép kiểm lẫn thông báo.)
+    """
+    body = client.get(f"/api/transcripts/{client.tid}/readability",
+                      params={"threshold": 5.0}).json()
+    assert body["threshold"] == 5.0
     flagged = [item["i"] for item in body["too_fast"]]
-    assert 1 in flagged, "dòng dài 19 ký tự trong 2 giây phải vượt ngưỡng"
-    assert 0 not in flagged
+    assert 1 in flagged, "đoạn 1 = 6,00 CPS phải vượt ngưỡng 5,0"
+    assert 0 not in flagged, "đoạn 0 = 1,00 CPS không được vượt ngưỡng 5,0"
 
 
 def test_approve_moves_status_to_reviewed(client):
@@ -5694,7 +5708,9 @@ def test_export_creates_job_and_download_serves_file(client):
 
     dl = client.get(f"/api/export/{job['id']}/download")
     assert dl.status_code == 200
-    assert dl.headers["content-type"].startswith("text/plain")
+    assert dl.headers["content-type"].startswith("application/x-subrip"), (
+        "SRT dùng MIME application/x-subrip (media_types['srt']), KHÔNG phải text/plain"
+    )
     assert "1\n00:00:00,000 --> 00:00:03,000\n大家好" in dl.text
 
 
@@ -5955,7 +5971,7 @@ from app.adapters.clock_system import SystemClock
 from app.adapters.governor.single_gpu import SingleGpuGovernor
 from app.adapters.persist.sqlite_repos import SqliteRepos
 from app.api.app import create_app
-from app.domain.models import Segment
+from app.domain.models import Job, Segment
 from app.pipeline.export import ExportHandler
 from app.pipeline.ingest import IngestHandler
 from app.pipeline.transcribe import TranscribeHandler
@@ -6018,7 +6034,18 @@ def wired(tmp_path):
         def run(self, job, report) -> None:
             sid = job.payload["source_id"]
             source = repos.get_source(sid)
-            repos.set_source_audio(sid, source.media_path.replace(".mp4", ".wav"), 8.0)
+            # R37: tệp wav phải TỒN TẠI. Bản trước suy tên qua `.replace(".mp4", ".wav")`
+            # nhưng KHÔNG ai tạo tệp đó, nên `TranscribeHandler` ném FileNotFoundError
+            # và job ASR thành FAILED. Dùng `open` (builtin) để khỏi thêm import.
+            audio = source.media_path.replace(".mp4", ".wav")
+            with open(audio, "wb") as fh:
+                fh.write(b"stub-wav")
+            repos.set_source_audio(sid, audio, 8.0)
+            # R7: và phải TẠO JOB ASR — không có nó thì không có gì chạy bóc băng.
+            repos.add_job(Job(id=None, workspace=1, type="asr",
+                              engine="fw-large-v3-turbo",
+                              phase="asr:fw-large-v3-turbo",
+                              payload={"source_id": sid}))
             report(1.0, "ingest giả")
 
     handlers["ingest"] = StubIngest()
@@ -6057,8 +6084,11 @@ def test_full_pipeline_from_upload_to_srt(wired):
     running = wired.get("/api/status").json()
     assert running["queue_depth"] == 0, "hàng đợi phải cạn; job dịch không có handler nên sẽ failed"
 
-    read = wired.get(f"/api/transcripts/{tid}/readability").json()
-    assert 1 in [item["i"] for item in read["too_fast"]]
+    read = wired.get(f"/api/transcripts/{tid}/readability",
+                     params={"threshold": 5.0}).json()
+    assert 1 in [item["i"] for item in read["too_fast"]], (
+        "đoạn 1 = 6,00 CPS > ngưỡng 5,0 (CPS_WARN 20,0 sẽ không gắn cờ đoạn nào)"
+    )
 
     exp = wired.post("/api/export", json={"transcript_id": tid, "format": "srt"})
     assert exp.status_code == 201
