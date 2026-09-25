@@ -24,6 +24,9 @@ from app.registry import EngineSpec
 _ASR_SPEC = EngineSpec(id="fw-large-v3-turbo", label="FW", kind="asr",
                        runtime="inprocess", model_ref="large-v3-turbo",
                        vram_mb=1600, langs=("zh", "en"), capabilities={}, opts={})
+_MT_SPEC = EngineSpec(id="opus-mt", label="OPUS-MT", kind="mt", runtime="inprocess",
+                      model_ref="Helsinki-NLP/opus-mt-zh-vi", vram_mb=0,
+                      langs=("zh", "en"), capabilities={}, opts={})
 
 
 @pytest.fixture()
@@ -31,7 +34,7 @@ def env(tmp_path):
     repos = SqliteRepos(tmp_path / "t.db", clock=SystemClock())
     repos.init_schema()
     broker = JobEventBroker()
-    app = create_app(repos=repos, specs=[_ASR_SPEC], media_dir=tmp_path / "m",
+    app = create_app(repos=repos, specs=[_ASR_SPEC, _MT_SPEC], media_dir=tmp_path / "m",
                      out_dir=tmp_path / "o", broker=broker)
     with TestClient(app) as c:
         c.repos = repos
@@ -57,9 +60,78 @@ def test_create_job_rejects_unknown_engine(env):
     assert resp.status_code == 422
 
 
+def test_create_job_rejects_a_type_with_no_registered_handler(env):
+    """I-5 · GĐ1a KHÔNG có handler `translate`; nhận nó là hứa một job chắc chắn FAILED.
+
+    `POST /api/jobs {"type": "translate"}` từng trả 201 rồi worker đánh dấu FAILED
+    ("không có handler cho loại job"). Lỗi thuộc về REQUEST, nên phải là 422 ngay.
+    """
+    resp = env.post("/api/jobs", json={"workspace": 2, "type": "translate",
+                                      "engine": "opus-mt",
+                                      "payload": {"transcript_id": 1}})
+    assert resp.status_code == 422, resp.text
+    assert "translate" in resp.text
+    assert "ingest" in resp.text, "lỗi phải nói loại job nào được nhận"
+
+
+def test_create_job_rejects_a_type_without_a_registered_handler(env):
+    """I-5 · handler ĐÃ ĐĂNG KÝ là nguồn sự thật, không phải một bảng chép tay.
+
+    App này chỉ đăng ký `ingest`; gửi `asr` (có hình dạng payload hợp lệ) vẫn phải
+    bị từ chối vì không có gì chạy nó.
+    """
+    from app.worker import PhaseQueueWorker
+
+    worker = PhaseQueueWorker(env.repos, FakeGovernor(),
+                              {"ingest": RecordingHandler(job_type="ingest")})
+    env.app.state.worker = worker
+    try:
+        resp = env.post("/api/jobs", json={"workspace": 1, "type": "asr",
+                                          "engine": "fw-large-v3-turbo",
+                                          "payload": {"source_id": 1}})
+    finally:
+        env.app.state.worker = None
+    assert resp.status_code == 422, resp.text
+    assert "handler" in resp.text
+
+
+@pytest.mark.parametrize("job_type,payload", [
+    ("ingest", {}),
+    ("asr", {}),
+    ("export", {}),
+])
+def test_create_job_rejects_a_payload_missing_the_fields_its_handler_reads(env, job_type,
+                                                                          payload):
+    """I-5 · thiếu trường handler đọc ⇒ 422 NÓI RÕ trường nào, không phải job FAILED.
+
+    `IngestHandler` đọc `payload["source_id"]` và `ExportHandler` đọc
+    `payload["transcript_id"]`; một job thiếu chúng là một `KeyError` trần ở tận
+    worker, sau khi đã xếp hàng và báo 201 cho client.
+    """
+    body = {"workspace": 1, "type": job_type, "payload": payload}
+    if job_type == "asr":
+        body["engine"] = "fw-large-v3-turbo"
+    resp = env.post("/api/jobs", json=body)
+    assert resp.status_code == 422, resp.text
+    assert "payload" in resp.text
+    expected = "transcript_id" if job_type == "export" else "source_id"
+    assert expected in resp.text, f"lỗi phải nêu tên trường thiếu: {resp.text}"
+
+
+def test_create_job_accepts_a_payload_that_satisfies_the_contract(env):
+    """Chiều ngược lại: payload đúng thì vẫn 201, hình dạng không đổi."""
+    resp = env.post("/api/jobs", json={
+        "workspace": 1, "type": "export",
+        "payload": {"transcript_id": 3, "format": "srt", "bilingual": True},
+    })
+    assert resp.status_code == 201, resp.text
+    assert resp.json()["payload"]["transcript_id"] == 3
+
+
 def test_list_and_get_job(env):
     env.post("/api/jobs", json={"workspace": 1, "type": "asr",
-                                "engine": "fw-large-v3-turbo", "payload": {}})
+                                "engine": "fw-large-v3-turbo",
+                                "payload": {"source_id": 1}})
     listed = env.get("/api/jobs").json()
     assert len(listed) == 1
     jid = listed[0]["id"]
@@ -69,7 +141,8 @@ def test_list_and_get_job(env):
 
 def test_cancel_sets_flag_not_kill(env):
     resp = env.post("/api/jobs", json={"workspace": 1, "type": "asr",
-                                       "engine": "fw-large-v3-turbo", "payload": {}})
+                                       "engine": "fw-large-v3-turbo",
+                                       "payload": {"source_id": 1}})
     jid = resp.json()["id"]
     assert env.post(f"/api/jobs/{jid}/cancel").json()["cancel_requested"] is True
     assert env.repos.get_job(jid).state == js.CANCELLED, (
@@ -79,7 +152,8 @@ def test_cancel_sets_flag_not_kill(env):
 
 def test_retry_only_from_retryable_states(env):
     resp = env.post("/api/jobs", json={"workspace": 1, "type": "asr",
-                                       "engine": "fw-large-v3-turbo", "payload": {}})
+                                       "engine": "fw-large-v3-turbo",
+                                       "payload": {"source_id": 1}})
     jid = resp.json()["id"]
     assert env.post(f"/api/jobs/{jid}/retry").status_code == 409
     env.repos.set_job_state(jid, js.RUNNING)

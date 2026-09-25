@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
 from app.api.deps import get_repos, get_specs
 from app.api.sse import JobEventBroker, stream_events
@@ -20,8 +20,42 @@ from app.registry import by_id
 
 router = APIRouter(prefix="/api/jobs", tags=["jobs"])
 
-JOB_TYPES = {"ingest", "asr", "translate", "export"}
-ENGINE_REQUIRED = {"asr", "translate"}
+ENGINE_REQUIRED = {"asr"}
+
+
+class IngestPayload(BaseModel):
+    """`IngestHandler.run` đọc `payload["source_id"]` (ingest.py)."""
+
+    source_id: int = Field(ge=1)
+
+
+class AsrPayload(BaseModel):
+    """`TranscribeHandler.run` đọc `payload["source_id"]` (transcribe.py)."""
+
+    source_id: int = Field(ge=1)
+    lang: str | None = None
+
+
+class ExportPayload(BaseModel):
+    """`ExportHandler.run` đọc `payload["transcript_id"]` (export.py)."""
+
+    transcript_id: int = Field(ge=1)
+    format: str | None = None
+    bilingual: bool = False
+    stem: str | None = None
+    translations: list | None = None
+
+
+#: I-5: hợp đồng payload theo từng loại job. Đây là DANH SÁCH TRẮNG: một loại
+#: không có ở đây bị từ chối 422, vì không có handler nào đọc payload của nó
+#: (`translate` là ca thật của GĐ1a — hàng đợi chỉ đánh dấu nó FAILED).
+PAYLOAD_SCHEMA: dict[str, type[BaseModel]] = {
+    "ingest": IngestPayload,
+    "asr": AsrPayload,
+    "export": ExportPayload,
+}
+
+JOB_TYPES = frozenset(PAYLOAD_SCHEMA)
 
 
 class JobIn(BaseModel):
@@ -42,11 +76,52 @@ def _job_json(job: Job) -> dict:
     }
 
 
+def _registered_job_types(request: Request) -> set[str]:
+    """Loại job có handler THẬT trong tiến trình này.
+
+    App ráp đủ (`app/main.py`) có `worker`, nên đây là danh sách `handles()` đã
+    đăng ký — thêm một handler mà quên hợp đồng payload thì nó không được nhận.
+    App chỉ để đọc (test dựng `create_app()` không worker) rơi về chính danh sách
+    hợp đồng, vì không có gì để hỏi.
+    """
+    worker = getattr(request.app.state, "worker", None)
+    handlers = getattr(worker, "handlers", None) or {}
+    registered = {handler.handles() for handler in handlers.values()}
+    return registered & set(PAYLOAD_SCHEMA) or set(PAYLOAD_SCHEMA)
+
+
+def _payload_errors(exc: ValidationError) -> str:
+    """Lỗi pydantic -> câu nêu ĐÚNG tên trường, để client sửa được ngay."""
+    parts: list[str] = []
+    for error in exc.errors():
+        field = ".".join(str(piece) for piece in error["loc"]) or "payload"
+        parts.append(f"{field}: {error['msg']}")
+    return "; ".join(parts)
+
+
 @router.post("", status_code=201)
-def create_job(payload: JobIn, repos=Depends(get_repos), specs=Depends(get_specs)):
+def create_job(payload: JobIn, request: Request, repos=Depends(get_repos),
+               specs=Depends(get_specs)):
     # `workspace` đã bị `JobIn` chặn ngoài 1..2 -> 422 của FastAPI, không tới đây.
-    if payload.type not in JOB_TYPES:
-        raise HTTPException(422, f"loại job không hợp lệ: {payload.type!r}")
+    schema = PAYLOAD_SCHEMA.get(payload.type)
+    if schema is None:
+        raise HTTPException(
+            422, f"loại job không hợp lệ: {payload.type!r} "
+                 f"(GĐ1a nhận: {sorted(PAYLOAD_SCHEMA)})")
+    registered = _registered_job_types(request)
+    if payload.type not in registered:
+        raise HTTPException(
+            422, f"chưa có handler cho loại job {payload.type!r} "
+                 f"(đang có: {sorted(registered)})")
+    # I-5: payload được kiểm NGAY ở đây, theo đúng trường mà handler sẽ đọc.
+    # Bản cũ nhận mọi payload rồi trả 201, và client chỉ biết mình sai khi job
+    # đã nằm trong hàng đợi và `KeyError` nổi lên thành FAILED ở worker.
+    try:
+        schema.model_validate(payload.payload)
+    except ValidationError as exc:
+        raise HTTPException(
+            422, f"payload của job {payload.type!r} không hợp lệ: "
+                 f"{_payload_errors(exc)}") from exc
     if payload.type in ENGINE_REQUIRED:
         if not payload.engine:
             raise HTTPException(422, f"job loại {payload.type} phải có engine")
