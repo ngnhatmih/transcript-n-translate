@@ -21,6 +21,9 @@ models/
 .env
 .env.local
 
+# Visual companion (mockup tạm)
+.superpowers/
+
 # Editor / OS
 .vscode/
 .idea/

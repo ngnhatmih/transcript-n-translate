@@ -1,14 +1,40 @@
 # phu-de-lab — Thiết kế
 
-**Ngày:** 2026-09-25 · **Bản:** v2 (sau đánh giá kiến trúc / hiệu năng / AI-ML)
+**Ngày:** 2026-09-25 · **Bản:** v3 (thêm ràng buộc từ thiết kế UI/UX)
 **Trạng thái:** Chờ người dùng duyệt lần cuối
 
 Một web app chia thành hai bàn thao tác cho một dây chuyền hai bước:
 **Workspace 1** bóc băng audio/video ra văn bản kèm timestamp, **Workspace 2** dịch văn bản đó sang tiếng Việt. Mỗi workspace đổi được model độc lập.
 
+> **File thiết kế giao diện tách riêng:** `2026-09-25-phu-de-lab-ui-design.md`.
+> File này ghi *hệ thống làm gì*; file kia ghi *người dùng nhìn thấy gì*.
+
 ---
 
-## 0. Lịch sử thay đổi — v1 → v2
+## 0. Lịch sử thay đổi
+
+### v2 → v3 — ràng buộc từ thiết kế UI/UX
+
+Soi lại 10 tính năng qua lăng kính giao diện (`frontend-design`, `frontend-developer`) tìm ra
+10 phát hiện, trong đó 4 mức Cao. Bốn cái Cao làm **đổi cả bố cục lẫn backend**, nên chúng được
+áp vào file này chứ không nằm yên trong file UI.
+
+| Mã | Phát hiện | Mức | Xử lý |
+|---|---|---|---|
+| U1 | Bố cục hai pane không chịu được nhiều source, trong khi §7.2 lại giả định nhiều job | Cao | §9.1 ba vùng, thêm vùng KÊNH |
+| U5 | Không có trình phát media → tín hiệu `suspect` báo lỗi mà không sửa được | Cao | §9.2 transport + §11 endpoint media có `Range` |
+| U3 | Tiếng Việt dài gấp 2–3× tiếng Trung, hai pane tách rời nên không thấy lỗi | Cao | §9.1 chế độ Đối chiếu + CPS, §3.1 `readability.py` |
+| U10 | Không có bàn phím cho một công cụ dùng hàng giờ | Cao | §9.3 bảng phím tắt là yêu cầu |
+| U2 | Job bị đẩy ra sau mà không thấy hàng đợi | Trung | §9.1 vùng HÀNG ĐỢI + lý do chờ |
+| U4 | Chỉnh timestamp bằng chuột | Trung | §9.3 nudge + đặt mốc tại đầu đọc |
+| U6 | Ảo hoá + sửa trực tiếp làm mất focus | Trung | §9.2 ghim dòng đang sửa |
+| U7 | N bản dịch dạng tab sẽ nổ | Trung | §9.2 segmented + ghim bản B |
+| U8 | Trạng thái rỗng/lỗi chưa được thiết kế | Trung | §9.2 Ollama mất kết nối là trạng thái hạng nhất |
+| U9 | Tiến độ không đồng nhất giữa các công đoạn | Thấp | File UI/UX §5.4, hai thanh tiến độ |
+
+Thêm một ràng buộc mới do phải chạy offline: **font self-host, không CDN** (§9.4).
+
+### v1 → v2 — đánh giá kiến trúc / hiệu năng / AI-ML
 
 v1 được đánh giá lại qua ba lăng kính (`architecture-patterns`, `application-performance-performance-optimization`, `ai-ml`). 18 phát hiện, trong đó 9 mức Cao. Bản v2 sửa hết.
 
@@ -89,6 +115,7 @@ backend/app/
 │   ├── batching.py          # chia lô theo ngân sách token
 │   ├── staleness.py         # quy tắc version → stale
 │   ├── qa_rules.py          # QA tầng 1, thuần code
+│   ├── readability.py       # CPS (tốc độ đọc) + ngưỡng cảnh báo
 │   └── job_state.py         # state machine
 ├── ports/                   # giao diện, KHÔNG hiện thực
 │   ├── asr.py · mt.py · repos.py · governor.py · clock.py
@@ -114,7 +141,7 @@ backend/app/
 
 ```
 ┌─ frontend/ (Next.js) ────────────────────────────────┐
-│  React 19 · Tailwind v4 · shadcn/ui                  │
+│  React 19 · Tailwind v4 · Radix/shadcn cho HÀNH VI │
 │  rewrite /api/* → http://127.0.0.1:8620              │
 └───────────────────────┬──────────────────────────────┘
                         │ HTTP + SSE
@@ -493,7 +520,7 @@ Tuỳ chọn, **MẶC ĐỊNH TẮT**. Cho phép 1 job ASR + 1 job MT cùng lúc
 
 - Lưu `avg_logprob` + `no_speech_prob` vào segment.
 - `suspect = no_speech_prob > 0.6 or avg_logprob < -1.0`.
-- UI **tô đỏ** đoạn nghi ngờ + nút "nhảy tới đoạn nghi ngờ kế tiếp".
+- UI **đánh dấu bằng vân chéo ở lề** (KHÔNG tô đỏ — lý do ở §9.2) + nút "nhảy tới đoạn nghi ngờ kế tiếp".
 - SenseVoice: dùng tag sự kiện thay thế (có `bgm` → cảnh báo đoạn đó dễ sai).
 - Ngưỡng nằm trong `domain/qa_rules.py`, chỉnh được.
 
@@ -556,6 +583,8 @@ Sinh 6 ứng viên mỗi lô → gọi lượt thứ 7 để pha. Tuần tự n�
 - Thuật ngữ glossary đã duyệt có bị mất không.
 - Độ dài bất thường (dài > 3× gốc = nghi bịa).
 - Bản dịch rỗng hoặc chỉ có ký tự lạ.
+- **CPS (tốc độ đọc) vượt ngưỡng** — `domain/readability.py`. Tiếng Việt dài gấp 2–3× tiếng
+  Trung nên đây là lỗi phụ đề phổ biến nhất, và nó chỉ lộ ra khi đặt hai thứ cạnh nhau (§9.1).
 
 **Tầng 2 — chỉ gọi LLM cho segment đã bị tầng 1 cảnh báo.** Không bao giờ soát cả file.
 
@@ -569,40 +598,70 @@ SRT · VTT · ASS — đơn ngữ hoặc **song ngữ**. Chọn bản dịch nà
 
 ## 9. Giao diện
 
-Next.js 16 App Router · React 19 · Tailwind v4 · shadcn/ui. `next.config.ts` rewrite `/api/*` → `http://127.0.0.1:8620`, đúng pattern của `truyen-dich`.
+> **Thiết kế giao diện đầy đủ nằm ở file riêng:** `2026-09-25-phu-de-lab-ui-design.md`
+> (hướng thẩm mỹ, hệ thống thiết kế, 8 màn hình, bàn phím). Mục này chỉ ghi những gì
+> **ràng buộc kiến trúc backend**.
+
+Next.js 16 App Router · React 19 · Tailwind v4. `next.config.ts` rewrite `/api/*` → `http://127.0.0.1:8620`, đúng pattern của `truyen-dich`.
+
+### 9.1 Bố cục: BA vùng, không phải hai pane
+
+v2 vẽ hai pane chia đôi. Bố cục đó không chịu được hai thứ mà chính spec này yêu cầu: nhiều
+source cùng lúc (§7.2 gom lô chỉ có nghĩa khi có nhiều job) và việc nghe lại để soát (§8.4).
 
 ```
-┌──────────────────────────────────────────────────────────────────┐
-│ phu-de-lab   [Ollama ●] [GPU 3.2/8GB] [Giai đoạn: ASR·turbo]     │
-├───────────────────────────────┬──────────────────────────────────┤
-│ WORKSPACE 1 · Tách âm         │ WORKSPACE 2 · Dịch               │
-│ ┌───────────────────────────┐ │ ┌──────────────────────────────┐ │
-│ │ kéo file vào  │  dán URL  │ │ │ transcript: [chọn ▼]         │ │
-│ └───────────────────────────┘ │ └──────────────────────────────┘ │
-│ Model: [Faster-Whisper ▼]     │ Model: [HY-MT1.5-7B ▼]           │
-│ ☐ Giữ lại để sửa              │ ☐ Chimera (chậm ~7×)  ☐ Dịch lại │
-│ [ Bắt đầu ]                   │ [ Dịch ]                         │
-│ ┌─ transcript (ảo hoá) ─────┐ │ ┌─ N bản dịch (ảo hoá) ────────┐ │
-│ │ 00:01→00:04  大家好       │ │ │ ● Qwen2.5-7B  ○ HY-MT1.5     │ │
-│ │ 00:04→00:07  ...          │ │ │ ○ OPUS-MT                    │ │
-│ │ ⚠ 00:12→00:15 (nghi ngờ)  │ │ │ v3→v5 · lỗi thời             │ │
-│ └───────────────────────────┘ │ └──────────────────────────────┘ │
-│ [ Duyệt → chuyển WS2 ]        │ [ Xuất SRT song ngữ ]            │
-├───────────────────────────────┴──────────────────────────────────┤
-│ Job: [████░░] ETA 4m · log trực tiếp · huỷ                        │
-└──────────────────────────────────────────────────────────────────┘
+┌───────────────────────────────────────────────────────────────────────────────┐
+│ PHÒNG THU BIÊN TẬP    [● Ollama]  [▮▮▮▯▯ 3.2/8GB]  [GĐ: ASR·turbo]       [⚙]  │
+├──────────────┬────────────────────────────────────────┬───────────────────────┤
+│ KÊNH         │  BÀN LÀM VIỆC                          │  HÀNG ĐỢI             │
+│ 214px        │  ┌─rail─┬─────────────────────────────┐│  286px                │
+│ ● video-01   │  │ 0:01 │ …                           ││  ▸ ASR·turbo   ▓▓▓░░  │
+│ ○ video-02   │  │ 0:12╱│ [nghi ngờ]                  ││  ⏸ MT·qwen2.5-7b      │
+│ [+ NẠP LIỆU ]│  └──────┴─────────────────────────────┘│    chờ gom lô         │
+│              │  [ BIÊN TẬP │ ĐỐI CHIẾU │ THUẬT NGỮ ]   │                       │
+├──────────────┴────────────────────────────────────────┴───────────────────────┤
+│ ▶ 0:15/12:04  [━━━━━━━━━░░░░░░]  ETA 4m           [SRT] [VTT] [ASS]           │
+└───────────────────────────────────────────────────────────────────────────────┘
 ```
 
-**Chi tiết bắt buộc:**
+Ba chế độ của vùng BÀN LÀM VIỆC: **Biên tập** · **Đối chiếu** (hai cột + CPS) · **Thuật ngữ**.
+Hai màn hình **đo lường** (§10) thay toàn bộ vùng giữa vì chúng không gắn với kênh nào.
+
+### 9.2 Yêu cầu bắt buộc
 
 - **Header** hiện trạng thái Ollama + VRAM + **giai đoạn hiện tại** + số job chờ.
 - **Job đang chờ hiện lý do** (`chờ gom lô cùng giai đoạn`) — nếu không, người dùng tưởng app treo.
 - Dropdown model đọc từ `GET /api/registry`, **không hard-code**.
-- **Danh sách ảo hoá** cho transcript và bản dịch — 2000 dòng vẫn mượt.
-- **ETA** trên thanh job, dựa trên `duration` × RTF đo được. Không có ETA thì người dùng không biết chờ 2 phút hay 40 phút.
-- **Đoạn nghi ngờ tô đỏ** + nút nhảy tới đoạn nghi ngờ kế tiếp.
+- **Danh sách ảo hoá** cho transcript và bản dịch — 2000 dòng vẫn mượt. **Dòng đang sửa được
+  ghim** để không bị unmount khi cuộn.
+- **ETA** trên thanh job, dựa trên `duration` × RTF đo được.
+- **Đoạn nghi ngờ đánh bằng vân chéo ở lề, KHÔNG tô đỏ** — lý do ở file UI/UX §2.5 (giữ amber là
+  tài nguyên duy nhất có nghĩa; an toàn cho người mù màu).
+- **Trình phát media** ở thanh transport: click dòng → seek tới đoạn đó. Không có nó thì tín hiệu
+  `suspect` báo chỗ sai mà người dùng không nghe được để sửa.
+- **N bản dịch là segmented control, không phải tab nổi** — 4 engine × nhiều phiên bản prompt sẽ
+  làm tab nổ tung. Cần so hai bản thì **ghim bản B** hiện cột thứ ba.
+- **Chimera hiện cả 6 ứng viên và bản hợp nhất**, kèm **cảnh báo chi phí** (`~7×`). Một chế độ
+  tốn gấp 7 lần phải biện minh cho chi phí của nó, nếu không sẽ không ai dùng.
+- **Tab Thuật ngữ hiện số bản dịch bị ảnh hưởng** khi glossary đổi, và hàng đợi tự sinh job
+  *"Dịch lại · do glossary đổi"*.
+- **Ollama mất kết nối là trạng thái HẠNG NHẤT** (dải vằn chéo ở đỉnh cửa sổ + khối hướng dẫn),
+  **không phải toast** — app không dùng được nếu thiếu, mà đây là lỗi phổ biến nhất của app local.
 - Log streaming bằng **SSE** (`GET /api/jobs/stream`, một stream toàn cục, client lọc theo `job_id`).
-- Tab **Thuật ngữ**: duyệt/sửa glossary, hiện số bản dịch bị ảnh hưởng khi glossary đổi.
+
+### 9.3 Bàn phím là yêu cầu, không phải điểm cộng
+
+Người dùng ngồi với app này hàng giờ. Bảng phím tắt đầy đủ ở file UI/UX §5.1; tối thiểu phải có:
+`Space` phát/dừng · `J`/`K` chuyển dòng · `Enter` sửa dòng · `Esc` thoát · `Shift+←/→` nudge mốc
+±0,1s · `[`/`]` đặt start/end tại đầu đọc · `S` tách dòng · `M` gộp dòng · `N` nhảy tới đoạn
+nghi ngờ kế tiếp · `Ctrl+1/2/3` đổi chế độ.
+
+### 9.4 Ràng buộc offline áp lên frontend
+
+App chạy hoàn toàn offline (§17.8) nên:
+
+- **Font phải self-host woff2** ở `frontend/public/fonts/`, **không được nạp từ Google Fonts CDN**.
+- Không có telemetry, không analytics, không gọi mạng ngoài khi chạy.
 
 ---
 
@@ -667,7 +726,8 @@ Ghi số thật vào `eval/report.md` và commit. **Không có con số thì kh�
 | `POST` | `/api/transcripts/{id}/approve` | duyệt → chuyển WS2 |
 | `GET` | `/api/translations?transcript_id=` | N bản dịch + cờ `stale` tính sẵn |
 | `PATCH` | `/api/translations/{id}` | sửa tay một bản dịch |
-| `GET` · `POST` · `PATCH` | `/api/glossary` | quản lý glossary |
+| `GET` | `/api/glossary` · `POST` · `PATCH` | quản lý glossary |
+| `GET` | `/api/media/{source_id}` | **serve media, BẮT BUỘC hỗ trợ HTTP `Range`** — không có `Range` thì trình phát không seek được |
 | `GET` | `/api/export/{translation_id}` | `?format=srt\|vtt\|ass&bilingual=0\|1` |
 
 ---
@@ -787,7 +847,12 @@ Hệ thống gồm 6 tiểu hệ thống; gói tất cả vào một kế hoạc
 - Ingest: upload file + yt-dlp + ffmpeg
 - ASR: adapter faster-whisper (phủ `small`/`medium`/`turbo` — một adapter, ba `model_ref`) + adapter SenseVoice + batched inference
 - Hậu xử lý segment + tín hiệu tin cậy (§8.4) + xuất SRT
-- Frontend Next.js: khung + pane workspace 1 (nạp liệu, chọn model, xem/sửa transcript)
+- **Endpoint media có HTTP `Range`** (§11) — điều kiện để có trình phát
+- Frontend Next.js: khung **ba vùng** (§9.1) — KÊNH / BÀN LÀM VIỆC / HÀNG ĐỢI + thanh transport
+- **Hệ thống thiết kế**: token màu, font self-host woff2 (§9.4), grain, dải vân nghi ngờ
+- **Trình phát + bàn phím** (§9.3) — nudge mốc, `[`/`]`, tách/gộp dòng, `N` nhảy đoạn nghi ngờ
+- **Danh sách ảo hoá + ghim dòng đang sửa** (§9.2)
+- Trạng thái rỗng và **trạng thái Ollama mất kết nối** (§9.2)
 - Test: unit + ranh giới tầng + E2E fake + hàng đợi + phục hồi + smoke thật
 
 **Bàn giao:** nạp một video (file hoặc link), chọn engine, ra transcript có timestamp, sửa được, xuất SRT tiếng gốc.
