@@ -143,3 +143,61 @@ def test_model_cache_is_pinned_at_user_scope():
     assert '"MODELSCOPE_CACHE"' in text, (
         "thiếu MODELSCOPE_CACHE thì SenseVoice + fsmn-vad + ct-punc rơi về ổ C:"
     )
+
+
+def test_last_exit_code_check_treats_null_as_success():
+    """H1 · `$LASTEXITCODE` là `$null` khi bước đó KHÔNG chạy lệnh ngoài nào.
+
+    Trên máy đã có `backend\\.venv`, `if (-not (Test-Path ".venv"))` không chạy
+    `py -3.10 -m venv`, nên `$LASTEXITCODE` vẫn là `$null`; `$null -ne 0` là
+    ĐÚNG và bản cũ ném `tạo venv thất bại (mã thoát )` ngay bước 1. Đúng máy
+    này có `.venv`, nên lệnh cài trong README hỏng thật, không phải giả định.
+    """
+    text = _text()
+    assert "$LASTEXITCODE" in text, "phải kiểm mã thoát của lệnh ngoài"
+    assert re.search(r"@\(\s*\$null\s*,\s*0\s*\)\s*-notcontains\s+\$LASTEXITCODE", text), (
+        "phép kiểm phải null-safe: coi `$null` là THÀNH CÔNG "
+        "(`@($null, 0) -notcontains $LASTEXITCODE`), nếu không thì mọi lần chạy "
+        "lại khi `.venv` đã có đều ném ở bước 1"
+    )
+    assert not re.search(r"\$LASTEXITCODE\s+-ne\s+0", text), (
+        "`$LASTEXITCODE -ne 0` là ĐÚNG khi giá trị là `$null` — không được quay lại"
+    )
+
+
+def test_step_labels_are_one_consistent_series():
+    """L3 · nhãn bước từng nhảy `1/6..4/6` rồi `5/7..7/7`."""
+    labels = re.findall(r"==\s*(\d+)/(\d+)\s*·", _text())
+    assert labels, "phải có nhãn bước dạng `== N/M · ...`"
+    denominators = {total for _step, total in labels}
+    assert denominators == {"7"}, (
+        f"mọi nhãn phải cùng một mẫu số, thực tế: {sorted(denominators)}"
+    )
+    steps = [int(step) for step, _total in labels]
+    assert steps == list(range(1, 8)), f"nhãn bước phải là 1..7 liên tục: {steps}"
+
+
+def test_hf_home_default_is_checked_for_an_existing_drive():
+    """M2 · `HF_HOME` bị ghim ở mức User, không được trỏ vào ổ không tồn tại."""
+    text = _text()
+    assert "Split-Path -Qualifier" in text, (
+        "phải tách ổ của $modelRoot để kiểm nó có thật trước khi ghim ở mức User"
+    )
+    assert re.search(r"Test-Path\s+\$qualifier", text), (
+        "phải Test-Path ổ đó; ghim `D:\\models\\hf` trên máy không có D: thì mọi "
+        "lần tải model SAU đều hỏng ở một chỗ cách xa nguyên nhân"
+    )
+    assert "New-Item -ItemType Directory" in text, (
+        "thư mục cache phải được tạo; mặc định D:\\models\\hf không có sẵn"
+    )
+
+
+def test_final_banner_prints_the_actual_cache_root():
+    """L4 · banner từng in cứng `D:\\models\\hf` kể cả khi $modelRoot khác."""
+    text = _text()
+    assert re.search(r"Write-Host\s+[\"']\s*HF_HOME\s*=\s*\$modelRoot", text), (
+        "banner phải in $modelRoot, không in giá trị mặc định"
+    )
+    assert "HF_HOME = D:\\models\\hf" not in text, (
+        "không được in cứng giá trị mặc định: nó sai khi người dùng đã đặt HF_HOME"
+    )

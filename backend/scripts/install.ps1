@@ -10,6 +10,14 @@
 # `--no-cache-dir`: pip trong môi trường này RẤT chậm khi đọc cache.
 
 $ErrorActionPreference = "Stop"
+# `$LASTEXITCODE` là biến TỰ ĐỘNG: trong một tiến trình `pwsh -File` còn tươi nó
+# là `$null` cho tới khi có một lệnh NGOÀI nào chạy. Đặt 0 ở đây để trạng thái
+# đầu là "chưa có lệnh ngoài nào hỏng" thay vì "chưa biết" — nhưng phép kiểm
+# thật vẫn nằm ở `Assert-LastExit` bên dưới (xem chú thích ở đó), vì biến này
+# có thể mang giá trị của một lệnh chạy TRƯỚC khi script bắt đầu: khi gọi
+# `. .\install.ps1` trong một phiên đã có lệnh ngoài hỏng thì gán ở đây mới xoá
+# được nó, còn `pwsh -File` là tiến trình mới nên chỉ cần phép kiểm null-safe.
+$global:LASTEXITCODE = 0
 $here = Split-Path -Parent $MyInvocation.MyCommand.Path
 $backend = Split-Path -Parent $here
 Set-Location $backend
@@ -23,7 +31,15 @@ function Assert-LastExit([string]$what) {
     # `$ErrorActionPreference = "Stop"` KHÔNG áp cho lệnh NGOÀI (pip, py): mã
     # thoát khác 0 vẫn đi tiếp. Thiếu phép kiểm này thì "cài bằng một lệnh"
     # thành "cài nửa vời rồi chạy tiếp trong im lặng".
-    if ($LASTEXITCODE -ne 0) { throw "$what thất bại (mã thoát $LASTEXITCODE)" }
+    #
+    # `$null` phải được coi là THÀNH CÔNG, không phải thất bại: bước nào bị BỎ
+    # QUA (ví dụ `Test-Path ".venv"` đã đúng nên không chạy `py -3.10 -m venv`)
+    # thì không có lệnh ngoài nào chạy và `$LASTEXITCODE` vẫn là `$null`. So
+    # sánh `$null -ne 0` là ĐÚNG, nên bản cũ ném "thất bại (mã thoát )" trên
+    # MỌI máy đã có `.venv` — đúng máy này — ngay ở bước 1.
+    if (@($null, 0) -notcontains $LASTEXITCODE) {
+        throw "$what thất bại (mã thoát $LASTEXITCODE)"
+    }
 }
 
 function Set-UserEnvIfMissing([string]$name, [string]$value) {
@@ -40,27 +56,40 @@ function Set-UserEnvIfMissing([string]$name, [string]$value) {
     Set-Item -Path "Env:$name" -Value $current
 }
 
-Write-Host "== 1/6 · venv ==" -ForegroundColor Cyan
+Write-Host "== 1/7 · venv ==" -ForegroundColor Cyan
 if (-not (Test-Path ".venv")) { py -3.10 -m venv .venv }
 Assert-LastExit "tạo venv"
 $py = ".\.venv\Scripts\python.exe"
 & $py -m pip install --no-cache-dir --upgrade pip
 Assert-LastExit "nâng cấp pip"
 
-Write-Host "== 2/6 · cache model về ổ D: (R60/R64) ==" -ForegroundColor Cyan
+Write-Host "== 2/7 · cache model về ổ D: (R60/R64) ==" -ForegroundColor Cyan
 # `app/config.py:HF_HOME` chỉ là hằng số Python; `huggingface_hub` đọc BIẾN MÔI
 # TRƯỜNG, và ModelScope đọc `MODELSCOPE_CACHE`. Đặt sớm để một lần hỏng ở bước
 # sau vẫn để lại đúng chỗ chứa model.
 $modelRoot = if ($env:HF_HOME) { $env:HF_HOME } else { "D:\models\hf" }
+# Giá trị dưới đây được ĐẶT Ở MỨC USER, tức là còn sống sau khi script kết thúc:
+# trỏ nó vào một ổ không tồn tại thì mọi lần tải model SAU đó đều hỏng ở một chỗ
+# cách xa nguyên nhân. Kiểm ổ TRƯỚC khi ghim, rồi tạo thư mục — `D:\models\hf`
+# mặc định không có sẵn trên máy mới.
+$qualifier = Split-Path -Qualifier $modelRoot -ErrorAction SilentlyContinue
+if ($qualifier -and -not (Test-Path $qualifier)) {
+    throw "HF_HOME trỏ vào ổ không tồn tại: $modelRoot — đặt `$env:HF_HOME trước khi chạy"
+}
+try {
+    New-Item -ItemType Directory -Force -Path $modelRoot | Out-Null
+} catch {
+    throw "không tạo được thư mục cache model: $modelRoot — $($_.Exception.Message)"
+}
 Set-UserEnvIfMissing "HF_HOME" $modelRoot
 Set-UserEnvIfMissing "MODELSCOPE_CACHE" (Join-Path $modelRoot "modelscope")
 
-Write-Host "== 3/6 · torch cu121 (TRƯỚC funasr) ==" -ForegroundColor Cyan
+Write-Host "== 3/7 · torch cu121 (TRƯỚC funasr) ==" -ForegroundColor Cyan
 & $py -m pip install --no-cache-dir torch==2.5.1 torchaudio==2.5.1 `
     --index-url https://download.pytorch.org/whl/cu121
 Assert-LastExit "cài torch cu121"
 
-Write-Host "== 4/6 · kiểm tra CUDA ==" -ForegroundColor Cyan
+Write-Host "== 4/7 · kiểm tra CUDA ==" -ForegroundColor Cyan
 & $py -X utf8 -c @'
 import torch, sys
 ok = torch.cuda.is_available()
@@ -114,7 +143,7 @@ if (-not (Get-Command yt-dlp -ErrorAction SilentlyContinue)) {
 
 Write-Host ""
 Write-Host "XONG. Biến môi trường đã đặt ở mức User:" -ForegroundColor Green
-Write-Host '  HF_HOME = D:\models\hf'
-Write-Host '  MODELSCOPE_CACHE = D:\models\hf\modelscope'
+Write-Host "  HF_HOME = $modelRoot"
+Write-Host "  MODELSCOPE_CACHE = $(Join-Path $modelRoot 'modelscope')"
 Write-Host 'Shell đang mở chưa thấy biến mới — mở shell mới, hoặc đặt lại trong phiên này.'
 Write-Host 'Tiếp theo: .\.venv\Scripts\python.exe -m pytest   (xem backend/README.md)'
