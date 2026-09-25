@@ -1,0 +1,87 @@
+{
+  "_ghi_chu": "Thêm model mới = sửa file này. KHÔNG hard-code ở pipeline hay giao diện. Frontend đọc qua GET /api/registry.",
+  "asr": [
+    {
+      "id": "fw-large-v3-turbo",
+      "label": "Faster-Whisper large-v3-turbo",
+      "runtime": "inprocess",
+      "model_ref": "large-v3-turbo",
+      "vram_mb": 1600,
+      "langs": ["zh", "en"],
+      "capabilities": { "timestamps": true, "word_timestamps": true, "confidence": true, "emotion": false, "batch_infer": true },
+      "opts": { "batch_size": 8, "compute_type": "int8_float16" }
+    },
+    {
+      "id": "fw-medium",
+      "label": "Faster-Whisper medium",
+      "runtime": "inprocess",
+      "model_ref": "medium",
+      "vram_mb": 1500,
+      "langs": ["zh", "en"],
+      "capabilities": { "timestamps": true, "word_timestamps": true, "confidence": true, "emotion": false, "batch_infer": true },
+      "opts": { "batch_size": 8, "compute_type": "int8_float16" }
+    },
+    {
+      "id": "fw-small",
+      "label": "Faster-Whisper small",
+      "runtime": "inprocess",
+      "model_ref": "small",
+      "vram_mb": 500,
+      "langs": ["zh", "en"],
+      "capabilities": { "timestamps": true, "word_timestamps": true, "confidence": true, "emotion": false, "batch_infer": true },
+      "opts": { "batch_size": 8, "compute_type": "int8_float16" }
+    },
+    {
+      "id": "sensevoice-small",
+      "label": "SenseVoice-Small",
+      "runtime": "inprocess",
+      "model_ref": "iic/SenseVoiceSmall",
+      "vram_mb": 1000,
+      "langs": ["zh", "yue", "en", "ja", "ko"],
+      "capabilities": { "timestamps": true, "word_timestamps": false, "confidence": false, "emotion": true, "batch_infer": false },
+      "opts": { "use_itn": true }
+    }
+  ],
+  "mt": [
+    {
+      "id": "opus-mt",
+      "label": "OPUS-MT (Marian)",
+      "runtime": "inprocess",
+      "model_ref": "Helsinki-NLP/opus-mt-zh-vi",
+      "vram_mb": 0,
+      "langs": ["zh", "en"],
+      "capabilities": { "glossary_prompt": false, "glossary_patch": false, "chimera": false, "batch_json": false },
+      "opts": {}
+    },
+    {
+      "id": "qwen2.5-3b",
+      "label": "Qwen2.5-3B (Ollama)",
+      "runtime": "ollama",
+      "model_ref": "qwen2.5:3b-instruct-q4_K_M",
+      "vram_mb": 2500,
+      "langs": ["zh", "en"],
+      "capabilities": { "glossary_prompt": true, "glossary_patch": false, "chimera": false, "batch_json": true },
+      "opts": {}
+    },
+    {
+      "id": "qwen2.5-7b",
+      "label": "Qwen2.5-7B (Ollama)",
+      "runtime": "ollama",
+      "model_ref": "qwen2.5:7b-instruct-q4_K_M",
+      "vram_mb": 5200,
+      "langs": ["zh", "en"],
+      "capabilities": { "glossary_prompt": true, "glossary_patch": false, "chimera": false, "batch_json": true },
+      "opts": {}
+    },
+    {
+      "id": "hy-mt-1.5-7b",
+      "label": "HY-MT1.5-7B (Hunyuan-MT)",
+      "runtime": "ollama",
+      "model_ref": "hy-mt1.5-7b:q4_K_M",
+      "vram_mb": 5200,
+      "langs": ["zh", "en"],
+      "capabilities": { "glossary_prompt": false, "glossary_patch": true, "chimera": true, "batch_json": true },
+      "opts": {}
+    }
+  ]
+}
