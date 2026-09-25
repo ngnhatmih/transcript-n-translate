@@ -5,6 +5,7 @@ import json
 import pytest
 
 from app.adapters.registry_file import load_registry
+from app.domain import job_state as js
 from app.registry import by_id, estimate_vram_mb, of_kind
 
 
@@ -75,6 +76,43 @@ def test_shipped_registry_file_is_valid():
     ids = {s.id for s in specs}
     assert "fw-large-v3-turbo" in ids
     assert "sensevoice-small" in ids
-    assert all(s.phase_key.startswith(("asr:", "mt:")) for s in specs)
+    assert all(s.phase_key.startswith(("asr:", "translate:")) for s in specs)
     # Moonshine KHÔNG được có mặt: nó không sinh timestamp (spec §6)
     assert not any("moonshine" in s.id.lower() for s in specs)
+
+
+# Loại job THẬT của từng kind (plan §"JOB_TYPES"): job dịch tên là `translate`,
+# KHÔNG phải `mt`. Bảng này cố ý viết lại tại đây thay vì import từ app.registry,
+# để test bắt được cả trường hợp bảng ánh xạ trong code bị đổi sai.
+_JOB_TYPE_OF_KIND = {"asr": "asr", "mt": "translate"}
+
+
+def test_phase_key_matches_job_state_phase_of_for_every_shipped_engine():
+    """`phase_key` phải bằng đúng chuỗi mà `Job.phase` thực sự lưu.
+
+    Dựng `phase_key` từ `self.kind` là tự quy chiếu: `kind` của engine dịch là
+    `"mt"` còn job type là `"translate"`, nên 4 engine mt sẽ không bao giờ khớp
+    một phase đã lưu. `next_queued_for_phase` tra bằng EQUALITY nên lỗi này âm
+    thầm treo hàng đợi thay vì ném exception.
+    """
+    for spec in load_registry():
+        job_type = _JOB_TYPE_OF_KIND[spec.kind]
+        assert spec.phase_key == js.phase_of(job_type, spec.id), spec.id
+
+
+def test_shipped_registry_pins_every_engine_and_its_vram():
+    """Ghim đủ 8 engine + vram_mb: con số này điều khiển VRAM arbitration.
+
+    Sai một số, hoặc mất một entry, là lỗi thật mà các test khác không bắt được.
+    """
+    specs = load_registry()
+    assert {s.id: s.vram_mb for s in specs} == {
+        "fw-large-v3-turbo": 1600,
+        "fw-medium": 1500,
+        "fw-small": 500,
+        "sensevoice-small": 1000,
+        "opus-mt": 0,
+        "qwen2.5-3b": 2500,
+        "qwen2.5-7b": 5200,
+        "hy-mt-1.5-7b": 5200,
+    }
