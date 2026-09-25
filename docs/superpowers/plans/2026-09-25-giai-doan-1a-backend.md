@@ -1266,7 +1266,11 @@ git commit -m "feat(domain): chia lo dich theo ngan sach token"
 - Consumes: `app.domain.models.Segment`
 - Produces:
   - `reading_cps(text, start, end) -> float` · `is_too_fast(text, start, end, threshold=CPS_WARN) -> bool` · `CPS_WARN = 20.0`
-  - `check(source_text, translated_text, glossary_terms=(), *, length_ratio_max=3.0) -> list[str]` — trả về mã lỗi dạng chuỗi
+  - `check(source_text, translated_text, glossary_terms=(), *, length_ratio_max=5.0) -> list[str]` — trả về mã lỗi dạng chuỗi
+
+  **SỬA SAU KHI SHIP (R18, R22).** Bản đầu ghi `length_ratio_max=3.0` — **sai**: 3.0 gắn cờ `too_long` cho
+  **mọi** bản dịch Trung→Việt đúng (đo được: ca sạch 3,86; ca glossary 4,33). Code đã ship dùng **5.0**.
+  Và `glossary_terms` **phải là các bản dịch ĐÍCH**, không phải thuật ngữ nguồn — xem R22.
 
 - [ ] **Step 1: Viết test thất bại**
 
@@ -1324,7 +1328,7 @@ def test_missing_glossary_term_is_flagged():
 
 
 def test_glossary_term_present_is_clean():
-    assert check("大模型很重要", "Mô hình lớn rất quan trọng", glossary_terms=["大模型"]) == []
+    assert check("大模型很重要", "Mô hình lớn rất quan trọng", glossary_terms=["Mô hình lớn"]) == []
 
 
 def test_overlong_translation_is_flagged():
@@ -1379,12 +1383,18 @@ không đốt token. Xem spec §8.8.
 
 Tên riêng không có NER ở đây — dùng chính thuật ngữ glossary làm đại diện. Đó
 là thứ duy nhất người dùng đã nói rõ là quan trọng.
+
+    HỢP ĐỒNG NGÔN NGỮ (làm rõ sau khi ship, R22): `glossary_terms` phải chứa các
+    bản dịch ĐÍCH, không phải thuật ngữ nguồn. Hàm so chúng với `translated_text`,
+    nên truyền thuật ngữ nguồn (ví dụ "大模型") sẽ báo `missing_term` cho MỌI dòng
+    đúng, và đẩy mọi dòng có thuật ngữ lên QA tầng 2 — ồn và tốn, không sai phụ đề.
+là thứ duy nhất người dùng đã nói rõ là quan trọng.
 """
 from __future__ import annotations
 
 import re
 
-LENGTH_RATIO_MAX = 3.0
+LENGTH_RATIO_MAX = 5.0   # SỬA SAU KHI SHIP (R18): spec §8.8 ghi 3.0 và 3.0 SAI cho Trung→Việt
 _NUMBER_RE = re.compile(r"\d+(?:[.,]\d+)*")
 _GARBAGE_RE = re.compile(r"^[\W_]+$", re.UNICODE)
 
