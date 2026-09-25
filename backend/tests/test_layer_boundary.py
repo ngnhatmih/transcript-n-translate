@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import ast
 import pathlib
+import shutil
 
 import pytest
 
@@ -48,7 +49,7 @@ def _imports_of(path: pathlib.Path) -> list[tuple[str, int]]:
 def _domain_files() -> list[pathlib.Path]:
     if not DOMAIN.exists():
         return []
-    return sorted(p for p in DOMAIN.rglob("*.py") if p.name != "__init__.py")
+    return sorted(DOMAIN.rglob("*.py"))
 
 
 def test_domain_directory_exists():
@@ -107,3 +108,46 @@ def test_guard_catches_cross_layer_absolute_import():
             test_domain_has_no_forbidden_absolute_imports()
     finally:
         rogue.unlink()
+
+
+def test_guard_catches_forbidden_import_in_nested_package_init():
+    """`__init__.py` cũng nằm trong `domain/**` nên phải bị quét.
+
+    Dùng gói con tạm để không bao giờ đụng vào `app/domain/__init__.py` thật.
+    """
+    pkg = DOMAIN / "_guard_probe"
+    pkg.mkdir()
+    (pkg / "__init__.py").write_text(
+        "from app.adapters.persist import sqlite_repos\n", encoding="utf-8"
+    )
+    try:
+        with pytest.raises(AssertionError):
+            test_domain_has_no_forbidden_absolute_imports()
+    finally:
+        shutil.rmtree(pkg)
+
+
+def test_guard_flags_bare_import_app():
+    """`import app` là import cả tầng ứng dụng — phải bị chặn."""
+    rogue = DOMAIN / "_guard_probe_bare_app.py"
+    rogue.write_text("import app\n", encoding="utf-8")
+    try:
+        with pytest.raises(AssertionError):
+            test_domain_has_no_forbidden_absolute_imports()
+    finally:
+        rogue.unlink()
+
+
+def test_guard_allows_safe_app_modules():
+    """Chống bắt nhầm: `app.config`, `app.domain.*`, `app_helpers` đều hợp lệ."""
+    safe = DOMAIN / "_guard_probe_safe.py"
+    safe.write_text(
+        "from app.config import DB_PATH\n"
+        "from app.domain.models import Segment\n"
+        "import app_helpers\n",
+        encoding="utf-8",
+    )
+    try:
+        test_domain_has_no_forbidden_absolute_imports()
+    finally:
+        safe.unlink()
