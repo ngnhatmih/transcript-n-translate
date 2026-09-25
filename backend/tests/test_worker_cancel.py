@@ -6,7 +6,7 @@ from app.adapters.clock_system import SystemClock
 from app.adapters.persist.sqlite_repos import SqliteRepos
 from app.domain import job_state as js
 from app.worker import JobCancelled, PhaseQueueWorker
-from tests.fakes import FakeGovernor, a_job
+from tests.fakes import FakeGovernor, RecordingHandler, a_job
 
 
 class CheckpointingHandler:
@@ -103,3 +103,24 @@ def test_cancel_requested_flag_stays_but_state_is_terminal(repos):
     assert job.state == js.CANCELLED
     assert job.cancel_requested is True
     assert job.finished_at is not None
+
+
+def test_cancel_requested_during_run_is_honoured_at_job_boundary(repos):
+    """Huỷ giữa lúc handler đang chạy, ở handler KHÔNG gọi checkpoint.
+
+    Đây là điểm khác biệt cốt lõi giữa hai đường huỷ: ``RecordingHandler``
+    không bao giờ gọi ``checkpoint()`` nên nó không ném ``JobCancelled``; yêu
+    cầu huỷ chỉ được nhận ra ở ranh giới job trong ``_run_one``. Nếu khối kiểm
+    tra sau khi chạy xong bị xoá, test này đỏ vì job rơi vào ``DONE``.
+    """
+    jid = repos.add_job(a_job(None, job_type="asr", engine="e"))
+    handler = RecordingHandler(
+        job_type="asr", cancel_after=1, _repos=repos, _job_id_to_cancel=jid
+    )
+    worker = PhaseQueueWorker(repos, FakeGovernor(), {"asr": handler})
+    while worker.tick():
+        pass
+    job = repos.get_job(jid)
+    assert handler.ran == [jid]
+    assert job.cancel_requested is True
+    assert job.state == js.CANCELLED
