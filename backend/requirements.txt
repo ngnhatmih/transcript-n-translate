@@ -6,6 +6,11 @@ python-multipart==0.0.20
 # --- ASR ---
 # faster-whisper dùng CTranslate2, KHÔNG cần torch
 faster-whisper==1.1.1
+# R71: faster_whisper 1.1.1 làm `import requests` trong utils.py, còn
+# huggingface_hub 1.x đã BỎ phụ thuộc `requests`. Thiếu dòng này thì
+# `import faster_whisper` ném ModuleNotFoundError và cả đường ASR chết ở runtime
+# dù toàn bộ test đều xanh. Ghim TƯỜNG MINH, không phó mặc cho phụ thuộc bắc cầu.
+requests==2.32.3
 
 # --- SenseVoice (torch PHẢI cài riêng trước, xem scripts/install.ps1) ---
 funasr==1.2.6

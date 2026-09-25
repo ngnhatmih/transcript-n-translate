@@ -71,7 +71,7 @@ print('device:', torch.cuda.get_device_name(0))
 '@
 Assert-LastExit "kiểm tra CUDA"
 
-Write-Host "== 5/6 · setuptools/wheel, jieba RIÊNG, rồi phần còn lại ==" -ForegroundColor Cyan
+Write-Host "== 5/7 · setuptools/wheel, jieba RIÊNG, rồi phần còn lại ==" -ForegroundColor Cyan
 & $py -m pip install --no-cache-dir --upgrade setuptools wheel
 Assert-LastExit "cài setuptools + wheel"
 # R70: `jieba` chỉ có sdist, KHÔNG có wheel Windows, và pip TREO ~30 phút (đo
@@ -83,7 +83,25 @@ Assert-LastExit "cài jieba"
 & $py -m pip install --no-cache-dir -r requirements.txt
 Assert-LastExit "cài requirements.txt"
 
-Write-Host "== 6/6 · ollama + yt-dlp ==" -ForegroundColor Cyan
+Write-Host "== 6/7 · cổng import faster_whisper (R71) ==" -ForegroundColor Cyan
+# R71: `pip install` XANH không có nghĩa là `import` chạy được. faster_whisper
+# 1.1.1 làm `import requests` trong utils.py, còn huggingface_hub 1.x đã bỏ phụ
+# thuộc đó — nên thiếu `requests` thì cả đường ASR chết ở runtime trong khi mọi
+# test vẫn xanh. Cổng này biến lần hỏng đó thành một lần DỪNG CÀI ĐẶT, đúng chỗ
+# và đúng lúc. `requests==2.32.3` được ghim trong requirements.txt (không lặp
+# lại ở đây: mọi dòng pip đều phải có --no-cache-dir, xem test_install_script).
+& $py -X utf8 -c @'
+import sys
+try:
+    import requests, faster_whisper
+except Exception as exc:
+    sys.exit(f'THẤT BẠI: import nổ {type(exc).__name__}: {exc}')
+print('requests', requests.__version__)
+print('faster_whisper', faster_whisper.__version__, '| import OK')
+'@
+Assert-LastExit "import faster_whisper"
+
+Write-Host "== 7/7 · ollama + yt-dlp ==" -ForegroundColor Cyan
 if (Get-Command ollama -ErrorAction SilentlyContinue) {
     Write-Host "   ollama đã có sẵn"
 } else {

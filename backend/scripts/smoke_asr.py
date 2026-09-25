@@ -1,6 +1,10 @@
 """Smoke test với model THẬT. Chạy sau khi cài xong:
 
-    .venv\\Scripts\\python.exe scripts\\smoke_asr.py <duong-dan-audio> [zh|en]
+    .venv\\Scripts\\python.exe scripts\\smoke_asr.py <duong-dan-audio> [zh|en] [engine-id]
+
+`engine-id` mặc định là `fw-large-v3-turbo` (engine ASR mặc định của GĐ1a). Lần
+chạy THẬT đầu tiên nên truyền một engine nhỏ — `tiny` — để không phải tải 1,6 GB
+trước khi biết đường ống có thông hay không.
 
 Không thuộc bộ pytest vì nó tải model vài GB và cần GPU.
 
@@ -83,6 +87,9 @@ def main() -> int:
         return 2
     audio = pathlib.Path(sys.argv[1])
     lang = sys.argv[2] if len(sys.argv) > 2 else "zh"
+    # Cho phép chọn engine: lần chạy THẬT đầu tiên phải chạy được với model NHỎ
+    # NHẤT trước, nếu không thì "kiểm tra đường ống" bị trói vào một lần tải 1,6 GB.
+    engine_id = sys.argv[3] if len(sys.argv) > 3 else "fw-large-v3-turbo"
     if not audio.exists():
         print(f"không thấy tệp: {audio}")
         return 2
@@ -90,7 +97,7 @@ def main() -> int:
     from app.adapters.registry_file import load_registry
     from app.registry import by_id
 
-    spec = by_id(load_registry(), "fw-large-v3-turbo")
+    spec = by_id(load_registry(), engine_id)
     cache_root = prepare_model_cache_env()
     print(f"[1/3] nạp {spec.model_ref} ...")
     print(f"      cache model: {cache_root}  <-- ghi số này vào eval/report.md nếu nó KHÁC ổ D:")
