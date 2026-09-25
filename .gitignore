@@ -1,0 +1,28 @@
+# Python
+backend/.venv/
+__pycache__/
+*.pyc
+
+# Node / Next.js
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+
+# Dữ liệu chạy — không commit
+data/media/
+data/output/
+data/app.db
+*.db-journal
+
+# Model không bao giờ nằm trong repo (đặt ở D:\models)
+models/
+
+# Môi trường
+.env
+.env.local
+
+# Editor / OS
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini
