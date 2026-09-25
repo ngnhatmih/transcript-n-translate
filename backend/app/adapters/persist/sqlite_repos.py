@@ -8,7 +8,7 @@ from typing import Iterable, Iterator
 
 from app.domain import job_state as js
 from app.domain.models import (
-    Job, Segment, Source, Term, Transcript,
+    Job, Segment, Source, Term, Transcript, Translation,
     segments_from_json, segments_to_json,
 )
 from app.ports.clock import Clock
@@ -90,15 +90,24 @@ class SqliteRepos:
             )
             return int(cur.lastrowid)
 
+    def _row_to_source(self, row: sqlite3.Row) -> Source:
+        return Source(id=row["id"], kind=row["kind"], origin=row["origin"],
+                      media_path=row["media_path"], lang=row["lang"],
+                      audio_path=row["audio_path"], duration=row["duration"],
+                      created_at=row["created_at"])
+
     def get_source(self, source_id: int) -> Source:
         with self._connect() as conn:
             row = conn.execute("SELECT * FROM sources WHERE id=?", (source_id,)).fetchone()
         if row is None:
             raise NotFound(f"source {source_id} không tồn tại")
-        return Source(id=row["id"], kind=row["kind"], origin=row["origin"],
-                      media_path=row["media_path"], lang=row["lang"],
-                      audio_path=row["audio_path"], duration=row["duration"],
-                      created_at=row["created_at"])
+        return self._row_to_source(row)
+
+    def list_sources(self) -> list[Source]:
+        """Nguồn mới nhất trước — cùng thứ tự với `list_transcripts`."""
+        with self._connect() as conn:
+            rows = conn.execute("SELECT * FROM sources ORDER BY id DESC").fetchall()
+        return [self._row_to_source(r) for r in rows]
 
     def set_source_audio(self, source_id: int, audio_path: str, duration: float) -> None:
         with self._connect() as conn:
@@ -159,6 +168,30 @@ class SqliteRepos:
     def set_transcript_status(self, transcript_id: int, status: str) -> None:
         with self._connect() as conn:
             conn.execute("UPDATE transcripts SET status=? WHERE id=?", (status, transcript_id))
+
+    # ---------- translations ----------
+    def _row_to_translation(self, row: sqlite3.Row) -> Translation:
+        return Translation(
+            id=row["id"], transcript_id=row["transcript_id"],
+            transcript_version=row["transcript_version"], engine=row["engine"],
+            segments=segments_from_json(row["segments"]),
+            prompt_version=row["prompt_version"], target_lang=row["target_lang"],
+            glossary_version=row["glossary_version"],
+            qa_issues=json.loads(row["qa_issues"] or "[]"),
+            tokens_in=row["tokens_in"], tokens_out=row["tokens_out"],
+            duration_ms=row["duration_ms"], created_at=row["created_at"],
+        )
+
+    def list_translations(self) -> list[Translation]:
+        """Bản dịch mới nhất trước — đối xứng với `list_transcripts`/`list_sources`.
+
+        GĐ1a chưa có handler `translate` nên chưa có ai GHI bảng này; phương thức
+        đọc vẫn phải có trên cổng, nếu không thì route bản dịch (Task 18) lại
+        phải mở thẳng tệp SQLite đúng như `routes_sources.py` từng làm (R74).
+        """
+        with self._connect() as conn:
+            rows = conn.execute("SELECT * FROM translations ORDER BY id DESC").fetchall()
+        return [self._row_to_translation(r) for r in rows]
 
     # ---------- jobs ----------
     def add_job(self, job: Job) -> int:

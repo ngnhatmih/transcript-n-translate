@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sqlite3
 
 import pytest
@@ -8,7 +9,7 @@ from app.adapters.clock_system import FrozenClock, SystemClock
 from app.adapters.persist import sqlite_repos as sqlite_repos_mod
 from app.adapters.persist.sqlite_repos import SqliteRepos
 from app.domain import job_state as js
-from app.domain.models import Job, Segment
+from app.domain.models import Job, Segment, segments_to_json
 
 
 @pytest.fixture()
@@ -46,6 +47,69 @@ def repos_that_fails_on(tmp_path, monkeypatch, predicate):
     r = SqliteRepos(tmp_path / "boom.db", clock=SystemClock())
     r.init_schema()
     return r
+
+
+def test_repos_port_declares_sources_and_translations_listing():
+    """I2: cổng `Repos` phải đối xứng — `list_transcripts` đã có sẵn từ trước.
+
+    Thiếu hai phương thức này chính là lý do `routes_sources.py` từng phải mở
+    thẳng tệp SQLite (R74).
+    """
+    from app.ports.repos import Repos
+
+    assert "list_sources" in dir(Repos)
+    assert "list_translations" in dir(Repos)
+
+
+def test_list_sources_is_newest_first(repos):
+    first = repos.add_source(kind="file", origin="a.mp4", media_path="m/a.mp4",
+                             lang="zh", audio_path="m/a.wav", duration=12.5)
+    second = repos.add_source(kind="url", origin="https://x/v", media_path="m/b.mp4",
+                              lang="en")
+
+    got = repos.list_sources()
+    assert [s.id for s in got] == [second, first]
+    assert got[0].kind == "url" and got[0].lang == "en"
+    assert got[0].media_path == "m/b.mp4"
+    # Cùng phép ánh xạ hàng -> `Source` như `get_source`, không phải bản sao thứ hai.
+    assert got[1] == repos.get_source(first)
+
+
+def test_list_translations_is_empty_before_any_translation(repos):
+    assert repos.list_translations() == []
+
+
+def test_list_translations_maps_stored_rows(repos):
+    """Task 18 chưa có `add_translation`; hàng được ghi thẳng để khoá phần ĐỌC.
+
+    Cột `segments`/`qa_issues` là JSON trong schema nên phép ánh xạ hàng ->
+    `Translation` phải giải mã, không trả chuỗi thô.
+    """
+    sid = repos.add_source(kind="file", origin="a", media_path="m", lang="zh")
+    tid = repos.add_transcript(source_id=sid, engine="e", lang="zh",
+                               segments=[Segment(i=0, start=0.0, end=1.0, text="你好")])
+    with sqlite3.connect(repos.db_path) as conn:
+        conn.execute(
+            "INSERT INTO translations(transcript_id, transcript_version, engine,"
+            " target_lang, segments, prompt_version, glossary_version, qa_issues,"
+            " tokens_in, tokens_out, duration_ms, created_at)"
+            " VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+            (tid, 1, "qwen2.5-7b", "vi",
+             segments_to_json([Segment(i=0, start=0.0, end=1.0, text="Xin chào")]),
+             "v1", 3, json.dumps(["lệch thuật ngữ"], ensure_ascii=False),
+             10, 20, 30, "2026-01-01T00:00:00Z"),
+        )
+
+    got = repos.list_translations()
+    assert len(got) == 1
+    tr = got[0]
+    assert tr.transcript_id == tid and tr.transcript_version == 1
+    assert tr.engine == "qwen2.5-7b" and tr.target_lang == "vi"
+    assert tr.segments[0].text == "Xin chào"
+    assert tr.prompt_version == "v1" and tr.glossary_version == 3
+    assert tr.qa_issues == ["lệch thuật ngữ"]
+    assert (tr.tokens_in, tr.tokens_out, tr.duration_ms) == (10, 20, 30)
+    assert tr.created_at == "2026-01-01T00:00:00Z"
 
 
 def test_source_and_transcript_roundtrip(repos):

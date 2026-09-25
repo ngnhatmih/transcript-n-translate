@@ -12,6 +12,7 @@ import pathlib
 from typing import Callable
 
 from app.domain.models import Job
+from app.domain.paths import safe_basename
 from app.domain.subtitle_format import to_ass, to_srt, to_vtt
 from app.ports.repos import Repos
 
@@ -58,7 +59,11 @@ class ExportHandler:
                                bilingual=bilingual)
 
         self._out_dir.mkdir(parents=True, exist_ok=True)
-        stem = payload.get("stem") or f"transcript-{transcript_id}"
+        # `stem` cũng là dữ liệu BÊN NGOÀI (payload job), nên `../` trong đó ghi
+        # được ra ngoài `out_dir` (R76). Cùng một phép cắt với route upload.
+        raw_stem = payload.get("stem")
+        stem = safe_basename(str(raw_stem) if raw_stem else None,
+                             fallback=f"transcript-{transcript_id}")
         suffix = ".vi" if translations is not None else ""
         target = self._out_dir / f"{stem}{suffix}.{fmt}"
         _write_utf8(target, content)

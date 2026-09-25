@@ -18,16 +18,26 @@ class SingleGpuGovernor:
         self._loaded: dict[str, Callable[[], None]] = {}
 
     def register(self, phase: str, releaser: Callable[[], None]) -> None:
+        """Đăng ký releaser cho một giai đoạn, và giữ nó VĨNH VIỄN.
+
+        `before_phase`/`after_phase` KHÔNG được pop đăng ký. Worker gọi
+        `after_phase` ở MỖI lần cạn giai đoạn, nên bản pop-sau-lần-đầu chỉ đổ
+        model đúng MỘT lần trong cả vòng đời tiến trình: từ lần thoát giai đoạn
+        thứ hai trở đi không còn releaser nào để gọi và model nằm lại trong
+        VRAM (`releases` đứng ở 1 dù engine vẫn nạp).
+
+        Gọi lặp lại là an toàn vì releaser BẮT BUỘC idempotent — `release()` là
+        no-op khi không có model nào đang nạp — nên không thể double-free.
+        """
         self._loaded[phase] = releaser
 
     def before_phase(self, phase: str) -> None:
         for other, releaser in list(self._loaded.items()):
             if other != phase:
                 releaser()
-                self._loaded.pop(other, None)
 
     def after_phase(self, phase: str) -> None:
-        releaser = self._loaded.pop(phase, None)
+        releaser = self._loaded.get(phase)
         if releaser is not None:
             releaser()
 

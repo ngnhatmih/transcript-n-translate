@@ -219,7 +219,15 @@ def test_single_gpu_governor_never_allows_parallel_in_phase_1a(tmp_path):
 
 
 def test_single_gpu_governor_releases_registered_phase(tmp_path):
-    """`after_phase` giải phóng đúng model đã đăng ký, và chỉ gọi một lần."""
+    """`after_phase` gọi releaser của giai đoạn đã đăng ký, và KHÔNG rút đăng ký.
+
+    Gọi hai lần thì releaser được gọi hai lần; an toàn vì releaser BẮT BUỘC
+    idempotent (`release()` là no-op khi không có model nào đang nạp) — chính
+    tính idempotent đó là thứ khiến gọi lặp không thể double-free. Vì vậy ĐỪNG
+    khôi phục kiểu "pop sau lần gọi đầu": worker gọi `after_phase` ở MỖI lần
+    cạn giai đoạn, pop đi thì từ lần thoát thứ hai model không bao giờ được đổ
+    nữa và VRAM rò rỉ (xem test hai lô liên tiếp bên dưới).
+    """
     repos = SqliteRepos(tmp_path / "t.db", clock=SystemClock())
     repos.init_schema()
     gov = SingleGpuGovernor(repos)
@@ -227,11 +235,18 @@ def test_single_gpu_governor_releases_registered_phase(tmp_path):
     gov.register("asr:fw-large-v3-turbo", lambda: released.append("fw"))
     gov.after_phase("asr:fw-large-v3-turbo")
     gov.after_phase("asr:fw-large-v3-turbo")
-    assert released == ["fw"], "lần gọi thứ hai không được giải phóng lại"
+    assert released == ["fw", "fw"], (
+        "releaser phải được gọi ở MỖI lần after_phase; an toàn nhờ idempotent"
+    )
 
 
 def test_single_gpu_governor_releases_other_phases_before_entering(tmp_path):
-    """Vào giai đoạn mới phải đổ model của giai đoạn KHÁC, giữ model trùng khoá."""
+    """Vào giai đoạn mới phải đổ model của giai đoạn KHÁC, giữ model trùng khoá.
+
+    Registry là VĨNH VIỄN (không pop), nên lần vào thứ hai vẫn gọi releaser của
+    giai đoạn khác. An toàn vì releaser bắt buộc idempotent — xem test trên;
+    đừng khôi phục consume-once.
+    """
     repos = SqliteRepos(tmp_path / "t.db", clock=SystemClock())
     repos.init_schema()
     gov = SingleGpuGovernor(repos)
@@ -241,7 +256,56 @@ def test_single_gpu_governor_releases_other_phases_before_entering(tmp_path):
     gov.before_phase("translate:qwen2.5-7b")
     assert released == ["fw"], "chỉ model của giai đoạn khác bị đổ"
     gov.before_phase("translate:qwen2.5-7b")
-    assert released == ["fw"], "đã đổ rồi thì không đổ lại"
+    assert released == ["fw", "fw"], (
+        "registry vĩnh viễn: mỗi lần vào giai đoạn đều đổ lại model giai đoạn khác"
+    )
+
+
+class _ModelHandler:
+    """Handler ASR giả có 'model' đúng nghĩa đang nạp hay không.
+
+    `release()` idempotent y như hợp đồng của releaser thật: gọi khi không có gì
+    nạp là no-op, nên `releases` đếm đúng số lần model THẬT SỰ bị đổ.
+    """
+
+    def __init__(self) -> None:
+        self.loaded = False
+        self.releases = 0
+
+    def handles(self) -> str:
+        return "asr"
+
+    def run(self, job, report) -> None:
+        self.loaded = True          # chạy job = model được nạp
+
+    def release(self) -> None:
+        if not self.loaded:
+            return
+        self.loaded = False
+        self.releases += 1
+
+
+def test_two_consecutive_batches_release_the_model_once_each(repos):
+    """HAI lô liên tiếp -> model phải được đổ HAI lần, không phải một.
+
+    Đây là kịch bản rò rỉ VRAM: worker gọi `after_phase` ở mỗi lần cạn giai
+    đoạn, nên bản governor pop-sau-lần-đầu chỉ đổ model ở lô ĐẦU; lô thứ hai
+    thoát giai đoạn trong khi `_loaded` đã rỗng, releaser không bao giờ được
+    gọi nữa và engine vẫn nằm trong VRAM (`releases == 1` cả hai lô).
+    """
+    gov = SingleGpuGovernor(repos)
+    handler = _ModelHandler()
+    gov.register("asr:fw-large-v3-turbo", handler.release)
+    worker = _worker(repos, gov, handler)
+
+    for batch in (1, 2):
+        repos.add_job(a_job(None, job_type="asr", engine="fw-large-v3-turbo"))
+        while worker.tick():
+            pass
+        assert handler.releases == batch, (
+            f"lô {batch}: model phải được đổ {batch} lần, thấy {handler.releases}"
+        )
+        assert handler.loaded is False, f"lô {batch}: model còn nằm trong VRAM"
 
 
 # Bảng ánh xạ kind -> loại JOB, cố ý viết lại TẠI ĐÂY thay vì import từ

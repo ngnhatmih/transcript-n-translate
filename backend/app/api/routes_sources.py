@@ -7,7 +7,6 @@ không giữ request HTTP mở suốt thời gian bóc âm thanh.
 from __future__ import annotations
 
 import pathlib
-import sqlite3
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel, field_validator
@@ -15,6 +14,7 @@ from pydantic import BaseModel, field_validator
 from app.api.deps import get_dirs, get_repos
 from app.domain import job_state as js
 from app.domain.models import Job, Source
+from app.domain.paths import InvalidBasename, safe_basename
 from app.pipeline import ingest
 
 router = APIRouter(prefix="/api/sources", tags=["sources"])
@@ -75,37 +75,15 @@ def _safe_name(name: str | None, fallback: str = "upload.bin") -> str:
     """Tên tệp do client gửi -> tên trần, không có thành phần đường dẫn.
 
     Không có bước này thì `../` trong `filename` ghi được ra ngoài `media_dir`.
+
+    Tên KHÔNG phải tên tệp (`""`, `"."`, `".."`) là lỗi ĐẦU VÀO, không phải lỗi
+    máy chủ: `pathlib.Path("..").name` vẫn là `".."`, nên `media_dir / ".."` là
+    thư mục CHA và `open(target, "wb")` nổ 500.
     """
-    return pathlib.Path(name or fallback).name or fallback
-
-
-def _list_sources(repos) -> list[Source]:
-    """Nguồn mới nhất trước.
-
-    Brief yêu cầu thêm `list_sources()` vào `app/ports/repos.py` và
-    `SqliteRepos`, nhưng cả hai tệp đó nằm trong danh sách ĐÓNG BĂNG của task
-    này. Nên thứ tự mới-nhất-trước được lấy thẳng từ khoá chính của bảng, đúng
-    một câu SELECT như phương thức được đề xuất.
-    """
-    return [repos.get_source(r["id"]) for r in _source_id_rows(repos)]
-
-
-def _source_id_rows(repos) -> list[dict]:
-    reader = getattr(repos, "list_sources", None)
-    if callable(reader):
-        return [{"id": s.id} for s in reader()]
-
-    db_path = getattr(repos, "db_path", None)
-    if not db_path:
-        raise HTTPException(
-            500,
-            f"{type(repos).__name__} không có `list_sources()` lẫn `db_path`; "
-            "route không đọc được danh sách nguồn",
-        )
-    with sqlite3.connect(str(db_path)) as conn:
-        conn.row_factory = sqlite3.Row
-        rows = conn.execute("SELECT id FROM sources ORDER BY id DESC").fetchall()
-    return [{"id": r["id"]} for r in rows]
+    try:
+        return safe_basename(name, fallback)
+    except InvalidBasename as exc:
+        raise HTTPException(422, str(exc)) from exc
 
 
 @router.post("/upload", status_code=201)
@@ -156,7 +134,9 @@ def add_url(payload: UrlIn, repos=Depends(get_repos), dirs=Depends(get_dirs)):
 
 @router.get("")
 def list_sources(repos=Depends(get_repos)):
-    return [_source_json(s) for s in _list_sources(repos)]
+    # Đi qua CỔNG: thứ tự mới-nhất-trước là việc của `SqliteRepos.list_sources()`
+    # (R74 — route từng mở thẳng tệp SQLite vì cổng còn thiếu phương thức này).
+    return [_source_json(s) for s in repos.list_sources()]
 
 
 @router.get("/{source_id}")

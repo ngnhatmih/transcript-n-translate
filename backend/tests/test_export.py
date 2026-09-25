@@ -343,3 +343,32 @@ def test_default_stem_is_transcript_id(repos, tmp_path, transcript_id):
         _job(transcript_id=transcript_id, format="srt"), lambda *_: None
     )
     assert (tmp_path / "out" / f"transcript-{transcript_id}.srt").is_file()
+
+
+def test_export_stem_cannot_escape_the_output_directory(repos, tmp_path, transcript_id):
+    """R76: `stem` do payload job gửi tới phải được cắt thành TÊN TRẦN.
+
+    `out_dir` ở đây là `tmp_path/out`, nên `out_dir / f"../thoat-ra-ngoai.{fmt}"`
+    ghi thẳng ra `tmp_path` — ngoài thư mục xuất, và tệp `.json` đi theo. Không
+    cắt thì hai khẳng định dưới đỏ.
+    """
+    _handler(repos, tmp_path).run(
+        _job(transcript_id=transcript_id, format="srt", stem="../thoat-ra-ngoai"),
+        lambda *_: None,
+    )
+
+    assert (tmp_path / "out" / "thoat-ra-ngoai.srt").is_file(), (
+        sorted(p.name for p in (tmp_path / "out").iterdir())
+    )
+    assert (tmp_path / "out" / "thoat-ra-ngoai.srt.json").is_file()
+    assert not (tmp_path / "thoat-ra-ngoai.srt").exists(), "thoát ra ngoài thư mục xuất"
+    assert not (tmp_path / "thoat-ra-ngoai.srt.json").exists()
+
+
+def test_export_rejects_a_stem_that_is_only_dotdot(repos, tmp_path, transcript_id):
+    """`..` không phải tên tệp: phải hỏng ồn ào, không ghi ra thư mục cha."""
+    with pytest.raises(ValueError, match="tên tệp"):
+        _handler(repos, tmp_path).run(
+            _job(transcript_id=transcript_id, format="srt", stem=".."),
+            lambda *_: None,
+        )

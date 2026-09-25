@@ -3,7 +3,8 @@ from __future__ import annotations
 
 from typing import Protocol
 
-from app.domain.models import (CallStats, Job, Segment, Source, Term, Transcript)
+from app.domain.models import (CallStats, Job, Segment, Source, Term, Transcript,
+                               Translation)
 
 
 class Repos(Protocol):
@@ -12,6 +13,7 @@ class Repos(Protocol):
                    lang: str | None = None, audio_path: str | None = None,
                    duration: float | None = None) -> int: ...
     def get_source(self, source_id: int) -> Source: ...
+    def list_sources(self) -> list[Source]: ...
     def set_source_audio(self, source_id: int, audio_path: str, duration: float) -> None: ...
 
     # transcripts
@@ -22,6 +24,9 @@ class Repos(Protocol):
     def update_transcript_segments(self, transcript_id: int,
                                    segments: list[Segment]) -> int: ...
     def set_transcript_status(self, transcript_id: int, status: str) -> None: ...
+
+    # translations
+    def list_translations(self) -> list[Translation]: ...
 
     # jobs
     def add_job(self, job: Job) -> int: ...

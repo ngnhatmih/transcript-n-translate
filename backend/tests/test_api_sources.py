@@ -22,7 +22,7 @@ from app.adapters.clock_system import SystemClock
 from app.adapters.persist.sqlite_repos import SqliteRepos
 from app.api.app import create_app
 from app.domain import job_state as js
-from app.domain.models import Job
+from app.domain.models import Job, Source
 from app.registry import EngineSpec
 
 
@@ -147,6 +147,51 @@ def test_upload_copies_every_byte_and_ignores_path_components(client):
     assert not (client.tmp / "thoat-ra-ngoai.mp4").exists()
 
 
+def test_safe_name_strips_every_path_component():
+    """I3: khoá TRỰC TIẾP phép cắt đường dẫn, không đi qua route.
+
+    Test tích hợp ở trên (`test_upload_copies_every_byte_and_ignores_path_components`)
+    KHÔNG bắt được việc bỏ `.name`: tệp thoát ra ngoài chỉ trong tích tắc rồi bị
+    `target.replace(final)` kéo về trong `media_dir`, nên mọi khẳng định chạy sau
+    request đều xanh (mutation M2 của vòng review: 32/32 vẫn xanh khi bỏ `.name`).
+    Ở đây phép khẳng định nằm ngay trên hàm thuần nên bỏ `.name` là đỏ ngay.
+    """
+    from app.api.routes_sources import _safe_name
+
+    assert _safe_name("../x.mp4") == "x.mp4"
+    assert _safe_name("..\\..\\x.mp4") == "x.mp4"
+    assert _safe_name("C:\\media\\x.mp4") == "x.mp4"
+    assert _safe_name("a/b/x.mp4") == "x.mp4"
+    assert _safe_name("x.mp4") == "x.mp4"
+
+
+def test_safe_name_rejects_names_that_are_not_files():
+    """M4: `pathlib.Path("..").name == ".."` nên `..` LỌT qua `.name`, và
+    `media_dir / ".."` là thư mục CHA -> `open()` nổ 500. Client gửi rác thì
+    phải nhận 4xx, không phải lỗi máy chủ."""
+    from fastapi import HTTPException
+
+    from app.api.routes_sources import _safe_name
+
+    for bad in ("", ".", "..", "x/..", "..\\.."):
+        with pytest.raises(HTTPException) as excinfo:
+            _safe_name(bad)
+        assert excinfo.value.status_code == 422, bad
+        assert "tên tệp" in str(excinfo.value.detail), bad
+
+
+@pytest.mark.parametrize("bad", ["..", "x/..", "..\\..", "."])
+def test_upload_answers_422_for_a_filename_that_is_not_a_file(client, bad):
+    """M4 qua đường thật: upload với tên `..` phải là 422 (đã xác nhận 500)."""
+    resp = client.post(
+        "/api/sources/upload",
+        files={"file": (bad, io.BytesIO(b"x"), "video/mp4")},
+        data={"lang": "zh"},
+    )
+    assert resp.status_code == 422, resp.text
+    assert "tên tệp" in resp.text
+
+
 def test_missing_lang_form_field_falls_back_to_zh(client):
     """`lang` là trường form tuỳ chọn; thiếu thì mặc định 'zh', không phải 422."""
     resp = client.post("/api/sources/upload",
@@ -212,6 +257,31 @@ def test_list_sources_returns_newest_first(client):
 
 def test_list_sources_is_empty_before_any_upload(client):
     assert client.get("/api/sources").json() == []
+
+
+def test_list_sources_goes_through_the_port_not_the_database_file(tmp_path):
+    """I2/R74: route chỉ nói chuyện qua `Repos`, không mở thẳng tệp SQLite.
+
+    Repos giả ở đây CHỈ có `list_sources()` — cố ý không có `db_path` lẫn
+    `_connect`, đúng như một hiện thực khác của cổng. Bản cũ
+    (`getattr(repos, "db_path")` rồi `sqlite3.connect`) trả 500 cho stub này;
+    đi qua cổng thì trả đúng dữ liệu.
+    """
+    class _PortOnlyRepos:
+        def list_sources(self):
+            return [Source(id=7, kind="file", origin="a.mp4", media_path="m/a.mp4",
+                           lang="zh", audio_path=None, duration=None, created_at="")]
+
+    app = create_app(repos=_PortOnlyRepos(), specs=[], media_dir=tmp_path / "media",
+                     out_dir=tmp_path / "out")
+    with TestClient(app) as c:
+        resp = c.get("/api/sources")
+
+    assert resp.status_code == 200, resp.text
+    assert resp.json() == [{
+        "id": 7, "kind": "file", "origin": "a.mp4", "media_path": "m/a.mp4",
+        "audio_path": None, "duration": None, "lang": "zh", "created_at": "",
+    }]
 
 
 def test_get_source_by_id_and_404_for_unknown(client):
@@ -608,6 +678,51 @@ def test_api_layer_does_not_import_adapters():
             offenders += [f"{py.name}: {n}" for n in names
                           if n.startswith("app.adapters")]
     assert not offenders, "app/api không được kéo adapter vào:\n  " + "\n  ".join(offenders)
+
+
+# Từ khoá cho thấy `app/api` tự chạm vào TỆP SQLite thay vì đi qua `Repos`.
+_PERSISTENCE_REACH = ("db_path", "_connect(", "import sqlite3")
+
+
+def _persistence_reach(directory: pathlib.Path) -> list[str]:
+    """Tên tệp + từ khoá vi phạm ranh giới cổng, quét cả gói con."""
+    offenders: list[str] = []
+    for py in sorted(directory.rglob("*.py")):
+        text = py.read_text(encoding="utf-8")
+        offenders += [f"{py.name}: {needle}" for needle in _PERSISTENCE_REACH
+                      if needle in text]
+    return offenders
+
+
+def test_api_layer_never_reaches_for_the_persistence_file():
+    """R74: `app/api` đi qua `Repos`; mở tệp DB là việc của adapter.
+
+    Đây là mắt lưới còn thiếu: `test_api_layer_does_not_import_adapters` chỉ bắt
+    tên module bắt đầu bằng `app.adapters`, nên một `import sqlite3` trần và một
+    `getattr(repos, "db_path")` lọt qua sạch sẽ (đúng thứ R74 mô tả).
+    `backend/app/main.py` là composition root — chỗ DUY NHẤT được biết
+    `SqliteRepos` — nên nó nằm ngoài thư mục bị quét ở đây.
+    """
+    api_dir = pathlib.Path(__file__).resolve().parents[1] / "app" / "api"
+    offenders = _persistence_reach(api_dir)
+    assert not offenders, (
+        "app/api không được tự mở tệp SQLite (dùng phương thức trên `Repos`):\n  "
+        + "\n  ".join(offenders)
+    )
+
+
+def test_persistence_guard_catches_a_rogue_api_file(tmp_path):
+    """Lưới phải bắt được thật, không phải vòng lặp rỗng."""
+    (tmp_path / "rogue.py").write_text(
+        "import sqlite3\n"
+        "conn = repos._connect()\n"
+        "path = repos.db_path\n",
+        encoding="utf-8",
+    )
+    offenders = _persistence_reach(tmp_path)
+    assert sorted(o.split(": ", 1)[1] for o in offenders) == sorted(_PERSISTENCE_REACH), (
+        offenders
+    )
 
 
 def test_main_module_is_importable_without_starting_a_server():
