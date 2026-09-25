@@ -4,17 +4,18 @@ import asyncio
 import contextlib
 import json
 import time
+from unittest import mock
 
 import anyio
 import httpx
 import pytest
 from fastapi.testclient import TestClient
-from fastapi.responses import StreamingResponse
 from starlette.requests import Request
 from starlette.routing import Match
 
 from app.adapters.clock_system import SystemClock
 from app.adapters.persist.sqlite_repos import SqliteRepos
+from app.api import routes_jobs
 from app.api.app import create_app
 from app.api.sse import JobEventBroker, stream_events
 from app.domain import job_state as js
@@ -279,6 +280,57 @@ def test_two_events_for_one_job_in_the_snapshot_window_never_strand_the_client(e
     )
 
 
+def test_an_event_equal_to_the_snapshot_after_a_newer_one_is_still_delivered(env):
+    """PROBE-B của review round 2: dấu khử trùng phải bị XOÁ sau khi gửi bản KHÁC.
+
+    Ảnh chụp gửi sự thật `done`. Sau khi phần thu đã chạy qua (hàng đợi rỗng,
+    chứng minh bằng một nhịp tim), worker publish `running(0.5)` — bản này ĐƯỢC
+    gửi vì khác ảnh chụp — rồi publish lại ĐÚNG nội dung `done` của ảnh chụp.
+    Giữ dấu khử trùng cũ thì sự kiện cuối bị bỏ: lời cuối client nghe là
+    `running` trong khi sự thật là `done`, và không còn sự kiện nào sửa lại.
+
+    Đường này tới được từ đường THẬT: `to_event()` không có mốc thời gian, còn
+    `retry_job` xoá `error`/`progress` nhưng KHÔNG xoá `log_tail`, nên một job
+    chạy lại sinh đúng chuỗi log cũ sẽ kết ở sự kiện byte-Equal ảnh chụp.
+    """
+    jid = env.repos.add_job(a_job(None, job_type="asr", engine="fw-large-v3-turbo"))
+    env.repos.set_job_state(jid, js.RUNNING)
+    env.repos.set_job_state(jid, js.DONE)
+    done = env.repos.get_job(jid).to_event()
+    older = {"id": jid, "state": js.RUNNING, "progress": 0.5, "phase": None,
+             "error": None, "log_tail": ""}
+
+    async def drive():
+        it = _stream_response(env.app, heartbeat=0.05).body_iterator
+        seen: list[str] = []
+        try:
+            assert await asyncio.wait_for(anext(it), 5) == ": connected\n\n"
+            snap = json.loads((await asyncio.wait_for(anext(it), 5))[len("data: "):])
+            assert snap == done, f"ảnh chụp phải là sự thật trong DB: {snap}"
+            # Nhịp tim chứng minh phần THU đã chạy xong và hàng đợi rỗng: sự
+            # kiện publish từ đây đi vào vòng lặp chính, không vào phần thu.
+            assert await asyncio.wait_for(anext(it), 5) == ": heartbeat\n\n"
+            env.broker.publish(dict(older))
+            body = json.loads((await asyncio.wait_for(anext(it), 5))[len("data: "):])
+            assert body == older, f"bản khác ảnh chụp phải tới client: {body}"
+            seen.append(body["state"])
+            env.broker.publish(dict(done))
+            final = await asyncio.wait_for(anext(it), 5)
+            assert not final.startswith(":"), (
+                f"sự kiện cuối trùng nội dung ảnh chụp bị BỎ: client đứng ở "
+                f"{seen[-1]!r} trong khi sự thật là {js.DONE}"
+            )
+            seen.append(json.loads(final[len("data: "):])["state"])
+        finally:
+            await it.aclose()
+        return seen
+
+    seen = asyncio.run(drive())
+    assert seen[-1] == js.DONE, (
+        f"lời cuối client nghe phải là sự thật ({js.DONE}), không phải bản cũ: {seen}"
+    )
+
+
 def test_broker_drops_oldest_when_subscriber_is_slow():
     """Một subscriber chậm không được làm phình bộ nhớ server."""
     async def drive():
@@ -332,23 +384,29 @@ def test_the_stream_route_is_declared_before_the_job_id_route(env):
 
 
 def _stream_response(app, **kwargs):
-    """`StreamingResponse` y như route `/api/jobs/stream` dựng, nhưng chỉnh được `heartbeat`.
+    """`StreamingResponse` của route THẬT `/api/jobs/stream`, chỉ chỉnh được `heartbeat`.
+
+    Gọi thẳng `stream_events(...)` ở đây là bỏ qua THÂN route (`request.app` ->
+    broker + repos của app, ảnh chụp `repos.list_jobs()`) — đúng chỗ hổng để
+    C1/I5 lọt qua: đổi route sang `broker = JobEventBroker()` mới toanh mà suite
+    vẫn xanh. Nên ở đây gọi ĐÚNG `route.endpoint(request)`; chỉ bọc lại
+    `stream_events` để route nhận `heartbeat` ngắn (route không đọc được tham số
+    đó từ `Request`).
 
     Không dùng `TestClient.stream()`: nó chờ app kết thúc, mà generator SSE thì
-    không bao giờ kết thúc -> test TREO. Ở đây vẫn là route THẬT (`request.app`
-    -> broker + repos của app, `repos.list_jobs()` làm ảnh chụp), chỉ khác đối
-    số `stream_events` mà route không thể nhận qua `Request`.
+    không bao giờ kết thúc -> test TREO chứ không đỏ.
     """
     request = Request({"type": "http", "app": app, "method": "GET",
                        "path": "/api/jobs/stream", "headers": []})
-    broker = request.app.state.broker
-    repos = request.app.state.repos
+    endpoint = next(r.endpoint for r in app.routes
+                    if getattr(r, "path", None) == "/api/jobs/stream")
     options = {"heartbeat": 15.0, **kwargs}
-    return StreamingResponse(
-        stream_events(broker, snapshot=lambda: [j.to_event() for j in repos.list_jobs()],
-                      **options),
-        media_type="text/event-stream",
-    )
+
+    def with_heartbeat(broker, **kw):
+        return stream_events(broker, **{**options, **kw})
+
+    with mock.patch.object(routes_jobs, "stream_events", with_heartbeat):
+        return endpoint(request)
 
 
 def test_the_stream_route_reads_the_broker_injected_into_the_app(env):

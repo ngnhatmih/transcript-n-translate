@@ -13,6 +13,12 @@ cùng một chuyển có thể vừa nằm trong ảnh chụp vừa nằm trong 
 khử trùng theo NỘI DUNG: một sự kiện trùng với ảnh chụp bị bỏ qua — và chỉ bỏ
 qua một lần, nên không có chuyển nào vừa bị mất vừa bị gửi hai lần.
 
+Khử trùng chỉ đối chiếu với NỘI DUNG ẢNH CHỤP, không đối chiếu các sự kiện với
+nhau: vừa gửi một sự kiện KHÁC ảnh chụp thì dấu đó bị xoá. Giữ nó lại thì một
+sự kiện tới sau, tình cờ trùng nội dung ảnh chụp, bị bỏ và client đứng ở bản
+CŨ (`to_event()` không có mốc thời gian, `retry_job` không xoá `log_tail`, nên
+một job chạy lại sinh đúng chuỗi log cũ sẽ kết ở sự kiện trùng khít).
+
 Khi cửa sổ đó chứa NHIỀU chuyển của CÙNG một job, hàng đợi phải được thu về
 bản MỚI NHẤT mỗi job trước khi gửi: khử trùng một-một sẽ bỏ bản mới (trùng ảnh
 chụp) rồi phát lại bản CŨ ngay sau ảnh chụp, và client đứng ở trạng thái cũ —
@@ -145,11 +151,16 @@ async def stream_events(broker: JobEventBroker, *, heartbeat: float = 15.0,
             for event in events:
                 yield format_sse(event)
                 pending[event.get("id")] = event
-            # Sự kiện publish trong cửa sổ "subscribe -> ảnh chụp" nằm sẵn trong
-            # hàng đợi dưới dạng callback `call_soon_threadsafe` chưa chạy. Nhường
-            # loop một nhịp để chúng vào hàng đợi TRƯỚC khi lọc: bỏ qua bước này
-            # thì bản CŨ có thể tới sau ảnh chụp.
-            await asyncio.sleep(0)
+            # KHÔNG cần nhường loop ở đây. Sự kiện publish trong cửa sổ
+            # "subscribe -> ảnh chụp" đi qua `call_soon_threadsafe` của CHÍNH
+            # loop này, và callback đánh thức ảnh chụp (từ luồng executor) cũng
+            # vậy nhưng được xếp SAU chúng; `_run_once` chạy hết lô ready hiện
+            # có TRƯỚC khi bước tiếp của task này chạy, nên tới đây chúng đã nằm
+            # trong hàng đợi. `await asyncio.sleep(0)` chỉ nhường ĐÚNG một vòng
+            # nên nó không phải hàng rào: nếu đường publish thêm một hop
+            # (task/queue/`call_later`), một vòng không đủ và phải chờ bằng tay
+            # (handshake) chứ không phải thêm vài lần `sleep(0)` — nó không phải
+            # điều kiện đúng, và không test nào phân biệt được có nó hay không.
             newest: dict[Any, dict[str, Any]] = {}
             while not sub.queue.empty():
                 # Chỉ những gì ĐÃ có sẵn; vòng lặp chính vẫn chờ bình thường.
@@ -171,6 +182,12 @@ async def stream_events(broker: JobEventBroker, *, heartbeat: float = 15.0,
                 # Ảnh chụp đã gửi đúng chuyển này rồi: bỏ bản trong hàng đợi.
                 del pending[event.get("id")]
                 continue
+            # Xoá dấu NGAY khi gửi một sự kiện khác ảnh chụp: từ đây lời cuối
+            # client nghe không còn là nội dung ảnh chụp nữa, nên giữ dấu lại
+            # thì một sự kiện tới sau mà trùng nội dung ảnh chụp sẽ bị bỏ và
+            # client đứng ở bản cũ (PROBE-B của review round 2) — cùng lớp lỗi
+            # mà phần thu ở trên đã chặn.
+            pending.pop(event.get("id"), None)
             yield format_sse(event)
     finally:
         broker.unsubscribe(sub)
