@@ -1,0 +1,167 @@
+"""Route nguồn vào: tải tệp lên, dán link, liệt kê, xem chi tiết.
+
+Route KHÔNG tự chạy pipeline. Nó lưu media + một hàng `sources`, rồi xếp một job
+`ingest`; worker (một luồng riêng) mới thật sự chạm ffmpeg. Nhờ vậy một tệp 2 GB
+không giữ request HTTP mở suốt thời gian bóc âm thanh.
+"""
+from __future__ import annotations
+
+import pathlib
+import sqlite3
+
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from pydantic import BaseModel, field_validator
+
+from app.api.deps import get_dirs, get_repos
+from app.domain import job_state as js
+from app.domain.models import Job, Source
+from app.pipeline import ingest
+
+router = APIRouter(prefix="/api/sources", tags=["sources"])
+
+ALLOWED_LANGS = {"zh", "en"}
+DEFAULT_LANG = "zh"
+_CHUNK = 1024 * 1024
+
+
+class UrlIn(BaseModel):
+    url: str
+    lang: str = DEFAULT_LANG
+
+    @field_validator("url")
+    @classmethod
+    def _http_only(cls, v: str) -> str:
+        if not (v.startswith("http://") or v.startswith("https://")):
+            raise ValueError("chỉ nhận http/https")
+        return v
+
+    @field_validator("lang")
+    @classmethod
+    def _known_lang(cls, v: str) -> str:
+        if v not in ALLOWED_LANGS:
+            raise ValueError(f"ngôn ngữ không hỗ trợ: {v!r}")
+        return v
+
+
+def _source_json(source: Source) -> dict:
+    return {
+        "id": source.id, "kind": source.kind, "origin": source.origin,
+        "media_path": source.media_path, "audio_path": source.audio_path,
+        "duration": source.duration, "lang": source.lang,
+        "created_at": source.created_at,
+    }
+
+
+def _job_json(job: Job) -> dict:
+    return {"id": job.id, "workspace": job.workspace, "type": job.type,
+            "engine": job.engine, "phase": job.phase, "state": job.state}
+
+
+def _enqueue_ingest(repos, source_id: int, lang: str) -> Job:
+    job = Job(id=None, workspace=1, type="ingest", engine=None,
+              phase=js.phase_of("ingest", None),
+              payload={"source_id": source_id, "lang": lang})
+    job.id = repos.add_job(job)
+    return job
+
+
+def _require_lang(lang: str) -> str:
+    if lang not in ALLOWED_LANGS:
+        raise HTTPException(422, f"ngôn ngữ không hỗ trợ: {lang!r}")
+    return lang
+
+
+def _safe_name(name: str | None, fallback: str = "upload.bin") -> str:
+    """Tên tệp do client gửi -> tên trần, không có thành phần đường dẫn.
+
+    Không có bước này thì `../` trong `filename` ghi được ra ngoài `media_dir`.
+    """
+    return pathlib.Path(name or fallback).name or fallback
+
+
+def _list_sources(repos) -> list[Source]:
+    """Nguồn mới nhất trước.
+
+    Brief yêu cầu thêm `list_sources()` vào `app/ports/repos.py` và
+    `SqliteRepos`, nhưng cả hai tệp đó nằm trong danh sách ĐÓNG BĂNG của task
+    này. Nên thứ tự mới-nhất-trước được lấy thẳng từ khoá chính của bảng, đúng
+    một câu SELECT như phương thức được đề xuất.
+    """
+    return [repos.get_source(r["id"]) for r in _source_id_rows(repos)]
+
+
+def _source_id_rows(repos) -> list[dict]:
+    reader = getattr(repos, "list_sources", None)
+    if callable(reader):
+        return [{"id": s.id} for s in reader()]
+
+    db_path = getattr(repos, "db_path", None)
+    if not db_path:
+        raise HTTPException(
+            500,
+            f"{type(repos).__name__} không có `list_sources()` lẫn `db_path`; "
+            "route không đọc được danh sách nguồn",
+        )
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute("SELECT id FROM sources ORDER BY id DESC").fetchall()
+    return [{"id": r["id"]} for r in rows]
+
+
+@router.post("/upload", status_code=201)
+async def upload(file: UploadFile = File(...), lang: str = Form(DEFAULT_LANG),
+                 repos=Depends(get_repos), dirs=Depends(get_dirs)):
+    lang = _require_lang(lang)
+
+    media_dir: pathlib.Path = dirs["media"]
+    target = media_dir / _safe_name(file.filename)
+    size = 0
+    with open(target, "wb") as fh:
+        while chunk := await file.read(_CHUNK):
+            size += len(chunk)
+            fh.write(chunk)
+    if size == 0:
+        # Xoá tệp rỗng vừa tạo: để lại thì `media_dir` đầy rác 0 byte và lần tải
+        # sau trùng tên sẽ gặp một tệp cũ vô nghĩa.
+        target.unlink(missing_ok=True)
+        raise HTTPException(422, "tệp rỗng")
+
+    digest = ingest.sha256_file(target)
+    stem = digest[:16]
+    final = media_dir / f"{stem}{target.suffix}"
+    # Tên theo nội dung: hai lần tải cùng một video dùng chung một tệp, và lần
+    # tải lại không đẻ ra bản sao thứ hai.
+    target.replace(final)
+
+    source_id = repos.add_source(kind="file", origin=file.filename or final.name,
+                                 media_path=str(final), lang=lang)
+    job = _enqueue_ingest(repos, source_id, lang)
+    return {"source": _source_json(repos.get_source(source_id)), "job": _job_json(job)}
+
+
+@router.post("/url", status_code=201)
+def add_url(payload: UrlIn, repos=Depends(get_repos), dirs=Depends(get_dirs)):
+    media_dir: pathlib.Path = dirs["media"]
+    try:
+        path = ingest.download_url(payload.url, media_dir)
+    except ingest.IngestError as exc:
+        # Mất mạng / video bị chặn là lỗi ĐẦU VÀO, không phải lỗi máy chủ.
+        raise HTTPException(422, str(exc)) from exc
+
+    source_id = repos.add_source(kind="url", origin=payload.url,
+                                 media_path=str(path), lang=payload.lang)
+    job = _enqueue_ingest(repos, source_id, payload.lang)
+    return {"source": _source_json(repos.get_source(source_id)), "job": _job_json(job)}
+
+
+@router.get("")
+def list_sources(repos=Depends(get_repos)):
+    return [_source_json(s) for s in _list_sources(repos)]
+
+
+@router.get("/{source_id}")
+def get_source(source_id: int, repos=Depends(get_repos)):
+    try:
+        return _source_json(repos.get_source(source_id))
+    except LookupError as exc:
+        raise HTTPException(404, str(exc)) from exc

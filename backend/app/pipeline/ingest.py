@@ -12,6 +12,10 @@ import shutil
 import subprocess
 from typing import Callable, Protocol
 
+from app.domain import job_state as _job_state
+from app.domain.models import Job
+from app.ports.repos import Repos
+
 
 class IngestError(RuntimeError):
     pass
@@ -151,3 +155,62 @@ def find_local_media(directory: str | pathlib.Path, stem: str) -> pathlib.Path |
 def free_space_gb(path: str | pathlib.Path) -> float:
     usage = shutil.disk_usage(str(path))
     return usage.free / (1024 ** 3)
+
+
+DEFAULT_ASR_ENGINE = "fw-large-v3-turbo"
+DEFAULT_LANG = "zh"
+
+
+class IngestHandler:
+    """Job 'ingest': bóc âm thanh từ media đã có, đặt duration, rồi xếp job asr.
+
+    Đây là mắt đầu tiên của cả pipeline. Nó KHÔNG tải media: việc tải (tệp lên
+    hay link) xảy ra ở route, trước khi job tồn tại, để request HTTP không phải
+    giữ một tệp 2 GB trong lúc bóc âm thanh.
+    """
+
+    def __init__(self, repos: Repos, *, audio_dir=None) -> None:
+        self._repos = repos
+        self._audio_dir = audio_dir
+
+    def handles(self) -> str:
+        return "ingest"
+
+    def run(self, job: Job, report: Callable[[float, str], None]) -> None:
+        source_id = int(job.payload["source_id"])
+        source = self._repos.get_source(source_id)
+        media = pathlib.Path(source.media_path)
+        if not media.exists():
+            # Nêu cả đường dẫn LẪN source id: người vận hành cần biết tệp nào
+            # mất và hàng `sources` nào đang trỏ tới nó. Ném lỗi ở đây cũng là
+            # cách duy nhất để job dừng TRƯỚC khi tạo job asr — nếu không, job
+            # asr sẽ nổ ở `TranscribeHandler` với thông báo mơ hồ hơn nhiều.
+            raise IngestError(
+                f"source {source_id}: tệp media không tồn tại: {media}. "
+                "Kiểm tra `media_path` trong bảng sources, hoặc nạp lại nguồn."
+            )
+
+        out_dir = pathlib.Path(self._audio_dir) if self._audio_dir else media.parent
+        report(0.2, f"extract audio từ {media.name}")
+        wav, duration = extract_audio(media, out_dir, stem=media.stem)
+        self._repos.set_source_audio(source_id, str(wav), duration)
+        report(0.7, f"audio {wav.name} · {duration:.1f}s")
+
+        # Ngôn ngữ đã khai báo thì dùng; nguồn không khai báo (Task 19 nạp thẳng
+        # vào DB, hoặc hàng cũ trước khi có cột `lang`) mới rơi về mặc định.
+        # Dòng log phải NÓI RÕ đây là dự phòng — nếu không, 'zh' giả định sẽ trá
+        # hình thành 'zh' do người dùng chọn và không ai phát hiện ra.
+        if source.lang:
+            lang = source.lang
+            report(0.8, f"ngôn ngữ khai báo: {lang}")
+        else:
+            lang = DEFAULT_LANG
+            report(0.8, f"nguồn chưa khai báo ngôn ngữ — dùng mặc định {lang}")
+
+        engine_id = self._repos.get_setting("default_asr_engine") or DEFAULT_ASR_ENGINE
+        self._repos.add_job(Job(
+            id=None, workspace=1, type="asr", engine=engine_id,
+            phase=_job_state.phase_of("asr", engine_id),
+            payload={"source_id": source_id, "lang": lang},
+        ))
+        report(1.0, "đã tạo job bóc băng")
