@@ -4,6 +4,7 @@ import json
 import shutil
 import subprocess
 import sys
+import types
 
 import pytest
 
@@ -158,3 +159,56 @@ def test_run_keeps_child_stderr_when_a_byte_cannot_be_decoded():
     assert "stderr-before\ufffdstderr-after" in message, (
         f"the undecodable byte was not replaced in place: {ascii(message)}"
     )
+
+
+def test_download_url_real_branch_drives_yt_dlp_when_no_runner(monkeypatch, tmp_path):
+    """R52 · nhánh yt-dlp THẬT chưa từng được thực thi ở đâu trong Giai đoạn 1a.
+
+    Cả bộ test chỉ đi qua `runner=` được bơm vào, còn `IngestHandler` thật thì bị
+    `StubIngest` của Task 19 thay thế. Bài này đẩy đúng nhánh `runner is None`:
+    import `yt_dlp`, dựng `YoutubeDL(opts)`, gọi `extract_info` rồi
+    `prepare_filename`.
+
+    `yt_dlp` KHÔNG có trong venv này (R47) và không bài nào được phép gọi mạng,
+    nên một module giả được gắn vào `sys.modules`. Điều đó KHÔNG làm phép kiểm
+    yếu đi: thứ đang được kiểm là *đường đi của code ta* (opts, hook tiến độ,
+    đường dẫn trả về), không phải yt-dlp. Một lần tải thật vẫn là việc CHƯA
+    chạy — xem `task-20-report.md`.
+    """
+    seen: dict = {}
+    fake = types.ModuleType("yt_dlp")
+
+    class FakeYoutubeDL:
+        def __init__(self, opts):
+            seen["opts"] = opts
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def extract_info(self, url, download):
+            seen["url"] = url
+            seen["download"] = download
+            return {"id": "abc123", "ext": "mp4"}
+
+        def prepare_filename(self, info):
+            return str(tmp_path / f"{info['id']}.{info['ext']}")
+
+    fake.YoutubeDL = FakeYoutubeDL
+    monkeypatch.setitem(sys.modules, "yt_dlp", fake)
+
+    progress: list[float] = []
+    out = ingest.download_url("https://example.com/v", tmp_path,
+                              on_progress=progress.append)
+
+    assert out == tmp_path / "abc123.mp4"
+    assert seen["url"] == "https://example.com/v"
+    assert seen["download"] is True
+    assert seen["opts"]["outtmpl"] == str(tmp_path / "%(id)s.%(ext)s")
+    assert seen["opts"]["noplaylist"] is True
+    assert len(seen["opts"]["progress_hooks"]) == 1
+
+    seen["opts"]["progress_hooks"][0]({"status": "finished"})
+    assert progress == [1.0], "hook tiến độ phải được nối tới on_progress"
