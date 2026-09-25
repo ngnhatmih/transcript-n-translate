@@ -85,6 +85,46 @@ def test_current_phase_is_none_when_queue_drains(repos):
     assert worker.current_phase is None, "hết việc thì phải nhả giai đoạn để lần sau chọn lại"
 
 
+class _RaisingAfterPhaseGovernor(FakeGovernor):
+    """Governor đối kháng: `after_phase` ghi lại rồi NÉM RA (kịch bản R56)."""
+
+    def after_phase(self, phase: str) -> None:
+        super().after_phase(phase)      # ghi vào `self.after` trước khi nổ
+        raise RuntimeError("after_phase hỏng theo kịch bản test")
+
+
+def test_leave_phase_clears_state_before_notifying_a_raising_governor(repos):
+    """R56: `after_phase` ném ra thì `current_phase` VẪN phải đã được xoá.
+
+    Bản cũ gọi governor TRƯỚC rồi mới gán `None`, nên khi governor nổ thì
+    `current_phase` còn nguyên. Nhịp sau thấy phase còn, `next_queued_for_phase`
+    trả None, rồi rời giai đoạn lần nữa -> `after_phase` bắn lại ở MỌI nhịp,
+    vô hạn. Vì vậy bài này đếm số lần gọi chứ không chỉ khẳng định "có ném".
+    """
+    gov = _RaisingAfterPhaseGovernor()
+    worker = _worker(repos, gov, RecordingHandler(job_type="asr"))
+    repos.add_job(a_job(None, job_type="asr", engine="e"))
+
+    assert worker.tick() is True                 # chạy hết job -> giai đoạn cạn việc
+    assert worker.current_phase == "asr:e"
+
+    with pytest.raises(RuntimeError, match="after_phase hỏng"):
+        worker.tick()                            # rời giai đoạn -> governor nổ
+
+    assert worker.current_phase is None, (
+        "phải xoá current_phase TRƯỚC khi báo governor, nếu không lỗi lặp vô hạn"
+    )
+    assert gov.after == ["asr:e"], "after_phase phải được gọi đúng MỘT lần"
+
+    # Hàng đợi đã rỗng: hai nhịp nữa không được rời lại giai đoạn cũ.
+    assert worker.tick() is False
+    assert worker.tick() is False
+    assert gov.after == ["asr:e"], (
+        f"after_phase chỉ được gọi một lần, thực tế {len(gov.after)} lần "
+        "— bản cũ bắn lại mỗi nhịp vì current_phase không bao giờ được xoá"
+    )
+
+
 def test_failing_job_does_not_stop_the_queue(repos):
     gov = FakeGovernor()
     handler = RecordingHandler(job_type="asr", fail_on={2})

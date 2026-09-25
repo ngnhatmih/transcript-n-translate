@@ -498,3 +498,75 @@ def test_release_empties_cuda_cache_only_when_torch_reports_a_gpu(asr_spec, monk
         is_available=lambda: False, empty_cache=lambda: calls.append("empty"))
     FasterWhisperEngine(asr_spec, model_factory=_RecordingModelFactory()).release()
     assert calls == ["empty"], "không có GPU thì không được gọi empty_cache"
+
+
+# --------------------------------------------------------------------------
+# R55: `release()` là unload callback của governor (Task 15) và governor gọi
+# `releaser()` KHÔNG có try/except ở cả `before_phase` lẫn `after_phase`. Một
+# exception lọt ra khỏi đây sẽ bỏ dở cả vòng đổ model -> các model khác vẫn nằm
+# trong VRAM và chuyển giai đoạn hỏng. Bản cũ chỉ bắt `ImportError`, nên hai
+# đường đi THẬT dưới đây đều lọt ra ngoài.
+# --------------------------------------------------------------------------
+
+def _load_engine_with_model_and_batched(asr_spec, monkeypatch):
+    """Trả về engine đang giữ CẢ `_model` lẫn `_batched` (đều khác None).
+
+    Phải nạp qua nhánh `batch_size > 1` thì `_batched` mới được set; nếu chỉ
+    nạp `_model` thì `_batched` vốn đã None từ đầu và khẳng định "đã xoá
+    `_batched`" là vô nghĩa.
+    """
+    fake_module = types.ModuleType("faster_whisper")
+    fake_module.BatchedInferencePipeline = _FakeBatchedPipeline
+    monkeypatch.setitem(sys.modules, "faster_whisper", fake_module)
+
+    engine = FasterWhisperEngine(_with_opts(asr_spec, batch_size=4),
+                                 model_factory=_RecordingModelFactory())
+    engine.transcribe("a.wav", "zh")
+    assert engine._model is not None and engine._batched is not None, (
+        "test chỉ có nghĩa khi cả hai thuộc tính ĐANG được set trước release()"
+    )
+    return engine
+
+
+def test_release_survives_oserror_from_a_broken_torch_install(asr_spec, monkeypatch):
+    """R55: torch cài hỏng ném `OSError [WinError 126]` ngay lúc `import torch`.
+
+    `OSError` KHÔNG phải lớp con của `ImportError`, nên `except ImportError` cũ
+    để nguyên exception bay ra ngoài `release()`.
+    """
+    assert not issubclass(OSError, ImportError), (
+        "đây là toàn bộ lý do phải bắt rộng: nếu OSError là ImportError thì bản cũ đã đủ"
+    )
+    engine = _load_engine_with_model_and_batched(asr_spec, monkeypatch)
+    real_import = builtins.__import__
+
+    def broken_import(name, *args, **kwargs):
+        if name == "torch":
+            raise OSError("[WinError 126] Không tìm thấy module được chỉ định")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", broken_import)
+
+    engine.release()          # không được ném
+
+    assert engine._model is None and engine._batched is None, (
+        "hai tham chiếu model phải được xoá TRƯỚC khối try, kể cả khi dọn torch nổ"
+    )
+
+
+def test_release_survives_runtimeerror_from_cuda_is_available(asr_spec, monkeypatch):
+    """R55: `torch.cuda.is_available()` ném `RuntimeError` khi driver/CUDA hỏng."""
+    engine = _load_engine_with_model_and_batched(asr_spec, monkeypatch)
+
+    def boom():
+        raise RuntimeError("CUDA driver không khả dụng")
+
+    fake_torch = types.ModuleType("torch")
+    fake_torch.cuda = types.SimpleNamespace(is_available=boom, empty_cache=lambda: None)
+    monkeypatch.setitem(sys.modules, "torch", fake_torch)
+
+    engine.release()          # không được ném
+
+    assert engine._model is None and engine._batched is None, (
+        "hai tham chiếu model phải được xoá TRƯỚC khối try, kể cả khi is_available nổ"
+    )

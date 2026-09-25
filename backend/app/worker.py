@@ -101,9 +101,17 @@ class PhaseQueueWorker:
         self.governor.before_phase(phase)
 
     def _leave_phase(self) -> None:
-        if self.current_phase is not None:
-            self.governor.after_phase(self.current_phase)
+        # Đọc ra biến cục bộ và XOÁ trạng thái TRƯỚC khi báo governor là chủ ý:
+        # `after_phase` ném ra thì `current_phase` vẫn đã được nhả. Nếu để
+        # `after_phase` chạy trước, một governor ném lỗi sẽ khiến `tick()` kế
+        # tiếp thấy phase còn nguyên, tra không ra job, rồi rời giai đoạn lần
+        # nữa — `after_phase` bắn lại VÔ HẠN ở mọi nhịp. Không bắt exception ở
+        # đây: lỗi vẫn phải nổi lên cho người gọi thấy, chỉ là có biên.
+        phase = self.current_phase
+        if phase is None:
+            return
         self.current_phase = None
+        self.governor.after_phase(phase)
 
     # ---------- chạy job ----------
     def checkpoint(self, job_id: int) -> None:

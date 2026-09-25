@@ -99,11 +99,22 @@ class FasterWhisperEngine:
         return normalize(to_segments(raw))
 
     def release(self) -> None:
+        # Xoá tham chiếu model TRƯỚC khối try: dù phần dọn torch có nổ thế nào
+        # thì model vẫn phải được nhả.
         self._batched = None
         self._model = None
+        # Best-effort, và bắt RỘNG TAY là cố ý — xin đừng "siết" lại thành
+        # `except ImportError`. Đây là callback đổ model: mục đích là giải phóng
+        # VRAM nếu có thể, còn không giải phóng được thì cũng KHÔNG được làm sập
+        # hàng đợi. Bản torch cài hỏng ném `OSError` (WinError 126) ngay lúc
+        # import, và `torch.cuda.is_available()` có thể ném `RuntimeError` —
+        # cả hai đều KHÔNG phải `ImportError`. Task 15 đăng ký hàm này làm
+        # unload callback của `SingleGpuGovernor`, nơi `releaser()` được gọi mà
+        # không có try/except ở CẢ `before_phase` lẫn `after_phase`: một
+        # exception lọt ra sẽ bỏ dở cả vòng đổ model và làm hỏng chuyển giai đoạn.
         try:
             import torch
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
-        except ImportError:
+        except Exception:  # noqa: BLE001 - dọn dẹp best-effort, xem chú thích trên
             pass
