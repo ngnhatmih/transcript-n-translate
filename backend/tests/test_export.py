@@ -1,0 +1,345 @@
+"""Test cho định dạng phụ đề (domain) và handler export (pipeline).
+
+Hai nhóm lý do file này tồn tại:
+
+  * R65 — ba bộ sinh trong brief không nhất quán cách tra bản dịch: `to_srt`
+    tra theo VỊ TRÍ (`translations[n - 1]`), còn `to_vtt`/`to_ass` tra theo
+    `seg.i`. Hai cách chỉ trùng nhau nhờ `normalize()` đánh số lại liên tục.
+    `translations` là danh sách SONG SONG — `_assert_lengths` bảo đảm
+    `len(translations) == len(segments)` — nên phải tra theo vị trí. Khi `i`
+    không liên tục (ví dụ `i=[0,1,3]`) bản brief làm VTT/ASS mất một bản dịch
+    trong khi SRT vẫn còn, và cùng một transcript cho ra phụ đề khác nhau tuỳ
+    định dạng.
+
+  * R66 — `app/pipeline/export.py` không được bài test nào import trong brief
+    (chuỗi `pipeline.export` xuất hiện 0 lần), nên một lỗi cú pháp trong đó sẽ
+    vô hình tới Task 15. Đây là task thứ ba liên tiếp có dạng này.
+"""
+from __future__ import annotations
+
+import json
+from types import SimpleNamespace
+
+import pytest
+
+from app.adapters.clock_system import SystemClock
+from app.adapters.persist.sqlite_repos import NotFound, SqliteRepos
+from app.domain.models import Job, Segment, Transcript
+from app.domain.subtitle_format import (
+    format_timestamp, to_ass, to_srt, to_vtt,
+)
+from app.pipeline.export import ExportHandler
+
+
+def test_timestamp_formatting_hours_and_millis():
+    assert format_timestamp(0.0) == "00:00:00,000"
+    assert format_timestamp(1.5) == "00:00:01,500"
+    assert format_timestamp(3661.25) == "01:01:01,250"
+    assert format_timestamp(1.5, sep=".") == "00:00:01.500"
+
+
+def test_negative_timestamp_clamps_to_zero():
+    assert format_timestamp(-3.0) == "00:00:00,000"
+
+
+def test_srt_structure_and_indexing_from_one():
+    segs = [Segment(i=0, start=1.0, end=2.5, text="甲"),
+            Segment(i=1, start=2.5, end=4.0, text="乙")]
+    out = to_srt(segs)
+    lines = out.strip().splitlines()
+    assert lines[0] == "1"
+    assert lines[1] == "00:00:01,000 --> 00:00:02,500"
+    assert lines[2] == "甲"
+    assert lines[3] == ""
+    assert lines[4] == "2"
+    assert out.endswith("\n")
+
+
+def test_srt_bilingual_puts_source_above_translation():
+    segs = [Segment(i=0, start=0.0, end=2.0, text="大家好")]
+    out = to_srt(segs, translations=["Chào mọi người"], bilingual=True)
+    body = out.strip().splitlines()[2:]
+    assert body[0] == "大家好"
+    assert body[1] == "Chào mọi người"
+
+
+def test_srt_monolingual_uses_translation_only():
+    """Một đoạn -> ĐÚNG một dòng văn bản, không dư dòng nào.
+
+    Không chỉ kiểm `"大家好" not in out`: nếu `_lines` trả về thêm một dòng rỗng
+    thì khẳng định đó vẫn xanh, còn tệp SRT thật thì hỏng. Vì vậy ở đây so
+    thẳng danh sách dòng với dạng đúng.
+    """
+    segs = [Segment(i=0, start=0.0, end=2.0, text="大家好")]
+    out = to_srt(segs, translations=["Chào mọi người"], bilingual=False)
+    assert "大家好" not in out
+    assert out == (
+        "1\n"
+        "00:00:00,000 --> 00:00:02,000\n"
+        "Chào mọi người\n"
+    )
+    assert out.splitlines()[2:] == ["Chào mọi người"]
+
+
+def test_srt_translation_mismatch_length_raises():
+    segs = [Segment(i=0, start=0.0, end=2.0, text="a"),
+            Segment(i=1, start=2.0, end=4.0, text="b")]
+    with pytest.raises(ValueError):
+        to_srt(segs, translations=["chỉ một dòng"])
+
+
+def test_vtt_has_header_and_dot_separator():
+    out = to_vtt([Segment(i=0, start=0.0, end=1.0, text="x")])
+    assert out.startswith("WEBVTT")
+    assert "00:00:00.000 --> 00:00:01.000" in out
+
+
+def test_ass_has_script_info_and_dialogue_lines():
+    segs = [Segment(i=0, start=0.0, end=1.0, text="x")]
+    out = to_ass(segs)
+    assert "[Script Info]" in out and "[V4+ Styles]" in out and "[Events]" in out
+    assert "Dialogue: 0,0:00:00.00,0:00:01.00,Default,,0,0,0,,x" in out
+
+
+def test_ass_escapes_braces_that_would_be_read_as_override_codes():
+    segs = [Segment(i=0, start=0.0, end=1.0, text="a{b}c")]
+    assert "a\\{b\\}c" in to_ass(segs)
+
+
+def test_empty_segment_list_gives_valid_empty_documents():
+    assert to_srt([]) == ""
+    assert to_vtt([]).startswith("WEBVTT")
+    assert "[Events]" in to_ass([])
+
+
+# --------------------------------------------------------------------------
+# R65: bản dịch là danh sách SONG SONG -> tra theo VỊ TRÍ, không theo `seg.i`
+# --------------------------------------------------------------------------
+
+def _non_contiguous() -> list[Segment]:
+    """Ba đoạn có `i` KHÔNG liên tục — đúng thứ mà mọi fixture trong brief thiếu.
+
+    `i=[0,1,3]` là trạng thái có thật: `update_transcript_segments` cho phép
+    ghi lại segments đã sửa, và bất cứ bước nào xoá một đoạn ở giữa mà không
+    đánh số lại sẽ để lại khoảng trống như thế này.
+    """
+    return [Segment(i=0, start=0.0, end=1.0, text="一"),
+            Segment(i=1, start=1.0, end=2.0, text="二"),
+            Segment(i=3, start=3.0, end=4.0, text="三")]
+
+
+NON_CONTIGUOUS_TRANSLATIONS = ["một", "hai", "ba"]
+
+
+def _srt_bodies(out: str) -> list[str]:
+    """Các dòng văn bản của SRT (bỏ chỉ số và dòng thời gian)."""
+    return [ln for ln in out.splitlines() if ln not in ("", "1", "2", "3")
+            and "-->" not in ln]
+
+
+def _vtt_bodies(out: str) -> list[str]:
+    return [ln for ln in out.splitlines() if ln and ln != "WEBVTT" and "-->" not in ln]
+
+
+def _ass_bodies(out: str) -> list[str]:
+    """Trường Text (trường thứ 10) của mỗi dòng Dialogue.
+
+    Không dùng `split(",,", 1)`: chuỗi `Default,,0,0,0,,` có HAI lần `,,` nên
+    cách đó cắt ngay sau `Default` và trả về cả phần toạ độ. Trường Text là
+    phần sau lần `,,` CUỐI CÙNG.
+    """
+    return [ln[ln.rindex(",,") + 2:] for ln in out.splitlines()
+            if ln.startswith("Dialogue:")]
+
+
+def test_all_three_formats_index_translations_by_position_not_by_seg_i():
+    """Cùng một transcript + cùng một danh sách bản dịch -> cùng nội dung.
+
+    Với bản brief (`translations[seg.i]`), đoạn `i=3` tra `translations[3]`;
+    `3 < 3` sai nên nó rơi về `None` và VTT/ASS mất bản dịch "ba" trong khi SRT
+    vẫn in. Test này khoá lại việc cả ba định dạng dùng CHUNG một cách tra.
+    """
+    segs = _non_contiguous()
+    assert _srt_bodies(to_srt(segs, translations=NON_CONTIGUOUS_TRANSLATIONS)) == \
+        NON_CONTIGUOUS_TRANSLATIONS
+    assert _vtt_bodies(to_vtt(segs, translations=NON_CONTIGUOUS_TRANSLATIONS)) == \
+        NON_CONTIGUOUS_TRANSLATIONS
+    assert _ass_bodies(to_ass(segs, translations=NON_CONTIGUOUS_TRANSLATIONS)) == \
+        NON_CONTIGUOUS_TRANSLATIONS
+
+
+def test_bilingual_non_contiguous_keeps_every_pair_together():
+    """Bản song ngữ: mỗi đoạn phải là (nguồn, dịch) của CÙNG một đoạn.
+
+    ASS khác SRT/VTT ở đây: `_ass_escape` chạy SAU khi `_lines` đã nối hai dòng
+    bằng `"\\N"`, nên dấu `\\` của dấu phân cách bị nhân đôi thành `"\\\\N"`.
+    Đó là hành vi của bản brief (dòng 209-214) — test này ghi lại đúng như vậy
+    thay vì sửa test cho khớp; xem báo cáo Task 14.
+    """
+    segs = _non_contiguous()
+    assert _srt_bodies(
+        to_srt(segs, translations=NON_CONTIGUOUS_TRANSLATIONS, bilingual=True)
+    ) == ["一", "một", "二", "hai", "三", "ba"]
+    assert _vtt_bodies(
+        to_vtt(segs, translations=NON_CONTIGUOUS_TRANSLATIONS, bilingual=True)
+    ) == ["一", "một", "二", "hai", "三", "ba"]
+    assert _ass_bodies(
+        to_ass(segs, translations=NON_CONTIGUOUS_TRANSLATIONS, bilingual=True)
+    ) == ["一\\\\Nmột", "二\\\\Nhai", "三\\\\Nba"]
+
+
+# --------------------------------------------------------------------------
+# R66: handler export — đường ghi tệp chưa từng được test chạm tới
+# --------------------------------------------------------------------------
+
+@pytest.fixture()
+def repos(tmp_path):
+    r = SqliteRepos(tmp_path / "t.db", clock=SystemClock())
+    r.init_schema()
+    return r
+
+
+@pytest.fixture()
+def transcript_id(repos):
+    """Transcript THẬT trong sqlite, không phải đồ giả.
+
+    `transcripts.source_id` có khoá ngoại thật, nên phải tạo source trước —
+    đúng cách các test khác đang làm.
+    """
+    source_id = repos.add_source(kind="file", origin="a.mp4",
+                                 media_path="m.mp4", lang="zh")
+    return repos.add_transcript(
+        source_id=source_id,
+        engine="fw-large-v3-turbo",
+        lang="zh",
+        segments=_non_contiguous(),
+    )
+
+
+def _handler(repos, tmp_path):
+    return ExportHandler(repos, out_dir=tmp_path / "out")
+
+
+def _job(**payload) -> Job:
+    return Job(id=None, workspace=3, type="export", engine=None, phase="export:-",
+               payload=payload)
+
+
+def test_handler_handles_export():
+    assert ExportHandler(None, out_dir=".").handles() == "export"
+
+
+def test_unsupported_format_names_the_supported_ones(repos, tmp_path, transcript_id):
+    """Lỗi phải NÓI ĐƯỢC định dạng nào dùng được, không chỉ kêu 'sai'."""
+    with pytest.raises(ValueError) as excinfo:
+        _handler(repos, tmp_path).run(
+            _job(transcript_id=transcript_id, format="docx"), lambda *_: None
+        )
+    message = str(excinfo.value)
+    assert "docx" in message, message
+    for supported in ("ass", "srt", "vtt"):
+        assert supported in message, message
+
+
+def test_translation_count_mismatch_raises(repos, tmp_path, transcript_id):
+    with pytest.raises(ValueError, match="không khớp"):
+        _handler(repos, tmp_path).run(
+            _job(transcript_id=transcript_id, format="srt", translations=["chỉ một"]),
+            lambda *_: None,
+        )
+
+
+def test_missing_transcript_surfaces_as_notfound(repos, tmp_path):
+    """`get_transcript` ném `NotFound`; handler không được bọc nó thành
+    `AttributeError` khó hiểu."""
+    with pytest.raises(NotFound):
+        _handler(repos, tmp_path).run(
+            _job(transcript_id=999, format="srt"), lambda *_: None
+        )
+
+
+@pytest.mark.parametrize("fmt", ["srt", "vtt", "ass"])
+def test_successful_run_matches_the_formatter_and_writes_utf8(
+    repos, tmp_path, transcript_id, fmt
+):
+    """Bản SONG NGỮ: nội dung tệp phải khớp `bilingual=True`.
+
+    Cố ý dùng `bilingual=True` chứ không phải mặc định: nếu chỉ chạy chế độ một
+    ngôn ngữ thì một handler bỏ qua cờ `bilingual` trong payload vẫn cho ra tệp
+    y hệt và test sẽ không nhìn thấy gì.
+    """
+    seen: list[float] = []
+    _handler(repos, tmp_path).run(
+        _job(transcript_id=transcript_id, format=fmt, stem="my-clip",
+             translations=NON_CONTIGUOUS_TRANSLATIONS, bilingual=True),
+        lambda fraction, _msg: seen.append(fraction),
+    )
+    target = tmp_path / "out" / f"my-clip.vi.{fmt}"
+    assert target.is_file(), sorted(p.name for p in (tmp_path / "out").iterdir())
+
+    raw = target.read_bytes()
+    expected = {"srt": to_srt, "vtt": to_vtt, "ass": to_ass}[fmt](
+        _non_contiguous(), translations=NON_CONTIGUOUS_TRANSLATIONS, bilingual=True
+    )
+    # UTF-8 thật, không phải mã hoá mặc định của hệ điều hành.
+    raw.decode("utf-8")
+    assert raw.startswith(b"\xef\xbb\xbf") is False
+    assert raw == expected.encode("utf-8")
+    assert target.read_text(encoding="utf-8") == expected
+    # Chế độ song ngữ thật sự có cả nguồn lẫn bản dịch, đúng thứ tự từng cặp.
+    bodies = {"srt": _srt_bodies, "vtt": _vtt_bodies, "ass": _ass_bodies}[fmt](expected)
+    if fmt == "ass":
+        assert bodies == ["一\\\\Nmột", "二\\\\Nhai", "三\\\\Nba"]
+    else:
+        assert bodies == ["一", "một", "二", "hai", "三", "ba"]
+    assert seen[0] == pytest.approx(0.3) and seen[-1] == 1.0
+
+
+def test_sidecar_index_is_written_next_to_the_subtitle(repos, tmp_path, transcript_id):
+    handler = _handler(repos, tmp_path)
+    handler.run(_job(transcript_id=transcript_id, format="srt", stem="my-clip"),
+                lambda *_: None)
+    index = tmp_path / "out" / "my-clip.srt.json"
+    assert index.is_file()
+    data = json.loads(index.read_text(encoding="utf-8"))
+    assert data["transcript_id"] == transcript_id
+    assert data["format"] == "srt"
+    assert data["bilingual"] is False
+    assert data["segments"] == 3
+    assert data["engine"] == "fw-large-v3-turbo"
+
+
+def test_sidecar_carries_the_stored_transcript_version(repos, tmp_path, transcript_id):
+    """Không phải `1` mặc định: ta sửa transcript để version thành 2 rồi mới
+    export, nên sidecar phải khớp hàng đã lưu."""
+    new_version = repos.update_transcript_segments(transcript_id, _non_contiguous())
+    assert new_version == 2, "fixture: bản sửa đầu tiên phải đẩy version lên 2"
+    stored = repos.get_transcript(transcript_id)
+    assert stored.version == 2
+
+    _handler(repos, tmp_path).run(
+        _job(transcript_id=transcript_id, format="vtt", stem="my-clip"), lambda *_: None
+    )
+    data = json.loads(
+        (tmp_path / "out" / "my-clip.vtt.json").read_text(encoding="utf-8")
+    )
+    assert data["transcript_version"] == stored.version == 2
+
+
+def test_vi_suffix_only_when_translations_are_supplied(repos, tmp_path, transcript_id):
+    handler = _handler(repos, tmp_path)
+    handler.run(_job(transcript_id=transcript_id, format="srt", stem="with-tr",
+                     translations=NON_CONTIGUOUS_TRANSLATIONS), lambda *_: None)
+    handler.run(_job(transcript_id=transcript_id, format="srt", stem="without-tr"),
+                lambda *_: None)
+    names = sorted(p.name for p in (tmp_path / "out").iterdir())
+    assert "with-tr.vi.srt" in names
+    assert "without-tr.srt" in names
+    assert "without-tr.vi.srt" not in names
+
+
+def test_default_stem_is_transcript_id(repos, tmp_path, transcript_id):
+    _handler(repos, tmp_path).run(
+        _job(transcript_id=transcript_id, format="srt"), lambda *_: None
+    )
+    assert (tmp_path / "out" / f"transcript-{transcript_id}.srt").is_file()
