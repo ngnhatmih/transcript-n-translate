@@ -91,6 +91,24 @@ def test_full_download_advertises_range_support(client):
     assert resp.headers["content-length"] == "1024"
     assert resp.headers["content-type"].startswith("video/mp4")
 
+def test_head_matches_get_without_a_body(client):
+    """RFC 9110 §9.3.2: nơi phục vụ GET thì phải phục vụ HEAD.
+
+    `curl -I` hay trình phát hỏi trước kích thước/`Accept-Ranges` mà không tải
+    phải nhận 405 nếu route chỉ khai `GET`: FastAPI `APIRoute` KHÔNG tự thêm HEAD
+    như `Route` của Starlette. Câu trả lời phải GIỐNG GET ở status và header,
+    chỉ khác thân rỗng.
+    """
+    get = client.get(f"/api/media/{client.source_id}")
+    head = client.head(f"/api/media/{client.source_id}")
+
+    assert head.status_code == get.status_code == 200, head.text
+    assert head.content == b""
+    for name in ("accept-ranges", "content-type", "content-length"):
+        assert head.headers[name] == get.headers[name], name
+    assert head.headers["content-length"] == "1024"
+
+
 def test_range_request_returns_206_with_exact_slice(client):
     resp = client.get(f"/api/media/{client.source_id}", headers={"Range": "bytes=0-99"})
     assert resp.status_code == 206, resp.text
@@ -157,6 +175,43 @@ def test_unsatisfiable_range_returns_416_with_total(client):
     assert resp.status_code == 416, resp.text
     assert resp.headers["content-range"] == "bytes */1024"
     assert resp.headers["accept-ranges"] == "bytes"
+
+
+def test_reversed_range_is_416_with_total(client):
+    """`start > end` là khoảng KHÔNG hợp lệ (RFC 7233 §2.1) -> 416, không phải
+    một `end - start + 1` âm chảy xuống `Content-Length`.
+
+    Không có test HTTP nào cho nhánh này: bỏ guard `start > end` chỉ giết đúng
+    một dòng của bảng tham số hoá `parse_range`, nên nhánh không được ghim ở
+    tầng giao thức.
+    """
+    resp = client.get(f"/api/media/{client.source_id}",
+                      headers={"Range": "bytes=500-100"})
+    assert resp.status_code == 416, resp.text
+    assert resp.headers["content-range"] == "bytes */1024"
+    assert resp.headers["accept-ranges"] == "bytes"
+    assert resp.content == b""
+
+
+def test_range_unit_is_case_insensitive(client):
+    """`BYTES=` là cùng một range unit: token không phân biệt hoa thường.
+
+    RFC 7233 §2.1 định nghĩa range unit là một `token`, và RFC 9110 §2.2 khiến
+    token không phân biệt hoa/thường. Regex đang khớp `bytes=` chữ thường, nên
+    `BYTES=0-99` rơi vào nhánh "header không hiểu được" -> 200 cả tệp: một yêu
+    cầu range hợp lệ bị bỏ im lặng thay vì trả 206.
+    """
+    resp = client.get(f"/api/media/{client.source_id}",
+                      headers={"Range": "BYTES=0-99"})
+    assert resp.status_code == 206, f"BYTES= bị bỏ qua: {resp.status_code}"
+    assert resp.content == PAYLOAD[:100]
+    assert resp.headers["content-range"] == "bytes 0-99/1024"
+
+    # Các dạng hoa thường khác của cùng một header phải cho cùng câu trả lời.
+    mixed = client.get(f"/api/media/{client.source_id}",
+                       headers={"Range": "Bytes=0-99"})
+    assert mixed.status_code == 206, mixed.text
+    assert mixed.content == PAYLOAD[:100]
 
 
 def test_malformed_range_header_is_ignored_not_fatal(client):
@@ -226,6 +281,40 @@ def test_file_outside_the_media_root_is_refused(client):
     resp = client.get(f"/api/media/{sid}")
     assert resp.status_code == 403, resp.text
     assert SECRET not in resp.content
+
+
+def test_the_403_body_does_not_disclose_server_paths(client, caplog):
+    """Từ chối tệp ngoài gốc thì câu từ chối KHÔNG được liệt kê gốc media hay
+    đường dẫn đã phân giải: endpoint tồn tại để chối, nên chính nó không được
+    xác nhận vị trí tệp mà client không được phép gọi tên.
+
+    Chi tiết vẫn phải còn cho người vận hành — chỉ đổi chỗ: server log.
+    """
+    import logging
+
+    secret = _secret_file(client)
+    sid = _add_source(client, secret)
+    leaked = {str(client.media.resolve()), str(secret.resolve())}
+
+    # `caplog` chỉ bắt được record từ logger của route nếu mức đó được ghi lại;
+    # hạ mức trong lúc test rồi trả lại như cũ để không đổi test khác.
+    logger = logging.getLogger("app.api.routes_media")
+    old_level = logger.level
+    logger.setLevel(logging.WARNING)
+    try:
+        resp = client.get(f"/api/media/{sid}")
+    finally:
+        logger.setLevel(old_level)
+
+    assert resp.status_code == 403, resp.text
+    for path in leaked:
+        assert path not in resp.text, f"thân 403 lộ đường dẫn {path}"
+    assert str(client.media.resolve()) not in resp.text
+    assert secret.name not in resp.text
+    # Bí mật phải nằm ở log, không phải ở câu trả lời.
+    logged = "\n".join(r.getMessage() for r in caplog.records)
+    assert str(secret.resolve()) in logged
+    assert str(client.media.resolve()) in logged
 
 
 def test_dotdot_cannot_escape_the_media_root(client):

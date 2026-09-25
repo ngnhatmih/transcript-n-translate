@@ -18,6 +18,7 @@ Ba thứ KHÔNG được nới ở đây:
 """
 from __future__ import annotations
 
+import logging
 import mimetypes
 import pathlib
 import re
@@ -28,13 +29,19 @@ from fastapi.responses import Response, StreamingResponse
 from app.api.deps import get_dirs, get_repos
 from app.domain.paths import PathOutsideRoot, resolve_within
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter(prefix="/api/media", tags=["media"])
 
 #: Header `Range` đã hiểu nhưng KHÔNG có khoảng nào thoả mãn -> 416 (kèm tổng
 #: kích thước). Khác hẳn `None`: header hỏng thì bỏ qua và trả toàn tệp.
 UNSATISFIABLE = "unsatisfiable"
 
-_RANGE_RE = re.compile(r"^bytes=\s*(\d*)\s*-\s*(\d*)\s*$")
+#: `re.IGNORECASE`: range unit là một `token`, mà token thì không phân biệt
+#: hoa/thường (RFC 9110 §2.2), nên `BYTES=0-99` là cùng một yêu cầu. Khớp chữ
+#: thường không thôi thì dạng đó rơi vào "header không hiểu được" và bị bỏ im
+#: lặng thành 200 cả tệp.
+_RANGE_RE = re.compile(r"^bytes=\s*(\d*)\s*-\s*(\d*)\s*$", re.IGNORECASE)
 _CHUNK = 1024 * 256
 
 #: Đuôi tệp của app này -> Content-Type. Tra bảng trước `mimetypes` vì
@@ -102,6 +109,11 @@ def _iter_file(path: pathlib.Path, start: int, end: int):
 
 
 @router.get("/{source_id}")
+# RFC 9110 §9.3.2: nơi phục vụ GET thì phải phục vụ HEAD (kích thước,
+# `Accept-Ranges` — thứ `curl -I` và trình phát hỏi trước khi tải). FastAPI
+# `APIRoute` KHÔNG tự thêm HEAD như `Route` của Starlette, nên phải khai tường
+# minh; `include_in_schema=False` để OpenAPI không có hai mục cho cùng một route.
+@router.head("/{source_id}", include_in_schema=False)
 def get_media(source_id: int, request: Request,
               repos=Depends(get_repos), dirs=Depends(get_dirs)):
     try:
@@ -112,7 +124,12 @@ def get_media(source_id: int, request: Request,
     try:
         path = resolve_within(dirs["media"], source.media_path)
     except PathOutsideRoot as exc:
-        raise HTTPException(403, str(exc)) from exc
+        # Câu trả lời cho client là CHUNG: endpoint này tồn tại để từ chối, nên
+        # chính nó không được liệt kê gốc media hay đường dẫn đã phân giải —
+        # một bước "mở API ra LAN" biến chi tiết đó thành bản đồ hệ tệp.
+        # Chi tiết vẫn còn nguyên cho người vận hành, ở log của máy chủ.
+        logger.warning("từ chối media ngoài gốc: source_id=%s: %s", source_id, exc)
+        raise HTTPException(403, "media path is outside the media root") from exc
 
     # `exists()` không đủ: `media_path` trỏ vào một thư mục thì `open()` nổ 500.
     if not path.is_file():
