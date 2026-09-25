@@ -25,6 +25,10 @@ class JobHandler(Protocol):
         ...
 
 
+class JobCancelled(Exception):
+    """Handler ném ra từ checkpoint() khi có yêu cầu huỷ."""
+
+
 class PhaseQueueWorker:
     def __init__(
         self,
@@ -102,6 +106,15 @@ class PhaseQueueWorker:
         self.current_phase = None
 
     # ---------- chạy job ----------
+    def checkpoint(self, job_id: int) -> None:
+        """Handler gọi giữa các bước. Đây là cách duy nhất để huỷ một job dài.
+
+        Không kill tiến trình: nếu kill, DB có thể nằm ở trạng thái nửa vời và
+        model đang nạp dở sẽ không được giải phóng.
+        """
+        if self.repos.get_job(job_id).cancel_requested:
+            raise JobCancelled(f"job {job_id} đã được yêu cầu huỷ")
+
     def _run_one(self, job: Job) -> None:
         assert job.id is not None
         handler = self.handlers.get(job.type)
@@ -121,6 +134,10 @@ class PhaseQueueWorker:
 
         try:
             handler.run(job, report)
+        except JobCancelled:
+            self.repos.append_job_log(job.id, "đã huỷ theo yêu cầu ở checkpoint")
+            self.repos.set_job_state(job.id, js.CANCELLED)
+            return
         except Exception as exc:  # noqa: BLE001 - phải bắt hết để hàng đợi sống
             self.repos.append_job_log(job.id, f"LỖI: {exc}")
             self.repos.set_job_state(job.id, js.FAILED, error=f"{type(exc).__name__}: {exc}")
