@@ -2266,7 +2266,10 @@ def test_shipped_registry_file_is_valid():
     ids = {s.id for s in specs}
     assert "fw-large-v3-turbo" in ids
     assert "sensevoice-small" in ids
-    assert all(s.phase_key.startswith(("asr:", "mt:")) for s in specs)
+    assert all(s.phase_key.startswith(("asr:", "translate:")) for s in specs)
+    # SỬA SAU KHI SHIP (R28): bản đầu khẳng định ("asr:", "mt:") — không thể đỏ với giá trị
+    # dựng từ `kind`. Và phải thêm test liên module: phase_key == phase_of(job_type, id)
+    # với cặp (asr, asr) và (mt, translate) trên registry đã ship.
     # Moonshine KHÔNG được có mặt: nó không sinh timestamp (spec §6)
     assert not any("moonshine" in s.id.lower() for s in specs)
 ```
@@ -2397,8 +2400,17 @@ class EngineSpec:
 
     @property
     def phase_key(self) -> str:
-        """Khoá giai đoạn của hàng đợi. Phải khớp `job_state.phase_of`."""
-        return f"{self.kind}:{self.id}"
+        """Khoá giai đoạn của hàng đợi. Phải khớp `job_state.phase_of`.
+
+        SỬA SAU KHI SHIP (R28). Bản đầu trả `f"{self.kind}:{self.id}"` ⇒ `mt:qwen2.5-7b`,
+        nhưng loại job dịch là `translate` nên khoá mà `jobs.phase` lưu là
+        `translate:qwen2.5-7b` — LỆCH cả 4 engine MT (ASR thì khớp, nên trông như đúng).
+        Uỷ quyền cho `phase_of` để hai bên không thể trôi khỏi nhau lần nữa.
+        Cần ở đầu module: `from app.domain.job_state import phase_of` (job_state không
+        import gì ⇒ không có vòng; guard chỉ ràng buộc `app/domain/**`) và
+        `_JOB_TYPE_OF_KIND = {"asr": "asr", "mt": "translate"}`.
+        """
+        return phase_of(_JOB_TYPE_OF_KIND[self.kind], self.id)
 
 
 def of_kind(specs: Iterable[EngineSpec], kind: str) -> list[EngineSpec]:
@@ -6345,9 +6357,17 @@ git commit -m "chore(backend): script cai dat + smoke test model that + README"
 (hành vi thật của GĐ1a, không phải chỗ trống).
 
 **Nhất quán kiểu:** `Segment` dùng `t` cho bản dịch (khớp JSON §5.2) và `translation` chỉ là
-tên cũ trong ghi chú — **không** xuất hiện trong code. `phase_of` ở `domain/job_state.py` và
-`EngineSpec.phase_key` ở `registry.py` phải cho cùng chuỗi; T8 có test `phase_key` và T3 có
-test `phase_of` — cả hai đều dùng tiền tố `asr:`/`mt:`.
+tên cũ trong ghi chú — **không** xuất hiện trong code.
+
+> **ĐÍNH CHÍNH (R28).** Bản đầu của đoạn này ghi: *"`phase_of` ở `domain/job_state.py` và
+> `EngineSpec.phase_key` ở `registry.py` phải cho cùng chuỗi … cả hai đều dùng tiền tố `asr:`/`mt:`"*
+> — **SAI**, và chính câu đó đã che mất một lỗi thật. `phase_key` bản đầu trả `f"{kind}:{id}"` với
+> `kind ∈ {"asr","mt"}`, còn khoá hàng đợi thật do `phase_of(job_type, engine)` sinh ra với
+> `job_type ∈ {ingest, asr, translate, export}` — **loại job dịch là `translate`, không phải `mt`**.
+> ⇒ Lệch cả 4 engine MT; 4 engine ASR khớp nên hợp đồng trông như đang đúng nếu chỉ thử với ASR.
+> Đúng ra phải viết: **`phase_key` phải UỶ QUYỀN cho `phase_of`**, chứ không phải "cùng dùng một tiền tố".
+> Đã sửa ở T8 và trong mục §7.2 của spec. **Bài học:** "hai bên dùng cùng quy ước" là khẳng định
+> phải **kiểm bằng test liên module**, không phải bằng cách đọc hai đoạn code cạnh nhau.
 
 **Hai task đã sửa so với spec, có ghi chú tại chỗ:** thêm `domain/subtitle_format.py` (T14) và
 `api/deps.py` (T15); thêm `Repos.list_sources()` (T15 Step 5) thay vì để route chọc vào

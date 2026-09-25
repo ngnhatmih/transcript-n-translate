@@ -455,10 +455,19 @@ Worker giữ `current_phase`. Vòng lặp:
 **"Giai đoạn" là cặp (loại job, engine), không phải `asr`/`mt`:**
 
 ```
-asr:fw-large-v3-turbo     mt:ollama:qwen2.5-7b
-asr:sensevoice-small      mt:ollama:hy-mt-1.5-7b
-                          mt:inprocess:opus-mt
+asr:fw-large-v3-turbo        translate:qwen2.5-7b
+asr:sensevoice-small         translate:hy-mt-1.5-7b
+ingest:-      export:-       translate:opus-mt
 ```
+
+> **ĐÍNH CHÍNH (R28).** Bản đầu của mục này ghi nhãn minh hoạ là `mt:ollama:qwen2.5-7b` — **sai hai
+> đường**. (a) Loại job dịch viết là **`translate`**, không phải `mt`: `Job.type ∈ {ingest, asr,
+> translate, export}` và khoá do `phase_of(job_type, engine)` sinh ra, nên khoá thật của MT là
+> `translate:<engine-id>`. (b) Nhãn có thêm `runtime` (`ollama`/`inprocess`) là **thừa** — id engine
+> đã phân biệt runtime rồi, nên khoá chỉ có hai phần.
+> Lỗi này đã lan vào code: `EngineSpec.phase_key` trả `f"{kind}:{id}"` ⇒ `mt:<id>`, **lệch cả 4 engine
+> MT** so với khoá mà `jobs.phase` thực sự lưu. Nguy hiểm ở chỗ 4 engine ASR **khớp đúng**, nên hợp
+> đồng trông như đang được thoả nếu chỉ thử với ASR. Đã sửa ở T8 (uỷ quyền cho `phase_of`).
 
 Vì người dùng đổi được model **từng job**, nếu file A dùng turbo và file B dùng SenseVoice thì gom theo `asr` vẫn phải swap. Gom theo cặp (loại, model) thì số lần swap = **số cặp khác nhau đang chờ**, không phải số job.
 
