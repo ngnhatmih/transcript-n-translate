@@ -129,6 +129,53 @@ def test_prepare_model_cache_env_respects_a_choice_made_by_the_user(monkeypatch,
     assert os.environ["HF_HOME"] == str(chosen), "setdefault, không ghi đè"
 
 
+def _asr_spec(engine_id: str, model_ref: str):
+    from app.registry import EngineSpec
+    return EngineSpec(id=engine_id, label=engine_id, kind="asr",
+                      runtime="inprocess", model_ref=model_ref, vram_mb=100,
+                      langs=("zh", "en"), capabilities={}, opts={})
+
+
+def test_build_engine_dispatches_by_engine_id_like_production(monkeypatch, tmp_path):
+    """I-2 · script phải dựng ĐÚNG adapter theo `spec.id`, không luôn faster-whisper.
+
+    `smoke_asr.py` là công cụ nghiệm thu model THẬT duy nhất của dự án, và nó
+    nhận BẤT KỲ engine id nào của registry. Bản cũ luôn trả `FasterWhisperEngine`,
+    nên `smoke_asr.py clip.mp4 zh sensevoice-small` đưa `model_ref` của SenseVoice
+    cho faster-whisper rồi báo THẤT BẠI vì lý do sai. Bài này so trực tiếp với
+    `app.main:_engine_factory` — chỗ dispatch thật — nên hai bên không thể trôi
+    khỏi nhau lần nữa (cùng khuôn với `test_model_cache_env.py:63-93`).
+    """
+    smoke = _load_smoke()
+    monkeypatch.setenv("HF_HOME", str(tmp_path / "models"))
+    monkeypatch.delenv("MODELSCOPE_CACHE", raising=False)
+
+    from app.adapters.asr.faster_whisper import FasterWhisperEngine
+    from app.adapters.asr.sensevoice import SenseVoiceEngine
+    from app.main import _engine_factory
+
+    fw = _asr_spec("fw-tiny", "tiny")
+    sv = _asr_spec("sensevoice-small", "iic/SenseVoiceSmall")
+
+    assert isinstance(smoke.build_engine(fw), FasterWhisperEngine)
+    assert isinstance(smoke.build_engine(sv), SenseVoiceEngine), (
+        "engine id 'sensevoice-small' phải ra SenseVoiceEngine; trả faster-whisper "
+        "nghĩa là smoke test báo hỏng vì dựng SAI adapter"
+    )
+    assert type(smoke.build_engine(fw)) is type(_engine_factory(fw))
+    assert type(smoke.build_engine(sv)) is type(_engine_factory(sv))
+
+
+def test_build_engine_refuses_an_id_it_cannot_faithfully_build(monkeypatch, tmp_path):
+    """I-2 · id không có adapter phải bị TỪ CHỐI, không âm thầm thử faster-whisper."""
+    smoke = _load_smoke()
+    monkeypatch.setenv("HF_HOME", str(tmp_path / "models"))
+    monkeypatch.delenv("MODELSCOPE_CACHE", raising=False)
+
+    with pytest.raises(KeyError, match="khong-co-adapter"):
+        smoke.build_engine(_asr_spec("khong-co-adapter", "whatever"))
+
+
 def test_build_engine_passes_the_cache_as_download_root(monkeypatch, tmp_path):
     """Thiếu `download_root` thì model ~1,6 GB rơi vào cache mặc định ổ C:."""
     smoke = _load_smoke()

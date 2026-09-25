@@ -14,11 +14,14 @@ Hai ruling được cài ở đây:
   tiếng Việt. Thiếu `force_utf8_stdout()` thì lần chạy THẬT đầu tiên ném
   `UnicodeEncodeError` ngay dòng đầu có ký tự ngoài cp1252 (`→`, `⚠`). pytest
   không thấy lỗi này vì nó tự bắt UTF-8 — chỉ console mới lộ.
-* **R60** — đây là chỗ gọi `FasterWhisperEngine` **thứ hai** (chỗ kia là
-  `app.main:_engine_factory`). Thiếu `download_root` thì model ~1,6 GB rơi vào
-  cache mặc định trên ổ C:. Và vì `huggingface_hub` đọc `HF_HOME` **ngay lúc
-  import**, biến môi trường phải được đặt TRƯỚC khi chạm `faster_whisper` —
-  `download_root=` một mình chưa đủ.
+* **R60** — chỗ dựng engine đi qua đúng hàm dispatch của production
+  (`app.adapters.asr.factory.engine_for`, cũng là thứ `app.main:_engine_factory`
+  gọi). Thiếu `download_root` thì model ~1,6 GB rơi vào cache mặc định trên ổ C:.
+  Và vì `huggingface_hub` đọc `HF_HOME` **ngay lúc import**, biến môi trường phải
+  được đặt TRƯỚC khi chạm `faster_whisper` — `download_root=` một mình chưa đủ.
+* **I-2** — bản trước tự dựng `FasterWhisperEngine` cho MỌI engine id, nên
+  `sensevoice-small` bị chạy bằng sai adapter và script báo hỏng sai. Dispatch
+  dùng chung với production là cách duy nhất để hai bên không trôi khỏi nhau.
 
 CHƯA kiểm chứng (R62): hình dạng THẬT của khoá `timestamp` mà FunASR trả về chỉ
 xác nhận được bằng một lần chạy `SenseVoiceEngine` thật (`funasr` không có trong
@@ -72,11 +75,17 @@ def prepare_model_cache_env() -> str:
 
 
 def build_engine(spec):
-    """Dựng engine ĐÚNG cách `app.main:_engine_factory` dựng nó (R60)."""
-    cache_root = prepare_model_cache_env()  # TRƯỚC khi chạm faster_whisper
-    from app.adapters.asr.faster_whisper import FasterWhisperEngine
+    """Dựng engine ĐÚNG cách `app.main:_engine_factory` dựng nó (R60, I-2).
 
-    return FasterWhisperEngine(spec, download_root=cache_root)
+    Đi qua CÙNG một hàm dispatch (`app.adapters.asr.factory.engine_for`) thay vì
+    tự dựng `FasterWhisperEngine`: bản cũ luôn trả faster-whisper cho MỌI id, nên
+    `smoke_asr.py clip.mp4 zh sensevoice-small` báo hỏng vì dựng sai adapter —
+    đúng thứ công cụ này tồn tại để đo.
+    """
+    cache_root = prepare_model_cache_env()  # TRƯỚC khi chạm faster_whisper
+    from app.adapters.asr.factory import engine_for
+
+    return engine_for(spec, download_root=cache_root)
 
 
 def main() -> int:
