@@ -82,7 +82,7 @@ def test_domain_has_no_cross_layer_relative_imports():
     )
 
 
-def test_the_guard_itself_can_fail(tmp_path):
+def test_the_guard_itself_can_fail():
     """Kiểm tra cái lưới: nếu domain/ có file import torch thì test phải bắt được."""
     rogue = DOMAIN / "_rogue_probe.py"
     rogue.write_text("import torch\n", encoding="utf-8")
@@ -114,40 +114,43 @@ def test_guard_catches_forbidden_import_in_nested_package_init():
     """`__init__.py` cũng nằm trong `domain/**` nên phải bị quét.
 
     Dùng gói con tạm để không bao giờ đụng vào `app/domain/__init__.py` thật.
+    Thư mục được dựng bằng `exist_ok=True` và việc dựng nằm TRONG `try`, nên
+    một lần chạy bị ngắt giữa đường không thể khoá cứng cái lưới: rác còn lại
+    của lần trước bị ghi đè rồi bị `finally` dọn sạch.
     """
     pkg = DOMAIN / "_guard_probe"
-    pkg.mkdir()
-    (pkg / "__init__.py").write_text(
-        "from app.adapters.persist import sqlite_repos\n", encoding="utf-8"
-    )
     try:
+        pkg.mkdir(parents=True, exist_ok=True)
+        (pkg / "__init__.py").write_text(
+            "from app.adapters.persist import sqlite_repos\n", encoding="utf-8"
+        )
         with pytest.raises(AssertionError):
             test_domain_has_no_forbidden_absolute_imports()
     finally:
-        shutil.rmtree(pkg)
+        shutil.rmtree(pkg, ignore_errors=True)
 
 
 def test_guard_flags_bare_import_app():
     """`import app` là import cả tầng ứng dụng — phải bị chặn."""
     rogue = DOMAIN / "_guard_probe_bare_app.py"
-    rogue.write_text("import app\n", encoding="utf-8")
     try:
+        rogue.write_text("import app\n", encoding="utf-8")
         with pytest.raises(AssertionError):
             test_domain_has_no_forbidden_absolute_imports()
     finally:
-        rogue.unlink()
+        rogue.unlink(missing_ok=True)
 
 
 def test_guard_allows_safe_app_modules():
     """Chống bắt nhầm: `app.config`, `app.domain.*`, `app_helpers` đều hợp lệ."""
     safe = DOMAIN / "_guard_probe_safe.py"
-    safe.write_text(
-        "from app.config import DB_PATH\n"
-        "from app.domain.models import Segment\n"
-        "import app_helpers\n",
-        encoding="utf-8",
-    )
     try:
+        safe.write_text(
+            "from app.config import DB_PATH\n"
+            "from app.domain.models import Segment\n"
+            "import app_helpers\n",
+            encoding="utf-8",
+        )
         test_domain_has_no_forbidden_absolute_imports()
     finally:
-        safe.unlink()
+        safe.unlink(missing_ok=True)
