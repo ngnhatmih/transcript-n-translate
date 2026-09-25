@@ -116,6 +116,19 @@ def main() -> int:
     print(f"[3/3] {len(segments)} đoạn trong {elapsed:.1f}s "
           f"| RTF = {rtf:.3f}  <-- ghi số này vào eval/report.md")
 
+    # R62/R68: 0 đoạn là THẤT BẠI, không phải "chạy được". Bản trước in
+    # `OK` rồi thoát 0 với `0 đoạn | RTF = nan`, nên nó báo xanh cho đúng thất
+    # bại mà nó tồn tại để bắt: nghiệm thu bước 5 đòi "ít nhất 1 đoạn có
+    # start/end". Không có đoạn nghĩa là VAD bỏ hết hoặc giải mã hỏng — im lặng
+    # ở đây nguy hiểm hơn hẳn một lần hỏng ồn ào.
+    if not segments:
+        print("THẤT BẠI: 0 đoạn — đường ống không sinh transcript nào. "
+              "KHÔNG tính là smoke test đạt (xem R62/R68).")
+        print(f"      engine={spec.id} model={spec.model_ref} "
+              f"audio={audio.name} lang={lang} cache={cache_root}")
+        engine.release()
+        return 1
+
     for seg in segments[:5]:
         flag = " ⚠NGHI NGỜ" if seg.suspect else ""
         words = "có word-ts" if seg.words else "không word-ts"

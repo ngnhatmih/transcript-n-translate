@@ -1,4 +1,4 @@
-"""Hợp đồng của `scripts/smoke_asr.py` (R17, R60).
+"""Hợp đồng của `scripts/smoke_asr.py` (R17, R60, R62/R68).
 
 Script này tải model ~1,6 GB và cần GPU nên KHÔNG thuộc bộ pytest ⇒ nó không có
 RED kiểu "chạy script rồi đỏ". Hai thứ nó PHẢI làm thì vẫn kiểm được mà không
@@ -9,6 +9,11 @@ cần model:
 * R60 · đây là chỗ gọi `FasterWhisperEngine` **thứ hai** (cùng họ với
   `main.py:_engine_factory`) và nó từng thiếu `download_root` ⇒ model rơi vào
   cache mặc định trên ổ C:.
+* R62/R68 · **0 đoạn KHÔNG được tính là đạt.** Script này là thứ được dùng để
+  nghiệm thu bước 5 ("ít nhất 1 đoạn có start/end"), mà bản trước in
+  `[3/3] 0 đoạn ... RTF = nan` rồi vẫn in `OK` và thoát 0 — tức là nó báo xanh
+  cho đúng thất bại mà nó tồn tại để bắt. Bài ở dưới lái `main()` bằng một
+  engine giả và đòi mã thoát KHÁC 0, không có dòng `OK`.
 """
 from __future__ import annotations
 
@@ -18,6 +23,8 @@ import os
 import pathlib
 
 import pytest
+
+from app.domain.models import Segment
 
 BACKEND = pathlib.Path(__file__).resolve().parents[1]
 SCRIPT = BACKEND / "scripts" / "smoke_asr.py"
@@ -139,3 +146,79 @@ def test_build_engine_passes_the_cache_as_download_root(monkeypatch, tmp_path):
     assert engine.download_root == str(chosen), (
         "smoke_asr.py là chỗ gọi THỨ HAI và cũng phải truyền download_root"
     )
+
+
+# ---------------------------------------------------------------------------
+# R62/R68 — 0 đoạn là THẤT BẠI, không phải "OK"
+# ---------------------------------------------------------------------------
+
+class _StubEngine:
+    """Engine giả: `transcribe()` trả ĐÚNG danh sách đoạn được dặn.
+
+    Không nạp weight nào, nên bài này kiểm được phán quyết của `main()` mà
+    không cần GPU — đúng thứ đã hỏng ở vòng trước (`0 đoạn` + `OK` + thoát 0).
+    """
+
+    def __init__(self, segments):
+        self.segments = list(segments)
+        self.loaded = False
+        self.released = False
+
+    def _load(self):
+        self.loaded = True
+
+    def transcribe(self, audio_path, lang):
+        return list(self.segments)
+
+    def release(self):
+        self.released = True
+
+
+def _drive_main(monkeypatch, tmp_path, segments):
+    """Lái `main()` tới hết đường bóc băng, không chạm model thật."""
+    from app.registry import EngineSpec
+
+    smoke = _load_smoke()
+    audio = tmp_path / "silence.wav"
+    audio.write_bytes(b"RIFF")
+    monkeypatch.setattr(smoke.sys, "argv", ["smoke_asr.py", str(audio), "zh", "fw-tiny"])
+
+    engine = _StubEngine(segments)
+    monkeypatch.setattr(smoke, "build_engine", lambda spec: engine)
+    # `main()` import hai hàm này BÊN TRONG thân hàm, nên phải vá ở module nguồn.
+    monkeypatch.setattr("app.adapters.registry_file.load_registry", lambda: [])
+    monkeypatch.setattr("app.registry.by_id", lambda specs, engine_id: EngineSpec(
+        id=engine_id, label="FW tiny", kind="asr", runtime="inprocess",
+        model_ref="tiny", vram_mb=200, langs=("zh", "en"),
+        capabilities={}, opts={},
+    ))
+    return smoke, engine
+
+
+def test_smoke_script_fails_loudly_with_zero_segments(monkeypatch, tmp_path, capsys):
+    """R62/R68 · đúng ca đã lọt: 0 đoạn, RTF = nan, và script vẫn báo đạt."""
+    smoke, engine = _drive_main(monkeypatch, tmp_path, segments=[])
+    code = smoke.main()
+    out = capsys.readouterr().out
+
+    assert code != 0, (
+        "0 đoạn phải làm smoke test THẤT BẠI (mã thoát khác 0); bản trước trả 0 "
+        "và in OK, nên nó không cưỡng chế được nghiệm thu 'ít nhất 1 đoạn'"
+    )
+    assert "OK" not in out, f"0 đoạn thì KHÔNG được có dòng OK:\n{out}"
+    assert "0 đoạn" in out or "không sinh" in out, (
+        f"phải nói rõ vì sao hỏng:\n{out}"
+    )
+    assert engine.released, "engine vẫn phải được giải phóng trên nhánh hỏng"
+
+
+def test_smoke_script_still_reports_ok_with_at_least_one_segment(monkeypatch, tmp_path, capsys):
+    """Chiều ngược lại: có đoạn thật thì vẫn `OK` + thoát 0."""
+    segments = [Segment(i=0, start=0.0, end=2.5, text="xin chào")]
+    smoke, _engine = _drive_main(monkeypatch, tmp_path, segments=segments)
+    code = smoke.main()
+    out = capsys.readouterr().out
+
+    assert code == 0, f"có đoạn thì phải thoát 0:\n{out}"
+    assert "OK" in out, f"có đoạn thì phải có dòng OK:\n{out}"
+    assert "1 đoạn" in out, f"phải in số đoạn thật:\n{out}"
