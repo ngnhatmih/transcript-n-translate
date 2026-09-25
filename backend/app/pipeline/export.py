@@ -18,6 +18,22 @@ from app.ports.repos import Repos
 
 FORMATS = {"srt": to_srt, "vtt": to_vtt, "ass": to_ass}
 
+#: Đuôi `Content-Type` cho từng định dạng. Ở đây chứ không ở route: danh sách
+#: này đi cùng `FORMATS`, và `application/x-subrip` KHÔNG phải `text/plain` —
+#: một chỗ khai sai thì trình phát tải về rồi không nhận ra phụ đề.
+MEDIA_TYPES = {"srt": "application/x-subrip", "vtt": "text/vtt",
+               "ass": "text/x-ssa"}
+
+
+def artifact_name(stem: str, fmt: str, *, translated: bool) -> str:
+    """Tên tệp phụ đề trên đĩa. MỘT nguồn cho cả handler lẫn route tải về.
+
+    `translated` (payload có bản dịch) thêm `.vi` vào TRƯỚC đuôi định dạng. Hai
+    chỗ tự ghép tên là hai chỗ trôi khỏi nhau: handler ghi `<stem>.vi.srt` còn
+    route đi tìm `<stem>.srt` thì người dùng nhận 410 cho một tệp nằm ngay đó.
+    """
+    return f"{stem}{'.vi' if translated else ''}.{fmt}"
+
 
 def _write_utf8(path: pathlib.Path, text: str) -> None:
     """Ghi UTF-8 với kết thúc dòng CỐ ĐỊNH `\\n`.
@@ -64,8 +80,7 @@ class ExportHandler:
         raw_stem = payload.get("stem")
         stem = safe_basename(str(raw_stem) if raw_stem else None,
                              fallback=f"transcript-{transcript_id}")
-        suffix = ".vi" if translations is not None else ""
-        target = self._out_dir / f"{stem}{suffix}.{fmt}"
+        target = self._out_dir / artifact_name(stem, fmt, translated=translations is not None)
         _write_utf8(target, content)
 
         index = target.with_suffix(target.suffix + ".json")

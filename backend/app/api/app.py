@@ -44,10 +44,13 @@ def create_app(*, repos, specs: list[EngineSpec], media_dir, out_dir,
         allow_headers=["*"],
     )
 
-    from app.api import routes_jobs, routes_media, routes_registry, routes_sources
+    from app.api import (routes_export, routes_jobs, routes_media,
+                         routes_registry, routes_sources, routes_transcripts)
 
     app.include_router(routes_registry.router)
     app.include_router(routes_sources.router)
     app.include_router(routes_media.router)
+    app.include_router(routes_transcripts.router)
+    app.include_router(routes_export.router)
     app.include_router(routes_jobs.router)
     return app

@@ -150,6 +150,27 @@ class Translation:
 
 
 @dataclass
+class TranslationSummary:
+    """Một hàng `translations` ĐÃ BỎ `segments`.
+
+    Route transcript chỉ cần biết bản dịch nào thuộc transcript nào và nó dịch
+    từ version mấy để tính `stale`. Kéo theo `segments` là giải mã JSON của cả
+    một bản dịch đầy đủ cho mỗi hàng trong danh sách — đúng thứ
+    `list_transcripts()` cố tình tránh ở route danh sách.
+
+    Không phải `Translation` rút gọn: `Translation.segments` là trường BẮT BUỘC,
+    nên nhét `[]` vào đó là bịa ra một bản dịch rỗng.
+    """
+    id: int | None
+    transcript_id: int
+    transcript_version: int
+    engine: str
+    target_lang: str
+    prompt_version: str
+    created_at: str = ""
+
+
+@dataclass
 class Job:
     id: int | None
     workspace: int

@@ -9,7 +9,7 @@ from typing import Iterable, Iterator
 from app.domain import job_state as js
 from app.domain.models import (
     Job, Segment, Source, Term, Transcript, Translation,
-    segments_from_json, segments_to_json,
+    TranslationSummary, segments_from_json, segments_to_json,
 )
 from app.ports.clock import Clock
 
@@ -192,6 +192,54 @@ class SqliteRepos:
         with self._connect() as conn:
             rows = conn.execute("SELECT * FROM translations ORDER BY id DESC").fetchall()
         return [self._row_to_translation(r) for r in rows]
+
+    def add_translation(self, *, transcript_id: int, transcript_version: int,
+                        engine: str, target_lang: str, segments: list[Segment],
+                        prompt_version: str, glossary_version: int | None = None,
+                        qa_issues: list[str] | None = None,
+                        tokens_in: int | None = None, tokens_out: int | None = None,
+                        duration_ms: int | None = None) -> int:
+        """Ghi một bản dịch.
+
+        `transcript_version` là version của transcript mà bản dịch này dịch TỪ —
+        không phải version hiện tại của transcript. Đây chính là giá trị mà
+        `is_stale()` so với version hiện tại; ghi nhầm thành "version hiện tại"
+        thì mọi bản dịch vừa dịch xong đều trông như đã lỗi thời.
+        """
+        with self._connect() as conn:
+            cur = conn.execute(
+                "INSERT INTO translations(transcript_id, transcript_version, engine,"
+                " target_lang, segments, prompt_version, glossary_version, qa_issues,"
+                " tokens_in, tokens_out, duration_ms, created_at)"
+                " VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+                (transcript_id, transcript_version, engine, target_lang,
+                 segments_to_json(segments), prompt_version, glossary_version,
+                 json.dumps(qa_issues or [], ensure_ascii=False), tokens_in,
+                 tokens_out, duration_ms, self._clock.now_iso()),
+            )
+            return int(cur.lastrowid)
+
+    def list_translations_for_transcript(
+            self, transcript_id: int) -> list[TranslationSummary]:
+        """Tóm tắt bản dịch của MỘT transcript, mới nhất trước.
+
+        Cố tình không `SELECT *`: cột `segments` là cả một bản dịch đã giải mã
+        JSON, mà route chỉ cần biết bản dịch dịch từ version nào để tính `stale`.
+        Danh sách này còn bị gọi cho TỪNG transcript ở route danh sách.
+        """
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT id, transcript_id, transcript_version, engine, target_lang,"
+                " prompt_version, created_at FROM translations"
+                " WHERE transcript_id=? ORDER BY id DESC",
+                (transcript_id,),
+            ).fetchall()
+        return [TranslationSummary(
+            id=r["id"], transcript_id=r["transcript_id"],
+            transcript_version=r["transcript_version"], engine=r["engine"],
+            target_lang=r["target_lang"], prompt_version=r["prompt_version"],
+            created_at=r["created_at"],
+        ) for r in rows]
 
     # ---------- jobs ----------
     def add_job(self, job: Job) -> int:

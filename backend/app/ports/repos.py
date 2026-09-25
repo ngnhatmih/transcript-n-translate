@@ -4,7 +4,7 @@ from __future__ import annotations
 from typing import Protocol
 
 from app.domain.models import (CallStats, Job, Segment, Source, Term, Transcript,
-                               Translation)
+                               Translation, TranslationSummary)
 
 
 class Repos(Protocol):
@@ -27,6 +27,8 @@ class Repos(Protocol):
 
     # translations
     def list_translations(self) -> list[Translation]: ...
+    def list_translations_for_transcript(
+        self, transcript_id: int) -> list[TranslationSummary]: ...
 
     # jobs
     def add_job(self, job: Job) -> int: ...
