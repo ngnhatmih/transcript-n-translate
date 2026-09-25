@@ -76,6 +76,20 @@ class TranscribeHandler:
         report(0.15, f"bóc băng {audio.name} (lang={lang})")
         segments = engine.transcribe(str(audio), lang)
 
+        # R68, và cố ý đặt ở ĐÂY chứ không trong từng adapter: guard này phải
+        # đúng cho MỌI engine. `SenseVoiceEngine` đã có guard riêng của nó
+        # (adapters/asr/sensevoice.py), nhưng engine MẶC ĐỊNH của GĐ1a —
+        # `fw-large-v3-turbo` — là `FasterWhisperEngine`, và nó không có guard
+        # nào: audio im lặng (VAD bỏ hết) trả `[]` mà không ném, nên job thành
+        # `done` kèm một transcript 0 đoạn. Một transcript rỗng trông y hệt một
+        # lần bóc băng thành công mà không có tiếng nói, nên nó giấu mất lỗi
+        # giải mã/thiếu model. Thà hỏng ồn ào còn hơn (xem R62).
+        if not segments:
+            raise RuntimeError(
+                f"{job.engine}: không có đoạn nào — audio im lặng hay giải mã hỏng. "
+                f"KHÔNG lưu transcript rỗng (R68)."
+            )
+
         report(0.9, f"đã có {len(segments)} đoạn")
         transcript_id = self._repos.add_transcript(
             source_id=source_id, engine=job.engine or "", lang=lang, segments=segments,
