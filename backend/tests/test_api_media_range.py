@@ -134,6 +134,24 @@ def test_range_ending_past_eof_is_clamped(client):
     assert resp.headers["content-range"] == "bytes 1000-1023/1024"
 
 
+def test_a_range_spanning_several_chunks_is_served_whole(client):
+    """Một khối là 256 KB; khoảng 2,5 khối phải ra ĐỦ byte và đúng thứ tự.
+
+    Vòng lặp chỉ đọc một khối (hoặc quên `seek`) vẫn qua được mọi test nhỏ ở
+    trên vì tệp 1024 byte nằm gọn trong một khối.
+    """
+    big = bytes((i * 7 + 3) % 251 for i in range(600 * 1024 + 123))
+    path = client.media / "to.mp4"
+    path.write_bytes(big)
+    sid = _add_source(client, path)
+
+    start, end = 1024, 550 * 1024
+    resp = client.get(f"/api/media/{sid}", headers={"Range": f"bytes={start}-{end}"})
+    assert resp.status_code == 206, resp.text
+    assert resp.content == big[start:end + 1]
+    assert resp.headers["content-length"] == str(end - start + 1)
+
+
 def test_unsatisfiable_range_returns_416_with_total(client):
     resp = client.get(f"/api/media/{client.source_id}", headers={"Range": "bytes=5000-6000"})
     assert resp.status_code == 416, resp.text
@@ -352,3 +370,20 @@ def test_resolve_within_follows_a_link_out_of_the_root(tmp_path):
 
     with pytest.raises(PathOutsideRoot):
         resolve_within(root, link / "secret.mp4")
+
+
+# --------------------------------------------------------------------------
+# Hợp đồng về luồng: không đọc tệp trên event loop
+# --------------------------------------------------------------------------
+
+def test_the_media_endpoint_is_sync_so_fastapi_runs_it_in_a_threadpool():
+    """`async def` + `open()`/`seek()`/`stat()` chặn = event loop đứng cho MỌI
+    request khác trong lúc đọc đĩa. Endpoint phải là `def` (FastAPI đẩy sang
+    threadpool), và thân 206 lặp trong threadpool qua `StreamingResponse`.
+    """
+    import inspect
+
+    from app.api.routes_media import get_media
+
+    assert not inspect.iscoroutinefunction(get_media), (
+        "endpoint media phải là `def`, không phải `async def`")
