@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import contextlib
 import json
 import pathlib
 import sqlite3
-from typing import Iterable
+from typing import Iterable, Iterator
 
 from app.domain import job_state as js
 from app.domain.models import (
@@ -24,8 +25,16 @@ class NotFound(LookupError):
 class SqliteRepos:
     """Hiện thực Repos trên SQLite.
 
-    Một kết nối cho mỗi luồng gọi. GĐ1a chỉ có một worker + các request FastAPI
+    Một kết nối cho mỗi LẦN GỌI (không phải mỗi luồng): `_connect()` mở mới rồi
+    bỏ đi khi phương thức trả về. GĐ1a chỉ có một worker + các request FastAPI
     đọc, nên khoá ghi ở mức kết nối là đủ.
+
+    CẢNH BÁO: `isolation_level=None` đặt kết nối vào chế độ autocommit, nên
+    `with self._connect() as conn:` KHÔNG mở giao dịch và KHÔNG thể rollback —
+    mỗi câu lệnh tự commit ngay khi chạy. Vì vậy phương thức nào ghi nhiều hơn
+    một câu lệnh PHẢI tự bọc `with self._tx(conn):` (xem `upsert_term` và
+    `update_transcript_segments`); nếu không, một lần chết giữa chừng sẽ để dữ
+    liệu lệch nhau mà không có gì cuốn lại.
     """
 
     def __init__(self, db_path: str | pathlib.Path, *, clock: Clock) -> None:
@@ -39,6 +48,25 @@ class SqliteRepos:
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("PRAGMA foreign_keys=ON")
         return conn
+
+    @contextlib.contextmanager
+    def _tx(self, conn: sqlite3.Connection) -> Iterator[sqlite3.Connection]:
+        """Giao dịch tường minh: `BEGIN IMMEDIATE` ... `COMMIT`, lỗi thì `ROLLBACK`.
+
+        Cần thiết vì `isolation_level=None` khiến `with conn:` chỉ là no-op:
+        không có `BEGIN` thì mỗi câu lệnh tự commit, nên đọc-rồi-ghi không còn
+        là một khối nguyên tử và một lần chết giữa hai câu lệnh để lại dữ liệu
+        lệch. `IMMEDIATE` (không phải `DEFERRED`) để khoá ghi được lấy ngay lúc
+        mở, tránh hai người ghi cùng đọc một giá trị rồi cùng ghi đè nhau.
+        """
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            yield conn
+            conn.execute("COMMIT")
+        except BaseException:
+            if conn.in_transaction:
+                conn.execute("ROLLBACK")
+            raise
 
     def init_schema(self) -> None:
         pathlib.Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
@@ -112,15 +140,20 @@ class SqliteRepos:
         """Ghi segments và TĂNG version. Trả về version mới.
 
         Version tăng là cơ chế duy nhất khiến bản dịch cũ thành 'lỗi thời'.
+
+        Đọc version rồi ghi version+1 phải nằm trong CÙNG một giao dịch: nếu
+        không, hai lời gọi song song cùng đọc version N và cùng ghi N+1, mất một
+        lần tăng — và một bản dịch đáng lẽ bị coi là lỗi thời sẽ không bị.
         """
         with self._connect() as conn:
-            row = conn.execute("SELECT version FROM transcripts WHERE id=?",
-                               (transcript_id,)).fetchone()
-            if row is None:
-                raise NotFound(f"transcript {transcript_id} không tồn tại")
-            new_version = int(row["version"]) + 1
-            conn.execute("UPDATE transcripts SET segments=?, version=? WHERE id=?",
-                         (segments_to_json(segments), new_version, transcript_id))
+            with self._tx(conn):
+                row = conn.execute("SELECT version FROM transcripts WHERE id=?",
+                                   (transcript_id,)).fetchone()
+                if row is None:
+                    raise NotFound(f"transcript {transcript_id} không tồn tại")
+                new_version = int(row["version"]) + 1
+                conn.execute("UPDATE transcripts SET segments=?, version=? WHERE id=?",
+                             (segments_to_json(segments), new_version, transcript_id))
             return new_version
 
     def set_transcript_status(self, transcript_id: int, status: str) -> None:
@@ -162,7 +195,12 @@ class SqliteRepos:
     def list_jobs(self, *, states: tuple[str, ...] | None = None) -> list[Job]:
         sql = "SELECT * FROM jobs"
         params: tuple = ()
-        if states:
+        if states is not None:
+            if not states:
+                # Lọc theo tập rỗng nghĩa là KHÔNG trạng thái nào khớp -> rỗng.
+                # (`if states:` cũ trả về TẤT CẢ job; còn `IN ()` là cú pháp sai
+                # trong SQLite nên không thể nhét thẳng tập rỗng vào IN.)
+                return []
             sql += f" WHERE state IN ({','.join('?' * len(states))})"
             params = tuple(states)
         sql += " ORDER BY id"
@@ -256,24 +294,43 @@ class SqliteRepos:
     # ---------- glossary / settings / calls ----------
     def upsert_term(self, *, lang: str, term: str, translation: str,
                     note: str | None, approved: bool) -> int:
+        """Ghi một thuật ngữ và TĂNG `glossary_version`, trong CÙNG giao dịch.
+
+        Hai câu lệnh phải nguyên tử với nhau: nếu hàng glossary landed mà
+        `glossary_version` không tăng, glossary và version lệch nhau — mà
+        `glossary_version` chính là thứ quyết định một bản dịch có lỗi thời hay
+        không.
+
+        Trả về id của hàng: `RETURNING id` cho id đúng ở cả nhánh INSERT lẫn
+        nhánh `ON CONFLICT ... DO UPDATE` (nếu trả `lastrowid`, nhánh update cho
+        ra 0 dù hàng có id thật).
+        """
         with self._connect() as conn:
-            cur = conn.execute(
-                "INSERT INTO glossary(lang, term, translation, note, approved, created_at)"
-                " VALUES(?,?,?,?,?,?)"
-                " ON CONFLICT(lang, term) DO UPDATE SET translation=excluded.translation,"
-                " note=excluded.note, approved=excluded.approved",
-                (lang, term, translation, note, int(approved), self._clock.now_iso()),
-            )
-            conn.execute(
-                "INSERT INTO settings(key, value) VALUES('glossary_version', '1')"
-                " ON CONFLICT(key) DO UPDATE SET value=CAST(CAST(value AS INTEGER)+1 AS TEXT)"
-            )
-            return int(cur.lastrowid or 0)
+            with self._tx(conn):
+                cur = conn.execute(
+                    "INSERT INTO glossary(lang, term, translation, note, approved, created_at)"
+                    " VALUES(?,?,?,?,?,?)"
+                    " ON CONFLICT(lang, term) DO UPDATE SET translation=excluded.translation,"
+                    " note=excluded.note, approved=excluded.approved"
+                    " RETURNING id",
+                    (lang, term, translation, note, int(approved), self._clock.now_iso()),
+                )
+                row = cur.fetchone()
+                if row is None:
+                    raise RuntimeError("upsert_term: RETURNING id không trả về hàng nào")
+                term_id = int(row["id"])
+                conn.execute(
+                    "INSERT INTO settings(key, value) VALUES('glossary_version', '1')"
+                    " ON CONFLICT(key) DO UPDATE SET value=CAST(CAST(value AS INTEGER)+1 AS TEXT)"
+                )
+            return term_id
 
     def list_terms(self, *, lang: str | None = None) -> list[Term]:
         sql = "SELECT * FROM glossary"
         params: tuple = ()
-        if lang:
+        if lang is not None:
+            # `is not None`, không phải `if lang:`: lọc theo chuỗi rỗng là lọc
+            # thật (và phải ra rỗng), không phải "bỏ lọc, trả mọi ngôn ngữ".
             sql += " WHERE lang=?"
             params = (lang,)
         sql += " ORDER BY id"

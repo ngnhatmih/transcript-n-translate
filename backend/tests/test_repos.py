@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import sqlite3
+
 import pytest
 
-from app.adapters.clock_system import SystemClock
+from app.adapters.clock_system import FrozenClock, SystemClock
+from app.adapters.persist import sqlite_repos as sqlite_repos_mod
 from app.adapters.persist.sqlite_repos import SqliteRepos
 from app.domain import job_state as js
 from app.domain.models import Job, Segment
@@ -11,6 +14,36 @@ from app.domain.models import Job, Segment
 @pytest.fixture()
 def repos(tmp_path):
     r = SqliteRepos(tmp_path / "t.db", clock=SystemClock())
+    r.init_schema()
+    return r
+
+
+class InjectedFailure(RuntimeError):
+    """Lỗi do test cố tình tiêm vào giữa hai câu lệnh."""
+
+
+def repos_that_fails_on(tmp_path, monkeypatch, predicate):
+    """Repos mà `execute` ném lỗi khi `predicate(sql)` đúng.
+
+    `SqliteRepos._connect` tự gọi `sqlite3.connect` nên không có khe nào để
+    truyền `factory=` từ ngoài; cách duy nhất là chặn `sqlite3.connect` trong
+    lúc test chạy (monkeypatch tự khôi phục sau test). Dùng `factory=` với lớp
+    con của `sqlite3.Connection` để câu lệnh chỉ nổ ở đúng chỗ đã chọn.
+    """
+    class FailingConn(sqlite3.Connection):
+        def execute(self, sql, *args, **kwargs):
+            if predicate(sql):
+                raise InjectedFailure(f"nổ có chủ đích: {sql.strip()[:48]}")
+            return super().execute(sql, *args, **kwargs)
+
+    real_connect = sqlite3.connect
+
+    def connect(path, **kwargs):
+        kwargs["factory"] = FailingConn
+        return real_connect(path, **kwargs)
+
+    monkeypatch.setattr(sqlite_repos_mod.sqlite3, "connect", connect)
+    r = SqliteRepos(tmp_path / "boom.db", clock=SystemClock())
     r.init_schema()
     return r
 
@@ -37,6 +70,12 @@ def test_update_segments_bumps_version(repos):
 
 
 def test_queue_picks_oldest_of_a_given_phase(repos):
+    # Job cũ NHẤT phải thuộc phase KHÁC. Nếu hiện thực bỏ mệnh đề `phase` khỏi
+    # SQL thì `next_queued_for_phase` sẽ trả về job này (engine sensevoice-small)
+    # và test đỏ — trước đây job cũ nhất tình cờ cũng đúng phase cần tìm nên một
+    # hiện thực hỏng vẫn qua.
+    repos.add_job(Job(id=None, workspace=1, type="asr", engine="sensevoice-small",
+                      phase=js.phase_of("asr", "sensevoice-small"), payload={"source_id": 0}))
     for engine in ("fw-large-v3-turbo", "sensevoice-small", "fw-large-v3-turbo"):
         repos.add_job(Job(id=None, workspace=1, type="asr", engine=engine,
                           phase=js.phase_of("asr", engine), payload={"source_id": 1}))
@@ -64,6 +103,9 @@ def test_mark_running_as_interrupted_at_startup(repos):
     assert repos.get_job(a).state == js.INTERRUPTED
     assert repos.get_job(b).state == js.QUEUED
     assert repos.get_job(a).finished_at is not None
+    # Gọi lần hai phải là no-op: không còn job `running` nào để quét. Task 9 gọi
+    # hàm này lúc khởi động và báo cáo số hàng đã đổi, nên `rowcount` phải đúng.
+    assert repos.mark_running_as_interrupted() == 0
 
 
 def test_illegal_transition_raises(repos):
@@ -117,3 +159,94 @@ def test_settings_roundtrip(repos):
     assert repos.get_setting("auto_forward", default="1") == "1"
     repos.set_setting("auto_forward", "0")
     assert repos.get_setting("auto_forward") == "0"
+
+
+def test_upsert_term_returns_real_id_on_both_paths(repos):
+    # Nhánh INSERT rồi nhánh ON CONFLICT ... DO UPDATE. Trước đây nhánh update trả
+    # `lastrowid` = 0 dù hàng có id thật, nên API glossary trả về id 0.
+    first = repos.upsert_term(lang="zh", term="大模型", translation="a",
+                              note=None, approved=False)
+    second = repos.upsert_term(lang="zh", term="大模型", translation="b",
+                               note=None, approved=True)
+    assert first == 1
+    assert second == 1, "nhánh update phải trả id thật của hàng, không phải 0"
+    assert len(repos.list_terms(lang="zh")) == 1
+    assert repos.glossary_version() == 2
+
+
+def test_list_jobs_with_empty_states_returns_nothing(repos):
+    for _ in range(3):
+        repos.add_job(Job(id=None, workspace=1, type="asr", engine="e",
+                          phase="asr:e", payload={}))
+    assert len(repos.list_jobs()) == 3
+    assert repos.list_jobs(states=()) == [], (
+        "tập trạng thái rỗng nghĩa là 'không khớp gì', không phải 'tất cả'"
+    )
+    assert len(repos.list_jobs(states=(js.QUEUED,))) == 3
+
+
+def test_list_terms_with_empty_lang_filters_instead_of_returning_all(repos):
+    repos.upsert_term(lang="zh", term="t1", translation="a", note=None, approved=False)
+    repos.upsert_term(lang="en", term="t2", translation="b", note=None, approved=False)
+    assert len(repos.list_terms()) == 2
+    assert repos.list_terms(lang="") == [], "chuỗi rỗng là bộ lọc thật, không phải 'bỏ lọc'"
+    assert len(repos.list_terms(lang="zh")) == 1
+
+
+def test_timestamps_come_from_the_injected_clock(tmp_path):
+    """Đồng hồ phải được TIÊM vào, không gọi `datetime.now()` trực tiếp.
+
+    Nếu adapter tự lấy giờ hệ thống thì mốc lưu xuống sẽ không khớp đồng hồ đóng
+    băng và test này đỏ.
+    """
+    clock = FrozenClock("2026-09-25T00:00:00Z")
+    r = SqliteRepos(tmp_path / "c.db", clock=clock)
+    r.init_schema()
+    jid = r.add_job(Job(id=None, workspace=1, type="asr", engine="e",
+                        phase="asr:e", payload={}))
+    assert r.get_job(jid).created_at == "2026-09-25T00:00:00Z"
+    r.set_job_state(jid, js.RUNNING)
+    assert r.get_job(jid).started_at == "2026-09-25T00:00:00Z"
+    clock.advance(90)
+    r.set_job_state(jid, js.DONE)
+    assert r.get_job(jid).finished_at == "2026-09-25T00:01:30Z"
+    sid = r.add_source(kind="file", origin="a", media_path="m", lang="zh")
+    assert r.get_source(sid).created_at == "2026-09-25T00:01:30Z"
+
+
+def test_upsert_term_is_atomic(tmp_path, monkeypatch):
+    """Tiêm lỗi vào câu lệnh THỨ HAI; câu thứ nhất đã chạy thật nên phải bị cuốn theo.
+
+    Không có giao dịch tường minh thì hàng glossary đã autocommit và ở lại, còn
+    `glossary_version` không tăng — đúng cái lệch khiến bản dịch không bị coi là
+    lỗi thời.
+    """
+    r = repos_that_fails_on(
+        tmp_path, monkeypatch,
+        lambda sql: sql.lstrip().upper().startswith("INSERT INTO SETTINGS"),
+    )
+    with pytest.raises(InjectedFailure):
+        r.upsert_term(lang="zh", term="大模型", translation="mô hình lớn",
+                      note=None, approved=True)
+    assert r.list_terms(lang="zh") == [], "hàng glossary đã landed phải bị rollback"
+    assert r.glossary_version() == 0, "version không được tăng khi hàng không landed"
+
+
+def test_update_transcript_segments_is_atomic(tmp_path, monkeypatch):
+    """Nổ ở COMMIT; cả lần đọc version lẫn lần ghi version+1 phải bị cuốn theo.
+
+    Không có giao dịch tường minh thì UPDATE đã autocommit trước khi COMMIT chạy,
+    nên version tăng dù lần ghi đó thất bại.
+    """
+    r = repos_that_fails_on(
+        tmp_path, monkeypatch,
+        lambda sql: sql.strip().upper().startswith("COMMIT"),
+    )
+    sid = r.add_source(kind="file", origin="a", media_path="m", lang="zh")
+    tid = r.add_transcript(source_id=sid, engine="e", lang="zh",
+                           segments=[Segment(i=0, start=0.0, end=1.0, text="a")])
+    with pytest.raises(InjectedFailure):
+        r.update_transcript_segments(tid, [Segment(i=0, start=0.0, end=1.0, text="b")])
+    t = r.get_transcript(tid)
+    assert t.version == 1, "version không được tăng khi COMMIT nổ"
+    assert t.segments[0].text == "a", "segments không được đổi khi COMMIT nổ"
