@@ -4950,9 +4950,14 @@ from fastapi.testclient import TestClient
 from app.adapters.clock_system import SystemClock
 from app.adapters.persist.sqlite_repos import SqliteRepos
 from app.api.app import create_app
-from app.api.sse import JobEventBroker
+from app.api.sse import JobEventBroker, stream_events
 from app.domain import job_state as js
 from app.domain.models import Job
+from app.registry import EngineSpec
+
+_ASR_SPEC = EngineSpec(id="fw-large-v3-turbo", label="FW", kind="asr",
+                       runtime="inprocess", model_ref="large-v3-turbo",
+                       vram_mb=1600, langs=("zh", "en"), capabilities={}, opts={})
 
 
 @pytest.fixture()
@@ -4960,7 +4965,7 @@ def env(tmp_path):
     repos = SqliteRepos(tmp_path / "t.db", clock=SystemClock())
     repos.init_schema()
     broker = JobEventBroker()
-    app = create_app(repos=repos, specs=[], media_dir=tmp_path / "m",
+    app = create_app(repos=repos, specs=[_ASR_SPEC], media_dir=tmp_path / "m",
                      out_dir=tmp_path / "o", broker=broker)
     with TestClient(app) as c:
         c.repos = repos
@@ -5001,7 +5006,9 @@ def test_cancel_sets_flag_not_kill(env):
                                        "engine": "fw-large-v3-turbo", "payload": {}})
     jid = resp.json()["id"]
     assert env.post(f"/api/jobs/{jid}/cancel").json()["cancel_requested"] is True
-    assert env.repos.get_job(jid).state == js.QUEUED, "job trong hàng đợi chưa chạy thì chưa đổi state"
+    assert env.repos.get_job(jid).state == js.CANCELLED, (
+        "huỷ job đang queued là xong ngay (spec §5.4: 'job chưa chạy, huỷ là xong')"
+    )
 
 
 def test_retry_only_from_retryable_states(env):
@@ -5016,17 +5023,26 @@ def test_retry_only_from_retryable_states(env):
 
 
 def test_sse_stream_emits_published_events(env):
-    with env.stream("GET", "/api/jobs/stream") as resp:
-        assert resp.status_code == 200
-        assert resp.headers["content-type"].startswith("text/event-stream")
+    """Kiểm generator TRỰC TIẾP — KHÔNG qua `TestClient.stream()`.
+
+    `TestClient` chạy app trong một portal rồi CHỜ app kết thúc, nên một
+    `StreamingResponse` bọc generator vô hạn (`while True` + heartbeat 15s) làm
+    `with env.stream(...)` **không bao giờ trả về**: test TREO chứ không đỏ.
+    Gọi thẳng generator vẫn kiểm đúng tính chất cần kiểm — sự kiện publish ra
+    thì có mặt trên luồng, đúng định dạng SSE — mà không cần app kết thúc.
+    """
+    gen = stream_events(env.broker, heartbeat=0.05)
+    try:
+        assert next(gen) == ": connected\n\n"
         env.broker.publish({"id": 7, "state": "done", "progress": 1.0})
-        for line in resp.iter_lines():
-            if not line:
-                continue
-            if line.startswith("data: "):
-                payload = json.loads(line[len("data: "):])
-                assert payload["id"] == 7
-                break
+        line = next(gen)
+        assert line.startswith("data: ")
+        assert json.loads(line[len("data: "):])["id"] == 7
+    finally:
+        gen.close()
+    assert any(getattr(r, "path", None) == "/api/jobs/stream" for r in env.app.routes), (
+        "route SSE phải được đăng ký trên app"
+    )
 
 
 def test_broker_drops_oldest_when_subscriber_is_slow():
@@ -5260,19 +5276,21 @@ def create_app(*, repos, specs: list[EngineSpec], media_dir, out_dir,
         allow_headers=["*"],
     )
 
-    from app.api import routes_jobs, routes_media, routes_registry, routes_sources
-    from app.api import routes_export, routes_transcripts
+    from app.api import routes_jobs, routes_registry, routes_sources
 
     app.include_router(routes_registry.router)
     app.include_router(routes_sources.router)
     app.include_router(routes_jobs.router)
-    app.include_router(routes_media.router)
-    app.include_router(routes_transcripts.router)
-    app.include_router(routes_export.router)
     return app
 ```
 
-> **Thứ tự trong file là quan trọng, không phải ở đây.** Ở T16 và T18, mỗi lần thêm router mới thì thêm đúng một dòng `app.include_router(...)`. Các router chưa tồn tại ở T15 — vì vậy ở T15 chỉ include `routes_registry` và `routes_sources`. Bản đầy đủ ở trên là **đích cuối cùng sau T18**.
+> **Thứ tự trong file là quan trọng, không phải ở đây.** Router được thêm DẦN theo từng task, và mỗi task chỉ được import những router **đã tồn tại** tại thời điểm đó — import một module chưa có là `ModuleNotFoundError`, không phải "chuẩn bị trước":
+> - **T15:** `routes_registry`, `routes_sources` (2 dòng).
+> - **T16 (task này):** thêm `routes_jobs` — **một** dòng.
+> - **T17:** thêm `routes_media` — **một** dòng.
+> - **T18:** thêm `routes_transcripts` **và** `routes_export` — **hai** dòng.
+>
+> Khối code ngay trên là bản **của T16** (đúng ba router). Bản đầy đủ sáu router chỉ đúng **sau T18**.
 
 > **Bẫy thứ tự route:** `GET /api/jobs/stream` phải được khai báo **TRƯỚC** `GET /api/jobs/{job_id}`, nếu không FastAPI sẽ khớp `stream` vào `job_id` và trả 422. Đặt `stream` ngay sau `POST ""`.
 
