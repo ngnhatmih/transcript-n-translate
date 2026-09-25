@@ -13,6 +13,13 @@ cùng một chuyển có thể vừa nằm trong ảnh chụp vừa nằm trong 
 khử trùng theo NỘI DUNG: một sự kiện trùng với ảnh chụp bị bỏ qua — và chỉ bỏ
 qua một lần, nên không có chuyển nào vừa bị mất vừa bị gửi hai lần.
 
+Khi cửa sổ đó chứa NHIỀU chuyển của CÙNG một job, hàng đợi phải được thu về
+bản MỚI NHẤT mỗi job trước khi gửi: khử trùng một-một sẽ bỏ bản mới (trùng ảnh
+chụp) rồi phát lại bản CŨ ngay sau ảnh chụp, và client đứng ở trạng thái cũ —
+kể cả `done` — mà không còn sự kiện nào sửa lại. Thu về bản mới nhất giống đúng
+cách hàng đợi giới hạn đã chọn cho subscriber chậm, và làm phần phát lại sau
+ảnh chụp đơn điệu theo thời gian.
+
 CHỜ SỰ KIỆN TRÊN EVENT LOOP, không trong một luồng: `stream_events` là async
 generator nên Starlette `async for` thẳng nó. Bản sync generator trước đây bị
 Starlette bọc trong `iterate_in_threadpool`, và mỗi `next()` đang chờ sự kiện
@@ -138,6 +145,23 @@ async def stream_events(broker: JobEventBroker, *, heartbeat: float = 15.0,
             for event in events:
                 yield format_sse(event)
                 pending[event.get("id")] = event
+            # Sự kiện publish trong cửa sổ "subscribe -> ảnh chụp" nằm sẵn trong
+            # hàng đợi dưới dạng callback `call_soon_threadsafe` chưa chạy. Nhường
+            # loop một nhịp để chúng vào hàng đợi TRƯỚC khi lọc: bỏ qua bước này
+            # thì bản CŨ có thể tới sau ảnh chụp.
+            await asyncio.sleep(0)
+            newest: dict[Any, dict[str, Any]] = {}
+            while not sub.queue.empty():
+                # Chỉ những gì ĐÃ có sẵn; vòng lặp chính vẫn chờ bình thường.
+                queued = sub.queue.get_nowait()
+                newest[queued.get("id")] = queued
+            for job_id, event in newest.items():
+                if pending.get(job_id) == event:
+                    # Ảnh chụp đã gửi đúng chuyển này rồi: bỏ bản trong hàng đợi.
+                    del pending[job_id]
+                    continue
+                pending.pop(job_id, None)
+                yield format_sse(event)
         while True:
             event = await sub.wait(heartbeat)
             if event is None:

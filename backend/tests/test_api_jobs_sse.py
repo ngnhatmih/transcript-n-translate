@@ -9,6 +9,7 @@ import anyio
 import httpx
 import pytest
 from fastapi.testclient import TestClient
+from fastapi.responses import StreamingResponse
 from starlette.requests import Request
 from starlette.routing import Match
 
@@ -187,6 +188,97 @@ def test_a_transition_is_not_both_snapshotted_and_resent():
     assert [(b["id"], b["state"]) for b in bodies] == [(1, js.RUNNING), (2, js.DONE)], lines
 
 
+class _EventJob:
+    """Job giả cho ảnh chụp: chỉ cần `to_event()` trả về sự kiện đã định."""
+
+    def __init__(self, event: dict):
+        self._event = event
+
+    def to_event(self) -> dict:
+        return dict(self._event)
+
+
+def test_two_events_for_one_job_in_the_snapshot_window_never_strand_the_client(env):
+    """R1 của review: hàng đợi phải thu về sự kiện MỚI NHẤT mỗi job, không phát lại cái cũ.
+
+    Cửa sổ "subscribe -> chụp ảnh" có thể chứa HAI chuyển trạng thái của cùng
+    một job: `running` rồi `done`. Ảnh chụp đọc sau nên thấy `done`; hàng đợi
+    giữ `[running, done]`. Khử trùng theo nội dung một-một sẽ bỏ `done` (trùng
+    ảnh chụp) rồi gửi `running` NGAY SAU ảnh chụp — client đứng ở `running` mãi
+    dù sự thật là `done`, và không còn sự kiện nào sửa lại.
+
+    Đường THẬT: broker + repos của app đã lắp, và đúng biểu thức ảnh chụp của
+    route (`[j.to_event() for j in repos.list_jobs()]`) — chỉ `heartbeat` ngắn
+    hơn để biết lúc hàng đợi đã cạn. Ảnh chụp chạy trong executor nên callback
+    của `publish` chỉ chạy sau đó, đúng thứ tự trên một event loop thật.
+    """
+    jid = env.repos.add_job(a_job(None, job_type="asr", engine="fw-large-v3-turbo"))
+    env.repos.set_job_state(jid, js.RUNNING)
+    env.repos.set_job_state(jid, js.DONE)
+
+    older = {"id": jid, "state": js.RUNNING, "progress": 0.5, "phase": None,
+             "error": None, "log_tail": ""}
+    real_list_jobs = env.repos.list_jobs
+    started: list[int] = []
+
+    class SnapshotInTheWindow:
+        """`repos` như route thấy, nhưng ảnh chụp rơi đúng vào cửa sổ.
+
+        Ảnh chụp chạy trong executor nên `asyncio.get_running_loop()` không có ở
+        đây: publish qua loop bắt từ trước, đúng đường `call_soon_threadsafe` mà
+        `JobEventBroker` dùng cho luồng worker. `list_jobs()` thật vẫn là nguồn
+        của ảnh chụp; chỉ `to_event()` của job được thay để ảnh chụp mang đúng
+        trạng thái mới nhất khi hàng đợi còn giữ bản cũ.
+        """
+
+        def __init__(self, repos, loop):
+            self._repos = repos
+            self._loop = loop
+
+        def __getattr__(self, name):
+            return getattr(self._repos, name)
+
+        def list_jobs(self, **kwargs):
+            started.append(1)
+            self._loop.call_soon_threadsafe(env.broker.publish, dict(older))
+            rows = real_list_jobs(**kwargs)
+            newest = rows[0].to_event()
+            assert newest["id"] == jid and newest["state"] == js.DONE, newest
+            self._loop.call_soon_threadsafe(env.broker.publish, dict(newest))
+            return [_EventJob(newest)]
+
+    async def drive():
+        loop = asyncio.get_running_loop()
+
+        env.app.state.repos = SnapshotInTheWindow(env.repos, loop)
+        try:
+            response = _stream_response(env.app, heartbeat=0.05)
+        finally:
+            env.app.state.repos = env.repos
+
+        it = response.body_iterator
+        seen: list[str] = []
+        try:
+            assert await asyncio.wait_for(anext(it), 5) == ": connected\n\n"
+            for _ in range(8):
+                chunk = await asyncio.wait_for(anext(it), 5)
+                if chunk.startswith(":"):
+                    break                                     # nhịp tim: hết sự kiện
+                body = json.loads(chunk[len("data: "):])
+                if body["id"] == jid:
+                    seen.append(body["state"])
+        finally:
+            await it.aclose()
+        return seen
+
+    seen = asyncio.run(drive())
+    assert started == [1], "ảnh chụp của route phải chạy đúng một lần trong cửa sổ"
+    assert js.DONE in seen, f"ảnh chụp mang trạng thái thật phải tới client: {seen}"
+    assert seen[-1] == js.DONE, (
+        f"trạng thái cuối client thấy phải là sự thật ({js.DONE}), không phải bản cũ: {seen}"
+    )
+
+
 def test_broker_drops_oldest_when_subscriber_is_slow():
     """Một subscriber chậm không được làm phình bộ nhớ server."""
     async def drive():
@@ -239,17 +331,24 @@ def test_the_stream_route_is_declared_before_the_job_id_route(env):
     assert handler.__name__ == "stream", f"route khớp /api/jobs/stream là {handler.__name__}"
 
 
-def _stream_response(app):
-    """Gọi THẲNG hàm route `/api/jobs/stream` để lấy `StreamingResponse`.
+def _stream_response(app, **kwargs):
+    """`StreamingResponse` y như route `/api/jobs/stream` dựng, nhưng chỉnh được `heartbeat`.
 
     Không dùng `TestClient.stream()`: nó chờ app kết thúc, mà generator SSE thì
-    không bao giờ kết thúc -> test TREO. Gọi hàm route vẫn kiểm đúng thứ cần
-    kiểm — route đọc broker NÀO — mà không cần app kết thúc.
+    không bao giờ kết thúc -> test TREO. Ở đây vẫn là route THẬT (`request.app`
+    -> broker + repos của app, `repos.list_jobs()` làm ảnh chụp), chỉ khác đối
+    số `stream_events` mà route không thể nhận qua `Request`.
     """
     request = Request({"type": "http", "app": app, "method": "GET",
                        "path": "/api/jobs/stream", "headers": []})
-    route = next(r for r in app.routes if getattr(r, "path", None) == "/api/jobs/stream")
-    return route.endpoint(request)
+    broker = request.app.state.broker
+    repos = request.app.state.repos
+    options = {"heartbeat": 15.0, **kwargs}
+    return StreamingResponse(
+        stream_events(broker, snapshot=lambda: [j.to_event() for j in repos.list_jobs()],
+                      **options),
+        media_type="text/event-stream",
+    )
 
 
 def test_the_stream_route_reads_the_broker_injected_into_the_app(env):
