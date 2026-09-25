@@ -168,6 +168,26 @@ class Job:
     started_at: str | None = None
     finished_at: str | None = None
 
+    def to_event(self) -> dict:
+        """Hình dạng sự kiện SSE của job này.
+
+        MỘT nguồn cho cả `worker._emit` lẫn ảnh chụp đầu stream của
+        `/api/jobs/stream`: `stream_events` khử trùng theo NỘI DUNG, nên hai bên
+        lệch khoá là sự kiện vừa bị gửi trùng vừa bị bỏ sót — hỏng âm thầm.
+
+        `log_tail` nằm trong sự kiện vì design §9.2 yêu cầu log streaming qua
+        SSE: client chỉ nghe stream vẫn phải thấy dòng log vừa sinh. Trường này
+        đã bị chặn ở `LOG_TAIL_LINES` nên sự kiện vẫn nhỏ.
+        """
+        return {
+            "id": self.id,
+            "state": self.state,
+            "progress": self.progress,
+            "phase": self.phase,
+            "error": self.error,
+            "log_tail": self.log_tail,
+        }
+
 
 @dataclass
 class Term:

@@ -67,8 +67,11 @@ def create_job(payload: JobIn, repos=Depends(get_repos), specs=Depends(get_specs
 @router.get("/stream")
 def stream(request: Request):
     broker: JobEventBroker = request.app.state.broker
+    repos = request.app.state.repos
+    # Ảnh chụp là CALLABLE: `stream_events` chỉ gọi nó SAU khi đã subscribe, nên
+    # một chuyển trạng thái rơi vào cửa sổ "chụp -> nghe" không thể mất.
     return StreamingResponse(
-        stream_events(broker),
+        stream_events(broker, snapshot=lambda: [j.to_event() for j in repos.list_jobs()]),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
@@ -89,11 +92,14 @@ def get_job(job_id: int, repos=Depends(get_repos)):
 
 @router.post("/{job_id}/cancel")
 def cancel_job(job_id: int, repos=Depends(get_repos)):
+    # `request_cancel` là UPDATE mù (0 hàng, không ném), nên lần đọc lại phải
+    # nằm TRONG cùng khối `try`: job không tồn tại là 404 như mọi route anh em,
+    # không phải 500.
     try:
         repos.request_cancel(job_id)
+        job = repos.get_job(job_id)
     except LookupError as exc:
         raise HTTPException(404, str(exc)) from exc
-    job = repos.get_job(job_id)
     # Job CHƯA chạy thì huỷ là xong ngay (spec §5.4). Job đang chạy chỉ được ĐẶT
     # CỜ: worker thấy cờ ở checkpoint kế tiếp rồi mới chuyển trạng thái. Kill
     # tiến trình sẽ để DB nửa vời và model đang nạp không được đổ.

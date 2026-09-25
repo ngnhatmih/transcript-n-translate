@@ -63,10 +63,7 @@ class PhaseQueueWorker:
         """
         try:
             job = self.repos.get_job(job_id)
-            self._publish({
-                "id": job.id, "state": job.state, "progress": job.progress,
-                "phase": job.phase, "error": job.error,
-            })
+            self._publish(job.to_event())
         except Exception:  # noqa: BLE001 - xem docstring
             pass
 

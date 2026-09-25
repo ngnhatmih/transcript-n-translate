@@ -10,11 +10,14 @@ import os
 import pathlib
 import threading
 
+from fastapi import FastAPI
+
 from app.adapters.clock_system import SystemClock
 from app.adapters.governor.single_gpu import SingleGpuGovernor
 from app.adapters.persist.sqlite_repos import SqliteRepos
 from app.adapters.registry_file import load_registry
 from app.api.app import create_app
+from app.api.sse import JobEventBroker
 from app.config import (API_HOST, API_PORT, DB_PATH, HF_HOME, LOG_DIR, MEDIA_DIR,
                         OUTPUT_DIR, OLLAMA_MODELS, ensure_dirs)
 from app.pipeline.export import ExportHandler
@@ -27,7 +30,13 @@ _AUTO_FORWARD_OFF = "0"
 
 
 def build_components():
-    """Dựng repos, specs và worker đã nối dây. Không chạy vòng lặp, không mở mạng."""
+    """Dựng repos, specs, worker và MỘT broker đã nối dây.
+
+    Không chạy vòng lặp, không mở mạng. Broker trả về ở đây là đường dây duy
+    nhất nối worker với `/api/jobs/stream`: worker publish vào nó, `build_app()`
+    truyền chính nó cho `create_app()`. Dựng hai broker riêng thì stream không
+    bao giờ nhận được gì — job chạy xong mà giao diện đứng im.
+    """
     ensure_dirs()
     repos = SqliteRepos(DB_PATH, clock=SystemClock())
     repos.init_schema()
@@ -42,7 +51,8 @@ def build_components():
         "asr": transcribe_handler,
         "export": ExportHandler(repos, out_dir=OUTPUT_DIR),
     }
-    worker = PhaseQueueWorker(repos, governor, handlers)
+    broker = JobEventBroker()
+    worker = PhaseQueueWorker(repos, governor, handlers, publish=broker.publish)
 
     # Giai đoạn = (loại job, engine). Governor chỉ đổ được model của một giai
     # đoạn nếu ai đó ĐĂNG KÝ hàm đổ cho giai đoạn đó; không có vòng lặp này thì
@@ -61,7 +71,17 @@ def build_components():
     if repos.get_setting(AUTO_FORWARD_SETTING) is None:
         repos.set_setting(AUTO_FORWARD_SETTING, _AUTO_FORWARD_OFF)
 
-    return repos, specs, worker
+    return repos, specs, worker, broker
+
+
+def build_app(repos, specs, worker, broker) -> FastAPI:
+    """Ráp app HTTP từ ĐÚNG những thành phần `build_components()` trả về.
+
+    Tách khỏi `main()` để test gọi được đường dây thật, không phải bản sao của
+    nó: bỏ `broker=broker` ở đây là app tự dựng broker riêng và stream câm.
+    """
+    return create_app(repos=repos, specs=specs, media_dir=MEDIA_DIR,
+                      out_dir=OUTPUT_DIR, worker=worker, log_dir=LOG_DIR, broker=broker)
 
 
 def _prepare_local_model_caches() -> None:
@@ -95,10 +115,9 @@ def _engine_factory(spec):
 def main() -> None:
     import uvicorn
 
-    repos, specs, worker = build_components()
+    repos, specs, worker, broker = build_components()
     worker.recover()
-    app = create_app(repos=repos, specs=specs, media_dir=MEDIA_DIR,
-                     out_dir=OUTPUT_DIR, worker=worker, log_dir=LOG_DIR)
+    app = build_app(repos, specs, worker, broker)
     thread = threading.Thread(target=worker.run_forever, name="phase-queue", daemon=True)
     thread.start()
     uvicorn.run(app, host=API_HOST, port=API_PORT, log_level="info")

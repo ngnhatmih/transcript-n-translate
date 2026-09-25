@@ -1,9 +1,16 @@
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import json
+import time
 
+import anyio
+import httpx
 import pytest
 from fastapi.testclient import TestClient
+from starlette.requests import Request
+from starlette.routing import Match
 
 from app.adapters.clock_system import SystemClock
 from app.adapters.persist.sqlite_repos import SqliteRepos
@@ -79,6 +86,18 @@ def test_retry_only_from_retryable_states(env):
     assert env.repos.get_job(jid).state == js.QUEUED
 
 
+def test_cancel_a_missing_job_is_404_like_its_siblings(env):
+    """Job không tồn tại là lỗi CLIENT (404), không phải 500.
+
+    `request_cancel` là một UPDATE mù: 0 hàng, không ném. Nên nếu lần đọc lại
+    `get_job` nằm NGOÀI khối `try`, `NotFound` nổi lên thành 500 — trong khi
+    `GET /{job_id}` và `POST /{job_id}/retry` trả 404 cho đúng tình huống đó.
+    """
+    assert env.get("/api/jobs/9999").status_code == 404
+    assert env.post("/api/jobs/9999/retry").status_code == 404
+    assert env.post("/api/jobs/9999/cancel").status_code == 404
+
+
 def test_sse_stream_emits_published_events(env):
     """Kiểm generator TRỰC TIẾP — KHÔNG qua `TestClient.stream()`.
 
@@ -88,29 +107,226 @@ def test_sse_stream_emits_published_events(env):
     Gọi thẳng generator vẫn kiểm đúng tính chất cần kiểm — sự kiện publish ra
     thì có mặt trên luồng, đúng định dạng SSE — mà không cần app kết thúc.
     """
-    gen = stream_events(env.broker, heartbeat=0.05)
-    try:
-        assert next(gen) == ": connected\n\n"
-        env.broker.publish({"id": 7, "state": "done", "progress": 1.0})
-        line = next(gen)
-        assert line.startswith("data: ")
-        assert json.loads(line[len("data: "):])["id"] == 7
-    finally:
-        gen.close()
+    async def drive():
+        gen = stream_events(env.broker, heartbeat=0.05)
+        try:
+            assert await anext(gen) == ": connected\n\n"
+            env.broker.publish({"id": 7, "state": "done", "progress": 1.0})
+            return await asyncio.wait_for(anext(gen), 5)
+        finally:
+            await gen.aclose()
+
+    line = asyncio.run(drive())
+    assert line.startswith("data: ")
+    assert json.loads(line[len("data: "):])["id"] == 7
     assert any(getattr(r, "path", None) == "/api/jobs/stream" for r in env.app.routes), (
         "route SSE phải được đăng ký trên app"
     )
 
 
+def test_a_transition_during_the_snapshot_is_delivered_not_lost():
+    """Cửa sổ giữa "chụp ảnh" và "nghe" không được nuốt mất một chuyển trạng thái.
+
+    Đây là probe G của review: client chụp `GET /api/jobs` (thấy `running`) rồi
+    mới mở stream; `done` rơi vào giữa hai bước thì client đứng ở `running` mãi,
+    vì không có sự kiện nào tới và cũng không có gì chụp lại. Cách sửa là NGHE
+    TRƯỚC rồi mới chụp, và chính stream gửi ảnh chụp đó. Ở đây ảnh chụp cố tình
+    publish một sự kiện ngay trong lúc chụp — đúng cái cửa sổ đó.
+    """
+    broker = JobEventBroker()
+
+    def snapshot():
+        broker.publish({"id": 1, "state": js.DONE, "progress": 1.0, "phase": None,
+                        "error": None, "log_tail": "xong"})
+        return [{"id": 1, "state": js.RUNNING, "progress": 0.5, "phase": None,
+                 "error": None, "log_tail": ""}]
+
+    gen = stream_events(broker, heartbeat=0.05, snapshot=snapshot)
+    async def drive():
+        try:
+            assert await anext(gen) == ": connected\n\n"
+            return [await asyncio.wait_for(anext(gen), 5) for _ in range(2)]
+        finally:
+            await gen.aclose()
+
+    lines = asyncio.run(drive())
+    bodies = [json.loads(line[len("data: "):]) for line in lines
+              if line.startswith("data: ")]
+    assert [b["state"] for b in bodies] == [js.RUNNING, js.DONE], lines
+
+
+def test_a_transition_is_not_both_snapshotted_and_resent():
+    """Khử trùng: chuyển trạng thái đã nằm trong ảnh chụp không được gửi lại.
+
+    Sự kiện publish SAU khi subscribe nhưng TRƯỚC khi ảnh chụp đọc xong sẽ vừa
+    nằm trong ảnh chụp vừa nằm trong hàng đợi. Gửi cả hai là gửi trùng một
+    chuyển; bỏ cả hai là mất một chuyển.
+    """
+    broker = JobEventBroker()
+    running = {"id": 1, "state": js.RUNNING, "progress": 0.5, "phase": None,
+               "error": None, "log_tail": ""}
+
+    def snapshot():
+        broker.publish(dict(running))
+        broker.publish({"id": 2, "state": js.DONE, "progress": 1.0, "phase": None,
+                        "error": None, "log_tail": ""})
+        return [dict(running)]
+
+    gen = stream_events(broker, heartbeat=0.05, snapshot=snapshot)
+
+    async def drive():
+        try:
+            assert await anext(gen) == ": connected\n\n"
+            return [await asyncio.wait_for(anext(gen), 5) for _ in range(2)]
+        finally:
+            await gen.aclose()
+
+    lines = asyncio.run(drive())
+    bodies = [json.loads(line[len("data: "):]) for line in lines
+              if line.startswith("data: ")]
+    assert [(b["id"], b["state"]) for b in bodies] == [(1, js.RUNNING), (2, js.DONE)], lines
+
+
 def test_broker_drops_oldest_when_subscriber_is_slow():
     """Một subscriber chậm không được làm phình bộ nhớ server."""
-    broker = JobEventBroker(max_queue=3)
-    q = broker.subscribe()
-    for n in range(10):
-        broker.publish({"id": n})
-    assert q.qsize() == 3
-    got = [q.get_nowait()["id"] for _ in range(3)]
-    assert got == [7, 8, 9], "phải giữ sự kiện MỚI NHẤT, bỏ cái cũ"
+    async def drive():
+        broker = JobEventBroker(max_queue=3)
+        sub = broker.subscribe()
+        for n in range(10):
+            broker.publish({"id": n})
+        await asyncio.sleep(0.01)            # cho các callback trên loop chạy
+        assert sub.queue.qsize() == 3
+        return [sub.queue.get_nowait()["id"] for _ in range(3)]
+
+    assert asyncio.run(drive()) == [7, 8, 9], "phải giữ sự kiện MỚI NHẤT, bỏ cái cũ"
+
+
+def test_stream_removes_its_subscriber_when_the_client_disconnects():
+    """I3 của review: ngắt kết nối phải rút hàng đợi khỏi broker.
+
+    Bỏ sót thì hàng đợi rò rỉ, và tệ hơn: mỗi lần publish sau đó lại serialize
+    rồi nhét vào một subscriber không còn ai đọc — mãi mãi.
+    """
+    async def drive():
+        broker = JobEventBroker()
+        gen = stream_events(broker, heartbeat=0.05)
+        try:
+            assert await anext(gen) == ": connected\n\n"
+            during = len(broker._subscribers)
+        finally:
+            await gen.aclose()
+        return during, list(broker._subscribers)
+
+    during, after = asyncio.run(drive())
+    assert during == 1, "stream phải đăng ký đúng một subscriber"
+    assert after == [], "ngắt kết nối phải rút hàng đợi khỏi broker"
+
+
+def test_the_stream_route_is_declared_before_the_job_id_route(env):
+    """I4 của review: `/api/jobs/stream` phải đứng TRƯỚC `/api/jobs/{job_id}`.
+
+    Không phải chuyện thẩm mỹ: FastAPI khớp theo thứ tự khai báo, nên đảo lại
+    thì "stream" khớp vào `{job_id}` và bị parse thành int -> 422 (đúng lỗi mà
+    brief:370 cảnh báo). Test cũ chỉ khẳng định route TỒN TẠI nên không thấy
+    được thứ tự; ở đây kiểm cả thứ tự LẪN route nào thực sự khớp được đường dẫn.
+    """
+    paths = [r.path for r in env.app.routes]
+    assert paths.index("/api/jobs/stream") < paths.index("/api/jobs/{job_id}")
+
+    scope = {"type": "http", "method": "GET", "path": "/api/jobs/stream", "headers": []}
+    handler = next(r.endpoint for r in env.app.routes
+                   if getattr(r, "matches", None) and r.matches(scope)[0] is Match.FULL)
+    assert handler.__name__ == "stream", f"route khớp /api/jobs/stream là {handler.__name__}"
+
+
+def _stream_response(app):
+    """Gọi THẲNG hàm route `/api/jobs/stream` để lấy `StreamingResponse`.
+
+    Không dùng `TestClient.stream()`: nó chờ app kết thúc, mà generator SSE thì
+    không bao giờ kết thúc -> test TREO. Gọi hàm route vẫn kiểm đúng thứ cần
+    kiểm — route đọc broker NÀO — mà không cần app kết thúc.
+    """
+    request = Request({"type": "http", "app": app, "method": "GET",
+                       "path": "/api/jobs/stream", "headers": []})
+    route = next(r for r in app.routes if getattr(r, "path", None) == "/api/jobs/stream")
+    return route.endpoint(request)
+
+
+def test_the_stream_route_reads_the_broker_injected_into_the_app(env):
+    """I5 của review: route phải đọc broker CỦA APP, không dựng broker mới.
+
+    Hai test cũ gọi thẳng `stream_events(env.broker, ...)` nên không chạm vào
+    dây route↔broker — đúng chỗ hổng đã để C1 lọt qua. Ở đây sự kiện publish
+    trên `env.broker` phải đi ra tới body của response thật.
+    """
+    assert env.app.state.broker is env.broker, (
+        "create_app() phải dùng broker được truyền vào, không dựng cái mới"
+    )
+    response = _stream_response(env.app)
+    published = {"id": 42, "state": js.DONE, "progress": 1.0, "phase": None,
+                 "error": None, "log_tail": ""}
+
+    async def drive():
+        it = response.body_iterator
+        try:
+            assert await asyncio.wait_for(anext(it), 5) == ": connected\n\n"
+            env.broker.publish(published)
+            return await asyncio.wait_for(anext(it), 5)
+        finally:
+            await it.aclose()
+
+    line = asyncio.run(drive())
+    assert json.loads(line[len("data: "):]) == published
+
+
+def test_an_idle_stream_does_not_hold_a_threadpool_token(env):
+    """I7 của review: stream đang CHỜ sự kiện không được giữ token threadpool.
+
+    Generator đồng bộ bị Starlette bọc trong `iterate_in_threadpool`, nên mỗi
+    `next()` đang chờ sự kiện chiếm một trong 40 token mặc định của anyio; với
+    heartbeat 15s thì token bị giữ gần như suốt vòng đời kết nối. Review đo
+    được 0.41s xếp hàng khi 40 stream mở. Ở đây hạ limiter xuống ĐÚNG một token
+    rồi bắt một route sync phải chạy được ngay trong lúc stream đang chờ.
+    """
+    async def drive():
+        limiter = anyio.to_thread.current_default_thread_limiter()
+        previous = limiter.total_tokens
+        limiter.total_tokens = 1
+        it = _stream_response(env.app).body_iterator
+        parked = None
+        try:
+            assert await asyncio.wait_for(anext(it), 5) == ": connected\n\n"
+            parked = asyncio.ensure_future(anext(it))        # stream chờ sự kiện
+            await asyncio.sleep(0.05)                         # để nó kịp park
+            borrowed = limiter.borrowed_tokens
+            transport = httpx.ASGITransport(app=env.app)
+            async with httpx.AsyncClient(transport=transport,
+                                         base_url="http://test") as client:
+                started = time.monotonic()
+                try:
+                    resp = await asyncio.wait_for(client.get("/api/jobs"), timeout=5)
+                except asyncio.TimeoutError:
+                    raise AssertionError(
+                        "route sync bị chặn quá 5s sau khi một stream im lặng đang chờ: "
+                        "stream đang giữ token threadpool"
+                    ) from None
+                elapsed = time.monotonic() - started
+            return borrowed, elapsed, resp.status_code
+        finally:
+            if parked is not None:
+                parked.cancel()
+                with contextlib.suppress(asyncio.CancelledError, StopAsyncIteration):
+                    await parked
+            await it.aclose()
+            limiter.total_tokens = previous
+
+    borrowed, elapsed, status = asyncio.run(drive())
+    assert status == 200
+    assert borrowed == 0, "stream đang giữ token threadpool khi chỉ ngồi chờ"
+    assert elapsed < 1.0, (
+        f"route sync phải chờ {elapsed:.3f}s sau một stream im lặng: "
+        "stream đang giữ token threadpool"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -158,7 +374,12 @@ def test_worker_publishes_every_state_it_writes(env):
 
 
 def test_worker_publishes_the_failed_state_and_reason(env):
-    """Nhánh `except` cũng phải publish — nếu không, job hỏng là job im lặng."""
+    """Nhánh `except` cũng phải publish — nếu không, job hỏng là job im lặng.
+
+    Hình dạng sự kiện được khoá ĐÚNG khoá ở đây, kể cả `log_tail`: design §9.2
+    yêu cầu log đi kèm stream, và một client chỉ nghe SSE phải đọc được dòng
+    log cuối cùng mà không cần gọi thêm `GET /api/jobs/{id}`.
+    """
     events: list[dict] = []
     worker = PhaseQueueWorker(
         env.repos, FakeGovernor(),
@@ -172,7 +393,33 @@ def test_worker_publishes_the_failed_state_and_reason(env):
     last = events[-1]
     assert last == {"id": jid, "state": js.FAILED, "progress": 0.5,
                     "phase": "asr:fw-large-v3-turbo",
-                    "error": "RuntimeError: job 1 hỏng theo kịch bản test"}, last
+                    "error": "RuntimeError: job 1 hỏng theo kịch bản test",
+                    # ĐÚNG chuỗi trong `jobs.log_tail`: `append_job_log` nối
+                    # bằng "\n" vào log_tail rỗng nên dòng đầu có tiền tố xuống
+                    # dòng, còn `str(exc)` không kèm tên lớp (tên lớp chỉ nằm
+                    # trong `error`).
+                    "log_tail": "\nchạy job 1\n"
+                                "LỖI: job 1 hỏng theo kịch bản test"}, last
+
+
+def test_worker_events_carry_the_log_text(env):
+    """I6 của review — design §9.2 "log streaming via SSE" phải được giao.
+
+    Sự kiện mang theo `log_tail` đã bị chặn ở `LOG_TAIL_LINES`, nên client đang
+    xem tiến độ đọc được dòng log vừa sinh ngay trên stream, không phải gọi
+    thêm `GET /api/jobs/{id}` sau mỗi sự kiện.
+    """
+    events: list[dict] = []
+    worker = _worker_publishing(env.repos, events.append)
+    env.repos.add_job(a_job(None, job_type="asr", engine="fw-large-v3-turbo"))
+    while worker.tick():
+        pass
+
+    assert set(events[-1]) == {"id", "state", "progress", "phase", "error",
+                              "log_tail"}, events[-1]
+    assert [e["log_tail"].splitlines()[-1] if e["log_tail"] else "" for e in events] == [
+        "", "chạy job 1", "xong", "xong",
+    ], events
 
 
 def test_published_events_reach_the_sse_stream(env):
@@ -181,22 +428,24 @@ def test_published_events_reach_the_sse_stream(env):
     Worker đẩy thẳng vào `env.broker` (đúng broker mà route đọc), nên đây là
     đường THẬT. Generator được mở TRƯỚC khi worker chạy, y như một client đang
     nghe; worker chạy xong thì sự kiện đã nằm sẵn trong hàng đợi nên mỗi
-    `next(gen)` trả về ngay. Chạy xen kẽ từng nhịp thì heartbeat 0.05s có thể
-    lọt vào giữa và test đỏ vì lý do không liên quan.
+    `anext(gen)` trả về ngay. Chạy xen kẽ từng nhịp thì heartbeat có thể lọt vào
+    giữa và test đỏ vì lý do không liên quan.
     """
     recorded: list[dict] = []
     worker = _worker_publishing(env.repos, _tee(recorded, env.broker.publish))
     jid = env.repos.add_job(a_job(None, job_type="asr", engine="fw-large-v3-turbo"))
 
-    gen = stream_events(env.broker, heartbeat=0.05)
-    try:
-        assert next(gen) == ": connected\n\n"
-        while worker.tick():
-            pass
-        lines = [next(gen) for _ in recorded]
-    finally:
-        gen.close()
+    async def drive():
+        gen = stream_events(env.broker, heartbeat=5.0)
+        try:
+            assert await anext(gen) == ": connected\n\n"
+            while worker.tick():
+                pass
+            return [await asyncio.wait_for(anext(gen), 5) for _ in recorded]
+        finally:
+            await gen.aclose()
 
+    lines = asyncio.run(drive())
     bodies = [json.loads(line[len("data: "):]) for line in lines]
     assert len(recorded) == 4, recorded
     assert [b["id"] for b in bodies] == [jid] * len(recorded), lines
@@ -213,6 +462,12 @@ def _tee(recorded: list[dict], sink):
 
 def test_broker_forwards_a_dict_without_handing_out_live_objects(env):
     """Sự kiện qua stream phải là JSON thuần, không kèm đối tượng sống."""
-    q = env.broker.subscribe()
-    env.broker.publish({"id": 1, "state": "done"})
-    assert q.get_nowait() == {"id": 1, "state": "done"}
+    async def drive():
+        sub = env.broker.subscribe()
+        env.broker.publish({"id": 1, "state": "done"})
+        try:
+            return await asyncio.wait_for(sub.wait(5), 5)
+        finally:
+            env.broker.unsubscribe(sub)
+
+    assert asyncio.run(drive()) == {"id": 1, "state": "done"}

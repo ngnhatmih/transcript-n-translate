@@ -10,6 +10,7 @@ Ngoài 9 test route của brief còn hai nhóm test CHE hai lỗ hổng đã bi�
 """
 from __future__ import annotations
 
+import asyncio
 import io
 import pathlib
 import sys
@@ -24,6 +25,7 @@ from app.api.app import create_app
 from app.domain import job_state as js
 from app.domain.models import Job, Source
 from app.registry import EngineSpec
+from tests.fakes import RecordingHandler, a_job
 
 
 @pytest.fixture()
@@ -542,8 +544,8 @@ def built(tmp_path, monkeypatch):
     monkeypatch.setattr(main, "LOG_DIR", tmp_path / "logs")
     monkeypatch.setattr(main, "load_registry", lambda: [ASR_SPEC, MT_SPEC])
     monkeypatch.setattr(main, "_engine_factory", lambda spec: engine, raising=False)
-    repos, specs, worker = main.build_components()
-    return main, repos, specs, worker, engine
+    repos, specs, worker, broker = main.build_components()
+    return main, repos, specs, worker, engine, broker
 
 
 def test_build_components_registers_every_asr_engine_with_the_governor(built):
@@ -552,7 +554,7 @@ def test_build_components_registers_every_asr_engine_with_the_governor(built):
     Không có dây này thì `before_phase`/`after_phase` là hàm rỗng và model ASR
     KHÔNG BAO GIỜ được đổ — đúng cái mà hàng đợi theo giai đoạn sinh ra để làm.
     """
-    main, repos, specs, worker, engine = built
+    main, repos, specs, worker, engine, broker = built
     governor = worker.governor
 
     assert set(governor._loaded) == {ASR_SPEC.phase_key}
@@ -565,7 +567,7 @@ def test_build_components_registers_every_asr_engine_with_the_governor(built):
 
 def test_registered_releaser_actually_unloads_the_loaded_model(built):
     """Kiểm tra cái releaser đã đăng ký là hàm ĐỔ MODEL, không phải hàm rỗng."""
-    main, repos, specs, worker, engine = built
+    main, repos, specs, worker, engine, broker = built
     handler = worker.handlers["asr"]
 
     # Nạp engine vào handler bằng đúng đường mà `run()` đi. Gọi thẳng hàm riêng
@@ -597,7 +599,7 @@ def test_build_components_defaults_auto_forward_off_until_mt_exists(built):
     worker (đúng như Task 9 khoá lại) đánh dấu nó FAILED. Nên mặc định phải là
     '0' cho tới khi có Giai đoạn 2.
     """
-    main, repos, specs, worker, engine = built
+    main, repos, specs, worker, engine, broker = built
 
     assert repos.get_setting("auto_forward") == "0"
     assert set(worker.handlers) == {"ingest", "asr", "export"}
@@ -605,7 +607,7 @@ def test_build_components_defaults_auto_forward_off_until_mt_exists(built):
 
 def test_build_components_does_not_overwrite_an_auto_forward_choice(built):
     """Người dùng đã đặt '1' thì `build_components()` không được ghi đè."""
-    main, repos, specs, worker, engine = built
+    main, repos, specs, worker, engine, broker = built
 
     repos.set_setting("auto_forward", "1")
     main.build_components()
@@ -621,9 +623,47 @@ def test_build_components_only_registers_asr_engines(monkeypatch, tmp_path):
     monkeypatch.setattr(main, "MEDIA_DIR", tmp_path / "media")
     monkeypatch.setattr(main, "OUTPUT_DIR", tmp_path / "output")
     monkeypatch.setattr(main, "LOG_DIR", tmp_path / "logs")
-    repos, specs, worker = main.build_components()
+    repos, specs, worker, broker = main.build_components()
 
     assert set(worker.governor._loaded) == {ASR_SPEC.phase_key}
+
+
+def test_the_worker_and_the_stream_share_the_broker_of_the_assembled_app(built):
+    """C1 của review: trong app ĐÃ RÁP, `/api/jobs/stream` không có producer.
+
+    `build_components()` phải dựng ĐÚNG MỘT broker, và `main()` phải truyền
+    chính nó cho `create_app()`: worker publish vào broker nào thì route phải
+    đọc đúng broker đó. Bỏ dây `publish=` ở worker hoặc bỏ `broker=` ở app là
+    stream im lặng vĩnh viễn dù job chạy xong — đúng thứ test này bắt.
+
+    Engine/handler được thay bằng stub (đúng như `built` đã thay engine), còn
+    repos/worker/app/broker là những thành phần THẬT của `main.py`.
+    """
+    main, repos, specs, worker, engine, broker = built
+    worker.handlers["asr"] = RecordingHandler(job_type="asr")
+    app = main.build_app(repos, specs, worker, broker)
+    assert app.state.broker is broker, "app phải đọc đúng broker của build_components()"
+    repos.add_job(a_job(None, job_type="asr", engine="fw-large-v3-turbo"))
+
+    async def run_a_job():
+        sub = app.state.broker.subscribe()
+        try:
+            while worker.tick():
+                pass
+            collected: list[dict] = []
+            for _ in range(4):
+                event = await sub.wait(5)
+                assert event is not None, f"worker không publish vào broker của app: {collected}"
+                collected.append(event)
+            return collected
+        finally:
+            app.state.broker.unsubscribe(sub)
+
+    events = asyncio.run(run_a_job())
+    assert [e["state"] for e in events] == [js.RUNNING, js.RUNNING, js.RUNNING, js.DONE], (
+        events
+    )
+    assert events[-1]["phase"] == ASR_SPEC.phase_key, events
 
 
 def test_engine_factory_points_the_faster_whisper_cache_at_the_configured_disk():
