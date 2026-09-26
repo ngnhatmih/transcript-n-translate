@@ -60,14 +60,20 @@ def test_concatenating_batches_reproduces_the_input_exactly(max_chars):
 
     So `id()` chứ không chỉ so `i`: một hiện thực nhân bản segment rồi sửa bản
     sao vẫn giữ nguyên dãy `i` và sẽ lọt qua phép so khoá.
+
+    Và so `text` với ảnh chụp TRƯỚC lời gọi: một hiện thực cắt `s.text` tại chỗ
+    vẫn qua được mọi phép so đối tượng ở trên, nhưng làm hỏng chính segment của
+    người gọi (segment trả về là cùng đối tượng, không phải bản sao).
     """
     segs = [seg(i, "t" * (i % 7 + 1)) for i in range(1, 40)]
+    texts = [s.text for s in segs]
     out = batch_segments(segs, max_chars=max_chars)
 
     flat = [s for batch in out for s in batch]
     assert [s.i for s in flat] == [s.i for s in segs]
     assert [id(s) for s in flat] == [id(s) for s in segs]
     assert len(flat) == len(segs)
+    assert [s.text for s in flat] == texts
     assert all(batch for batch in out), "không được có lô rỗng"
 
     for batch in out:
@@ -86,6 +92,34 @@ def test_every_segment_longer_than_the_budget_gets_its_own_batch():
     assert out == [[s] for s in segs]
 
 
+def test_empty_text_segment_is_not_dropped():
+    """Segment văn bản RỖNG là đầu vào có thật: `models.py` gán mặc định `""` cho
+    thiếu khoá `text`, `faster_whisper.py` trả `(raw.get("text") or "").strip()`.
+
+    Nó vẫn phải có mặt, đúng thứ tự, đúng một lần, trong đúng một lô — bỏ nó là
+    mất hẳn một dòng phụ đề mà không phép so nào khác nhìn thấy.
+    """
+    a, b, c = seg(1, ""), seg(2, "x"), seg(3, "")
+    out = batch_segments([a, b, c], max_chars=10)
+
+    flat = [s for batch in out for s in batch]
+    assert [id(s) for s in flat] == [id(a), id(b), id(c)]
+    assert len(out) == 1, "ba segment này phải nằm gọn trong đúng một lô"
+    assert all(batch for batch in out), "không được có lô rỗng"
+
+
 def test_negative_budget_is_rejected():
     with pytest.raises(ValueError):
         batch_segments([seg(1, "a")], max_chars=-1)
+
+
+def test_packing_restarts_after_a_flush():
+    """Sau mỗi lần xả lô, bộ đếm `used` phải reset về 0 rồi gói tiếp.
+
+    Quên reset thì mọi segment sau lô đầu thành lô riêng: bản ghi 1000 segment
+    × 40 ký tự gói đúng thành 34 lô nhưng thành 971 lô (28,6× số lần gọi engine)
+    nếu không reset — nội dung vẫn ghép đúng nên không phép so "ghép lại == đầu
+    vào" nào bắt được, chỉ có ví dụ vượt qua một lần xả lô này bắt được.
+    """
+    a, b, c, d, e = seg(1, "a" * 6), seg(2, "b" * 6), seg(3, "c"), seg(4, "d"), seg(5, "e")
+    assert batch_segments([a, b, c, d, e], max_chars=6) == [[a], [b], [c, d, e]]
