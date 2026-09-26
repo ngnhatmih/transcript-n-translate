@@ -8,8 +8,8 @@ from typing import Iterable, Iterator
 
 from app.domain import job_state as js
 from app.domain.models import (
-    Job, Segment, Source, Term, Transcript, Translation,
-    TranslationSummary, segments_from_json, segments_to_json,
+    UNSETTLED_TRANSLATION_STATUSES, Job, Segment, Source, Term, Transcript,
+    Translation, TranslationSummary, segments_from_json, segments_to_json,
 )
 from app.ports.clock import Clock
 
@@ -496,6 +496,29 @@ class SqliteRepos:
             cur = conn.execute(
                 "UPDATE jobs SET state=?, finished_at=? WHERE state=?",
                 (js.INTERRUPTED, self._clock.now_iso(), js.RUNNING),
+            )
+            return int(cur.rowcount)
+
+    def set_translations_status(self, translation_ids: list[int], status: str) -> int:
+        """Ghi `status` cho nhiều hàng dịch, CHỈ những hàng chưa kết thúc.
+
+        `IN (?,?,…)` dựng từ SỐ LƯỢNG id, không từ nội dung: giá trị vẫn là tham
+        số `?` buộc, đúng quy ước của cả tệp này.
+
+        Bộ lọc `status IN (?,?)` nằm trong CHÍNH câu UPDATE chứ không ở người gọi:
+        nó là bất biến của phép đối chiếu (một hàng `done` là kết quả của một lần
+        chạy thật, không được xoá bởi một lần quét muộn), và để nó ở người gọi là
+        để mọi người gọi phải nhớ.
+        """
+        ids = [int(i) for i in translation_ids]
+        if not ids:
+            return 0
+        placeholders = ",".join("?" * len(ids))
+        with self._connect() as conn:
+            cur = conn.execute(
+                f"UPDATE translations SET status=? WHERE id IN ({placeholders})"
+                " AND status IN (?, ?)",
+                (status, *ids, *UNSETTLED_TRANSLATION_STATUSES),
             )
             return int(cur.rowcount)
 

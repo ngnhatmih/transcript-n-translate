@@ -71,6 +71,26 @@ class Repos(Protocol):
     def append_job_log(self, job_id: int, line: str) -> None: ...
     def request_cancel(self, job_id: int) -> None: ...
     def mark_running_as_interrupted(self) -> int: ...
+    def set_translations_status(self, translation_ids: list[int], status: str) -> int:
+        """Ghi CÙNG một trạng thái cho nhiều hàng `translations`, trả số hàng đã sửa.
+
+        Dùng để đối chiếu một bản dịch với SỐ PHẬN của job đứng sau nó: job bị
+        huỷ lúc còn `queued` hoặc bị ngắt giữa lúc chạy thì KHÔNG còn gì chạm
+        vào hàng dịch nữa, nên nó phải rời `queued`/`running` — nếu không
+        `translations.status` đứng nguyên ở `queued` VĨNH VIỄN và
+        `GET /api/translations` (Task 13 phơi cột này) hiện một bản dịch "đang
+        chờ" không bao giờ chạy.
+
+        Danh sách rỗng là NO-OP trả `0`, không phải lỗi: người gọi tra id từ
+        payload job, và một job không mang `translation_id` (mọi job `asr`/
+        `ingest`/`export`) là chuyện bình thường.
+
+        Hiện thực KHÔNG được ghi đè một hàng đã ở trạng thái kết thúc
+        (`done`/`failed`/`cancelled`): `done` là kết quả của một lần chạy thật, và
+        một lần đối chiếu muộn không được xoá nó. Hai trạng thái còn sửa được là
+        `app.domain.models.UNSETTLED_TRANSLATION_STATUSES`.
+        """
+        ...
     def retry_job(self, job_id: int) -> None: ...
 
     # glossary / settings / calls

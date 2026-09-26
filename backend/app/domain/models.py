@@ -233,3 +233,36 @@ class CallStats:
     tokens_in: int | None = None
     tokens_out: int | None = None
     duration_ms: int | None = None
+
+
+def translation_id_of(job) -> int | None:
+    """`translation_id` mà một job `translate` trỏ tới, hoặc `None`.
+
+    Đây là DẪU NỐI duy nhất giữa một job và hàng `translations` nó chạy: bảng
+    `jobs` không có cột `translation_id`, và id của hai bảng KHÔNG được đảm bảo
+    trùng nhau (chúng chỉ tình cờ bằng nhau khi cả hai là hàng đầu tiên của DB).
+    Suy ra từ payload là cách duy nhất đúng, và nó là cùng một khoá mà
+    `TranslateHandler.run` đọc.
+
+    Job của loại khác (`asr`/`ingest`/`export`) không mang khoá này ⇒ `None`, chứ
+    không phải lỗi: người gọi dùng nó để quyết định có gì phải đối chiếu hay
+    không. Payload hỏng (`None`, không phải dict, hay id không phải số) cũng trả
+    `None` thay vì ném: đối chiếu trạng thái là việc dọn dẹp, nó không được biến
+    một hàng job dị dạng thành sự cố ở tầng trên.
+    """
+    payload = getattr(job, "payload", None)
+    if not isinstance(payload, dict):
+        return None
+    value = payload.get("translation_id")
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+#: Hai trạng thái của `translations` mà một phép ĐỐI CHIẾU được phép ghi đè.
+#: Mọi giá trị khác là kết luận của một lần chạy thật (`done`) hoặc của chính
+#: handler (`failed`/`cancelled`), và một lần quét muộn không được xoá chúng.
+UNSETTLED_TRANSLATION_STATUSES = ("queued", "running")
