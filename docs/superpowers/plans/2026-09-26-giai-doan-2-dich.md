@@ -3631,7 +3631,14 @@ git commit -m "feat(api): glossary CRUD + job dich lai khi glossary doi"
 > **giữ** route cũ (`POST /api/export` + `GET /api/export/{job_id}/download`), và **ghim bằng test rằng cả hai cho ra
 > CÙNG nội dung** cho cùng một bản dịch. Bỏ route cũ là phá thứ đang chạy mà không có gì bù.
 >
-> **C. `POST /api/transcripts/{id}/approve`** — chỉ đổi trạng thái transcript sang `translated`; id lạ ⇒ 404.
+> **C. `POST /api/transcripts/{id}/approve`** — ❌ **MỤC NÀY ĐÃ BỊ BÁC BỎ ở review Task 15 (F1 Critical).**
+> Bản đầu của tôi viết "đổi trạng thái sang `translated`". **Sai.** Spec nói chuỗi là `draft → reviewed → translated`
+> (design doc dòng 231 và 544), và `reviewed` nằm **đúng** ở cửa duyệt; `translated` là trạng thái **cuối**, chỉ
+> đúng khi đã có bản dịch xong. Reviewer đo được rằng duyệt một transcript **chưa có bản dịch nào** sẽ ghi
+> `status="translated"` — **sai ngay lúc ghi** — và `set_transcript_status` chỉ có hai chỗ gọi, nên làm vậy sẽ để
+> giá trị **giữa** chuỗi không có người sản xuất.
+> ⇒ **Đúng:** route này **đã tồn tại từ Giai đoạn 1a** (`routes_transcripts.py:143`) và đặt **`reviewed`**; giữ
+> nguyên, chỉ cần id lạ ⇒ 404. Ai đó ghi `translated` thì đó là **đường hoàn thành dịch** — nay thuộc **Task 18**.
 >
 > **D. Luật chung của phase này (đã trả giá nhiều lần):**
 > - **`app/api` KHÔNG được import `app.adapters`**, không `sqlite3`/`db_path`/`_connect(` (có test canh).
