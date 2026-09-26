@@ -28,6 +28,14 @@ nhiên:
   `run(self, job, report: Callable[[float, str], None])`). Gọi một tham số là
   `TypeError` ngay dòng log đầu, và vì nó nằm trong `try` của `_run_one`, job chỉ
   lặng lẽ thành `failed`.
+* **Cờ huỷ đọc LẠI TỪ REPO mỗi lô.** `job.cancel_requested` là ẢNH CHỤP worker
+  đọc trước khi handler chạy, còn yêu cầu huỷ thật chỉ ghi DB; tin ảnh chụp thì
+  chức năng huỷ không bao giờ chạy trong đường nối dây thật, mà test chỉ lật
+  thuộc tính của một job giả vẫn xanh (F1 của review Task 11).
+* **Lỗi không lường trước phải để lại `failed`.** Cả vòng lặp được bọc; nếu chỉ
+  nhánh alignment ghi `failed` thì một `RuntimeError` trần (Ollama sập, OOM) để
+  hàng dịch treo ở `queued` trong khi job đã `FAILED`. `LookupError` đi thẳng ra:
+  hàng biến mất thì không có gì để đánh dấu (F2 của review Task 11).
 """
 from __future__ import annotations
 
@@ -91,30 +99,43 @@ class TranslateHandler:
         # Retry bắt đầu từ segment ĐẦU TIÊN chưa có bản dịch, không dịch lại từ
         # đầu: `done` đọc từ hàng đã ghi ở lần chạy trước (spec §3, "Retry").
         remaining = [s for s in source if s.i not in done_ids]
-        for batch in batch_segments(remaining, max_chars=self._batch_chars):
-            # Hủy chỉ được kiểm GIỮA các lô: kill giữa lô để lại DB nửa vời và
-            # model không được giải phóng (worker.checkpoint).
-            if job.cancel_requested:
-                self._repos.set_translation_status(translation_id, "cancelled")
+        # Bọc CẢ vòng lặp: mọi lỗi không lường trước (engine sập, OOM, mạng) phải
+        # để hàng dịch ở `failed` TRƯỚC khi nổi lên. Chỉ nhánh alignment ghi
+        # `failed` là chưa đủ: một `RuntimeError` trần để hàng treo ở `queued`
+        # trong khi job đã `FAILED`, và API/UI hiện một bản dịch "đang chờ" không
+        # bao giờ chạy. `LookupError` (`NotFound` kế thừa nó) là ngoại lệ: hàng đã
+        # biến mất thì không có gì để đánh dấu, và lần ghi thêm sẽ ném `NotFound`
+        # thứ hai che mất lỗi gốc.
+        try:
+            for batch in batch_segments(remaining, max_chars=self._batch_chars):
+                # Hủy chỉ được kiểm GIỮA các lô: kill giữa lô để lại DB nửa vời và
+                # model không được giải phóng (worker.checkpoint).
+                if self._cancel_requested(job):
+                    self._repos.set_translation_status(translation_id, "cancelled")
+                    job.progress = len(done) / total if total else 1.0
+                    report(job.progress, f"đã huỷ: giữ {len(done)}/{total} segment")
+                    return
+
+                translated, missing = self._translate_batch(
+                    engine, batch, glossary, opts, report, job.progress)
+                if translated is None:
+                    # Giữ nguyên phần đã dịch (không xoá công đã làm) và nói rõ id nào
+                    # chưa có bản dịch — đây là thông báo hành động được của bước (c).
+                    self._repos.set_translation_status(translation_id, "failed")
+                    raise RuntimeError(
+                        f"dịch thất bại: segment {missing} chưa có bản dịch "
+                        f"(đã giữ {len(done)}/{total} segment đã dịch xong)")
+
+                # Checkpoint: ghi CẢ danh sách đã cộng dồn, nên `len(done)` là tiến độ.
+                done.extend(translated)
+                self._repos.update_translation_segments(translation_id, done)
                 job.progress = len(done) / total if total else 1.0
-                report(job.progress, f"đã huỷ: giữ {len(done)}/{total} segment")
-                return
-
-            translated, missing = self._translate_batch(
-                engine, batch, glossary, opts, report, job.progress)
-            if translated is None:
-                # Giữ nguyên phần đã dịch (không xoá công đã làm) và nói rõ id nào
-                # chưa có bản dịch — đây là thông báo hành động được của bước (c).
-                self._repos.set_translation_status(translation_id, "failed")
-                raise RuntimeError(
-                    f"dịch thất bại: segment {missing} chưa có bản dịch "
-                    f"(đã giữ {len(done)}/{total} segment đã dịch xong)")
-
-            # Checkpoint: ghi CẢ danh sách đã cộng dồn, nên `len(done)` là tiến độ.
-            done.extend(translated)
-            self._repos.update_translation_segments(translation_id, done)
-            job.progress = len(done) / total if total else 1.0
-            report(job.progress, f"đã dịch {len(done)}/{total}")
+                report(job.progress, f"đã dịch {len(done)}/{total}")
+        except LookupError:
+            raise
+        except Exception:
+            self._repos.set_translation_status(translation_id, "failed")
+            raise
 
         # Chuẩn hoá thứ tự trước khi chốt `done`: một hàng CŨ đã ghi lệch thứ tự
         # (hoặc bị chèn giữa) sẽ khiến `done` mang thứ tự của hàng cũ chứ không
@@ -136,6 +157,33 @@ class TranslateHandler:
         )
         job.progress = 1.0
         report(1.0, f"xong: {len(done)} segment, {len(issues)} issue QA")
+
+    def _cancel_requested(self, job) -> bool:
+        """Cờ huỷ của job, ĐỌC LẠI TỪ REPO mỗi lô.
+
+        `job.cancel_requested` là ẢNH CHỤP: `worker._run_one` bốc job bằng
+        `oldest_queued()` TRƯỚC khi handler chạy, còn yêu cầu huỷ thật
+        (`routes_jobs` → `repos.request_cancel`) CHỈ ghi `jobs.cancel_requested=1`,
+        và worker chỉ đọc lại cờ sau khi `run()` trả về. Tin ảnh chụp thì người
+        dùng bấm huỷ mà cả bản dịch vẫn chạy hết, ghi `done` kèm QA, rồi job mới
+        thành `cancelled` ở ranh giới — hai mặt của cùng một bản dịch nói hai
+        chuyện khác nhau.
+
+        Một lần đọc theo khoá chính mỗi lô là không đáng kể cạnh một lời gọi
+        engine, và handler phải đúng bất kể ai gọi nó. Cờ trên `job` vẫn được giữ
+        làm đường tắt cho test đơn vị (job giả không có hàng trong DB), nhưng thứ
+        được TIN là lần đọc lại này. Job không còn hàng (`LookupError`, `NotFound`
+        kế thừa nó) coi như không huỷ: hàng biến mất thì đã có lỗi khác nói lên.
+        """
+        if job.cancel_requested:
+            return True
+        job_id = getattr(job, "id", None)
+        if job_id is None:
+            return False
+        try:
+            return bool(self._repos.get_job(job_id).cancel_requested)
+        except LookupError:
+            return False
 
     def _ordered_prefix(self, source: list[Segment],
                         stored: list[Segment]) -> list[Segment]:

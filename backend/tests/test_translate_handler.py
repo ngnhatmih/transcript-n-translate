@@ -26,6 +26,8 @@ from app.domain.models import Segment
 from app.domain.mt import MtOpts
 from app.domain.mt_qa import QaLimits
 from app.pipeline.translate import TranslateHandler
+from app.worker import PhaseQueueWorker
+from tests.fakes import FakeGovernor, a_job
 from tests.fakes_mt import FakeMtEngine
 
 
@@ -89,6 +91,42 @@ class _UpdateRaisesNotFound:
     def update_translation_segments(self, translation_id, segments):
         self.update_calls += 1
         raise NotFound(f"translation {translation_id} không tồn tại")
+
+
+class _CancelInDbAfterFirstBatch(FakeMtEngine):
+    """Huỷ theo ĐÚNG đường sản phẩm: `repos.request_cancel` ghi DB, không lật
+    thuộc tính của một job giả.
+
+    `job.cancel_requested` là ẢNH CHỤP mà worker đọc trước khi handler chạy
+    (`oldest_queued()`), còn yêu cầu huỷ thật chỉ ghi `jobs.cancel_requested=1`;
+    worker chỉ đọc lại cờ sau khi `run()` trả về. Nên một test chỉ lật thuộc
+    tính đó là mock tự thoả mãn: nó xanh trong khi đường nối dây thật chết.
+    """
+
+    def __init__(self, repos, job_id):
+        super().__init__()
+        self._repos = repos
+        self._job_id = job_id
+
+    def translate(self, batch, glossary, opts):
+        out = super().translate(batch, glossary, opts)
+        if len(self.calls) == 1:
+            self._repos.request_cancel(self._job_id)
+        return out
+
+
+class _BoomOnSecondCall(FakeMtEngine):
+    """Nổ `RuntimeError` trần ở lô thứ hai: engine thật sập (Ollama, OOM)."""
+
+    def __init__(self, **kw):
+        super().__init__(**kw)
+        self.calls_seen = 0
+
+    def translate(self, batch, glossary, opts):
+        self.calls_seen += 1
+        if self.calls_seen == 2:
+            raise RuntimeError("engine sập giữa đường")
+        return super().translate(batch, glossary, opts)
 
 
 @pytest.fixture
@@ -241,6 +279,25 @@ def test_failure_keeps_what_was_already_translated(repos, transcript):
     assert [s.i for s in got.segments] == [1, 2], "phần đã dịch trước chỗ hỏng phải còn"
 
 
+def test_engine_exception_outside_alignment_marks_the_translation_failed(
+        repos, transcript):
+    """Lỗi engine KHÔNG phải alignment cũng phải để lại `status='failed'`.
+
+    Ràng buộc số 2 của phase nói trạng thái kết thúc là `failed`; nhánh alignment
+    làm đúng, còn một `RuntimeError` trần (Ollama sập, OPUS-MT OOM) thì không —
+    hàng dịch treo ở `queued` trong khi job đã `FAILED`, và API/UI hiện một bản
+    dịch "đang chờ" không bao giờ chạy. Phần đã dịch vẫn phải được giữ nguyên.
+    """
+    tid, _ = transcript
+    tr_id = _translation(repos, tid)
+    with pytest.raises(RuntimeError):
+        _call(_handler(repos, _BoomOnSecondCall(), batch_chars=1),
+              repos, tr_id, tid)
+    got = repos.get_translation(tr_id)
+    assert got.status == "failed"
+    assert [s.i for s in got.segments] == [1], "phần đã dịch phải còn"
+
+
 def test_a_failed_large_batch_keeps_everything_already_checkpointed(repos, transcript):
     """Hạ cấp hỏng thì KHÔNG được ghi phần hạ cấp đã dịch được.
 
@@ -322,6 +379,38 @@ def test_cancel_on_the_last_batch_writes_nothing_more_and_leaves_status_cancelle
     assert got.qa_issues == [], "huỷ thì không được ghi QA của một bản dịch chưa xong"
 
 
+def test_cancel_requested_in_the_db_during_the_run_stops_at_the_next_batch(
+        repos, transcript):
+    """Huỷ giữa các lô phải đọc cờ từ REPO, không tin ảnh chụp trên `job`.
+
+    Đây là đường nối dây thật: `worker._run_one` lấy job bằng `oldest_queued()`
+    TRƯỚC khi chạy handler, `routes_jobs` chỉ ghi `cancel_requested=1` vào DB, và
+    worker chỉ đọc lại cờ SAU khi `run()` trả về. Nếu handler chỉ nhìn
+    `job.cancel_requested` thì bản dịch 5 lô chạy HẾT, ghi `status='done'` kèm QA,
+    rồi job mới thành `cancelled` ở ranh giới — người dùng bấm huỷ và không thấy
+    gì dừng lại.
+    """
+    tid, _ = transcript
+    tr_id = _translation(repos, tid)
+    job = a_job(None, job_type="translate", engine="fake-mt")
+    job.payload = {"translation_id": tr_id, "transcript_id": tid,
+                   "engine_id": "fake-mt", "source_lang": "zh", "target_lang": "vi"}
+    jid = repos.add_job(job)
+    engine = _CancelInDbAfterFirstBatch(repos, jid)
+    handler = TranslateHandler(repos, {"fake-mt": engine}, batch_chars=1)
+    worker = PhaseQueueWorker(repos, FakeGovernor(), {"translate": handler})
+
+    while worker.tick():
+        pass
+
+    assert engine.calls == [[1]], "huỷ ngay sau lô 1 thì không được gọi lô nào nữa"
+    assert repos.get_job(jid).state == "cancelled"
+    got = repos.get_translation(tr_id)
+    assert got.status == "cancelled", "job huỷ mà bản dịch vẫn `done` là hai mặt lệch nhau"
+    assert [s.i for s in got.segments] == [1], "phần đã checkpoint phải được giữ"
+    assert repos.get_job(jid).progress == 0.2
+
+
 def test_each_segment_failure_is_logged_with_its_own_id(repos, transcript):
     """Dòng log lúc hỏng phải nói ĐÚNG id vừa hỏng, không phải id nào khác.
 
@@ -334,9 +423,34 @@ def test_each_segment_failure_is_logged_with_its_own_id(repos, transcript):
     seen = []
     with pytest.raises(RuntimeError):
         _call(_handler(repos, FakeMtEngine(drop_ids={3}), batch_chars=1),
-              repos, tr_id, tid, report=lambda p, line: seen.append(line))
-    assert any("segment 3" in line for line in seen), seen
-    assert not any("segment 5 thất bại" in line for line in seen)
+              repos, tr_id, tid, report=lambda p, line: seen.append((p, line)))
+    lines = [line for _, line in seen]
+    assert any("segment 3" in line for line in lines), lines
+    assert not any("segment 5 thất bại" in line for line in lines)
+    probs = [p for p, _ in seen]
+    assert probs == sorted(probs), f"tiến độ bị nhảy lùi giữa dòng chẩn đoán: {seen}"
+
+
+def test_big_batch_fallback_logs_the_segment_that_failed(repos, transcript):
+    """Lô lớn lệch rồi hạ cấp: dòng log phải nói ĐÚNG segment vừa hỏng.
+
+    Test kia chỉ chạm bước (b) với `batch_chars=1`, ở đó lô hạ cấp có MỘT phần tử
+    nên `batch[-1].i == s.i`; mutant dùng id của segment cuối lô vì thế vẫn xanh
+    trên toàn bộ suite. Với một lô 5 phần tử thì hai id đó khác nhau, và đây là
+    dòng log DUY NHẤT nói segment nào VỪA hỏng (thông báo cuối chỉ liệt kê id còn
+    thiếu), nên nó cũng là chỗ duy nhất phân biệt "hỏng ở 3" với "hỏng ở 5".
+    """
+    tid, _ = transcript
+    tr_id = _translation(repos, tid)
+    seen = []
+    with pytest.raises(RuntimeError):
+        _call(_handler(repos, FakeMtEngine(drop_ids={3}), batch_chars=10_000),
+              repos, tr_id, tid, report=lambda p, line: seen.append((p, line)))
+    lines = [line for _, line in seen]
+    assert any("segment 3 thất bại" in line for line in lines), lines
+    assert not any("segment 5 thất bại" in line for line in lines), lines
+    probs = [p for p, _ in seen]
+    assert probs == sorted(probs), f"tiến độ bị nhảy lùi giữa dòng chẩn đoán: {seen}"
 
 
 def test_retry_resumes_from_first_missing_segment(repos, transcript):
@@ -346,8 +460,11 @@ def test_retry_resumes_from_first_missing_segment(repos, transcript):
         _call(_handler(repos, FakeMtEngine(drop_ids={3}), batch_chars=1),
               repos, tr_id, tid)
     engine = FakeMtEngine()
-    _call(_handler(repos, engine, batch_chars=1), repos, tr_id, tid)
+    seen = []
+    _call(_handler(repos, engine, batch_chars=1), repos, tr_id, tid,
+          report=lambda p, line: seen.append(line))
     assert engine.calls[0] == [3], "đã có 1,2 thì không được dịch lại"
+    assert "2/5" in seen[0], f"dòng đầu phải nói đã có 2/5 segment: {seen}"
     assert [s.i for s in repos.get_translation(tr_id).segments] == [1, 2, 3, 4, 5]
 
 
@@ -456,6 +573,8 @@ def test_checkpoint_not_found_is_loud_and_not_a_silent_done(repos, transcript):
         _call(_handler(guarded, FakeMtEngine()), repos, tr_id, tid)
     assert guarded.update_calls == 1
     assert repos.get_translation(tr_id).segments == []
+    assert repos.get_translation(tr_id).status == "queued", (
+        "hàng biến mất thì không có gì để đánh dấu `failed`; đừng ghi thêm")
 
 
 def test_run_reads_the_job_payload(repos, transcript):
