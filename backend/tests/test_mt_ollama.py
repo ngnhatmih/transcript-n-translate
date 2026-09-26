@@ -203,7 +203,7 @@ def test_user_message_carries_every_segment_and_both_languages():
                   MtOpts(source_lang="zh", target_lang="vi"))
     user = client.bodies[0]["json"]["messages"][1]["content"]
     assert "你好" in user and "再见" in user
-    assert "zh" in user and "vi" in user
+    assert "từ zh sang vi" in user, "chiều dịch phải là source → target, không được đảo"
 
 
 def test_glossary_reaches_the_system_message():
