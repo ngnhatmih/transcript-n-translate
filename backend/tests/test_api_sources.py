@@ -11,6 +11,7 @@ Ngoài 9 test route của brief còn hai nhóm test CHE hai lỗ hổng đã bi�
 from __future__ import annotations
 
 import asyncio
+import ast
 import io
 import pathlib
 import sys
@@ -531,17 +532,26 @@ def test_media_path_is_taken_from_pathlib_not_string_splitting(repos, tmp_path, 
 
     posix_style = "/data/media/bai-giang.mp4"
     windows_style = r"D:\data\media\bai-giang.mp4"
-    for raw in (posix_style, windows_style):
-        assert pathlib.Path(raw).name == "bai-giang.mp4"
-        assert pathlib.Path(raw).stem == "bai-giang"
+    # Khẳng định bằng lớp PurePath TƯỜNG MINH (M8/RU-05): `pathlib.Path(r"D:\…")`
+    # là `PurePosixPath` trên POSIX, nên `.name` trả CẢ chuỗi và bản cũ đỏ trên
+    # CI Linux. Máy này Windows-only ⇒ ca POSIX ở đây là SUY LUẬN, không quan sát.
+    assert pathlib.PurePosixPath(posix_style).name == "bai-giang.mp4"
+    assert pathlib.PurePosixPath(posix_style).stem == "bai-giang"
+    assert pathlib.PureWindowsPath(windows_style).name == "bai-giang.mp4"
+    assert pathlib.PureWindowsPath(windows_style).stem == "bai-giang"
 
     source_id = repos.add_source(kind="file", origin="bai-giang.mp4",
                                  media_path=posix_style, lang="zh")
-    # Đường dẫn kiểu POSIX đó không trỏ tới tệp nào trên máy này -> phải hỏng
-    # ồn ào và TUYỆT ĐỐI không được gọi ffmpeg trên đường dẫn sai.
-    with pytest.raises(IngestError):
-        IngestHandler(repos).run(_ingest_job(source_id), lambda fraction, line: None)
-    assert calls == []
+    # Đường dẫn kiểu POSIX đó là TUYỆT ĐỐI và nằm ngoài gốc media của test, nên
+    # handler phải từ chối bằng guard I-6 (`resolve_within`): nó KHÔNG được bị
+    # diễn giải lại thành đường dẫn tương đối dưới `media_dir` rồi đưa cho ffmpeg.
+    # Khẳng định này khác `test_ingest_handler_raises_an_actionable_error_when_
+    # media_is_missing` (test kia không truyền `media_root`, nên chỉ chạm nhánh
+    # "tệp không tồn tại"); ở đây điều được ghim là phép phân giải đường dẫn.
+    with pytest.raises(IngestError, match="ngoài gốc media"):
+        IngestHandler(repos, media_root=media_dir).run(
+            _ingest_job(source_id), lambda fraction, line: None)
+    assert calls == [], "không được gọi ffmpeg trên đường dẫn sai"
 
 
 def test_ingest_handler_refuses_an_asr_engine_absent_from_the_registry(repos, tmp_path,
@@ -646,6 +656,39 @@ class _RecordingEngine:
         self.releases += 1
 
 
+def _repo_data_dirs() -> list[pathlib.Path]:
+    """Bốn thư mục mà `ensure_dirs()` tạo cho cấu hình THẬT của repo.
+
+    Đường dẫn suy từ `config.__file__`, KHÔNG từ `config.DATA_DIR`: chính
+    `DATA_DIR` là thứ bị fixture vá, nên hỏi nó là hỏi kẻ vừa bị đổi.
+    """
+    from app import config
+
+    root = pathlib.Path(config.__file__).resolve().parents[2] / "data"
+    return [root, root / "media", root / "logs", root / "output"]
+
+
+def _snapshot_repo_data_dirs() -> dict[pathlib.Path, bool]:
+    """Trạng thái `data/` THẬT của repo, đo TRƯỚC khi gọi `build_components()`."""
+    return {d: d.exists() for d in _repo_data_dirs()}
+
+
+def _assert_repo_data_dirs_untouched(before: dict[pathlib.Path, bool]) -> None:
+    """M7/RU-04 · bộ test KHÔNG được tạo `data/` thật.
+
+    `ensure_dirs()` closure trên biến module của `app.config`, nên vá mỗi tên đã
+    import vào `main` là KHÔNG đủ: `main.build_components()` vẫn tạo
+    `data/{media,logs,output}` của repo. Đo trên chính thư mục repo — `tmp_path`
+    không thấy được điểm mù này.
+    """
+    created = [str(d) for d, existed in before.items() if not existed and d.exists()]
+    assert not created, (
+        "build_components() đã tạo thư mục THẬT trong repo: " + ", ".join(created)
+        + ". Phải vá `app.config` (nơi `ensure_dirs()` đọc biến), không chỉ vá "
+          "tên đã import vào `main` (M7/RU-04)."
+    )
+
+
 @pytest.fixture()
 def built(tmp_path, monkeypatch):
     """Dựng `build_components()` thật, chỉ thay registry, engine nặng và đường dẫn.
@@ -654,10 +697,13 @@ def built(tmp_path, monkeypatch):
     vào `data/` thật của repo. Phải vá CẢ `app.config`: `ensure_dirs()`
     (`config.py:38-40`) đọc biến toàn cục của chính module đó, nên vá mỗi tên đã
     import vào `main` là không đủ — `main.build_components()` vẫn tạo `data/`
-    THẬT của repo (đúng cái bẫy đã biết ở Q5 của review Task 19).
+    THẬT của repo (đúng cái bẫy đã biết ở Q5 của review Task 19). Khẳng định
+    `_assert_repo_data_dirs_untouched` ngay dưới đây biến lời hứa đó thành thứ
+    chạy được: bỏ các dòng vá `config` là MỌI test dùng fixture này đỏ.
     """
     from app import config, main
 
+    repo_data_before = _snapshot_repo_data_dirs()
     data = tmp_path / "data"
     monkeypatch.setattr(config, "DATA_DIR", data)
     monkeypatch.setattr(config, "MEDIA_DIR", data / "media")
@@ -672,6 +718,7 @@ def built(tmp_path, monkeypatch):
     monkeypatch.setattr(main, "load_registry", lambda: [ASR_SPEC, MT_SPEC])
     monkeypatch.setattr(main, "_engine_factory", lambda spec: engine, raising=False)
     repos, specs, worker, broker = main.build_components()
+    _assert_repo_data_dirs_untouched(repo_data_before)
     return main, repos, specs, worker, engine, broker
 
 
@@ -807,6 +854,7 @@ def test_build_components_only_registers_asr_engines(monkeypatch, tmp_path):
     """Engine MT không được đăng ký: GĐ1a chạy nó qua Ollama, không qua handler này."""
     from app import config, main
 
+    repo_data_before = _snapshot_repo_data_dirs()
     data = tmp_path / "data"
     monkeypatch.setattr(config, "DATA_DIR", data)
     monkeypatch.setattr(config, "MEDIA_DIR", data / "media")
@@ -818,8 +866,34 @@ def test_build_components_only_registers_asr_engines(monkeypatch, tmp_path):
     monkeypatch.setattr(main, "OUTPUT_DIR", data / "output")
     monkeypatch.setattr(main, "LOG_DIR", data / "logs")
     repos, specs, worker, broker = main.build_components()
+    _assert_repo_data_dirs_untouched(repo_data_before)
 
     assert set(worker.governor._loaded) == {ASR_SPEC.phase_key}
+
+
+def test_build_components_wires_the_declared_default_mt_engine(built):
+    """R58/WQ-02 · composition root phải nạp khoá `default_mt` và truyền cho handler.
+
+    Không có dây này thì `TranscribeHandler` dựng bởi `main.py` rơi về phần tử
+    ĐẦU của mảng `mt` — đúng thứ khoá `default_mt` sinh ra để chặn — mà không
+    test nào đỏ. Registry ở fixture là [ASR_SPEC, MT_SPEC] với MT đầu = `qwen2.5-7b`,
+    còn `registry.json` THẬT khai báo `default_mt = opus-mt`: hai giá trị khác
+    nhau nên một dây nối đúng là thấy được.
+    """
+    from app.adapters.registry_file import load_default_mt
+
+    main, repos, specs, worker, engine, broker = built
+    declared = load_default_mt()
+    assert declared == "opus-mt"
+
+    handler = worker.handlers["asr"]
+    handler._forward_to_translation(1, 1, "zh")  # noqa: SLF001 - chính đường thật
+    mt_jobs = [j for j in repos.list_jobs() if j.type == "translate"]
+    first_mt = [s.id for s in specs if s.kind == "mt"][0]
+    assert [j.engine for j in mt_jobs] == [declared], (
+        "handler của composition root phải dùng khoá `default_mt`, không phải "
+        f"phần tử đầu của mảng `mt` ({first_mt})"
+    )
 
 
 def test_the_worker_and_the_stream_share_the_broker_of_the_assembled_app(built):
@@ -894,13 +968,15 @@ def test_engine_factory_points_the_faster_whisper_cache_at_the_configured_disk()
 # Cấu trúc gói
 # --------------------------------------------------------------------------
 
-def test_api_layer_does_not_import_adapters():
-    """`app/api` chỉ nói chuyện qua app.state; adapter là việc của `app/main.py`."""
-    import ast
+def _adapter_import_offenders(directory: pathlib.Path) -> list[str]:
+    """Tệp + module `app.adapters` mà `directory` kéo vào, quét ĐỆ QUY (`rglob`).
 
-    api_dir = pathlib.Path(__file__).resolve().parents[1] / "app" / "api"
+    N3/RU-03: bản cũ dùng `glob("*.py")`, nên `app/api/<gói con>/` im lặng thoát
+    lưới ngay khi `app/api` mọc thêm gói con. Tách thành hàm để chính cái tính
+    đệ quy ấy đo được bằng một test (xem `test_api_adapter_guard_scans_subpackages`).
+    """
     offenders: list[str] = []
-    for py in sorted(api_dir.glob("*.py")):
+    for py in sorted(directory.rglob("*.py")):
         tree = ast.parse(py.read_text(encoding="utf-8"), filename=str(py))
         for node in ast.walk(tree):
             if isinstance(node, ast.Import):
@@ -911,20 +987,86 @@ def test_api_layer_does_not_import_adapters():
                 continue
             offenders += [f"{py.name}: {n}" for n in names
                           if n.startswith("app.adapters")]
+    return offenders
+
+
+def test_api_layer_does_not_import_adapters():
+    """`app/api` chỉ nói chuyện qua app.state; adapter là việc của `app/main.py`."""
+    api_dir = pathlib.Path(__file__).resolve().parents[1] / "app" / "api"
+    offenders = _adapter_import_offenders(api_dir)
     assert not offenders, "app/api không được kéo adapter vào:\n  " + "\n  ".join(offenders)
 
 
-# Từ khoá cho thấy `app/api` tự chạm vào TỆP SQLite thay vì đi qua `Repos`.
-_PERSISTENCE_REACH = ("db_path", "_connect(", "import sqlite3")
+def test_api_adapter_guard_scans_subpackages(tmp_path):
+    """N3/RU-03 · lưới phải đệ quy, nếu không một gói con là thoát sạch.
+
+    Mutation chứng minh: đổi `rglob` về `glob("*.py")` trong
+    `_adapter_import_offenders` ⇒ test này đỏ.
+    """
+    pkg = tmp_path / "goi_con"
+    pkg.mkdir()
+    (pkg / "_probe.py").write_text(
+        "from app.adapters.persist import sqlite_repos\n", encoding="utf-8"
+    )
+    assert _adapter_import_offenders(tmp_path) == [
+        "_probe.py: app.adapters.persist"
+    ], "tệp trong gói con của app/api đã thoát khỏi lưới"
+
+
+#: Thuộc tính của `Repos` mà `app/api` không được tự chạm (R74).
+_PERSISTENCE_ATTRS = frozenset({"db_path", "_connect"})
+#: Module mà `app/api` không được tự import (R74).
+_PERSISTENCE_MODULE = "sqlite3"
+
+
+def _constant_str(node: ast.AST) -> str | None:
+    """Chuỗi hằng của một biểu thức, ghép được các mảnh `"db" + "_path"` (N2).
+
+    Không có bước này thì `getattr(repos, "db" + "_path")` lọt qua phép so trên
+    `Attribute.attr` — đúng cách viết mà bản quét chuỗi con cũ bỏ lọt.
+    """
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return node.value
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+        left, right = _constant_str(node.left), _constant_str(node.right)
+        if left is not None and right is not None:
+            return left + right
+    return None
 
 
 def _persistence_reach(directory: pathlib.Path) -> list[str]:
-    """Tên tệp + từ khoá vi phạm ranh giới cổng, quét cả gói con."""
+    """Tên tệp + hành vi vi phạm ranh giới cổng, quét cả gói con.
+
+    N2/RU-02: phân tích AST thay vì quét chuỗi con. Bản cũ vừa BỎ LỌT
+    (`from sqlite3 import connect`; `getattr(repos, "db" + "_path")`) vừa BÁO
+    NHẦM khi một tệp chỉ *nhắc* `db_path` trong docstring/comment. Ở đây chỉ
+    `Import`/`ImportFrom`/`Attribute`/`getattr` thật mới bị tính — comment và
+    docstring không sinh node tương ứng.
+    """
     offenders: list[str] = []
     for py in sorted(directory.rglob("*.py")):
-        text = py.read_text(encoding="utf-8")
-        offenders += [f"{py.name}: {needle}" for needle in _PERSISTENCE_REACH
-                      if needle in text]
+        tree = ast.parse(py.read_text(encoding="utf-8"), filename=str(py))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    if (alias.name == _PERSISTENCE_MODULE
+                            or alias.name.startswith(_PERSISTENCE_MODULE + ".")):
+                        offenders.append(f"{py.name}: import {alias.name}")
+            elif isinstance(node, ast.ImportFrom):
+                module = node.module or ""
+                if (module == _PERSISTENCE_MODULE
+                        or module.startswith(_PERSISTENCE_MODULE + ".")):
+                    offenders.append(f"{py.name}: from {module} import ...")
+            elif isinstance(node, ast.Attribute):
+                if node.attr in _PERSISTENCE_ATTRS:
+                    offenders.append(f"{py.name}: attribute {node.attr}")
+            elif isinstance(node, ast.Call):
+                func = node.func
+                if (isinstance(func, ast.Name) and func.id == "getattr"
+                        and len(node.args) >= 2):
+                    name = _constant_str(node.args[1])
+                    if name in _PERSISTENCE_ATTRS:
+                        offenders.append(f"{py.name}: getattr {name}")
     return offenders
 
 
@@ -954,9 +1096,43 @@ def test_persistence_guard_catches_a_rogue_api_file(tmp_path):
         encoding="utf-8",
     )
     offenders = _persistence_reach(tmp_path)
-    assert sorted(o.split(": ", 1)[1] for o in offenders) == sorted(_PERSISTENCE_REACH), (
-        offenders
+    assert sorted(o.split(": ", 1)[1] for o in offenders) == [
+        "attribute _connect", "attribute db_path", "import sqlite3",
+    ], offenders
+
+
+def test_persistence_guard_catches_from_sqlite3_import(tmp_path):
+    """N2/RU-02 · dạng import mà bản quét chuỗi con BỎ LỌT: `from sqlite3 import`."""
+    (tmp_path / "rogue.py").write_text(
+        "from sqlite3 import connect\n"
+        "conn = connect('app.db')\n",
+        encoding="utf-8",
     )
+    assert _persistence_reach(tmp_path) == ["rogue.py: from sqlite3 import ..."]
+
+
+def test_persistence_guard_catches_a_concatenated_getattr(tmp_path):
+    """N2/RU-02 · `getattr(repos, "db" + "_path")` — chuỗi con không thấy, AST thấy."""
+    (tmp_path / "rogue.py").write_text(
+        'path = getattr(repos, "db" + "_path")\n',
+        encoding="utf-8",
+    )
+    assert _persistence_reach(tmp_path) == ["rogue.py: getattr db_path"]
+
+
+def test_persistence_guard_ignores_a_docstring_that_merely_says_db_path(tmp_path):
+    """N2/RU-02 · chỉ NHẮC `db_path` trong docstring/comment thì KHÔNG phải vi phạm.
+
+    Bản quét chuỗi con báo nhầm tệp này (đo được: `comment.py: db_path` → 1
+    offender), nên lưới cũ vừa thủng vừa ồn.
+    """
+    (tmp_path / "comment.py").write_text(
+        '"""Tệp này chỉ nhắc db_path trong docstring, không hề chạm tệp SQLite."""\n'
+        "# comment cũng nhắc db_path và _connect(\n"
+        "VALUE = 1\n",
+        encoding="utf-8",
+    )
+    assert _persistence_reach(tmp_path) == []
 
 
 def test_main_module_is_importable_without_starting_a_server():
@@ -1130,7 +1306,13 @@ def test_upload_answers_422_promptly_for_a_reserved_device_name(tmp_path, name):
 
 
 def test_upload_still_accepts_a_normal_filename(client):
-    """Siết tên không được chặn tên thật: 201 + tên theo nội dung như cũ."""
+    """Siết tên không được chặn tên thật: 201 + tên theo nội dung như cũ.
+
+    API-06 (R40): spec §8.1 ghi `<sha256>`, code cố ý rút còn **16 hex**. Hai
+    khẳng định dưới đây ghim đúng hợp đồng đó: tên tệp là tiền tố 16 ký tự của
+    digest THẬT, và dài ĐÚNG 16 (không phải 8, không phải 64). Bỏ `[:16]` hoặc
+    đổi độ dài là đỏ.
+    """
     import hashlib
 
     payload = b"du-lieu-that"
@@ -1141,6 +1323,10 @@ def test_upload_still_accepts_a_normal_filename(client):
     stored = pathlib.Path(resp.json()["source"]["media_path"])
     assert stored.parent == client.tmp / "media"
     assert stored.name == f"{hashlib.sha256(payload).hexdigest()[:16]}.mp4"
+    assert len(stored.stem) == 16, (
+        f"tên theo nội dung phải là 16 hex (quyết định của API-06), thấy "
+        f"{stored.stem!r} dài {len(stored.stem)}"
+    )
     assert stored.read_bytes() == payload
 
 

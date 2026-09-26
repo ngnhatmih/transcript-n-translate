@@ -145,6 +145,37 @@ def test_default_asr_engine_falls_back_and_refuses_a_registry_without_it(tmp_pat
         default_asr_engine(specs)
 
 
+def test_shipped_registry_declares_the_default_mt_engine():
+    """R58/WQ-02 · engine DỊCH mặc định là DỮ LIỆU, không phải thứ tự mảng `mt`.
+
+    `TranscribeHandler._default_mt_engine` từng lấy thẳng `mt_specs[0].id`, nên
+    đảo thứ tự mảng `mt` trong `registry.json` — hoặc thêm một model Ollama
+    5200 MB lên đầu — là đổi engine mặc định của cả pipeline một cách im lặng,
+    không test nào ghim. Bài này khoá dấu hiệu tường minh `default_mt`.
+    """
+    from app.adapters.registry_file import load_default_mt
+    from app.registry import default_mt_engine
+
+    declared = load_default_mt()
+    assert declared == "opus-mt"
+    assert declared in {s.id for s in load_registry()}, (
+        "registry.json phải khai báo một engine mt CÓ THẬT trong danh sách"
+    )
+
+    # Đảo thứ tự mảng `mt`: model Ollama 5200 MB (`hy-mt-1.5-7b`) lên đầu, y như
+    # một lần sửa `registry.json` vô ý. Mặc định tường minh KHÔNG được đổi theo.
+    specs = load_registry()
+    mt = [s for s in specs if s.kind == "mt"]
+    asr = [s for s in specs if s.kind == "asr"]
+    reordered = asr + [mt[-1]] + mt[:-1]
+    assert reordered[len(asr)].id != mt[0].id, (
+        "mutation tự kiểm của chính test: thứ tự mảng `mt` phải đã đổi"
+    )
+    assert default_mt_engine(reordered, declared=declared) == "opus-mt", (
+        "mặc định phải đến từ khoá `default_mt`, không từ vị trí dòng"
+    )
+
+
 # Loại job THẬT của từng kind (plan §"JOB_TYPES"): job dịch tên là `translate`,
 # KHÔNG phải `mt`. Bảng này cố ý viết lại tại đây thay vì import từ app.registry,
 # để test bắt được cả trường hợp bảng ánh xạ trong code bị đổi sai.

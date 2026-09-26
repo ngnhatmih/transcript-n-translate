@@ -193,6 +193,43 @@ def test_cancel_request_and_progress_and_log_tail(repos):
     assert tail[-1] == "line 149"
 
 
+def test_job_log_file_gets_the_whole_log_while_log_tail_keeps_the_tail(tmp_path):
+    """DC-03 · spec §5.5: log ĐẦY ĐỦ nằm ở tệp `job-<id>.log`, DB giữ 100 dòng cuối.
+
+    Trước bản vá, `log_path` là trường chết: cột `jobs.log_path` không bao giờ
+    được gán và `data/logs/job-<id>.log` không bao giờ tồn tại.
+    """
+    import pathlib
+
+    log_dir = tmp_path / "logs"
+    r = SqliteRepos(tmp_path / "t.db", clock=SystemClock(), log_dir=log_dir)
+    r.init_schema()
+    jid = r.add_job(Job(id=None, workspace=1, type="asr", engine="e", phase="asr:e", payload={}))
+    for n in range(150):
+        r.append_job_log(jid, f"line {n}")
+
+    job = r.get_job(jid)
+    assert job.log_path is not None, "ghi log ra tệp thì `log_path` phải được gán"
+    path = pathlib.Path(job.log_path)
+    assert path == log_dir / f"job-{jid}.log", (
+        f"`log_path` phải trỏ đúng tệp theo spec §5.5, thấy {path}"
+    )
+    assert path.read_text(encoding="utf-8").splitlines() == [
+        f"line {n}" for n in range(150)
+    ], "tệp log phải giữ TOÀN BỘ dòng, không bị cắt ở 100"
+    tail = job.log_tail.splitlines()
+    assert len(tail) == 100, "DB chỉ giữ 100 dòng cuối cho UI"
+    assert tail[-1] == "line 149"
+
+
+def test_job_log_file_is_absent_when_the_adapter_has_no_log_dir(repos):
+    """Chống hồi quy: repos không có `log_dir` (test dựng trần) giữ nguyên hành vi cũ."""
+    jid = repos.add_job(Job(id=None, workspace=1, type="asr", engine="e", phase="asr:e", payload={}))
+    repos.append_job_log(jid, "một dòng")
+    assert repos.get_job(jid).log_path is None
+    assert repos.get_job(jid).log_tail.splitlines()[-1] == "một dòng"
+
+
 def test_retry_after_failure_resets_to_queued_and_bumps_attempts(repos):
     jid = repos.add_job(Job(id=None, workspace=1, type="asr", engine="e", phase="asr:e", payload={}))
     repos.set_job_state(jid, js.RUNNING)

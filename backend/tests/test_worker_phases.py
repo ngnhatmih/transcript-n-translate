@@ -164,6 +164,49 @@ def test_job_of_another_type_is_deferred_not_starved(repos):
     assert asr.ran == [2]
 
 
+def test_oldest_queued_and_next_queued_for_phase_agree_on_the_same_job(repos):
+    """R43/WQ-01 · bất biến giữa HAI truy vấn mà `tick()` phối hợp.
+
+    `tick()` bốc job bằng `oldest_queued()` rồi chạy THẲNG, không hỏi lại
+    `next_queued_for_phase()`. Hôm nay hai truy vấn khớp (cùng `state = queued`,
+    cùng `ORDER BY id`), nhưng thêm một bộ lọc — ví dụ `AND workspace = 1` — vào
+    MỘT trong hai thì `tick()` chạy sai job mà không test nào đỏ. Tập job dưới
+    đây cố ý để job CŨ NHẤT nằm ở workspace 2 và có một job workspace 1 CÙNG
+    giai đoạn thêm sau: đúng hình dạng làm lộ một bộ lọc theo workspace.
+    """
+    gov = FakeGovernor()
+    asr = RecordingHandler(job_type="asr")
+    mt = RecordingHandler(job_type="translate")
+    worker = _worker(repos, gov, asr, mt)
+
+    running = repos.add_job(a_job(None, job_type="asr", engine="sensevoice-small"))
+    repos.set_job_state(running, js.RUNNING)            # nhiễu: không phải `queued`
+    oldest_id = repos.add_job(a_job(None, job_type="translate",
+                                    engine="qwen2.5-7b", workspace=2))
+    repos.add_job(a_job(None, job_type="translate",
+                        engine="qwen2.5-7b", workspace=1))
+    repos.add_job(a_job(None, job_type="asr", engine="fw-large-v3-turbo"))
+    repos.add_job(a_job(None, job_type="asr", engine="sensevoice-small"))
+
+    oldest = repos.oldest_queued()
+    assert oldest is not None and oldest.id == oldest_id, (
+        f"job CŨ NHẤT đang chờ phải là #{oldest_id} (workspace 2), thấy {oldest}"
+    )
+    picked = repos.next_queued_for_phase(oldest.phase)
+    assert picked is not None and picked.id == oldest.id, (
+        "hai truy vấn của tick() đã lệch nhau: `oldest_queued()` trỏ "
+        f"#{oldest.id} (workspace {oldest.workspace}) còn "
+        f"`next_queued_for_phase({oldest.phase!r})` trỏ "
+        f"#{getattr(picked, 'id', None)}"
+    )
+
+    assert worker.tick() is True
+    assert mt.ran == [oldest.id], (
+        f"tick() phải chạy ĐÚNG job mà next_queued_for_phase trả về, thấy {mt.ran}"
+    )
+    assert asr.ran == [], "không được bốc sang giai đoạn khác khi giai đoạn này còn việc"
+
+
 def test_worker_drains_every_phase_in_one_call_loop(repos):
     """RULING R2: `tick()` chỉ được trả False khi KHÔNG còn job chờ nào.
 
@@ -197,6 +240,29 @@ def test_progress_and_log_are_written(repos):
     job = repos.get_job(jid)
     assert job.progress == 1.0
     assert "chạy job" in job.log_tail and "xong" in job.log_tail
+
+
+def test_running_a_job_through_the_worker_writes_its_log_file(tmp_path):
+    """DC-03 · chạy một job qua worker ⇒ có tệp `logs/job-<id>.log` và `log_path`.
+
+    Đây là đường THẬT của production: `main.py` truyền `config.LOG_DIR` cho
+    `SqliteRepos`, worker gọi `append_job_log` qua `report()`. Trước bản vá,
+    `log_path` luôn `None` và spec §5.5 không có gì thực thi nó.
+    """
+    import pathlib
+
+    log_dir = tmp_path / "logs"
+    repos = SqliteRepos(tmp_path / "t.db", clock=SystemClock(), log_dir=log_dir)
+    repos.init_schema()
+    worker = _worker(repos, FakeGovernor(), RecordingHandler(job_type="asr"))
+    jid = repos.add_job(a_job(None, job_type="asr", engine="e"))
+
+    assert worker.tick() is True
+
+    job = repos.get_job(jid)
+    assert job.log_path == str(log_dir / f"job-{jid}.log"), job.log_path
+    content = pathlib.Path(job.log_path).read_text(encoding="utf-8")
+    assert "chạy job" in content and "xong" in content, content
 
 
 def test_unknown_job_type_does_not_crash_the_worker(repos):
