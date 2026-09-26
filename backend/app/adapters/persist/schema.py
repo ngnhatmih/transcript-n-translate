@@ -1,4 +1,4 @@
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS schema_meta (
@@ -35,6 +35,7 @@ CREATE TABLE IF NOT EXISTS translations (
   target_lang TEXT NOT NULL DEFAULT 'vi',
   segments TEXT NOT NULL,
   prompt_version TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'queued',
   glossary_version INTEGER,
   qa_issues TEXT,
   tokens_in INTEGER,

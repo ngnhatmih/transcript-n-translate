@@ -75,10 +75,47 @@ class SqliteRepos:
                 conn.execute("ROLLBACK")
             raise
 
+    #: Các bước migration, khai báo TƯỜNG MINH theo thứ tự tăng dần của `version`:
+    #: `(version, table, column, ddl)`. Cố tình không tách tên bảng/cột ra từ
+    #: chuỗi DDL: cách đó chỉ đúng với đúng một câu `ALTER TABLE ... ADD COLUMN`
+    #: và sẽ phân tích sai ngay khi thêm bước thứ hai (đổi kiểu, backfill dữ
+    #: liệu, `ALTER TABLE ... RENAME`).
+    #:
+    #: Mỗi bước PHẢI idempotent: chạy lại trên DB đã migrate là no-op, không ném.
+    _MIGRATIONS: tuple[tuple[int, str, str, str], ...] = (
+        (2, "translations", "status",
+         "ALTER TABLE translations ADD COLUMN status TEXT NOT NULL DEFAULT 'queued'"),
+    )
+
+    def _column_names(self, conn: sqlite3.Connection, table: str) -> set[str]:
+        """Tên cột THẬT của bảng, đọc từ `PRAGMA table_info`.
+
+        Đây là nguồn sự thật duy nhất về schema đang có trên đĩa — xem
+        `_apply_migrations` để biết vì sao KHÔNG được tin `schema_meta.version`.
+        """
+        return {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}
+
+    def _apply_migrations(self, conn: sqlite3.Connection) -> None:
+        """Áp mọi bước migration mà schema THẬT còn thiếu.
+
+        `CREATE TABLE IF NOT EXISTS` KHÔNG thêm cột vào bảng đã tồn tại, nên một
+        DB Giai đoạn 1a sẽ thiếu `translations.status` trong khi
+        `schema_meta.version` vẫn bị ghi thành số mới — hỏng âm thầm. Vì vậy
+        `version` chỉ dùng để SẮP THỨ TỰ các bước, tuyệt đối không dùng làm cổng
+        chặn: một DB đã bị ghi nhầm version (đúng cái bug này) vẫn phải tự vá
+        được ở lần chạy sau. Điều kiện duy nhất để bỏ qua một bước là cột đích đã
+        có thật, nhờ đó chạy lại là no-op thay vì `duplicate column name`.
+        """
+        for _version, table, column, ddl in sorted(self._MIGRATIONS):
+            if column in self._column_names(conn, table):
+                continue
+            conn.execute(ddl)
+
     def init_schema(self) -> None:
         pathlib.Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
         with self._connect() as conn:
             conn.executescript(SCHEMA_SQL)
+            self._apply_migrations(conn)
             conn.execute(
                 "INSERT INTO schema_meta(key, value) VALUES('version', ?) "
                 "ON CONFLICT(key) DO UPDATE SET value=excluded.value",

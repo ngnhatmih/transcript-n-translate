@@ -141,6 +141,7 @@ class Translation:
     segments: list[Segment]
     prompt_version: str
     target_lang: str = "vi"
+    status: str = "queued"           # queued | running | done | failed | cancelled
     glossary_version: int | None = None
     qa_issues: list[str] = field(default_factory=list)
     tokens_in: int | None = None
