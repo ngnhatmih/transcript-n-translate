@@ -285,15 +285,26 @@ class SqliteRepos:
 
     def update_translation_segments(self, translation_id: int,
                                     segments: list[Segment]) -> None:
-        """Checkpoint tiến độ: ghi ĐÈ `segments` bằng danh sách ĐÃ APPEND.
+        """Checkpoint tiến độ: ghi ĐÈ `segments` bằng ĐÚNG danh sách được đưa.
 
-        Người gọi truyền cả danh sách đã dịch tới lúc này (không phải lô vừa
+        Adapter KHÔNG append: việc cộng dồn (`done + new`) là của người gọi, và
+        người gọi phải truyền cả danh sách đã dịch tới lúc này (không phải lô vừa
         xong), nên `len(segments)` chính là tiến độ và không cần bảng
-        `translation_segments` riêng (spec §3). Không đụng `status`.
+        `translation_segments` riêng (spec §3). Hệ quả: một danh sách NGẮN HƠN sẽ
+        xoá việc đã ghi trước đó — đó là lý do người gọi phải tự cộng dồn. Không
+        đụng `status`.
+
+        Id không tồn tại ném `NotFound`: một `UPDATE` không khớp hàng nào vẫn
+        "thành công", nên nuốt lỗi đó biến một id sai thành mất cả lô đã dịch,
+        rồi lần ghi `status` sau cũng im lặng, và job báo `done` trên `segments`
+        rỗng — đúng hợp đồng "`len(segments)` là tiến độ" bị phá mà không có tín
+        hiệu nào. Đối xứng với `get_translation` và `update_transcript_segments`.
         """
         with self._connect() as conn:
-            conn.execute("UPDATE translations SET segments=? WHERE id=?",
-                         (segments_to_json(segments), translation_id))
+            cur = conn.execute("UPDATE translations SET segments=? WHERE id=?",
+                               (segments_to_json(segments), translation_id))
+            if cur.rowcount == 0:
+                raise NotFound(f"translation {translation_id} không tồn tại")
 
     def set_translation_status(self, translation_id: int, status: str, *,
                                qa_issues: list[str] | None = None,
@@ -304,6 +315,10 @@ class SqliteRepos:
 
         Tham số `None` nghĩa là "không đụng tới cột đó", không phải "ghi NULL":
         một job hỏng giữa đường vẫn phải giữ token đã tiêu của các lô đã xong.
+
+        Id không tồn tại ném `NotFound`, cùng lý do với
+        `update_translation_segments`: nếu không, một checkpoint đã hụt vẫn được
+        "đổi trạng thái" thành công trên hàng không tồn tại và job báo `done`.
         """
         sets, args = ["status=?"], [status]
         for column, value in (("qa_issues", qa_issues), ("tokens_in", tokens_in),
@@ -314,7 +329,9 @@ class SqliteRepos:
                             if column == "qa_issues" else value)
         args.append(translation_id)
         with self._connect() as conn:
-            conn.execute(f"UPDATE translations SET {', '.join(sets)} WHERE id=?", args)
+            cur = conn.execute(f"UPDATE translations SET {', '.join(sets)} WHERE id=?", args)
+            if cur.rowcount == 0:
+                raise NotFound(f"translation {translation_id} không tồn tại")
 
     def list_translations_for_transcript(
             self, transcript_id: int) -> list[TranslationSummary]:
