@@ -310,11 +310,15 @@ class SqliteRepos:
                                qa_issues: list[str] | None = None,
                                tokens_in: int | None = None,
                                tokens_out: int | None = None,
-                               duration_ms: int | None = None) -> None:
-        """Ghi trạng thái và (tuỳ chọn) số liệu QA/token.
+                               duration_ms: int | None = None,
+                               glossary_version: int | None = None) -> None:
+        """Ghi trạng thái và (tuỳ chọn) số liệu QA/token/glossary.
 
         Tham số `None` nghĩa là "không đụng tới cột đó", không phải "ghi NULL":
         một job hỏng giữa đường vẫn phải giữ token đã tiêu của các lô đã xong.
+        Cùng quy ước đó áp cho `glossary_version`: nó được ghi khi một lần DỊCH LẠI
+        chạy xong (spec §8.1 — cột này là dấu vết duy nhất cho biết bản dịch đã
+        dùng glossary nào), và một lần ghi `failed` không được xoá version đã có.
 
         Id không tồn tại ném `NotFound`, cùng lý do với
         `update_translation_segments`: nếu không, một checkpoint đã hụt vẫn được
@@ -322,7 +326,8 @@ class SqliteRepos:
         """
         sets, args = ["status=?"], [status]
         for column, value in (("qa_issues", qa_issues), ("tokens_in", tokens_in),
-                              ("tokens_out", tokens_out), ("duration_ms", duration_ms)):
+                              ("tokens_out", tokens_out), ("duration_ms", duration_ms),
+                              ("glossary_version", glossary_version)):
             if value is not None:
                 sets.append(f"{column}=?")
                 args.append(json.dumps(value, ensure_ascii=False)

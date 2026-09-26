@@ -87,6 +87,13 @@ class TranslateHandler:
         engine = self._engines[engine_id]
         opts = MtOpts(source_lang=source_lang, target_lang=target_lang)
         glossary = approved(self._repos.list_terms(lang=source_lang))
+        # Version ĐỌC NGAY ĐÂY, cùng chỗ dựng `glossary`: đây là glossary THẬT SỰ
+        # đi vào prompt (spec §8.1 — `translations.glossary_version` là dấu vết
+        # duy nhất cho biết bản dịch dùng glossary nào). KHÔNG đọc từ
+        # `job.payload`: payload là ảnh chụp lúc enqueue, nên một lần sửa glossary
+        # khác xen vào trước khi job chạy sẽ khiến dấu vết ghi version CŨ — đúng
+        # loại dối mà Task 18 tồn tại để dẹp (F1 của review Task 14).
+        glossary_version = self._repos.glossary_version()
 
         source = self._repos.get_transcript(transcript_id).segments
         done = self._ordered_prefix(
@@ -154,7 +161,15 @@ class TranslateHandler:
             tokens_in=getattr(stats, "tokens_in", None),
             tokens_out=getattr(stats, "tokens_out", None),
             duration_ms=getattr(stats, "duration_ms", None),
+            glossary_version=glossary_version,
         )
+        # §8.6 `draft -> reviewed -> translated`: `approve` ghi `reviewed` (Task 15,
+        # vì `translated` ngay lúc duyệt một transcript CHƯA có bản dịch nào là sai
+        # ngay khi ghi), nên giá trị cuối chuỗi phải do chỗ DUY NHẤT biết chắc bản
+        # dịch đã xong sinh ra — đây là chỗ đó. Chỉ nằm trên đường thành công: cả
+        # nhánh `failed` lẫn nhánh `cancelled` ở trên đều KHÔNG đi qua đây, vì một
+        # transcript `translated` với bản dịch hỏng cũng là một lời nói dối.
+        self._repos.set_transcript_status(transcript_id, "translated")
         job.progress = 1.0
         report(1.0, f"xong: {len(done)} segment, {len(issues)} issue QA")
 

@@ -203,6 +203,88 @@ def test_engine_receives_the_source_and_target_languages(repos, transcript):
     assert engine.last_opts == MtOpts(source_lang="zh", target_lang="en")
 
 
+def test_retranslation_records_the_glossary_version_it_actually_used(repos, transcript):
+    """Dấu vết phải là version ĐỌC LÚC CHẠY, không phải giá trị trong payload.
+
+    `job.payload` là ảnh chụp lúc enqueue; nếu một lần sửa glossary khác xen vào
+    trước khi job chạy thì payload đã CŨ. Vì vậy handler phải đọc
+    `repos.glossary_version()` ngay chỗ nó dựng `glossary = approved(...)`.
+
+    Job ở đây KHÔNG mang payload, nên mutant "đọc `glossary_version` từ
+    `job.payload`" chết bằng `KeyError`/`AttributeError` chứ không lặng lẽ ghi
+    `None` — đó là lý do không dùng `_Job(payload={...})`.
+    """
+    tid, _ = transcript
+    tr_id = _translation(repos, tid)                    # tạo ở glossary_version 0
+    repos.upsert_term(lang="zh", term="câu 1", translation="cau 1",
+                      note=None, approved=True)         # bump version
+    expected = repos.glossary_version()
+    assert expected >= 1, "upsert_term phải bump version, nếu không test vô nghĩa"
+    _call(_handler(repos, FakeMtEngine(), batch_chars=1), repos, tr_id, tid)
+    got = repos.get_translation(tr_id)
+    assert got.status == "done"
+    assert got.glossary_version == expected
+
+
+def test_finishing_a_translation_marks_the_transcript_translated(repos, transcript):
+    """§8.6: `draft -> reviewed -> translated`. Đây là chỗ DUY NHẤT biết chắc xong.
+
+    `approve` (Task 15) chỉ được ghi `reviewed`, nên nếu handler dịch không ghi
+    `translated` thì giá trị cuối chuỗi không có người sản xuất và transcript mãi
+    mãi nằm ở `reviewed` dù đã có bản dịch hoàn chỉnh.
+    """
+    tid, _ = transcript
+    assert repos.get_transcript(tid).status == "draft"
+    tr_id = _translation(repos, tid)
+    _call(_handler(repos, FakeMtEngine()), repos, tr_id, tid)
+    assert repos.get_translation(tr_id).status == "done"
+    assert repos.get_transcript(tid).status == "translated"
+
+
+def test_a_failed_translation_leaves_the_transcript_untranslated(repos, transcript):
+    """`translated` trên một bản dịch HỎNG là cùng loại dối như version cũ.
+
+    Transcript phải còn `draft` (không phải `translated`) khi bản dịch `failed`.
+    """
+    tid, _ = transcript
+    tr_id = _translation(repos, tid)
+    with pytest.raises(RuntimeError):
+        _call(_handler(repos, FakeMtEngine(drop_ids={3}), batch_chars=1),
+              repos, tr_id, tid)
+    assert repos.get_translation(tr_id).status == "failed"
+    assert repos.get_transcript(tid).status == "draft"
+
+
+def test_a_cancelled_translation_leaves_the_transcript_untranslated(repos, transcript):
+    """Huỷ giữa đường cũng KHÔNG được ghi `translated`."""
+    tid, _ = transcript
+    tr_id = _translation(repos, tid)
+    job = _Job()
+    engine = FakeMtEngine()
+    real = engine.translate
+
+    def cancel_after_first(batch, glossary, opts):
+        out = real(batch, glossary, opts)
+        job.cancel_requested = True
+        return out
+
+    engine.translate = cancel_after_first        # type: ignore[method-assign]
+    _call(_handler(repos, engine, batch_chars=1), repos, tr_id, tid, job=job)
+    assert repos.get_translation(tr_id).status == "cancelled"
+    assert repos.get_transcript(tid).status == "draft"
+
+
+def test_engine_exception_does_not_mark_the_transcript_translated(repos, transcript):
+    """Lỗi engine trần cũng không được ghi `translated` (nhánh `except Exception`)."""
+    tid, _ = transcript
+    tr_id = _translation(repos, tid)
+    with pytest.raises(RuntimeError):
+        _call(_handler(repos, _BoomOnSecondCall(), batch_chars=1),
+              repos, tr_id, tid)
+    assert repos.get_translation(tr_id).status == "failed"
+    assert repos.get_transcript(tid).status == "draft"
+
+
 def test_only_approved_terms_reach_the_engine(repos, transcript):
     """Glossary chưa duyệt là bản nháp: nó không được đi vào prompt."""
     tid, _ = transcript

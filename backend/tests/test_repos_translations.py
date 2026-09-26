@@ -205,6 +205,38 @@ def test_set_status_without_metrics_keeps_the_metrics_already_stored(repos):
     assert (got.tokens_in, got.qa_issues) == (7, ["a"])
 
 
+def test_set_status_can_record_the_glossary_version_used(repos):
+    """`glossary_version` là dấu vết DUY NHẤT của glossary đã dùng (spec §8.1).
+
+    `add_translation` ghi được version lúc TẠO hàng, nhưng một lần DỊCH LẠI sau khi
+    glossary đổi phải ghi lại version MỚI vào chính hàng đó. Nếu
+    `set_translation_status` không có tham số này thì bản dịch mãi mãi mang version
+    cũ và dấu vết nói dối (F1 của review Task 14).
+    """
+    tid = _transcript(repos)
+    tr_id = repos.add_translation(transcript_id=tid, transcript_version=1,
+                                  engine="opus-mt", target_lang="vi", segments=[],
+                                  prompt_version="p1", glossary_version=0)
+    repos.set_translation_status(tr_id, "done", glossary_version=7)
+    assert repos.get_translation(tr_id).glossary_version == 7
+
+
+def test_set_status_without_glossary_version_leaves_it_alone(repos):
+    """`None` = không đụng cột, KHÔNG phải ghi NULL — cùng quy ước với token/qa.
+
+    Một job hỏng giữa đường (`failed`, chỉ có token) không được xoá version đã ghi
+    ở lần tạo hàng: version `None` làm mọi phép so "lỗi thời so với glossary" mất
+    chỗ dựa.
+    """
+    tid = _transcript(repos)
+    tr_id = repos.add_translation(transcript_id=tid, transcript_version=1,
+                                  engine="opus-mt", target_lang="vi", segments=[],
+                                  prompt_version="p1", glossary_version=7)
+    repos.set_translation_status(tr_id, "failed", tokens_in=5)
+    got = repos.get_translation(tr_id)
+    assert got.glossary_version == 7 and got.tokens_in == 5
+
+
 def test_set_status_to_failed_keeps_segments_already_translated(repos):
     tid = _transcript(repos)
     tr_id = _translation(repos, tid, segments=[seg(1, "vi1")])

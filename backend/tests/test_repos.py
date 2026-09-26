@@ -124,6 +124,22 @@ def test_source_and_transcript_roundtrip(repos):
     assert repos.get_source(sid).duration == 12.5
 
 
+def test_set_transcript_status_writes_the_value_it_is_given(repos):
+    """`translated` phải là giá trị GHI ĐƯỢC, không chỉ là chuỗi trong tài liệu.
+
+    §8.6 `draft -> reviewed -> translated`: `approve` ghi `reviewed` (Task 15) còn
+    handler dịch ghi `translated` khi bản dịch xong. Hai lời gọi đó đi qua CÙNG
+    phương thức này, nên nó phải ghi đúng tham số chứ không phải hằng số.
+    """
+    sid = repos.add_source(kind="file", origin="a", media_path="m", lang="zh")
+    tid = repos.add_transcript(source_id=sid, engine="e", lang="zh",
+                               segments=[Segment(i=0, start=0.0, end=1.0, text="a")])
+    repos.set_transcript_status(tid, "reviewed")
+    assert repos.get_transcript(tid).status == "reviewed"
+    repos.set_transcript_status(tid, "translated")
+    assert repos.get_transcript(tid).status == "translated"
+
+
 def test_update_segments_bumps_version(repos):
     sid = repos.add_source(kind="file", origin="a", media_path="m", lang="zh")
     tid = repos.add_transcript(source_id=sid, engine="e", lang="zh",
