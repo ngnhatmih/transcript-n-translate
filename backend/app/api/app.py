@@ -63,6 +63,12 @@ def create_app(*, repos, specs: list[EngineSpec], media_dir, out_dir,
     # sai — nhưng vẫn đặt cạnh nhóm route tài nguyên (trước `routes_jobs`) để tệp
     # này đọc như một danh sách tài nguyên.
     app.include_router(routes_translations.router)
+    # Task 15: hình dạng spec §11 của route export (`GET /api/export/{translation_id}`)
+    # nằm trên router RIÊNG của `routes_translations`, vì `routes_translations.router`
+    # mang tiền tố `/api/translations`. Hai route cũ trong `routes_export` ở trên vẫn
+    # nguyên và vẫn được phục vụ: `/{job_id}/download` và `/{translation_id}` là hai
+    # khuôn đường dẫn khác nhau, nên thứ tự include không đổi hành vi của đường nào.
+    app.include_router(routes_translations.export_router)
     # Task 14: tiền tố `/api/glossary` cũng TĨNH, và `GET /api/glossary/version`
     # được khai TRƯỚC route động duy nhất của router (`PATCH /{term_id}`, khác
     # method) nên không có chuyện "version" bị bắt làm id thuật ngữ.

@@ -19,18 +19,29 @@ Bốn quyết định ở đây, và lý do chúng không hiển nhiên:
   và nuốt `speaker`/`words`/`emotion`/`events`/`t`/`qa`/`suspect` (lỗi đã bị bắt
   ở review Task 7 và lặp lại hai lần trong giai đoạn này). `start`/`end` là thời
   lượng của bản GỐC: sửa chữ không được phép làm phụ đề lệch.
+* **Route export hình dạng spec §11 ở ĐÂY, và đi CHUNG `artifact_name()` với
+  `pipeline/export.py`.** Spec ghim `GET /api/export/{translation_id}?format=&bilingual=`
+  còn Giai đoạn 1a đã ship `POST /api/export` + `GET /api/export/{job_id}/download`.
+  Đường CŨ không bị bỏ (nó đang chạy) và `routes_export.py` không bị sửa một byte:
+  hai đường gặp nhau ở đúng ba thứ dùng chung — `FORMATS`, `MEDIA_TYPES` và
+  `artifact_name()`. Tên tệp route này ghi là tên tệp handler của đường cũ ghi, và
+  `tests/test_api_export_by_translation.py` so nội dung của hai đường cho CÙNG một
+  bản dịch, nên chúng không thể trôi khỏi nhau mà không đỏ.
 """
 from __future__ import annotations
 
 import dataclasses
+import pathlib
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, Field
 
-from app.api.deps import get_repos, get_specs
+from app.api.deps import get_dirs, get_repos, get_specs
 from app.domain.job_state import phase_of
 from app.domain.models import Job
 from app.domain.staleness import is_stale
+from app.pipeline.export import FORMATS, MEDIA_TYPES, artifact_name
 from app.registry import by_id
 
 router = APIRouter(prefix="/api/translations", tags=["translations"])
@@ -189,3 +200,71 @@ def patch_translation(translation_id: int, body: PatchIn,
     fresh = _require_translation(repos, translation_id)
     current = _require_transcript(repos, fresh.transcript_id).version
     return _summary(fresh, stale=is_stale(current, fresh.transcript_version))
+
+
+#: Router RIÊNG cho hình dạng spec §11 của route export.
+#:
+#: Không nằm trên `router` ở trên (router đó mang `prefix="/api/translations"`), và
+#: cũng KHÔNG nằm trong `routes_export.py`: tệp đó sở hữu hai route cũ ĐANG CHẠY và
+#: được giữ nguyên byte-for-byte. Hai đường gặp nhau ở `artifact_name()` chứ không ở
+#: tệp nguồn — đó chính là thứ `tests/test_api_export_by_translation.py` ghim.
+export_router = APIRouter(prefix="/api/export", tags=["export"])
+
+
+@export_router.get("/{translation_id}", response_class=PlainTextResponse)
+def export_translation(translation_id: int, format: str = "srt", bilingual: int = 0,
+                       repos=Depends(get_repos), dirs=Depends(get_dirs)):
+    """Xuất THẲNG nội dung phụ đề của một bản dịch (spec §11).
+
+    Đường CŨ (`POST /api/export` -> job -> `GET /api/export/{job_id}/download`) vẫn
+    là đường chạy job và ghi tệp chỉ mục `.json`; đường này trả nội dung ngay, không
+    xếp job. Hai đường dùng CHUNG `FORMATS`/`MEDIA_TYPES`/`artifact_name()` của
+    `pipeline/export.py`, nên cùng một bản dịch ⇒ cùng nội dung và cùng tên tệp.
+
+    `translations` ở đây là danh sách SONG SONG với `transcript.segments` (cả ba
+    định dạng tra theo VỊ TRÍ, không theo `seg.i`) — đúng bất biến của
+    `domain/subtitle_format.py`, và đúng thứ `ExportHandler.run` dựng từ
+    `payload["translations"]`.
+    """
+    fmt = format.lower()
+    if fmt not in FORMATS:
+        # Kiểm ĐỊNH DẠNG trước khi tra hàng: `format` là tham số của client còn id
+        # là dữ liệu, và đây đúng thứ tự của `create_export` (route cũ). Đảo lại
+        # thì `?format=pdf` trên một id lạ trả 404 và client tưởng id mới là sai.
+        raise HTTPException(
+            422, f"định dạng không hỗ trợ: {format!r} (có: {sorted(FORMATS)})")
+
+    translation = _require_translation(repos, translation_id)
+    transcript = _require_transcript(repos, translation.transcript_id)
+
+    translations = [seg.text for seg in translation.segments]
+    if len(translations) != len(transcript.segments):
+        # KHÔNG để `_assert_lengths` của `subtitle_format` ném `ValueError` ra
+        # thành 500: bản dịch lệch số đoạn là DỮ LIỆU bình thường (transcript bị
+        # sửa sau khi dịch), không phải lỗi máy chủ. 409 cũng đúng lớp với đường
+        # cũ: handler ném cùng `ValueError`, job thành `failed`, và
+        # `GET /api/export/{job_id}/download` trả 409 "job chưa xong".
+        raise HTTPException(
+            409, f"bản dịch {translation_id} có {len(translations)} đoạn nhưng "
+                 f"transcript {transcript.id} có {len(transcript.segments)} đoạn: "
+                 f"dịch lại trước khi xuất")
+
+    body = FORMATS[fmt](transcript.segments, translations=translations,
+                        bilingual=bool(bilingual))
+
+    # CÙNG `artifact_name()` với handler của đường cũ. `translated=True` vì route
+    # này LUÔN xuất theo một hàng `translations` — quy tắc `.vi` nằm ở
+    # `pipeline/export.py:92` (handler suy nó từ `payload["translations"] is not
+    # None`), và hai chỗ tự ghép tên là hai chỗ trôi khỏi nhau.
+    stem = f"transcript-{translation.transcript_id}"
+    name = artifact_name(stem, fmt, translated=True)
+
+    out_dir = pathlib.Path(dirs["out"])
+    out_dir.mkdir(parents=True, exist_ok=True)
+    # `newline="\n"` như `pipeline/export.py::_write_utf8`: mở ở chế độ văn bản mặc
+    # định thì Windows dịch mọi `\n` thành `\r\n`, và tệp ghi ở đây sẽ không còn
+    # khớp với tệp mà handler ghi cho CÙNG một bản dịch.
+    with (out_dir / name).open("w", encoding="utf-8", newline="\n") as handle:
+        handle.write(body)
+
+    return PlainTextResponse(body, media_type=MEDIA_TYPES.get(fmt, "text/plain"))

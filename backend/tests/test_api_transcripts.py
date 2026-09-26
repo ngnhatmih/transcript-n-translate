@@ -97,10 +97,18 @@ def test_readability_endpoint_flags_long_line(client):
     assert 0 not in flagged, "đoạn 0 = 1,00 CPS không được vượt ngưỡng 5,0"
 
 
-def test_approve_moves_status_to_reviewed(client):
+def test_approve_moves_status_to_translated(client):
+    """Duyệt = bàn giao sang Workspace 2 ⇒ `translated`, KHÔNG phải `reviewed`.
+
+    Bài này từng ghim `reviewed` (Giai đoạn 1a, khi WS2 chưa tồn tại). Spec §11
+    ghim route này là *"duyệt → chuyển WS2"* và §8.6 định nghĩa chuỗi
+    `draft → reviewed → translated`, nên Task 15 (Giai đoạn 2) sửa trạng thái đích
+    cho đúng hợp đồng. Kỳ vọng cũ bị ĐỔI, không bị xoá: `reviewed` vẫn là trạng thái
+    hợp lệ và vẫn đặt được qua `PATCH /api/transcripts/{id}`.
+    """
     resp = client.post(f"/api/transcripts/{client.tid}/approve")
     assert resp.status_code == 200
-    assert resp.json()["status"] == "reviewed"
+    assert resp.json()["status"] == "translated"
 
 
 def test_stale_flag_is_computed_not_stored(client):

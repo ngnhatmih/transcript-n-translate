@@ -7,9 +7,12 @@ Hai bất biến của tầng này:
   đọc bằng `is_stale(version_hiện_tại, version_đã_dịch)`. Lưu sẵn một cột
   `stale` thì mọi đường ghi khác (sửa, chạy lại ASR, hồi phục job) đều phải nhớ
   cập nhật nó, và quên một đường là giao diện nói sai.
-* **Duyệt (`approve`) KHÔNG tăng version.** Nó chỉ đổi `status`. Nếu nó tăng
-  version thì mọi bản dịch thành lỗi thời chỉ vì người dùng bấm "duyệt" — một
-  nút không sửa một ký tự nào.
+* **Duyệt (`approve`) KHÔNG tăng version, và đặt `status = "translated"`.** Nó chỉ
+  đổi `status`. Nếu nó tăng version thì mọi bản dịch thành lỗi thời chỉ vì người
+  dùng bấm "duyệt" — một nút không sửa một ký tự nào. Trạng thái đích là
+  `translated` (bàn giao sang Workspace 2 — spec §11 "duyệt → chuyển WS2", và chuỗi
+  §8.6 `draft → reviewed → translated`), KHÔNG phải `reviewed` như Giai đoạn 1a ghi
+  lúc WS2 chưa tồn tại. `reviewed` vẫn đặt được qua `PATCH /api/transcripts/{id}`.
 
 Route đi qua cổng `Repos` cho cả bản dịch (`list_translations_for_transcript`):
 `app/api` không được mở tệp SQLite, kể cả để đọc.
@@ -138,8 +141,15 @@ def readability(transcript_id: int, threshold: float = CPS_WARN,
 
 @router.post("/{transcript_id}/approve")
 def approve(transcript_id: int, repos=Depends(get_repos)):
+    """Duyệt transcript -> bàn giao sang Workspace 2 (spec §11: "duyệt → chuyển WS2").
+
+    Trạng thái đích là `translated`, chuỗi của §8.6 `draft → reviewed → translated`.
+    Giai đoạn 1a ghi `reviewed` ở đây vì lúc đó chưa có WS2 để bàn giao sang; Giai
+    đoạn 2 (Task 15) sửa lại cho đúng hợp đồng, và `reviewed` vẫn đặt được qua
+    `PATCH /api/transcripts/{id}` (`VALID_STATUS`).
+    """
     # Cố ý KHÔNG đụng tới segments/version: xem docstring đầu tệp.
     _require_transcript(repos, transcript_id)
-    repos.set_transcript_status(transcript_id, "reviewed")
+    repos.set_transcript_status(transcript_id, "translated")
     return _transcript_json(repos, _require_transcript(repos, transcript_id),
                             include_segments=False)
