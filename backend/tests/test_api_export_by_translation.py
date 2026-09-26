@@ -3,7 +3,9 @@
 Spec §11 ghi `GET /api/export/{translation_id}?format=&bilingual=`, còn Giai đoạn 1a
 đã ship `POST /api/export` + `GET /api/export/{job_id}/download`. Hai đường phải
 không trôi khỏi nhau — cùng `artifact_name()` nên cùng TÊN TỆP — và ba bài
-`test_both_export_routes_*` dưới đây ghim điều đó bằng so sánh nội dung.
+`test_both_export_routes_*` dưới đây ghim điều đó trên CẢ SÁU ô định dạng × song
+ngữ, bằng BYTE (không phải `.text`) và bằng TÊN TỆP mỗi đường ghi ra đĩa, không chỉ
+bằng nội dung.
 
 Bốn chỗ khác brief, và lý do:
 
@@ -136,14 +138,44 @@ def _translation_texts(repos, translation_id: int) -> list[str]:
     return [s.text for s in repos.get_translation(translation_id).segments]
 
 
-def _run_the_old_route(c, repos, worker, tid: int, translations: list[str], *,
-                       fmt: str = "srt", bilingual: bool = False) -> str:
+@dataclasses.dataclass(frozen=True)
+class _Exported:
+    """Một lần xuất: BYTE client nhận, BYTE tệp trên đĩa, và TÊN TỆP đó."""
+
+    content: bytes
+    disk: bytes
+    name: str
+
+
+def _clear_format(out_dir: pathlib.Path, fmt: str) -> None:
+    """Xoá tệp `.<fmt>` cũ, để phép đo sau chỉ thấy tệp ĐƯỜNG VỪA GỌI ghi ra."""
+    for stale in out_dir.glob(f"*.{fmt}"):
+        stale.unlink()
+
+
+def _measure(out_dir: pathlib.Path, fmt: str, response, *, label: str) -> _Exported:
+    """Tệp `.<fmt>` mà `response` để lại trên đĩa, kèm byte của response.
+
+    ĐÚNG MỘT tệp: một lần xuất ghi một tệp phụ đề, còn tệp chỉ mục `.json` đi kèm
+    không khớp `*.<fmt>`. Nhiều hơn nghĩa là đường đó ghi thêm thứ khác, và khi đó
+    so tên hai đường là so hai tập hợp khác nhau.
+    """
+    assert response.status_code == 200, f"{label}: {response.text}"
+    written = sorted(p.name for p in out_dir.glob(f"*.{fmt}"))
+    assert len(written) == 1, f"{label} phải ghi ĐÚNG một tệp .{fmt}: {written}"
+    return _Exported(content=response.content,
+                     disk=(out_dir / written[0]).read_bytes(),
+                     name=written[0])
+
+
+def _run_the_old_route(c, repos, worker, out_dir, tid: int, translations: list[str],
+                       *, fmt: str = "srt", bilingual: bool = False) -> "_Exported":
     """Chạy ĐƯỜNG CŨ trọn vẹn: xếp job -> worker -> handler -> tải về.
 
-    Trả NỘI DUNG tải được từ `GET /api/export/{job_id}/download`. Job mang ĐÚNG
-    danh sách `translations` đã lưu của bản dịch, nên nội dung dưới đây là nội dung
-    của CÙNG một bản dịch mà route spec xuất.
+    Trả BYTE (cả byte client nhận lẫn byte trên đĩa) và TÊN TỆP mà đường này sinh
+    ra, đo trên thư mục đã dọn nên tên đọc được là tên do CHÍNH đường này ghi.
     """
+    _clear_format(out_dir, fmt)
     created = c.post("/api/jobs", json={
         "workspace": 1, "type": "export",
         "payload": {"transcript_id": tid, "format": fmt, "bilingual": bilingual,
@@ -160,8 +192,15 @@ def _run_the_old_route(c, repos, worker, tid: int, translations: list[str], *,
     assert job.state == "done", job.error
 
     dl = c.get(f"/api/export/{job_id}/download")
-    assert dl.status_code == 200, dl.text
-    return dl.text
+    return _measure(out_dir, fmt, dl, label="đường cũ")
+
+
+def _run_the_spec_route(c, out_dir, tr_id: int, *, fmt: str = "srt",
+                        bilingual: bool = False) -> "_Exported":
+    """Đường spec, đo trên thư mục đã dọn: byte trả về + tên/byte tệp nó ghi ra."""
+    _clear_format(out_dir, fmt)
+    r = c.get(f"/api/export/{tr_id}?format={fmt}&bilingual={int(bilingual)}")
+    return _measure(out_dir, fmt, r, label="route spec")
 
 
 # ---------------------------------------------------------------------------
@@ -169,14 +208,22 @@ def _run_the_old_route(c, repos, worker, tid: int, translations: list[str], *,
 # ---------------------------------------------------------------------------
 
 def test_approve_moves_transcript_to_workspace_2(wired):
+    """Duyệt là CỔNG REVIEW -> `reviewed`; handoff sang WS2 là hệ quả, không phải status.
+
+    `reviewed` nằm ĐÚNG ở bước duyệt của chuỗi §8.6 `draft → reviewed → translated`,
+    còn `translated` là bản dịch ĐÃ XONG. Đo trên đường thật: một transcript có **0**
+    bản dịch vẫn bị ghi `translated`, tức giá trị SAI ngay tại lúc ghi. "Chuyển WS2"
+    của §11 là hệ quả của review — handoff thật ở GĐ2 là `POST /api/translations` —
+    không phải giá trị của cột `status`.
+    """
     c, repos, _out, _worker = wired
     tid, _ = _ready(repos)
 
     r = c.post(f"/api/transcripts/{tid}/approve")
 
     assert r.status_code == 200, r.text
-    assert r.json()["status"] == "translated"
-    assert repos.get_transcript(tid).status == "translated"
+    assert r.json()["status"] == "reviewed"
+    assert repos.get_transcript(tid).status == "reviewed"
 
 
 def test_approve_unknown_transcript_is_404(wired):
@@ -295,36 +342,44 @@ def test_export_with_segment_counts_out_of_step_is_409(wired):
 # ---------------------------------------------------------------------------
 
 def test_both_export_routes_produce_the_same_bytes(wired):
-    """Route cũ và route spec phải cho CÙNG nội dung cho CÙNG một bản dịch."""
-    c, repos, _out, worker = wired
+    """Route cũ và route spec phải cho CÙNG byte VÀ CÙNG TÊN TỆP, một bản dịch."""
+    c, repos, out_dir, worker = wired
     tid, tr_id = _ready(repos)
 
-    spec_route = c.get(f"/api/export/{tr_id}?format=srt").text
-    old_route = _run_the_old_route(c, repos, worker, tid,
+    spec_route = _run_the_spec_route(c, out_dir, tr_id)
+    old_route = _run_the_old_route(c, repos, worker, out_dir, tid,
                                    _translation_texts(repos, tr_id))
 
-    assert spec_route == old_route
+    assert spec_route.name == old_route.name
+    assert spec_route.content == old_route.content
+    assert spec_route.disk == old_route.disk
 
 
-@pytest.mark.parametrize("fmt,bilingual", [("srt", True), ("vtt", False),
-                                           ("ass", True)])
+@pytest.mark.parametrize("fmt,bilingual", [("srt", True), ("srt", False),
+                                           ("vtt", True), ("vtt", False),
+                                           ("ass", True), ("ass", False)])
 def test_both_export_routes_agree_for_every_format(wired, fmt, bilingual):
-    """Cùng bất biến cho CẢ BA định dạng, và cho cả hai chế độ song ngữ.
+    """CẢ SÁU ô của ba định dạng × hai chế độ song ngữ: cùng BYTE và cùng TÊN TỆP.
 
     Không thừa: `to_srt` tra bản dịch theo `n - 1` còn `to_vtt`/`to_ass` tra theo
     vị trí của `enumerate`, và `.vi` chỉ xuất hiện khi có bản dịch — ba định dạng
-    là ba đường sinh nội dung khác nhau, không phải một đường lặp lại.
+    là ba đường sinh nội dung khác nhau, không phải một đường lặp lại. So `.text`
+    là CHƯA ĐỦ theo hai hướng: `Path.read_text()` nuốt `\r\n`, và một mutant đổi
+    stem của route spec vẫn cho nội dung y hệt trong khi tên tệp đã trôi — nên tên
+    tệp phải được so riêng.
     """
-    c, repos, _out, worker = wired
+    c, repos, out_dir, worker = wired
     tid, tr_id = _ready(repos)
 
-    spec_route = c.get(
-        f"/api/export/{tr_id}?format={fmt}&bilingual={int(bilingual)}").text
-    old_route = _run_the_old_route(c, repos, worker, tid,
+    spec_route = _run_the_spec_route(c, out_dir, tr_id, fmt=fmt,
+                                     bilingual=bilingual)
+    old_route = _run_the_old_route(c, repos, worker, out_dir, tid,
                                    _translation_texts(repos, tr_id),
                                    fmt=fmt, bilingual=bilingual)
 
-    assert spec_route == old_route
+    assert spec_route.name == old_route.name
+    assert spec_route.content == old_route.content
+    assert spec_route.disk == old_route.disk
 
 
 def test_both_routes_write_byte_identical_files(wired):
@@ -340,7 +395,8 @@ def test_both_routes_write_byte_identical_files(wired):
     tid, tr_id = _ready(repos)
     target = out_dir / f"transcript-{tid}.vi.srt"
 
-    _run_the_old_route(c, repos, worker, tid, _translation_texts(repos, tr_id))
+    _run_the_old_route(c, repos, worker, out_dir, tid,
+                       _translation_texts(repos, tr_id))
     from_handler = target.read_bytes()
     target.unlink()
 
@@ -369,7 +425,8 @@ def test_the_spec_route_materialises_the_same_artifact_name(wired):
     assert (out_dir / f"transcript-{tid}.vi.srt").is_file(), (
         sorted(p.name for p in out_dir.iterdir()))
 
-    _run_the_old_route(c, repos, worker, tid, _translation_texts(repos, tr_id))
+    _run_the_old_route(c, repos, worker, out_dir, tid,
+                       _translation_texts(repos, tr_id))
 
     # Đường cũ ghi CÙNG tệp đó, không phải một tệp thứ hai nằm cạnh.
     assert [p.name for p in out_dir.iterdir() if p.suffix == ".srt"] == [
