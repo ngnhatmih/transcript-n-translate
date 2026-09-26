@@ -17,12 +17,13 @@ Ba điểm KHÁC bản code trong brief (mục hiệu chỉnh ở đầu brief t
   ĐẦU VÀO (transcript nguồn), đúng như `test_repos_translations.py` làm.
 """
 import copy
+import sqlite3
 
 import pytest
 
 from app.adapters.clock_system import SystemClock
 from app.adapters.persist.sqlite_repos import NotFound, SqliteRepos
-from app.domain.models import Segment
+from app.domain.models import Job, Segment
 from app.domain.mt import MtOpts
 from app.domain.mt_qa import QaLimits
 from app.pipeline.translate import TranslateHandler
@@ -203,19 +204,57 @@ def test_engine_receives_the_source_and_target_languages(repos, transcript):
     assert engine.last_opts == MtOpts(source_lang="zh", target_lang="en")
 
 
-def test_retranslation_records_the_glossary_version_it_actually_used(repos, transcript):
-    """Dấu vết phải là version ĐỌC LÚC CHẠY, không phải giá trị trong payload.
+def test_a_stale_payload_does_not_decide_the_recorded_glossary_version(
+        repos, transcript):
+    """Đây là ca THẬT của F1: payload CÓ khoá `glossary_version` nhưng đã CŨ.
 
-    `job.payload` là ảnh chụp lúc enqueue; nếu một lần sửa glossary khác xen vào
-    trước khi job chạy thì payload đã CŨ. Vì vậy handler phải đọc
-    `repos.glossary_version()` ngay chỗ nó dựng `glossary = approved(...)`.
+    Route glossary đặt `glossary_version` vào payload lúc ENQUEUE. Nếu một lần sửa
+    glossary khác landed trước khi job chạy thì payload trỏ vào version cũ, còn
+    `glossary` mà handler thật sự dựng (`approved(list_terms(...))`) là glossary
+    MỚI. Ghi theo payload là ghi một dấu vết SAI — đúng thứ spec §8.1 cấm.
 
-    Job ở đây KHÔNG mang payload, nên mutant "đọc `glossary_version` từ
-    `job.payload`" chết bằng `KeyError`/`AttributeError` chứ không lặng lẽ ghi
-    `None` — đó là lý do không dùng `_Job(payload={...})`.
+    Kịch bản: hàng tạo ở version 1 -> job enqueue ở version 1 -> một lần upsert nữa
+    đưa glossary lên version 3 -> job chạy. Kỳ vọng: ghi 3 (version ĐỌC LÚC CHẠY),
+    KHÔNG phải 1 (ảnh chụp trong payload).
     """
     tid, _ = transcript
-    tr_id = _translation(repos, tid)                    # tạo ở glossary_version 0
+    tr_id = _translation(repos, tid)
+    with sqlite3.connect(repos.db_path) as conn:
+        conn.execute("UPDATE translations SET glossary_version=1 WHERE id=?", (tr_id,))
+        conn.commit()
+    enqueued_version = repos.glossary_version()
+    job_id = repos.add_job(Job(
+        id=None, workspace=1, type="translate", engine="fake-mt", phase="translate",
+        payload={"translation_id": tr_id, "transcript_id": tid, "engine_id": "fake-mt",
+                 "source_lang": "zh", "target_lang": "vi",
+                 "glossary_version": enqueued_version, "reason": "glossary"}))
+    repos.upsert_term(lang="zh", term="câu 1", translation="cau 1",
+                      note=None, approved=True)          # glossary đổi SAU enqueue
+    current = repos.glossary_version()
+    assert current > enqueued_version, "upsert phải bump version, nếu không test vô nghĩa"
+
+    run_job = repos.list_jobs(states=("queued",))
+    run_job = [j for j in run_job if j.id == job_id][0]
+    _handler(repos, FakeMtEngine(), batch_chars=1).translate(
+        translation_id=tr_id, transcript_id=tid, engine_id="fake-mt",
+        source_lang="zh", target_lang="vi", job=run_job, report=_noop)
+
+    got = repos.get_translation(tr_id)
+    assert got.status == "done"
+    assert got.glossary_version == current
+    assert got.glossary_version != enqueued_version, "không được ghi ảnh chụp cũ"
+
+
+def test_retranslation_records_the_glossary_version_it_actually_used(repos, transcript):
+    """Bản tối thiểu: job KHÔNG mang payload vẫn phải ghi được version.
+
+    Bổ trợ cho test stale-payload ở trên: nó ghim nguồn ĐỌC là repo, còn test này
+    ghim rằng đường ghi không phụ thuộc payload có mặt hay không.
+    """
+    tid, _ = transcript
+    tr_id = repos.add_translation(transcript_id=tid, transcript_version=1,
+                                  engine="fake-mt", target_lang="vi", segments=[],
+                                  prompt_version="p1", glossary_version=0)
     repos.upsert_term(lang="zh", term="câu 1", translation="cau 1",
                       note=None, approved=True)         # bump version
     expected = repos.glossary_version()
