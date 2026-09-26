@@ -3150,7 +3150,18 @@ git commit -m "feat(worker): phuc hoi sau crash + huy hop tac qua checkpoint"
   - `extract_audio(media_path, out_dir, *, stem) -> tuple[Path, float]` — trả `(wav_path, duration)`
   - `download_url(url, out_dir, *, on_progress=None) -> Path`
   - `AUDIO_SAMPLE_RATE = 16000`
-  - `IngestHandler(repos, clock)` với `handles() -> "ingest"`
+
+> **ĐÍNH CHÍNH (R48 = DOC-01, R53 = DOC-03).** Khối Interfaces bản đầu còn một dòng
+> `IngestHandler(repos, clock)` với `handles() -> "ingest"`. Dòng đó **sai ở hai tầng** và đã bị bỏ:
+> (a) `IngestHandler` **không thuộc Task 11** — nó được thêm ở **Task 15** (mục
+> *"## Task 15: FastAPI app + route sources & registry"*, đoạn `Thêm \`IngestHandler\` vào
+> \`backend/app/pipeline/ingest.py\``), nên đây là
+> một phép chiếu tới task sau bị viết như đặc tả của task hiện tại; và (b) chữ ký nêu ra cũng sai:
+> chữ ký **đã ship** là
+> `IngestHandler(repos, *, audio_dir=None, media_root=None, specs=None, declared_default_asr=None)`
+> (`backend/app/pipeline/ingest.py:189`) — **không** có tham số `clock`, và ba tham số từ khoá cuối
+> chỉ `app/main.py` truyền (I-3, I-6). DOC-03 ("R53 = thông tin", ledger ghi *không làm gì*) tự đóng
+> kèm DOC-01: cùng một dòng, cùng một edit.
 
 - [ ] **Step 1: Viết test thất bại**
 
@@ -3158,6 +3169,7 @@ git commit -m "feat(worker): phuc hoi sau crash + huy hop tac qua checkpoint"
 # backend/tests/test_ingest.py
 from __future__ import annotations
 
+import json
 import shutil
 import subprocess
 
@@ -3205,14 +3217,20 @@ def test_extract_audio_produces_mono_16k_wav(tone_wav, tmp_path):
     assert wav.name == "abc.wav"
     assert 2.8 < duration < 3.2
 
+    # Đọc theo TÊN trường, không theo thứ tự: ffprobe 8.1.1 luôn xuất
+    # sample_rate TRƯỚC channels (`16000,1`) bất kể thứ tự liệt kê trong
+    # -show_entries, nên khẳng định vị trí `startswith("1,")` là sai.
     probe = subprocess.run(
         ["ffprobe", "-v", "error", "-select_streams", "a:0",
-         "-show_entries", "stream=channels,sample_rate", "-of", "csv=p=0", str(wav)],
+         "-show_entries", "stream=channels,sample_rate", "-of", "json", str(wav)],
         capture_output=True, text=True, check=True,
-    ).stdout.strip()
-    assert probe.startswith("1,"), f"phải là mono, nhận được {probe!r}"
+    ).stdout
+    stream = json.loads(probe)["streams"][0]
+    assert stream["channels"] == 1, f"phải là mono, nhận được {stream['channels']!r}"
     assert ingest.AUDIO_SAMPLE_RATE == 16000
-    assert ",16000" in probe, f"phải là 16kHz, nhận được {probe!r}"
+    assert int(stream["sample_rate"]) == 16000, (
+        f"phải là 16kHz, nhận được {stream['sample_rate']!r}"
+    )
 
 
 def test_extract_audio_is_idempotent(tone_wav, tmp_path):
@@ -3259,6 +3277,14 @@ def test_download_url_uses_injected_runner(tmp_path):
 - [ ] **Step 2: Chạy test — phải ĐỎ**
 
 Run: `.venv\Scripts\python.exe -m pytest tests/test_ingest.py -v`
+
+> **ĐÍNH CHÍNH (R49 = DOC-02).** Hai assertion bản đầu — `assert probe.startswith("1,")` và
+> `assert ",16000" in probe` trên `-of csv=p=0` — **không thể xanh** trên máy này: ffprobe **8.1.1**
+> xuất cột theo thứ tự ĐĂNG KÝ TRƯỜNG của chính binary (`16000,1`), không theo thứ tự yêu cầu trong
+> `-show_entries` (đảo thứ tự yêu cầu **không** đổi thứ tự CSV; yêu cầu `channels,codec_name` cũng
+> trả `pcm_s16le,1`). Bản sửa **đã ship** trong `backend/tests/test_ingest.py:63-76` dùng `-of json`
+> rồi đọc trường có tên, và khối test phía trên đã được đồng bộ với nó. Đây là **đồng bộ văn bản**,
+> không phải một bản sửa test mới.
 
 Expected: FAIL — `ModuleNotFoundError: No module named 'app.pipeline'`
 
@@ -4867,6 +4893,12 @@ if __name__ == "__main__":
 
 Thêm `IngestHandler` vào `backend/app/pipeline/ingest.py`:
 
+> **Ghi chú (R53 = DOC-03).** Chữ ký trong khối dưới đây là bản **đầu** của plan; code **đã ship**
+> rộng hơn: `IngestHandler(repos, *, audio_dir=None, media_root=None, specs=None, declared_default_asr=None)`
+> (`backend/app/pipeline/ingest.py:189`) — ba tham số cuối do I-3/I-6 thêm và chỉ `app/main.py`
+> (`main.py:66-67`) truyền. `main.py` vì vậy cũng không còn là `IngestHandler(repos)` như khối
+> `build_components()` ở dưới.
+
 ```python
 class IngestHandler:
     """Job 'ingest': extract audio từ media đã có, đặt duration và lang."""
@@ -5577,6 +5609,18 @@ git commit -m "feat(api): endpoint media ho tro HTTP Range cho trinh phat"
   - `GET /api/transcripts` · `GET /api/transcripts/{id}` · `PATCH /api/transcripts/{id}` · `POST /api/transcripts/{id}/approve`
   - `GET /api/transcripts/{id}/readability` — danh sách đoạn vượt ngưỡng CPS
   - `POST /api/export` → tạo job export; `GET /api/export/{job_id}/download`
+
+> **Quyết định tường minh (R75 = DOC-04).** Hình dạng export của GĐ1a **cố ý** khác spec §11:
+> plan (và code đã ship ở `backend/app/api/routes_export.py:59,83`) dùng
+> **`POST /api/export`** + **`GET /api/export/{job_id}/download`**, còn spec §11 ghi
+> `GET /api/export/{translation_id}?format=&bilingual=`. Lý do: GĐ1a **chưa có `translation_id`**
+> để tham chiếu — chưa có handler `translate`, bảng `translations` chưa có người ghi — nên hình dạng
+> của spec không dùng được. Đây là **điều chỉnh có ý thức**, không phải lệch im lặng; khi bảng
+> `translations` có người ghi (GĐ2) thì chuyển sang hình dạng spec, hoặc giữ nguyên và ghi rõ lý do.
+> Ba nhóm endpoint spec §11 chưa ship — `GET /api/translations?transcript_id=`,
+> `PATCH /api/translations/{id}`, `GET`/`POST`/`PATCH /api/glossary` — là **đúng phạm vi**
+> (workspace 2 ⇒ GĐ2), đã ghi trong bảng "Đã biết, NGOÀI phạm vi GĐ1a" ở cuối plan này để review
+> toàn nhánh **không** đếm nhầm chúng thành thiếu sót.
 
 - [ ] **Step 1: Viết test thất bại**
 
@@ -6297,6 +6341,13 @@ if __name__ == "__main__":
 
 - [ ] **Step 3: Viết README backend**
 
+> **ĐÍNH CHÍNH (R40/DOC-07).** Ba dòng in trong script ghi `eval/report.md` vì `scripts/smoke_asr.py`
+> chạy với cwd `backend\`; đường dẫn **đúng theo spec §10** là **`backend/eval/report.md`**
+> (subsystem `backend/eval/`, `report.md` là bảng kết quả). Đây là **smoke THỦ CÔNG của Task 20**,
+> **không** phải test tự động — GĐ1a chưa nạp model thật lần nào. Thư mục `backend/eval/` **chưa tồn tại**
+> và **cố ý không được tạo** ở vòng dọn này (tạo thư mục rỗng chỉ để "cho khớp" là giả); việc sinh báo cáo
+> thật thuộc GĐ1b. Xem bảng "Đã biết, NGOÀI phạm vi GĐ1a" ở cuối plan.
+
 ```markdown
 # phu-de-lab · backend
 
@@ -6398,7 +6449,8 @@ git commit -m "chore(backend): script cai dat + smoke test model that + README"
 | §13 kiểm thử | Toàn bộ; T19 E2E fake |
 | §16 GĐ1a | Toàn bộ kế hoạch |
 
-**Khoảng trống đã biết, nằm ngoài phạm vi:** mọi thứ ở cột "Kế hoạch 2", và toàn bộ GĐ1b/2/3.
+**Khoảng trống đã biết, nằm ngoài phạm vi:** mọi thứ ở cột "Kế hoạch 2", và toàn bộ GĐ1b/2/3 —
+danh sách cụ thể, từng dòng một, ở bảng **"Đã biết, NGOÀI phạm vi GĐ1a"** cuối plan này.
 
 **Quét placeholder:** không có "TBD"/"TODO". Hai chỗ cố tình để ngỏ và **có ghi rõ lý do**:
 `TOKENS_PER_SOURCE_CHAR = 1.0` (phải đo ở GĐ1b) và `governor.can_run_parallel` trả `False`
@@ -6420,3 +6472,28 @@ tên cũ trong ghi chú — **không** xuất hiện trong code.
 **Hai task đã sửa so với spec, có ghi chú tại chỗ:** thêm `domain/subtitle_format.py` (T14) và
 `api/deps.py` (T15); thêm `Repos.list_sources()` (T15 Step 5) thay vì để route chọc vào
 `_connect()`.
+
+---
+
+## Đã biết, NGOÀI phạm vi GĐ1a
+
+> Mục đích: một review toàn nhánh đọc bảng này và **không đếm nhầm các mục HOÃN CÓ KẾ HOẠCH thành
+> THIẾU SÓT**. Mọi dòng đã được đối chiếu với code ở HEAD `65c03b5`; lệnh grep/read dùng để
+> chứng minh nằm trong `.superpowers/sdd/2026-09-25-giai-doan-1a-backend/cleanup-C-report.md`.
+> Không dòng nào ở đây là việc bị bỏ quên, và không dòng nào có test — lý do "không test" ghi ngay
+> trong cột Vì sao.
+
+| # | Mục đã biết là NGOÀI phạm vi GĐ1a | Vì sao (một dòng) |
+|---|---|---|
+| 1 | **Toàn bộ frontend** (spec §9.2–§9.4: ghim dòng, bàn phím, font self-host) | Thuộc "Kế hoạch 2"; cây repo chỉ có `.superpowers/`, `backend/`, `docs/` — không có mã frontend nào. |
+| 2 | **Workspace 2 / dịch máy (MT)** — không có handler `translate` | `backend/app/pipeline/` chỉ có `ingest.py`/`export.py`/`transcribe.py`; `app/main.py:84-89` cố ý đặt `auto_forward="0"` vì GĐ1a chưa có handler `translate`, nên job dịch (nếu ai bật) chỉ bị worker đánh `FAILED`. |
+| 3 | **`GET /api/translations?transcript_id=` và `PATCH /api/translations/{id}`** (spec §11) | Không có route tương ứng trong `backend/app/api/` (grep `translations` chỉ thấy payload của `routes_transcripts.py`); workspace 2 ⇒ GĐ2. |
+| 4 | **`GET`/`POST`/`PATCH /api/glossary`** (spec §11) | Grep `glossary` trong `backend/app/api/` → 0 hit (port `upsert_term` có sẵn nhưng chưa có route); glossary là workspace 2 ⇒ GĐ2. |
+| 5 | **GĐ1b: subsystem `eval/` + benchmark** (spec §10, `backend/eval/report.md`) | `backend/eval/` chưa tồn tại và **cố ý không được tạo**; Task 20 chỉ thu hai số đầu (RTF, thời gian nạp) bằng smoke **thủ công**, không phải test tự động. |
+| 6 | **Task ASS riêng (EX-02)** | `to_ass` join bằng `"\N"` rồi `_ass_escape` nhân đôi backslash ⇒ tệp ASS song ngữ in một `\` thừa: lỗi người-dùng-thấy-được, nhưng `task-14-brief.md:209` **buộc** giữ ở GĐ1a; sửa cùng adjudication brace-escaping ở task ASS riêng. |
+| 7 | **`.vi` hardcode (EX-08)** | `backend/app/pipeline/export.py:35` (`artifact_name`) gắn `.vi` theo cờ `translated`, không theo ngôn ngữ đích — đúng khi Việt là đích duy nhất; khi có đích thứ hai thì đổi thành `payload.get("lang", "vi")`. Không test: hành vi hiện tại là hợp đồng đúng của GĐ1a. |
+| 8 | **Bảng `translations` chưa có người ghi (DC-04)** | Schema (`schema.py:30`) và đường ĐỌC qua port (`list_translations`, `ports/repos.py:29`) có, nhưng **không writer production** nào gọi `add_translation` (grep chỉ thấy `sqlite_repos.py:196` + test); GĐ1a chỉ đọc nếu có, GĐ2 mới ghi — viết test sẽ phải tự chế writer, tức test chính cái không tồn tại. |
+| 9 | **`initial_prompt` lấy từ glossary (DOC-06/R40)** | `faster_whisper.py:89,96` đọc `spec.opts["initial_prompt"]` mà `registry.json` **không có khoá đó** (grep), nên "mồi thuật ngữ" của spec §8.2.4 không có đường vào; glossary là workspace 2 ⇒ GĐ2, và GĐ1a không có nguồn dữ liệu để test. |
+| 10 | **API-05 (N7): `origin` thô + `fallback` một-đường** | `routes_sources.py:134` lưu `origin=file.filename` **nguyên vẹn kể cả thành phần đường dẫn** (`a/b/c.mp4`), còn `fallback` của `safe_basename` chỉ tới được khi `filename is None`; re-review kết luận **no action required** — quan sát, không phải defect, không nơi nào dùng `origin` làm đường dẫn. Không test: lý do là "quyết định giữ nguyên", không phải "thiếu test". |
+| 11 | **`digest[:16]` thay vì `<sha256>` đầy đủ (API-06/R40, đối chiếu spec §8.1)** | Điều chỉnh **có ý thức**: tên tệp ngắn, 16 hex (64 bit) đủ chống trùng ở quy mô GĐ1a; đổi sang 64 hex là đổi hợp đồng `media_path` (R37/StubIngest, Task 19) nên phải làm cùng lúc. Quyết định được ghim bằng chú thích + khẳng định độ dài 16 trong `test_upload_still_accepts_a_normal_filename` — **không phải** lệch im lặng. |
+
