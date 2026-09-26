@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import contextlib
 import http.server
+import socket
 import threading
 import urllib.error
 import urllib.request
@@ -125,3 +126,26 @@ def test_read_timeout_is_unknown(monkeypatch):
 
     monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
     assert probe_ollama("http://127.0.0.1:11434", timeout=0.1) == "unknown"
+
+
+def test_dns_failure_is_unknown_not_down(monkeypatch):
+    """API-02/F2 · không phân giải được tên ⇒ CHƯA hỏi được ai ⇒ `unknown`.
+
+    `urlopen` bọc `socket.gaierror` của pha phân giải tên vào `URLError.reason`.
+    Nhánh `else` của bản cũ biến nó thành `down`, tức báo một trạng thái CHƯA ĐO
+    thành một trạng thái ĐÃ ĐO — đúng thứ docstring của hàm cấm.
+    """
+    def fake_urlopen(url, timeout=None):
+        raise urllib.error.URLError(socket.gaierror(11001, "getaddrinfo failed"))
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    assert probe_ollama("http://khong-ton-tai.invalid:11434", timeout=0.1) == "unknown"
+
+
+def test_empty_host_is_unknown_because_nobody_was_asked():
+    """API-02/F2 · host rỗng ⇒ URL không dựng nổi (`'no host given'`).
+
+    Đo THẬT, không mock: `urlopen` ném ngay ở khâu dựng URL nên chưa có câu hỏi
+    nào được gửi đi. Bản cũ trả `down` cho ca này, tức lại bịa một sự thật chưa đo.
+    """
+    assert probe_ollama("") == "unknown"

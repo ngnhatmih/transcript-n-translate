@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import ast
+import dataclasses
 import io
 import pathlib
 import sys
@@ -701,6 +702,24 @@ MT_SPEC = EngineSpec(id="qwen2.5-7b", label="Qwen", kind="mt", runtime="ollama",
                      capabilities={}, opts={})
 
 
+def _registry_with_the_shipped_mt_default(specs: list[EngineSpec]) -> list[EngineSpec]:
+    """Registry giả + id `default_mt` THẬT, khi danh sách chưa có nó.
+
+    WQ-02/F3: composition root nay đối chiếu id mặc định với chính `specs` và
+    hỏng NGAY lúc dựng khi không khớp, nên một registry rút gọn phải TỰ NHẤT
+    QUÁN với mặc định đã ship — nếu không thì mọi test dùng fixture này đỏ vì
+    một lý do không liên quan tới thứ nó đang kiểm. Id thật được thêm vào CUỐI
+    danh sách `mt` để "phần tử đầu mảng" vẫn khác mặc định: đó chính là thứ khiến
+    bài ghim dây nối `default_mt` có năng lực phát hiện.
+    """
+    from app.adapters.registry_file import load_default_mt
+
+    declared = load_default_mt()
+    if declared is None or declared in {s.id for s in specs}:
+        return list(specs)
+    return list(specs) + [dataclasses.replace(MT_SPEC, id=declared)]
+
+
 class _RecordingEngine:
     def __init__(self) -> None:
         self.releases = 0
@@ -771,7 +790,8 @@ def built(tmp_path, monkeypatch):
     monkeypatch.setattr(main, "MEDIA_DIR", data / "media")
     monkeypatch.setattr(main, "OUTPUT_DIR", data / "output")
     monkeypatch.setattr(main, "LOG_DIR", data / "logs")
-    monkeypatch.setattr(main, "load_registry", lambda: [ASR_SPEC, MT_SPEC])
+    monkeypatch.setattr(main, "load_registry",
+                        lambda: _registry_with_the_shipped_mt_default([ASR_SPEC, MT_SPEC]))
     monkeypatch.setattr(main, "_engine_factory", lambda spec: engine, raising=False)
     repos, specs, worker, broker = main.build_components()
     _assert_repo_data_dirs_untouched(repo_data_before)
@@ -806,6 +826,38 @@ def test_build_components_refuses_a_registry_that_cannot_satisfy_the_default_asr
     message = str(excinfo.value)
     assert "fw-large-v3-turbo" in message, message
     assert "default_asr" in message, f"lỗi phải chỉ đúng khoá cần sửa: {message!r}"
+
+
+def test_build_components_refuses_a_registry_that_cannot_satisfy_the_default_mt(
+        monkeypatch, tmp_path):
+    """WQ-02/F3 · `default_mt` gõ sai phải hỏng NGAY lúc dựng, y như `default_asr`.
+
+    `default_mt_engine` từng trả thẳng id đã khai báo mà không đối chiếu `specs`,
+    nên một `default_mt` gõ sai trở thành engine của MỌI job `translate` một cách
+    im lặng — GĐ1a chưa có handler `translate` nên job chỉ FAILED ở tận worker.
+    """
+    from app import config, main
+
+    data = tmp_path / "data"
+    monkeypatch.setattr(config, "DATA_DIR", data)
+    monkeypatch.setattr(config, "MEDIA_DIR", data / "media")
+    monkeypatch.setattr(config, "LOG_DIR", data / "logs")
+    monkeypatch.setattr(config, "OUTPUT_DIR", data / "output")
+    monkeypatch.setattr(main, "DB_PATH", data / "app.db")
+    monkeypatch.setattr(main, "MEDIA_DIR", data / "media")
+    monkeypatch.setattr(main, "OUTPUT_DIR", data / "output")
+    monkeypatch.setattr(main, "LOG_DIR", data / "logs")
+    monkeypatch.setattr(main, "load_registry", lambda: [ASR_SPEC, MT_SPEC])
+    # Registry THẬT trỏ tới một id CÓ THẬT; ở đây giả lập một lần gõ sai khoá
+    # `default_mt` trong registry.json.
+    monkeypatch.setattr(main, "load_default_mt", lambda: "opus-mt-go-nham")
+
+    with pytest.raises(RuntimeError) as excinfo:
+        main.build_components()
+
+    message = str(excinfo.value)
+    assert "opus-mt-go-nham" in message, message
+    assert "default_mt" in message, f"lỗi phải chỉ đúng khoá cần sửa: {message!r}"
 
 
 def test_build_components_wires_the_ingest_guards_into_the_real_handler(built, tmp_path):
@@ -916,7 +968,8 @@ def test_build_components_only_registers_asr_engines(monkeypatch, tmp_path):
     monkeypatch.setattr(config, "MEDIA_DIR", data / "media")
     monkeypatch.setattr(config, "LOG_DIR", data / "logs")
     monkeypatch.setattr(config, "OUTPUT_DIR", data / "output")
-    monkeypatch.setattr(main, "load_registry", lambda: [ASR_SPEC, MT_SPEC])
+    monkeypatch.setattr(main, "load_registry",
+                        lambda: _registry_with_the_shipped_mt_default([ASR_SPEC, MT_SPEC]))
     monkeypatch.setattr(main, "DB_PATH", data / "app.db")
     monkeypatch.setattr(main, "MEDIA_DIR", data / "media")
     monkeypatch.setattr(main, "OUTPUT_DIR", data / "output")
@@ -927,22 +980,50 @@ def test_build_components_only_registers_asr_engines(monkeypatch, tmp_path):
     assert set(worker.governor._loaded) == {ASR_SPEC.phase_key}
 
 
+def test_build_components_wires_the_job_log_dir(built):
+    """DC-03/F1 · composition root phải truyền `LOG_DIR` cho `SqliteRepos`.
+
+    Ba bài DC-03 tự dựng `SqliteRepos(..., log_dir=...)`, nên gỡ dây
+    `log_dir=LOG_DIR` ở `main.py` KHÔNG làm bài nào đỏ: `log_path` âm thầm quay
+    lại thành cột chết trong production. Bài này chạy một job qua worker THẬT
+    của `build_components()` rồi đòi tệp log nằm ĐÚNG `main.LOG_DIR` — gỡ dây
+    là đỏ ngay.
+    """
+    main, repos, specs, worker, engine, broker = built
+    worker.handlers["asr"] = RecordingHandler(job_type="asr")
+    jid = repos.add_job(a_job(None, job_type="asr", engine=ASR_SPEC.id))
+
+    while worker.tick():
+        pass
+
+    job = repos.get_job(jid)
+    log_path = pathlib.Path(main.LOG_DIR) / f"job-{jid}.log"
+    assert job.log_path == str(log_path), job.log_path
+    assert log_path.is_file(), sorted(p.name for p in pathlib.Path(main.LOG_DIR).iterdir())
+    assert "chạy job" in log_path.read_text(encoding="utf-8")
+
+
 def test_build_components_wires_the_declared_default_mt_engine(built):
     """R58/WQ-02 · composition root phải nạp khoá `default_mt` và truyền cho handler.
 
     Không có dây này thì `TranscribeHandler` dựng bởi `main.py` rơi về phần tử
     ĐẦU của mảng `mt` — đúng thứ khoá `default_mt` sinh ra để chặn — mà không
-    test nào đỏ. Registry ở fixture là [ASR_SPEC, MT_SPEC] với MT đầu = `qwen2.5-7b`,
-    còn `registry.json` THẬT khai báo `default_mt = opus-mt`: hai giá trị khác
-    nhau nên một dây nối đúng là thấy được.
+    test nào đỏ. Registry ở fixture có `mt` đầu = `qwen2.5-7b`, còn `default_mt`
+    THẬT (do `_registry_with_the_shipped_mt_default` thêm vào CUỐI mảng) là một
+    id khác: hai giá trị khác nhau nên một dây nối đúng là thấy được. Bài này
+    KHÔNG hard-code id mặc định — đổi `default_mt` trong `registry.json` sang
+    một id hợp lệ khác là chuyện của `tests/test_registry.py`, không được làm
+    bài ghim DÂY NỐI này đỏ oan.
     """
     from app.adapters.registry_file import load_default_mt
 
     main, repos, specs, worker, engine, broker = built
     declared = load_default_mt()
-    assert declared == "opus-mt"
 
     handler = worker.handlers["asr"]
+    assert handler._declared_default_mt == declared, (  # noqa: SLF001 - đọc thẳng dây nối
+        "handler của composition root phải nhận ĐÚNG giá trị `load_default_mt()`"
+    )
     handler._forward_to_translation(1, 1, "zh")  # noqa: SLF001 - chính đường thật
     mt_jobs = [j for j in repos.list_jobs() if j.type == "translate"]
     first_mt = [s.id for s in specs if s.kind == "mt"][0]
@@ -1116,6 +1197,13 @@ def _persistence_reach(directory: pathlib.Path) -> list[str]:
             elif isinstance(node, ast.Attribute):
                 if node.attr in _PERSISTENCE_ATTRS:
                     offenders.append(f"{py.name}: attribute {node.attr}")
+            elif isinstance(node, ast.Subscript):
+                # F4: truy cập bằng KHOÁ (`repos.__dict__["db_path"]`,
+                # `vars(repos)["_connect"]`). Bản quét chuỗi con cũ bắt được
+                # dạng này; thiếu nhánh ở đây là lưới bị THU HẸP.
+                key = _constant_str(node.slice)
+                if key in _PERSISTENCE_ATTRS:
+                    offenders.append(f"{py.name}: subscript {key}")
             elif isinstance(node, ast.Call):
                 func = node.func
                 if (isinstance(func, ast.Name) and func.id == "getattr"
@@ -1174,6 +1262,28 @@ def test_persistence_guard_catches_a_concatenated_getattr(tmp_path):
         encoding="utf-8",
     )
     assert _persistence_reach(tmp_path) == ["rogue.py: getattr db_path"]
+
+
+def test_persistence_guard_catches_a_keyed_reach(tmp_path):
+    """N2/RU-02 + F4 · `repos.__dict__["db_path"]` và `vars(repos)["db" + "_connect"]`.
+
+    Bản quét CHUỖI CON cũ bắt được cả hai dạng này (nó thấy `db_path` / `_connect(`
+    trong mã nguồn), nên khi RU-02 chuyển sang AST mà thiếu nhánh `Subscript`
+    thì lưới bị THU HẸP: truy cập bằng khoá lọt sạch. Bài này giữ đúng độ rộng cũ.
+    """
+    (tmp_path / "rogue.py").write_text(
+        'path = repos.__dict__["db_path"]\n'
+        'conn = vars(repos)["_connect"]\n'
+        'other = repos.__dict__["db" + "_path"]\n',
+        encoding="utf-8",
+    )
+    offenders = _persistence_reach(tmp_path)
+    assert sorted({o.split(": ", 1)[1] for o in offenders}) == [
+        "subscript _connect", "subscript db_path",
+    ], offenders
+    assert len(offenders) == 3, (
+        f"khoá ghép mảnh (`'db' + '_path'`) cũng phải bị bắt: {offenders}"
+    )
 
 
 def test_persistence_guard_ignores_a_docstring_that_merely_says_db_path(tmp_path):

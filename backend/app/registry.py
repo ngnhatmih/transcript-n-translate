@@ -118,18 +118,42 @@ def default_mt_engine(specs: Iterable[EngineSpec], *, declared: str | None = Non
     """Engine DỊCH mặc định — chọn từ DỮ LIỆU, không từ thứ tự dòng (R58).
 
     Thứ tự ưu tiên: setting của người dùng (`configured`) -> khai báo
-    `default_mt` của registry (`declared`) -> phần tử ĐẦU của danh sách `mt`
-    (hành vi cũ, nay chỉ còn là điểm rơi khi registry không khai báo gì).
+    `default_mt` của registry (`declared`) -> phần tử ĐẦU của danh sách `mt`.
 
-    Vì sao cần dấu hiệu tường minh: trước bản vá chỉ có nhánh cuối, nên đảo thứ
-    tự mảng `mt` trong `registry.json` — hoặc thêm một model Ollama 5200 MB lên
-    đầu — là đổi engine mặc định của cả pipeline một cách im lặng, không test
-    nào ghim. Không ném khi id vắng trong registry: job `translate` của GĐ1a vốn
-    chưa có handler, nên hỏng ở worker mới là chỗ báo đúng.
+    Vì sao cần dấu hiệu tường minh: trước R58 chỉ có nhánh cuối, nên đảo thứ tự
+    mảng `mt` trong `registry.json` — hoặc thêm một model Ollama 5200 MB lên đầu
+    — là đổi engine mặc định của cả pipeline một cách im lặng, không test nào ghim.
+
+    Hai nhánh đầu là DỮ LIỆU do người viết cấu hình gõ tay, nên chúng phải được
+    CHỨNG MINH là có thật — y như `default_asr_engine`, và ném `KeyError` nêu
+    ĐÚNG id, NGUỒN của nó, các engine đang có, và chỗ cần sửa. Trước bản vá,
+    `if declared: return declared` trả thẳng id mà không đối chiếu `specs`: một
+    `default_mt` gõ sai im lặng trở thành engine của MỌI job `translate`, và
+    GĐ1a chưa có handler `translate` nên nó chỉ hiện ra thành job FAILED ở worker.
+
+    Nhánh cuối theo THỨ TỰ MẢNG là ĐIỂM RƠI có hợp đồng của `default_mt_engine`
+    (registry không khai báo `default_mt` vẫn phải chạy, giữ nguyên hành vi cũ).
+    Cấu hình đã ship luôn truyền `declared`, nên không đường sản xuất nào tới
+    được nó — nhưng nó KHÔNG phải code chết: xoá đi là phá API công khai này.
+    Ở nhánh đó id lấy từ chính `specs` nên không cần kiểm lại.
     """
+    specs = list(specs)
     if configured:
-        return configured
-    if declared:
-        return declared
-    mt_specs = [s for s in specs if s.kind == "mt"]
-    return mt_specs[0].id if mt_specs else None
+        source = f"setting {MT_DEFAULT_SETTING!r}"
+        engine_id = configured
+    elif declared:
+        source = f"khoá {DEFAULT_MT_KEY!r} trong registry"
+        engine_id = declared
+    else:
+        mt_specs = [s for s in specs if s.kind == "mt"]
+        return mt_specs[0].id if mt_specs else None
+
+    available = [s.id for s in specs if s.kind == "mt"]
+    if engine_id not in {s.id for s in specs}:
+        raise KeyError(
+            f"engine dịch mặc định {engine_id!r} ({source}) không có trong registry; "
+            f"các engine mt đang có: {available}. "
+            f"Sửa {DEFAULT_MT_KEY!r} trong registry.json hoặc setting "
+            f"{MT_DEFAULT_SETTING!r} cho khớp."
+        )
+    return engine_id

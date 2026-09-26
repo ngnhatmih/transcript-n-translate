@@ -156,6 +156,11 @@ def wired(tmp_path, monkeypatch):
         return engine
 
     monkeypatch.setattr(main, "load_registry", lambda: [ASR_SPEC, MT_SPEC])
+    # WQ-02/F3: composition root nay đối chiếu `default_mt` với chính `specs` và
+    # hỏng NGAY lúc dựng khi không khớp, nên registry GIẢ ở trên phải đi kèm một
+    # mặc định GIẢ trỏ vào id CÓ THẬT trong đó — `registry.json` thật khai báo
+    # `opus-mt`, id không có trong danh sách rút gọn này.
+    monkeypatch.setattr(main, "load_default_mt", lambda: MT_SPEC.id)
     monkeypatch.setattr(main, "_engine_factory", factory)
     monkeypatch.setattr(main, "SingleGpuGovernor", TracingGovernor)
 

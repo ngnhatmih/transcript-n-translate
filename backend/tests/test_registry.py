@@ -145,6 +145,42 @@ def test_default_asr_engine_falls_back_and_refuses_a_registry_without_it(tmp_pat
         default_asr_engine(specs)
 
 
+def test_default_mt_engine_refuses_a_declared_id_that_is_not_in_the_registry(specs):
+    """WQ-02/F3 · `default_mt` gõ sai phải hỏng kèm id + nguồn + danh sách có thật.
+
+    `default_mt_engine` từng trả thẳng id đã khai báo mà không đối chiếu `specs`,
+    nên một lần gõ sai trong `registry.json` trở thành engine của MỌI job
+    `translate` mà không ai thấy: GĐ1a chưa có handler `translate`, nên job chỉ
+    `FAILED` ở tận worker. Đây là bất đối xứng với `default_asr_engine`, thứ vốn
+    đã từ chối NGAY lúc dựng (`main.py`).
+    """
+    from app.registry import default_mt_engine
+
+    with pytest.raises(KeyError, match="opus-mt-go-nham") as excinfo:
+        default_mt_engine(specs, declared="opus-mt-go-nham")
+    assert "qwen2.5-7b" in str(excinfo.value), (
+        "lỗi phải liệt kê các engine mt ĐANG CÓ để người vận hành sửa được ngay"
+    )
+
+    # Setting của người dùng cũng phải có thật, y như nhánh `configured` của ASR.
+    with pytest.raises(KeyError, match="cung-sai"):
+        default_mt_engine(specs, declared="qwen2.5-7b", configured="cung-sai")
+
+
+def test_default_mt_engine_keeps_the_legacy_order_fallback(specs):
+    """WQ-02/F3 · registry KHÔNG khai báo gì ⇒ điểm rơi theo thứ tự mảng giữ nguyên.
+
+    Đây là HỢP ĐỒNG CÔNG KHAI của `default_mt_engine` (registry không có khoá
+    `default_mt` vẫn phải chạy), không phải code chết — dù cấu hình đã ship luôn
+    truyền `declared` nên không đường sản xuất nào tới được nhánh này.
+    """
+    from app.registry import default_mt_engine
+
+    assert default_mt_engine(specs) == "qwen2.5-7b"
+    assert default_mt_engine(specs, declared=None) == "qwen2.5-7b"
+    assert default_mt_engine(of_kind(specs, "asr")) is None
+
+
 def test_shipped_registry_declares_the_default_mt_engine():
     """R58/WQ-02 · engine DỊCH mặc định là DỮ LIỆU, không phải thứ tự mảng `mt`.
 

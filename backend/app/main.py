@@ -23,7 +23,8 @@ from app.config import (API_HOST, API_PORT, DB_PATH, HF_HOME, LOG_DIR, MEDIA_DIR
 from app.pipeline.export import ExportHandler
 from app.pipeline.ingest import IngestHandler
 from app.pipeline.transcribe import AUTO_FORWARD_SETTING, TranscribeHandler
-from app.registry import ASR_DEFAULT_SETTING, default_asr_engine
+from app.registry import (ASR_DEFAULT_SETTING, MT_DEFAULT_SETTING,
+                          default_asr_engine, default_mt_engine)
 from app.worker import PhaseQueueWorker
 
 # MT là Giai đoạn 2.
@@ -58,12 +59,26 @@ def build_components():
             f"cấu hình engine ASR mặc định không dùng được: {exc}"
         ) from exc
 
+    # WQ-02/F3: engine DỊCH mặc định phải được kiểm ở CÙNG chỗ sớm nhất, cùng
+    # bảo đảm như ASR. Thiếu phép kiểm này thì một `default_mt` gõ sai trong
+    # `registry.json` im lặng trở thành engine của MỌI job translate (GĐ1a chưa
+    # có handler `translate` nên nó chỉ FAILED ở tận worker) — hai đường mặc
+    # định cùng họ mà khác bảo đảm là bất nhất quán.
+    declared_mt = load_default_mt()
+    try:
+        default_mt_engine(specs, declared=declared_mt,
+                          configured=repos.get_setting(MT_DEFAULT_SETTING))
+    except KeyError as exc:
+        raise RuntimeError(
+            f"cấu hình engine dịch mặc định không dùng được: {exc}"
+        ) from exc
+
     transcribe_handler = TranscribeHandler(
         repos, specs, engine_factory=_engine_factory, workdir=MEDIA_DIR,
         # R58/WQ-02: engine dịch mặc định là DỮ LIỆU của registry (`default_mt`),
         # không phải thứ tự mảng `mt`. Thiếu dây này thì mặc định âm thầm quay về
         # "phần tử đầu tiên", đúng lỗi mà khoá `default_mt` sinh ra để chặn.
-        declared_default_mt=load_default_mt(),
+        declared_default_mt=declared_mt,
     )
     handlers = {
         # I-3 + I-6: handler thật nhận registry và gốc media; thiếu chúng thì nó

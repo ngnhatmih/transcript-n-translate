@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import socket
 import urllib.error
 import urllib.request
 from dataclasses import asdict
@@ -52,6 +53,11 @@ def get_status(repos=Depends(get_repos), worker=Depends(get_worker)):
         # `body["vram"]` chứ không phải phòng thủ bằng `if "vram" in body`.
         # Đo VRAM thật là việc của GĐ2.
         "vram": None,
+        # API-03 (M6): `probe_ollama` chạy MỖI request (tối đa ~300 ms khi host
+        # không tới được). Quyết định của GĐ1a: GIỮ NGUYÊN — route này là `def`
+        # nên FastAPI chạy nó trong threadpool, không chặn event loop, và
+        # `/api/status` chỉ được poll thưa; cache TTL (hoặc tách endpoint riêng)
+        # là việc của GĐ2. Đây là quyết định hoãn CÓ GHI NHẬN, không phải thiếu test.
         "ollama": probe_ollama(),
     }
 
@@ -74,6 +80,10 @@ def probe_ollama(host: str = _OLLAMA_HOST,
       `socket.timeout` của pha KẾT NỐI. Timeout là "chưa đo được" ⇒ `unknown`;
       `ConnectionRefusedError` mới là "có máy nhưng không ai nghe" ⇒ `down`.
       Thứ tự `except` giữ `URLError` trước vì nó là lớp con của `OSError`.
+    * `socket.gaierror` (DNS không phân giải được TÊN) cũng là "chưa đo được":
+      chưa hỏi được ai cả thì không được kết luận `down`. Cùng loại: `reason` là
+      một CHUỖI (`'no host given'`, `'unknown url type'`) — URL/host không dựng
+      nổi, tức lỗi cấu hình chứ không phải câu trả lời của ai.
     """
     host = os.environ.get("OLLAMA_HOST", host)
     if "://" not in host:
@@ -84,14 +94,19 @@ def probe_ollama(host: str = _OLLAMA_HOST,
             json.loads(resp.read().decode("utf-8"))
     except urllib.error.URLError as exc:
         reason = exc.reason
-        if isinstance(reason, TimeoutError):
-            # Chưa đo được: host có thể sống mà chỉ chậm/mất gói.
+        if isinstance(reason, (TimeoutError, socket.gaierror)):
+            # Chưa đo được: host có thể sống mà chỉ chậm/mất gói, hoặc tên chưa
+            # phân giải được nên CHƯA hỏi được ai.
             return "unknown"
         if isinstance(reason, ConnectionRefusedError):
             # Cổng đóng: kết luận được là đang tắt.
             return "down"
-        # Còn lại (DNS không phân giải được, host không tới được, scheme lạ):
-        # có hỏi mà không ai trả lời.
+        if isinstance(reason, str):
+            # URL/host không dựng nổi (`'no host given'`, `'unknown url type'`):
+            # lỗi CẤU HÌNH, chưa có câu hỏi nào được gửi đi ⇒ chưa đo được.
+            return "unknown"
+        # Còn lại (đã phân giải được tên nhưng không tới được host ở tầng
+        # socket): ĐÃ hỏi, không ai trả lời ⇒ `down`.
         return "down"
     except (TimeoutError, OSError, ValueError):
         return "unknown"

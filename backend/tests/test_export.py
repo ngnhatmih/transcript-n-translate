@@ -195,6 +195,7 @@ def test_bilingual_non_contiguous_keeps_every_pair_together():
     assert _vtt_bodies(
         to_vtt(segs, translations=NON_CONTIGUOUS_TRANSLATIONS, bilingual=True)
     ) == ["一", "một", "二", "hai", "三", "ba"]
+    # TODO(ASS-escape): separator phải là một \N
     assert _ass_bodies(
         to_ass(segs, translations=NON_CONTIGUOUS_TRANSLATIONS, bilingual=True)
     ) == ["一\\\\Nmột", "二\\\\Nhai", "三\\\\Nba"]
@@ -317,6 +318,7 @@ def test_successful_run_matches_the_formatter_and_writes_utf8(
     # Chế độ song ngữ thật sự có cả nguồn lẫn bản dịch, đúng thứ tự từng cặp.
     bodies = {"srt": _srt_bodies, "vtt": _vtt_bodies, "ass": _ass_bodies}[fmt](expected)
     if fmt == "ass":
+        # TODO(ASS-escape): separator phải là một \N
         assert bodies == ["一\\\\Nmột", "二\\\\Nhai", "三\\\\Nba"]
     else:
         assert bodies == ["一", "một", "二", "hai", "三", "ba"]
