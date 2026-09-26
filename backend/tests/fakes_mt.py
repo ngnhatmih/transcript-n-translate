@@ -5,6 +5,8 @@ cần hỏng (`drop_ids`, `fail_times`).
 """
 from __future__ import annotations
 
+from dataclasses import replace
+
 from app.domain.models import Segment, Term
 from app.domain.mt import MtOpts
 
@@ -17,8 +19,12 @@ class FakeMtEngine:
         self._drop_ids = drop_ids or set()
         self._fail_times = fail_times
         self.release_count = 0
+        # `calls` = các lô ĐÃ THÀNH CÔNG; `attempts` = MỌI lần gọi, kể cả lần hỏng
+        # (test retry cần đếm số lần THỬ, không phải số lần thành công).
         self.calls: list[list[int]] = []
+        self.attempts: list[list[int]] = []
         self.last_opts: MtOpts | None = None
+        self.last_glossary: list[Term] | None = None
 
     @property
     def engine_id(self) -> str:
@@ -29,18 +35,18 @@ class FakeMtEngine:
 
     def translate(self, batch: list[Segment], glossary: list[Term],
                   opts: MtOpts) -> list[Segment]:
+        self.attempts.append([s.i for s in batch])
         if self._fail_times > 0:
             self._fail_times -= 1
             raise RuntimeError("fake engine: hỏng theo kịch bản test")
         self.last_opts = opts
+        self.last_glossary = glossary
         self.calls.append([s.i for s in batch])
         out: list[Segment] = []
         for s in batch:
             if s.i in self._drop_ids:
                 continue
-            out.append(Segment(i=s.i, start=s.start, end=s.end,
-                               text=self._mapping.get(s.text, f"[vi]{s.text}"),
-                               words=s.words, speaker=s.speaker))
+            out.append(replace(s, text=self._mapping.get(s.text, f"[vi]{s.text}")))
         return out
 
     def release(self) -> None:
