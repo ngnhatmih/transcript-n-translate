@@ -38,9 +38,11 @@ from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, Field
 
 from app.api.deps import get_dirs, get_repos, get_specs
+from app.api.routes_jobs import _job_json
 from app.domain.job_state import phase_of
 from app.domain.models import Job
-from app.domain.staleness import is_stale
+from app.domain.paths import PathOutsideRoot, resolve_within
+from app.domain.staleness import is_stale, translation_summary_json
 from app.pipeline.export import FORMATS, MEDIA_TYPES, artifact_name
 from app.registry import by_id
 
@@ -68,17 +70,15 @@ class PatchIn(BaseModel):
 
 
 def _summary(row, *, stale: bool) -> dict:
-    return {
-        "id": row.id,
-        "transcript_id": row.transcript_id,
-        "engine": row.engine,
-        "target_lang": row.target_lang,
-        "prompt_version": row.prompt_version,
-        "transcript_version": row.transcript_version,
-        "status": row.status,
-        "stale": stale,
-        "created_at": row.created_at,
-    }
+    """Hình dạng JSON của một bản dịch — UỶ QUYỀN cho builder dùng chung.
+
+    `stale` truyền vào chứ không tính lại ở đây vì đã có route đọc transcript
+    ngay trước đó (`_require_transcript`) và biết version hiện tại; hai lần đọc
+    cùng một hàng trong một request là hai chỗ để trôi. Giá trị đó được truyền
+    thẳng vào builder chung nên hai endpoint không thể phát hai hình dạng khác
+    nhau — xem `tests/test_translation_summary_shape.py`.
+    """
+    return translation_summary_json(row, stale=stale)
 
 
 def _require_translation(repos, translation_id: int):
@@ -155,8 +155,11 @@ def create_translation(body: CreateIn, repos=Depends(get_repos),
     job.id = repos.add_job(job)
 
     stored = repos.get_translation(translation_id)
+    # `job` là hàng ĐÃ GHI đọc lại, không phải object trong bộ nhớ: mọi route tạo
+    # việc khác (`routes_jobs._job_json`) trả CÙNG hình dạng này, và một object
+    # ba khoá ở riêng đây là chỗ client phải special-case theo endpoint.
     return {"translation": _summary(stored, stale=False),
-            "job": {"id": job.id, "state": job.state, "phase": job.phase}}
+            "job": _job_json(repos.get_job(job.id))}
 
 
 @router.get("")
@@ -259,12 +262,35 @@ def export_translation(translation_id: int, format: str = "srt", bilingual: int 
     stem = f"transcript-{translation.transcript_id}"
     name = artifact_name(stem, fmt, translated=True)
 
-    out_dir = pathlib.Path(dirs["out"])
-    out_dir.mkdir(parents=True, exist_ok=True)
-    # `newline="\n"` như `pipeline/export.py::_write_utf8`: mở ở chế độ văn bản mặc
-    # định thì Windows dịch mọi `\n` thành `\r\n`, và tệp ghi ở đây sẽ không còn
-    # khớp với tệp mà handler ghi cho CÙNG một bản dịch.
-    with (out_dir / name).open("w", encoding="utf-8", newline="\n") as handle:
-        handle.write(body)
+    _materialise(pathlib.Path(dirs["out"]), name, body)
 
     return PlainTextResponse(body, media_type=MEDIA_TYPES.get(fmt, "text/plain"))
+
+
+def _materialise(out_dir: pathlib.Path, name: str, body: str) -> pathlib.Path | None:
+    """Ghi bản xuất ra `<out_dir>/<name>`, CHỈ khi `resolve_within` chứng minh được.
+
+    Đường dẫn ghi của route này phải đi qua cùng hàm containment với mọi chỗ GHI
+    khác trong dự án (`domain/paths.py`), đúng như phép đọc đã đi từ Giai đoạn 1a:
+    `name` hôm nay là `artifact_name()` của một `stem` dựng từ `int` cộng một
+    `format` đã whitelist, nhưng "hôm nay an toàn" không phải một bất biến — đó
+    chính là cách lỗi `stem` chưa lọc của 1a sống sót qua nhiều vòng review.
+
+    Không chứng minh được thì BỎ lần ghi trên đĩa và trả `None`: thân phụ đề đã
+    nằm trong `PlainTextResponse`, nên client vẫn nhận đủ nội dung (route này
+    KHÔNG phục vụ tệp, đường tải tệp là `GET /api/export/{job_id}/download`), còn
+    một `500` vì thư mục đầu ra không phân giải được sẽ biến một lần xuất đọc được
+    thành một lỗi máy chủ.
+
+    `newline="\\n"` như `pipeline/export.py::_write_utf8`: mở ở chế độ văn bản mặc
+    định thì Windows dịch mọi `\\n` thành `\\r\\n`, và tệp ghi ở đây sẽ không còn
+    khớp với tệp mà handler ghi cho CÙNG một bản dịch.
+    """
+    out_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        target = resolve_within(out_dir, out_dir / name)
+    except PathOutsideRoot:
+        return None
+    with target.open("w", encoding="utf-8", newline="\n") as handle:
+        handle.write(body)
+    return target

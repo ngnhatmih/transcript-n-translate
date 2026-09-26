@@ -15,7 +15,7 @@ from pydantic import BaseModel, Field, ValidationError
 from app.api.deps import get_repos, get_specs
 from app.api.sse import JobEventBroker, stream_events
 from app.domain import job_state as js
-from app.domain.models import Job
+from app.domain.models import Job, translation_id_of
 from app.registry import by_id
 
 router = APIRouter(prefix="/api/jobs", tags=["jobs"])
@@ -180,6 +180,20 @@ def cancel_job(job_id: int, repos=Depends(get_repos)):
     # tiến trình sẽ để DB nửa vời và model đang nạp không được đổ.
     if job.state == js.QUEUED:
         repos.set_job_state(job_id, js.CANCELLED)
+        # Hàng `translations` phải theo job, không chỉ bảng `jobs`: một job dịch
+        # bị huỷ lúc còn `queued` không bao giờ chạy handler, nên nếu chỉ
+        # `set_job_state` thì hàng dịch đứng nguyên ở `queued` VĨNH VIỄN và
+        # `GET /api/translations` (Task 13 phơi `status`) hiện một bản dịch "đang
+        # chờ" không còn job nào đứng sau.
+        #
+        # CHỈ nhánh `queued`. Job đang `running` chỉ được đặt cờ ở đây — nó vẫn
+        # có thể chạy xong trước checkpoint kế tiếp, và ghi `cancelled` ngay lúc
+        # này sẽ chốt trước một kết quả chưa xảy ra (worker ghi kết luận thật ở
+        # ranh giới job: `TranslateHandler` tự ghi `cancelled` khi thấy cờ, còn
+        # `worker._run_one` đối chiếu hàng dịch ở nhánh huỷ sau `run()`).
+        translation_id = translation_id_of(job)
+        if translation_id is not None:
+            repos.set_translations_status([translation_id], js.CANCELLED)
     return _job_json(repos.get_job(job_id))
 
 

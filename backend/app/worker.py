@@ -11,7 +11,7 @@ import time
 from typing import Callable, Protocol
 
 from app.domain import job_state as js
-from app.domain.models import Job
+from app.domain.models import Job, translation_id_of
 from app.ports.governor import ResourceGovernor
 from app.ports.repos import Repos
 
@@ -69,8 +69,26 @@ class PhaseQueueWorker:
 
     # ---------- vòng đời ----------
     def recover(self) -> int:
-        """Gọi MỘT LẦN lúc khởi động, trước run_forever."""
-        return self.repos.mark_running_as_interrupted()
+        """Gọi MỘT LẦN lúc khởi động, trước run_forever.
+
+        Đối chiếu CẢ HAI bảng, không chỉ `jobs`: một job bị ngắt giữa lúc chạy để
+        lại một hàng `translations` đang `running` (handler ghi `running` khi bắt
+        đầu việc), và không có bước này thì hàng đó đứng nguyên ở `running` mãi
+        mãi — `GET /api/translations` hiện một bản dịch "đang chạy" mà không còn
+        tiến trình nào chạy nó.
+
+        Thứ tự bắt buộc: đọc danh sách job TRƯỚC khi đổi trạng thái chúng, vì
+        `mark_running_as_interrupted` trả về SỐ HÀNG chứ không trả về id.
+        """
+        to_reconcile = [translation_id_of(job)
+                        for job in self.repos.list_jobs(states=(js.RUNNING,))]
+        interrupted = self.repos.mark_running_as_interrupted()
+        ids = [i for i in to_reconcile if i is not None]
+        # `interrupted` là số JOB đã đổi trạng thái (hợp đồng đã có của
+        # `mark_running_as_interrupted`, được `test_worker_recovery` ghim); số
+        # hàng DỊCH đối chiếu được là chuyện khác và không được trộn vào đây.
+        self.repos.set_translations_status(ids, "failed")
+        return interrupted
 
     def stop(self) -> None:
         self._stop.set()
@@ -178,11 +196,18 @@ class PhaseQueueWorker:
         except JobCancelled:
             self.repos.append_job_log(job.id, "đã huỷ theo yêu cầu ở checkpoint")
             self.repos.set_job_state(job.id, js.CANCELLED)
+            self._settle_translation(job, "cancelled")
             self._emit(job.id)
             return
         except Exception as exc:  # noqa: BLE001 - phải bắt hết để hàng đợi sống
             self.repos.append_job_log(job.id, f"LỖI: {exc}")
             self.repos.set_job_state(job.id, js.FAILED, error=f"{type(exc).__name__}: {exc}")
+            # Hàng dịch phải theo SỐ PHẬN của job. `TranslateHandler` tự ghi
+            # `failed` cho mọi lỗi nó bắt được, nhưng lỗi ở tầng HẠ TẦNG (hàng
+            # biến mất lúc checkpoint, DB hỏng) làm chính lần ghi đó ném
+            # `LookupError`; nếu không có nhánh này thì hàng còn `running` mãi
+            # trong khi job đã `failed`.
+            self._settle_translation(job, "failed")
             self._emit(job.id)
             return
 
@@ -191,9 +216,38 @@ class PhaseQueueWorker:
         if fresh.cancel_requested:
             self.repos.append_job_log(job.id, "đã huỷ theo yêu cầu")
             self.repos.set_job_state(job.id, js.CANCELLED)
+            self._settle_translation(job, "cancelled")
             self._emit(job.id)
             return
 
         self.repos.set_job_progress(job.id, 1.0)
         self.repos.set_job_state(job.id, js.DONE)
         self._emit(job.id)
+
+    def _settle_translation(self, job: Job, status: str) -> None:
+        """Đối chiếu hàng `translations` với kết luận của job, ở ranh giới `run()`.
+
+        Ba đường gọi, cùng một lý do — một bản dịch không được đứng ở `queued`/
+        `running` khi job đứng sau nó đã kết thúc:
+
+        * huỷ ở ranh giới job (người dùng bấm huỷ sau khi `run()` trả về);
+        * `handler.run` ném `JobCancelled` từ `checkpoint`;
+        * `handler.run` ném lỗi hạ tầng, tức chính lần ghi `failed` của handler
+          cũng hỏng.
+
+        Phép ghi CHỈ chạm `queued`/`running` (xem
+        `UNSETTLED_TRANSLATION_STATUSES`), nên nó là NO-OP trên đường thành công
+        (hàng đã `done`) và trên đường handler đã tự ghi kết luận. Job không mang
+        `translation_id` (mọi job `asr`/`ingest`/`export`) là NO-OP.
+
+        `LookupError` bị nuốt: hàng dịch đã biến mất thì không có gì để đánh dấu,
+        và ném ở đây sẽ che mất lỗi GỐC vừa làm job hỏng — đúng lý do
+        `TranslateHandler` cũng để `LookupError` đi thẳng ra.
+        """
+        translation_id = translation_id_of(job)
+        if translation_id is None:
+            return
+        try:
+            self.repos.set_translations_status([translation_id], status)
+        except LookupError:
+            pass

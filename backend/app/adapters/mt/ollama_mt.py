@@ -125,6 +125,15 @@ class OllamaMtEngine:
         return self._engine_id
 
     @property
+    def model_ref(self) -> str:
+        """Tag model gửi cho Ollama — giá trị ghi vào `llm_calls.model_ref`.
+
+        Cùng lý do với `OpusMtEngine.model_ref`: người ghi số liệu không được
+        chạm vào trường nội bộ `_model`, vì mỗi adapter đặt tên nó một khác.
+        """
+        return self._model
+
+    @property
     def prompt_version(self) -> str:
         return PROMPT_VERSION.get(self.engine_id, "unknown")
 

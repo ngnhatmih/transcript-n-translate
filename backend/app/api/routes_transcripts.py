@@ -24,7 +24,7 @@ from pydantic import BaseModel, Field
 from app.api.deps import get_repos
 from app.domain.models import Segment
 from app.domain.readability import CPS_WARN, reading_cps
-from app.domain.staleness import is_stale
+from app.domain.staleness import translation_summary_json
 
 logger = logging.getLogger(__name__)
 
@@ -41,15 +41,15 @@ class PatchIn(BaseModel):
 
 
 def _translation_json(row, current_version: int) -> dict:
-    return {
-        "id": row.id,
-        "engine": row.engine,
-        "target_lang": row.target_lang,
-        "prompt_version": row.prompt_version,
-        "translated_from_version": row.transcript_version,
-        "stale": is_stale(current_version, row.transcript_version),
-        "created_at": row.created_at,
-    }
+    """Hình dạng JSON của một bản dịch — UỶ QUYỀN cho builder dùng chung.
+
+    Trước bản này route ở đây tự ghép khoá và phát `translated_from_version`
+    (không `status`), nên cùng một hàng đọc ở `/api/translations` và ở đây cho
+    hai hình dạng khác nhau. Một builder trong `domain/staleness.py` — chỗ đã sở
+    hữu `is_stale` — là nguồn duy nhất; xem
+    `tests/test_translation_summary_shape.py`.
+    """
+    return translation_summary_json(row, current_version)
 
 
 def _transcript_json(repos, transcript, *, include_segments: bool = True) -> dict:

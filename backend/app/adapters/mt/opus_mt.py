@@ -42,6 +42,16 @@ class OpusMtEngine:
     def engine_id(self) -> str:
         return "opus-mt"
 
+    @property
+    def model_ref(self) -> str:
+        """Tên model THẬT SỰ được nạp — giá trị ghi vào `llm_calls.model_ref`.
+
+        Là thuộc tính CÔNG KHAI chứ không để handler đọc `_model_name`: handler
+        ghi số liệu của MỌI engine qua cùng một giao diện, và một adapter khác
+        (Ollama) đặt tên trường nội bộ khác hẳn.
+        """
+        return self._model_name
+
     def supports_glossary(self) -> bool:
         return False
 
