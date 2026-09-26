@@ -3618,6 +3618,35 @@ git commit -m "feat(api): glossary CRUD + job dich lai khi glossary doi"
 
 ### Task 15: Duyệt transcript + route export đúng hình dạng spec
 
+> 🔴 **HIỆU CHỈNH BẮT BUỘC CHO TASK NÀY — phần code ở Step 3 dưới đây SAI; mục này thắng.**
+>
+> **A. API thật của `pipeline/export.py` (đọc mã, không suy đoán):** nó công bố **`FORMATS`**, **`MEDIA_TYPES`**,
+> và **`artifact_name(stem, fmt, translated: bool)`** — dùng ở `routes_export.py:30` và `:105`. **KHÔNG có hàm
+> `render()`**, và `artifact_name` **không** nhận `translation`/`bilingual`. Step 3 gọi `render(...)` và truyền
+> `artifact_name(tr, fmt=…, bilingual=…)` ⇒ **không chạy được**.
+> ⇒ **Đọc `backend/app/api/routes_export.py:60-115`** (route đang chạy) rồi làm route mới theo **đúng** cách nó gọi
+> `artifact_name`. Đừng thay chữ ký của hàm đang chạy để vừa plan.
+>
+> **B. Quyết định đã chốt (spec §7):** thêm route **đúng spec** `GET /api/export/{translation_id}?format=&bilingual=`,
+> **giữ** route cũ (`POST /api/export` + `GET /api/export/{job_id}/download`), và **ghim bằng test rằng cả hai cho ra
+> CÙNG nội dung** cho cùng một bản dịch. Bỏ route cũ là phá thứ đang chạy mà không có gì bù.
+>
+> **C. `POST /api/transcripts/{id}/approve`** — chỉ đổi trạng thái transcript sang `translated`; id lạ ⇒ 404.
+>
+> **D. Luật chung của phase này (đã trả giá nhiều lần):**
+> - **`app/api` KHÔNG được import `app.adapters`**, không `sqlite3`/`db_path`/`_connect(` (có test canh).
+> - **KHÔNG dựng `Segment(...)` bằng tay** — dùng `dataclasses.replace` (hai task đã ship lỗi nuốt 7/13 trường).
+> - **Test qua ĐƯỜNG THẬT** (`build_components()` + `build_app()` + `TestClient`); **fixture phải CHÉP từ
+>   `tests/test_api_sources.py`**, đừng viết lại từ trí nhớ — `monkeypatch.setenv("PHUDE_DATA", …)` chạy **sau**
+>   `from app import main` nên **không** chuyển hướng được (`config.py` đọc env lúc import) và sẽ **mở DB thật của
+>   repo**. Đây đúng bẫy M7 của Giai đoạn 1a mà plan này đã lặp lại một lần ở Task 14.
+> - **KHÔNG gán thẳng trường của đối tượng giả** để "làm cho test xanh" — Task 11 từng có test huỷ **tự thoả mãn**
+>   vì đúng cách đó, và nó xanh trong khi huỷ không hoạt động.
+> - **COMMIT TRƯỚC khi chạy mutation**; không để harness mutation chạy `git checkout` trên cây còn chỉnh sửa.
+> - Phục hồi mutation phải kiểm **hash** + **byte trong không gian chuẩn hoá của git** + `git diff --quiet HEAD`
+>   (`core.autocrlf=true`: blob HEAD là LF, cây làm việc là CRLF).
+> - Brief **không** dự đoán số test. Báo số **thật**; mỗi test chạy mutation và báo **kết quả quan sát được**.
+
 **Files:**
 - Modify: `backend/app/api/routes_translations.py`
 - Create: `backend/tests/test_api_export_by_translation.py`
