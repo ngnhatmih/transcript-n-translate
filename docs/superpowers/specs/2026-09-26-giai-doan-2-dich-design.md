@@ -55,8 +55,11 @@ api/        HTTP           →  routes_translations.py · routes_glossary.py
   được**. Giá trị cụ thể **đo rồi chốt** (§12). Một lô **luôn** chứa ít nhất một segment, kể cả khi segment đó
   vượt ngân sách — không có lô rỗng và không có segment bị bỏ. Hàm thuần ⇒ test được không cần model.
   Bất biến: ghép các lô theo thứ tự = đầu vào, **đúng thứ tự**, không lô rỗng, không segment nào xuất hiện hai lần.
-- **`alignment.py`** — `check_alignment(src, out) -> None | AlignmentProblem`; `split_batches_for_repair(...)`.
-  Thuần.
+- **`alignment.py`** — `check_alignment(src, out) -> None`, ném `AlignmentProblem` (có `.expected_ids`,
+  `.got_ids`, `.reason`) khi số lượng / id / thứ tự không khớp. Thuần.
+  *(Bản trước của spec có nhắc `split_batches_for_repair(...)`. Hàm đó **không được làm** — bước hạ cấp xuống dịch
+  từng segment nằm **ngoài** module này, trong `TranslateHandler` (Task 11), vì nó cần gọi engine chứ không thuần.
+  Spec đã sửa cho khớp mã, thay vì thêm một hàm chỉ để khớp spec.)*
 - **`glossary_match.py`** — `terms_in(segment, glossary) -> list[Term]`;
   `affected_segments(segments, old_glossary, new_glossary) -> list[int]`. Thuần. Đây là thứ tab Thuật ngữ cần.
 - **`mt_qa.py`** — QA tất định sau dịch, trả `list[QaIssue]`. Thuần.
