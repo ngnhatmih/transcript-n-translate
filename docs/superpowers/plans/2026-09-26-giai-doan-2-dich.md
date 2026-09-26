@@ -4097,6 +4097,46 @@ git commit -m "feat(mt): cai Ollama, do keep_alive, smoke test co so, test live 
 
 ### Task 17: Nghiệm thu đầu-cuối + tài liệu
 
+> 🔴 **HIỆU CHỈNH BẮT BUỘC CHO TASK NÀY — phần code ở Step 1 SAI; mục này thắng.**
+>
+> **A. Hình dạng THẬT của composition root sau Task 12** (đọc mã trước khi viết):
+> - `build_components()` trả **tuple 5 phần tử** `(repos, specs, worker, broker, mt_engines)` — **không** có thuộc
+>   tính `.repos`/`.mt_engines`.
+> - `build_app(repos, specs, worker, broker, mt_engines) -> FastAPI` — **tham số vị trí**.
+> ⇒ Mọi dòng trong Step 1 kiểu `wired.mt_engines` / `main.build_app(wired)` là **sai**. Và fixture phải **CHÉP từ
+> `tests/test_api_sources.py`** (nó patch hằng số trong `app.config`); **đừng** dùng `monkeypatch.setenv("PHUDE_DATA")`
+> vì nó chạy sau `from app import main` và `config.py` đọc env lúc import — sẽ **mở DB thật của repo** (đúng bẫy M7
+> của Giai đoạn 1a, mà plan này đã lặp lại một lần ở Task 14).
+>
+> **B. Chuỗi trạng thái để test đầu-cuối phải đúng spec §8.6: `draft → reviewed → translated`.**
+> - `approve` đặt **`reviewed`** (ruling review Task 15) — **không** phải `translated`.
+> - `translated` do **đường hoàn thành dịch** đặt (Task 18, trong `TranslateHandler`) — **chỉ** khi bản dịch `done`,
+>   và **không** khi thất bại/huỷ.
+> ⇒ Test đầu-cuối nên đi trọn chuỗi đó và khẳng định cả ba mốc, chứ không chỉ hai.
+>
+> **C. Tài liệu PHẢI mang hai điều CHƯA BIẾT, ghi thành giới hạn có tên (từ review Task 16 — C7/C8):**
+> 1. **`DEFAULT_MAX_CHARS = 1200` chưa từng bị ép.** Lô lớn nhất đo được chỉ **94 ký tự** và alignment **chưa lần nào
+>    vỡ** trên 18 segment. Giữ 1200 nghĩa là *"không có cơ sở đo để đổi"*, **không** phải *"đã xác nhận đúng"*.
+>    Ngưỡng hỏng thật **vẫn chưa biết** — README phải nói đúng như vậy, kèm cách đo lại.
+> 2. **Chất lượng dịch chưa được đánh giá**, nhưng **lỗi thấy được trên đầu ra thật** phải được ghi: OPUS-MT **cắt
+>    cụt câu** và dịch 成本 thành `"10%"`; Qwen 3B **để sót chữ Hán** trong bản dịch (`dịch字`, `việc字幕`). Đây là
+>    **số thật về sản phẩm**, không phải phỏng đoán.
+> Kèm **số đo đã có** (Task 16, đã được reviewer chạy lại và xác nhận): OPUS-MT 4/4 segment trong 6,7 s (không có
+> token count); Qwen2.5-3B 4/4 trong 2,9 s với `tokens_in/out = 219/149`; ASR `fw-small` 4 segment trong 1,0 s,
+> **RTF 0,049**; `ollama ps` rỗng sau mọi `release()`.
+> Và ghi rõ **`HF_HOME`**: mặc định `D:\models\hf`; trong phiên này ghi sang D: **bị từ chối** (`WinError 5`) nên
+> trọng số OPUS-MT đã bị xoá cùng scratch ⇒ lần chạy thật tiếp theo **phải tải lại ~800 MB**.
+>
+> **D. `pytest.ini` giờ có `-m "not live"`** ⇒ suite mặc định **bỏ qua** test live (13 test). Test đầu-cuối của task
+> này **không** được là live; nó phải chạy được trong suite mặc định. Nếu muốn chạm engine thật thì dùng marker
+> `live` và nói rõ.
+>
+> **E. Luật chung:** **COMMIT TRƯỚC khi chạy mutation**; phục hồi phải kiểm **hash + byte trong không gian chuẩn hoá +
+> `git diff --quiet HEAD`**; **không** dựng `Segment(...)` bằng tay; test đi qua **đường thật**, **không gán thẳng
+> trường của đối tượng giả** (Task 11 từng có test huỷ tự thoả mãn vì đúng cách đó); `$env:TEMP` và mọi ghi ngoài
+> workspace đều **BỊ TỪ CHỐI** — scratch trong workspace nhưng ngoài cây repo, rồi xoá; brief **không** dự đoán số test
+> — báo số **thật** và với mỗi test chạy mutation rồi báo **kết quả quan sát được**.
+
 **Files:**
 - Create: `backend/tests/test_e2e_translate.py`
 - Modify: `README.md`
