@@ -176,8 +176,12 @@ def patch_translation(translation_id: int, body: PatchIn,
         # `words` là dữ liệu của bản GỐC, không phải thứ client sửa được.
         edited[seg.i] = dataclasses.replace(edited[seg.i], text=seg.text)
 
-    repos.update_translation_segments(translation_id,
-                                      [edited[i] for i in sorted(edited)])
+    # Thứ tự ĐÃ LƯU là dữ liệu, không phải thứ route được chuẩn hoá: đi theo
+    # `translation.segments` (không `sorted`) nên sửa chữ một dòng không sắp xếp
+    # lại các dòng còn lại. Vẫn không thể thêm hay bớt: mọi `s.i` đến từ chính
+    # danh sách đã lưu.
+    repos.update_translation_segments(
+        translation_id, [edited[s.i] for s in translation.segments])
     # Sửa tay không đổi `transcript_version`: bản dịch vẫn dịch từ đúng bản
     # transcript cũ. Nên `stale` vẫn phải TÍNH LẠI từ version hiện tại của
     # transcript — trả cứng `False` ở đây là nói dối ngay sau khi người dùng vừa

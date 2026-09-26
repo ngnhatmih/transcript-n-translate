@@ -447,6 +447,74 @@ def test_patch_edits_one_segment_text_and_keeps_every_other_field(wired):
     assert got.start == 0.0 and got.end == 1.0
 
 
+def test_patch_ignores_client_supplied_timing_and_speaker(wired):
+    """Client gửi `start`/`end`/`speaker` KHÁC bản gốc thì phải bị bỏ qua.
+
+    `start`/`end` là thời lượng của bản GỐC (xem docstring của route): nghe theo
+    client là phụ đề lệch tiếng, mà client thì không biết gì hơn dữ liệu đã lưu.
+    Đây là mutant X7 của review Task 13: route cũ nhận thẳng `seg.start`/`seg.end`
+    — đúng dạng code của brief — và CẢ TỆP vẫn xanh, nên bài này phải đỏ khi route
+    làm thế. `speaker` nằm trong payload để ghim rằng nó cũng không đi qua được
+    (`SegmentIn` không có trường đó, nên nó bị bỏ im lặng).
+    """
+    c, repos, _specs, _worker, _broker, _mt = wired
+    sid = repos.add_source(kind="file", origin="x.mp4", media_path="/m/x.mp4")
+    tid = repos.add_transcript(source_id=sid, engine="fw-large-v3-turbo", lang="zh",
+                               segments=[Segment(i=1, start=0.0, end=1.0, text="你好")])
+    full = Segment(i=1, start=0.0, end=1.0, text="Xin chào",
+                   words=[Word(w="Xin", s=0.0, e=0.4)],
+                   emotion="neutral", events=["music"], speaker="SPK_1",
+                   avg_logprob=-0.2, no_speech_prob=0.01, suspect=True,
+                   t="MT", qa=["thieu_dau"])
+    tr_id = repos.add_translation(transcript_id=tid, transcript_version=1,
+                                  engine=INPROCESS_ENGINE_ID, target_lang="vi",
+                                  segments=[full], prompt_version="raw-p1")
+
+    r = c.patch(f"/api/translations/{tr_id}", json={"segments": [
+        {"i": 1, "start": 99.0, "end": 100.0, "text": "Xin chào bạn",
+         "speaker": "SPK_9"}]})
+    assert r.status_code == 200, r.text
+    got = repos.get_translation(tr_id).segments[0]
+    assert (got.start, got.end) == (0.0, 1.0), (
+        "PATCH phải giữ thời lượng của bản GỐC, không nghe `start`/`end` của client"
+    )
+    assert got.speaker == "SPK_1", "client không được đổi người nói của bản gốc"
+    assert dataclasses.replace(got, text="Xin chào") == full, (
+        "PATCH chỉ được đổi `text`; mọi trường khác phải là dữ liệu của bản gốc"
+    )
+
+
+def test_patch_preserves_the_stored_segment_order(wired):
+    """Sửa chữ MỘT dòng không được sắp xếp lại những dòng còn lại.
+
+    Route cũ dựng lại danh sách bằng `sorted(edited)`, nên một bản dịch lưu
+    `[(2,B),(1,A)]` đổi thành `[(1,A!),(2,B)]` chỉ vì người dùng sửa `i=1`. Thứ tự
+    đã lưu là dữ liệu của bản gốc — cùng loại với `start`/`end`.
+    """
+    c, repos, _specs, _worker, _broker, _mt = wired
+    sid = repos.add_source(kind="file", origin="x.mp4", media_path="/m/x.mp4")
+    tid = repos.add_transcript(source_id=sid, engine="fw-large-v3-turbo", lang="zh",
+                               segments=[Segment(i=2, start=1.0, end=2.0, text="b"),
+                                         Segment(i=1, start=0.0, end=1.0, text="a")])
+    tr_id = repos.add_translation(
+        transcript_id=tid, transcript_version=1, engine=INPROCESS_ENGINE_ID,
+        target_lang="vi", prompt_version="raw-p1",
+        segments=[Segment(i=2, start=1.0, end=2.0, text="B"),
+                  Segment(i=1, start=0.0, end=1.0, text="A")])
+    before = [(s.i, s.text) for s in repos.get_translation(tr_id).segments]
+    assert before == [(2, "B"), (1, "A")], (
+        f"fixture phải lưu ĐÚNG thứ tự đã đưa vào, nhận được {before}"
+    )
+
+    r = c.patch(f"/api/translations/{tr_id}", json={"segments": [
+        {"i": 1, "start": 0.0, "end": 1.0, "text": "A!"}]})
+    assert r.status_code == 200, r.text
+    got = [(s.i, s.text) for s in repos.get_translation(tr_id).segments]
+    assert got == [(2, "B"), (1, "A!")], (
+        "PATCH phải giữ thứ tự đã lưu, không sắp xếp lại theo `i`"
+    )
+
+
 def test_patch_keeps_the_segments_it_was_not_given(wired):
     """PATCH là sửa MỘT PHẦN: không gửi segment nào thì không được xoá segment nào."""
     c, repos, _specs, _worker, _broker, _mt = wired
