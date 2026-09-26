@@ -3017,6 +3017,49 @@ git commit -m "feat(main): noi MT vao composition root, doi build_components san
 
 ### Task 13: `api/routes_translations.py` — tạo, liệt kê, sửa tay
 
+> 🔴 **HIỆU CHỈNH BẮT BUỘC CHO TASK NÀY — phần code bên dưới SAI ở nhiều chỗ; mục này thắng.**
+>
+> **A. Dependency và tra cứu (đọc mã, không suy đoán):**
+> - Dependency thật là **`get_specs`** (`api/deps.py:17`) trả **`list[EngineSpec]`**. **KHÔNG có `get_registry`.**
+> - Tra engine theo id bằng **`app.registry.by_id(specs, engine_id)`** (`registry.py:54`).
+> - "engine dịch" nhận biết bằng **`spec.kind == "mt"`** (không có trường `workspace`).
+> - Sẵn sàng hay không: **`spec.capabilities.get("available")`** — Task 12 đã đặt cờ này lúc build.
+>
+> **B. 🔴 `prompt_version` KHÔNG được lấy bằng cách import `app.adapters`.**
+> Hiệu chỉnh 6 nói dùng `PROMPT_VERSION[spec.id]` từ `adapters/mt/prompts.py` — nhưng **`app/api` bị CẤM import
+> `app.adapters`**, và đã có test canh: **`test_api_layer_does_not_import_adapters`** (`tests/test_api_sources.py:1170`).
+> Route mà `from app.adapters.mt.prompts import PROMPT_VERSION` là **đỏ ngay**.
+> ⇒ **Cách đúng, làm TRƯỚC khi viết route:** trong `main.build_components()`, cạnh chỗ đặt `available`, đặt luôn
+> `spec.capabilities["prompt_version"] = PROMPT_VERSION.get(spec.id, "unknown")`. Route chỉ đọc
+> `spec.capabilities["prompt_version"]`. **Cùng một khuôn với `available`**: dữ liệu dẫn xuất được tính ở
+> composition root, tầng API chỉ tiêu thụ.
+>
+> **C. 🔴 Mục Important mang từ Task 12 — phải sửa trong task này.**
+> `default_mt_engine` (`registry.py:228-235`) chỉ kiểm engine **có trong registry**, **không** kiểm `available`. Đo
+> thật ở re-review Task 12: đặt `MT_DEFAULT_SETTING='hy-mt-1.5-7b'` ⇒ sinh dòng `translations` với
+> `engine='hy-mt-1.5-7b'`, `prompt_version='unknown'`, `status='queued'`, rồi job chết `KeyError`. **`available=False`
+> chỉ đóng dropdown, không đóng đường setting/`default_mt`.**
+> ⇒ Thêm phép kiểm ở **`build_components()`**: engine dịch mặc định phải **tồn tại VÀ `available`**; nếu không thì
+> `RuntimeError` **lúc khởi động** với thông báo nêu rõ engine nào và vì sao. Đúng bài học I-3: *fail ở chỗ sớm nhất*.
+> `default_mt` hiện là `opus-mt` (available) nên khởi động bình thường không đổi. Thêm test cho cả hai nhánh.
+>
+> **D. Hình dạng API đã chốt (spec §8):** `GET /api/translations?transcript_id=` phải trả cờ **`stale` tính ở server**
+> (`transcripts.version > translations.transcript_version`); client **không** tự suy. `PATCH` chỉ sửa được segment
+> **thuộc chính bản dịch đó** (id lạ ⇒ 422), và **giữ nguyên** `start`/`end`/`speaker`/`words` của segment cũ.
+>
+> **E. Luật chung của phase này:**
+> - **KHÔNG dựng `Segment(...)` bằng tay** — dùng `dataclasses.replace` khi cần đổi `text` (hai task đã ship lỗi nuốt
+>   7/13 trường).
+> - **Mọi hành vi đi qua worker/API phải được test qua ĐƯỜNG THẬT** (`build_components()` + `build_app()` +
+>   `TestClient`), không dựng lại assembly bằng tay và **không gán thẳng trường của đối tượng giả**. Task 11 từng có
+>   test huỷ **tự thoả mãn** vì gán thẳng `job.cancel_requested` — nó xanh trong khi huỷ không hoạt động.
+> - Brief **không** dự đoán số test. Báo số **thật**; mỗi test chạy mutation rồi báo **kết quả quan sát được**.
+> - **COMMIT TRƯỚC khi chạy mutation**, và **không** để harness mutation chạy `git checkout` trên cây còn chỉnh sửa
+>   chưa commit — Task 12 vòng sửa đã mất hai chỉnh sửa vì đúng cách đó.
+> - Phục hồi mutation phải kiểm **cả hash LẪN byte**. Sandbox từ chối `$env:TEMP` **và** mọi ghi ngoài workspace.
+> - Ollama **đang chạy** trên máy này và chỉ **một** model được pull ⇒ test phải chịu được cả `available` `True` lẫn
+>   `False`, đừng hardcode.
+
 **Files:**
 - Create: `backend/app/api/routes_translations.py`
 - Create: `backend/tests/test_api_translations.py`
