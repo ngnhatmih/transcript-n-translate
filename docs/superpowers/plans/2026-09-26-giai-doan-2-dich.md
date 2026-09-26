@@ -3840,6 +3840,45 @@ git commit -m "feat(api): duyet transcript + route export theo hinh dang spec"
 
 ### Task 16: Cài Ollama, ĐO `keep_alive`, và chạy thật cả hai engine
 
+> 🔴 **HIỆU CHỈNH BẮT BUỘC CHO TASK NÀY — Step 1 và Step 2 ĐÃ ĐƯỢC LÀM SẴN bởi controller; ĐỪNG làm lại.**
+>
+> **A. Trạng thái môi trường thật (đã đo, không phải giả định):**
+> - **Ollama 0.34.4 đã cài** (`winget`), daemon **đang chạy** ở `http://127.0.0.1:11434`.
+> - Model theo đúng `model_ref` của `registry.json` — **`qwen2.5:3b-instruct-q4_K_M`, 1,9 GB — ĐÃ PULL.** Tag đó
+>   **tồn tại**, nên **không** có lỗi registry.
+> - **`keep_alive` đã đo bằng `ollama ps`:** `"30m"` ⇒ model nạp **2,2 GB, 100% GPU, `UNTIL 29 minutes from now`**;
+>   `{"messages": [], "keep_alive": 0}` ⇒ `done_reason: "unload"` và `ollama ps` **rỗng**. ⇒ **Cơ chế `release()`
+>   trong `OllamaMtEngine` là ĐÚNG, không cần đổi.**
+> - **`load_duration` = 1,67 s trong tổng 1,80 s** lần gọi đầu ⇒ nạp model chiếm gần hết; đây là lý do `keep_alive`
+>   phải dài giữa các lô.
+> - Log thô: `.superpowers\sdd\2026-09-26-giai-doan-2-dich\ollama-probe.log`. **Trích lại số từ log đó**, đừng chạy
+>   lại `ollama pull`.
+>
+> **B. `$env:TEMP` KHÔNG dùng được — ghi vào đó và ghi ra ngoài workspace đều BỊ TỪ CHỐI.** Step 5 của plan tạo file
+> wav tổng hợp ở `$env:TEMP` ⇒ **sai**. Tạo nó **trong workspace nhưng NGOÀI cây repo** (ví dụ `..\_gd2_audio\`), dùng
+> xong xoá. `HF_HOME`: mặc định của dự án là `D:\models\hf` và **thư mục đó chưa tồn tại** — nó sẽ được tạo; ổ C: chỉ
+> còn ~26 GB nên **đặt `HF_HOME` sang D:** trước khi tải model OPUS-MT (~300 MB).
+>
+> **C. `smoke_mt.py` phải đọc API THẬT của tầng ASR trước khi gọi.** Plan viết
+> `from app.adapters.asr.factory import build_asr_engine` và `asr.transcribe(media, lang=…)` — **hãy mở
+> `backend/app/adapters/asr/`** xem tên hàm và chữ ký thật (Task 9 đã tạo một dispatch dùng chung), rồi gọi đúng.
+> Đừng để smoke script hỏng vì tên hàm tôi đoán sai.
+>
+> **D. `pytest.ini`:** plan thêm `-m "not live"` vào `addopts`. **Phải giữ đúng MỘT `-q`** (thêm `-q` nữa thành `-qq`
+> và nuốt dòng "N passed"). Và `-m "not live"` **không** được làm test nào khác biến mất — đối chiếu số test thu được
+> trước và sau khi thêm.
+>
+> **E. Điều kiện để task này được coi là XONG:** có **số đo thật** của **cả hai** engine (OPUS-MT và Qwen2.5-3B) —
+> số segment vào/ra, thời gian, token in/out — dán **nguyên văn** vào báo cáo. **Không có số nghĩa là chưa xong**, và
+> "smoke script chạy xong với 0 segment" **không** phải thành công: phải thoát khác 0. Nếu một engine không chạy được
+> thì **dừng và báo thẳng**, đừng thay bằng test giả — đây đúng là bài học Giai đoạn 1a ("19 task xanh test mà đường
+> ASR chết vì chưa ai chạy nó").
+>
+> **F. Luật chung:** **COMMIT TRƯỚC khi chạy mutation**, không để harness mutation chạy `git checkout` trên cây bẩn;
+> phục hồi phải kiểm **hash + byte trong không gian chuẩn hoá + `git diff --quiet HEAD`**; **không** dựng
+> `Segment(...)` bằng tay; test đi qua **đường thật**; brief **không** dự đoán số test — báo số **thật** và với mỗi
+> test chạy mutation rồi báo **kết quả quan sát được**.
+
 **Đây là task quyết định Giai đoạn 2 có thật hay chỉ xanh test.** Giai đoạn 1a đã trả giá: 19 task xanh mà đường ASR chết ở hai chỗ không test nào chạm, vì **chưa từng ai chạy nó**.
 
 **Files:**
