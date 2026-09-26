@@ -1001,6 +1001,43 @@ git commit -m "feat(domain): QA tat dinh sau dich (CPS, do dai, thuat ngu)"
 
 ### Task 6: Port + adapter cho `translations` (đọc/ghi/checkpoint/trạng thái)
 
+> 🔴 **HIỆU CHỈNH BẮT BUỘC CHO TASK NÀY — phần code ở Step 3/Step 4 dưới đây SAI so với mã thật. Mục này thắng.**
+>
+> **Ba thứ ĐÃ TỒN TẠI — chỉ THÊM, không viết lại:**
+> - `SqliteRepos.add_translation` — `sqlite_repos.py:203`. Chữ ký thật:
+>   `(*, transcript_id, transcript_version, engine, target_lang, segments, prompt_version, glossary_version=None, qa_issues=None, tokens_in=None, tokens_out=None, duration_ms=None)`.
+>   ⇒ **Chỉ thêm** `status: str = "queued"` và ghi nó vào câu INSERT. **Không** đổi `target_lang` thành có default.
+> - `SqliteRepos._row_to_translation` — `sqlite_repos.py:180`. ⇒ **Chỉ thêm** `status=row["status"]`.
+> - `list_translations` / `list_translations_for_transcript` — đã có, không đụng.
+>
+> **Phải THÊM mới:** `get_translation`, `update_translation_segments`, `set_translation_status` (như Step 4), cộng khai báo tương ứng trên `ports/repos.py`.
+>
+> **HAI CHỖ CODE DƯỚI ĐÂY SAI, BỎ ĐI:**
+> 1. **KHÔNG có tham số `error`.** Bảng `translations` **không có cột `error`** (`schema.py:30-44`) ⇒ truyền `error=`
+>    là `no such column`. Lỗi của job đã nằm ở `jobs.error`; bản dịch không cần cột đó.
+> 2. **KHÔNG thêm `bump_glossary_version`.** `upsert_term` **đã tự tăng** `glossary_version` ở
+>    `sqlite_repos.py:468-471` (`INSERT ... ON CONFLICT DO UPDATE SET value = CAST(... AS INTEGER)+1`). Thêm hàm
+>    đó rồi gọi ở Task 14 sẽ **tăng hai lần mỗi lần sửa glossary**. Thay vào đó hãy **ghim hành vi đã có** bằng một
+>    test: gọi `upsert_term` hai lần thì `glossary_version()` tăng đúng 2. `glossary_version()` là getter có sẵn
+>    (`sqlite_repos.py:453`).
+>
+> **`NotFound(LookupError)` tồn tại ở `sqlite_repos.py:21`.** **Đọc** xem `get_transcript` và các hàm anh em ném gì,
+> rồi cho `except` trong Step 4 và `pytest.raises` trong test khớp **thực tế** — đừng mặc định là `KeyError`.
+>
+> 🔴 **Mục I3 của Task 1 chuyển sang đây và phải đóng tại đây:** `Translation.status` hiện **không được ghi và không
+> được đọc ở đâu**, nên default của nó không được ghim đầu-cuối. Cụ thể: `add_translation` nhận và ghi `status`;
+> `_row_to_translation` map nó; và có test chứng minh `get_translation` trả đúng `status` sau khi
+> `set_translation_status` đổi nó — cộng test rằng `add_translation` mặc định ra `"queued"`.
+> Nếu bỏ sót, cột này sẽ **mãi mãi đọc ra `"queued"`** dù `set_translation_status` ghi đúng, và
+> `GET /api/translations` sẽ báo mọi bản dịch là đang chờ.
+>
+> **Đếm test:** brief **không** dự đoán số test nữa (bốn dự đoán trước của controller đều sai). Báo cáo số **thật**,
+> và với mỗi test mới hãy chạy một mutation và **báo kết quả quan sát được** — kể cả "mutant này sống sót, và đây là
+> lý do". Nếu brief dưới đây có ghi "Kỳ vọng: `6 passed`" thì đó là **số cũ**, chỉ để tham khảo.
+>
+> **Sandbox:** ghi vào `$env:TEMP` **bị từ chối** trong phiên này. Scratch để **ngoài repo nhưng trong workspace**
+> rồi xoá.
+
 **Vì sao cần:** hiện `add_translation` **chỉ có trên adapter, không có trên port** (phát hiện M-1 của review Task 18) — một phương thức mà production sắp cần lại không nằm trong giao diện. Và chưa có đường nào để checkpoint (`update_translation_segments`) hay đổi trạng thái. Không có ba phương thức đó thì `TranslateHandler` không viết được.
 
 **Files:**
@@ -3109,6 +3146,21 @@ git commit -m "feat(api): route translations (tao, liet ke kem co stale, sua tay
 ---
 
 ### Task 14: `api/routes_glossary.py` — CRUD + "glossary đổi thì bản dịch nào phải xem lại"
+
+> 🔴 **HIỆU CHỈNH BẮT BUỘC CHO TASK NÀY (mục này thắng phần code bên dưới):**
+> 1. **KHÔNG gọi `repos.bump_glossary_version()`** trong `create_term`/`patch_term`. Hàm đó **không tồn tại và không
+>    được thêm** — `upsert_term` **đã tự tăng** `glossary_version` (`sqlite_repos.py:468-471`). Gọi thêm là **tăng hai
+>    lần mỗi lần sửa glossary**, và mọi bản dịch sẽ trông "lỗi thời so với glossary" sớm hơn thực tế.
+> 2. **KHÔNG dùng `repos.list_translations()`** để tìm bản dịch bị ảnh hưởng: nó trả `Translation` **đầy đủ**, tức
+>    **giải mã JSON của mọi bản dịch trong DB**. Duyệt `repos.list_transcripts()` rồi gọi
+>    `repos.list_translations_for_transcript(t.id)` cho từng transcript, và chỉ đụng tới những transcript thật sự bị
+>    ảnh hưởng.
+> 3. `affected_segments` nay so ánh xạ của **thuật ngữ đã duyệt** ở cả hai phía (ruling T4/F2), nên `_recompute_affected`
+>    truyền **danh sách thô** là đúng — đừng lọc trước khi gọi, nếu không ca "bỏ duyệt" sẽ không bao giờ được phát hiện.
+> 4. Endpoint `GET /api/glossary/version` **không có trong spec §11** — nó là tiện ích tôi thêm cho test. Giữ nếu thấy
+>   rẻ, nhưng **ghi rõ trong báo cáo** rằng nó là phần thêm ngoài spec.
+> 5. Brief **không** dự đoán số test nữa; báo cáo số **thật**. Sandbox từ chối ghi `$env:TEMP` — scratch để ngoài repo
+>    nhưng trong workspace rồi xoá.
 
 **Files:**
 - Create: `backend/app/api/routes_glossary.py`
