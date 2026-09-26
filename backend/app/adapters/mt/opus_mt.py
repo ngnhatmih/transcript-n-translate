@@ -56,12 +56,31 @@ class OpusMtEngine:
         # tín hiệu là đúng kiểu thất bại âm thầm mà `AlignmentProblem` tồn tại để
         # chặn. Bên gọi (Task 11) bắt riêng ngoại lệ này để thử lại cả lô hoặc
         # lùi về dịch từng segment.
+        #
+        # Chiều THỪA cũng phải chặn, và nó là chiều NGẶT hơn: `zip` bỏ đi bản
+        # dịch dư mà KHÔNG làm sai số lượng, nên lô ra vẫn đúng hình dạng và
+        # không ai nghi ngờ. Điều kiện `!=` là thứ duy nhất gác cả hai chiều.
         if len(translated) != len(batch):
+            # `got_ids` phải TRUNG THỰC ở cả hai chiều. Chiều THIẾU: id của đúng
+            # những segment đã nhận được. Chiều THỪA:
+            # `batch[:len(translated)]` cắt quá cuối list nên nó trả về ĐÚNG
+            # `expected_ids` và ngoại lệ tự mâu thuẫn — `reason` nói "4 bản dịch
+            # cho 3 segment" trong khi hai trường id lại bằng nhau. Phần thừa
+            # không có id nào để gán, nên KHÔNG bịa ra: `got_ids` rỗng và
+            # `reason` nói rõ số thừa.
+            surplus = len(translated) - len(batch)
+            # `surplus > 0`, KHÔNG phải `if surplus`: chiều thiếu cho ra số ÂM,
+            # mà số âm là truthy trong Python — viết `if surplus` sẽ làm chiều
+            # thiếu rơi vào nhánh của chiều thừa.
+            got_ids = ([] if surplus > 0
+                       else [s.i for s in batch[:len(translated)]])
             raise AlignmentProblem(
                 expected_ids=[s.i for s in batch],
-                got_ids=[s.i for s in batch[:len(translated)]],
+                got_ids=got_ids,
                 reason=(f"opus-mt trả {len(translated)} bản dịch cho "
-                        f"{len(batch)} segment"),
+                        f"{len(batch)} segment"
+                        + (f" (thừa {surplus} bản dịch không gắn được id nào)"
+                           if surplus > 0 else "")),
             )
         return [replace(s, text=t) for s, t in zip(batch, translated)]
 

@@ -42,8 +42,12 @@ class _FakeTokenizer:
 
 
 class _FakeModel:
-    def __init__(self, outputs):
-        self._outputs = outputs
+    def __init__(self, *, n_generated=None):
+        #: Số chuỗi mà `generate()` trả về. `None` = đúng bằng số dòng đầu vào
+        #: (hành vi thật của MarianMT). Đặt khác đi để mô phỏng một decoder trả
+        #: THIẾU hoặc THỪA — hai chiều mà `translate()` phải ném
+        #: `AlignmentProblem` thay vì để `zip` cắt cụt hoặc bỏ im lặng.
+        self._n_generated = n_generated
         self.generate_calls = 0
         self.to_calls = []
 
@@ -57,6 +61,8 @@ class _FakeModel:
     def generate(self, **kwargs):
         self.generate_calls += 1
         n = len(kwargs["input_ids"].rows)
+        if self._n_generated is not None:
+            n = self._n_generated
         return [[10 + i] for i in range(n)]
 
 
@@ -75,12 +81,13 @@ class _FakeMarian:
                  outputs: int | None = None):
         self.translated = list(translated)
         self.device = device
-        #: Số chuỗi mà `generate()` trả về. Mặc định = số dòng đầu vào (hành vi
-        #: bình thường). Đặt nhỏ hơn để mô phỏng decoder trả THIẾU — đúng ca mà
-        #: `zip` âm thầm cắt cụt.
+        #: Số chuỗi mà `generate()` trả về (xem `_FakeModel`). Mặc định = số
+        #: dòng đầu vào (hành vi thật). Đặt NHỎ HƠN để mô phỏng decoder trả
+        #: thiếu — đúng ca mà `zip` âm thầm cắt cụt — và LỚN HƠN để mô phỏng
+        #: decoder trả thừa, ca mà `zip` âm thầm bỏ đi.
         self.outputs = outputs
         self.tokenizer = _FakeTokenizer()
-        self.model = _FakeModel(self.translated)
+        self.model = _FakeModel(n_generated=outputs)
 
     def decode(self, ids, skip_special_tokens=True):
         # Hết chuỗi thì trả "" chứ không ném: một decoder thật trả chuỗi RỖNG cho
@@ -93,8 +100,6 @@ class _FakeMarian:
                                  truncation=True)
         encoded = {k: v.to(self.device) for k, v in encoded.items()}
         generated = self.model.generate(**encoded)
-        if self.outputs is not None:
-            generated = generated[:self.outputs]
         return [self.decode(ids) for ids in generated]
 
 
@@ -267,5 +272,43 @@ def test_short_decoder_output_is_an_alignment_problem_not_a_silent_loss():
     marian = _FakeMarian(["vi1", "vi2"], outputs=2)  # 3 segment, chỉ 2 bản dịch
     eng = OpusMtEngine(model_factory=lambda: marian)
     batch = [seg(1, "a"), seg(2, "b"), seg(3, "c")]
-    with pytest.raises(AlignmentProblem):
+    with pytest.raises(AlignmentProblem) as exc:
         eng.translate(batch, [], MtOpts(source_lang="zh"))
+    assert exc.value.expected_ids == [1, 2, 3]
+    assert exc.value.got_ids == [1, 2], (
+        "chiều THIẾU: got_ids phải là id của đúng những segment đã nhận được "
+        "(chứ không phải id của cả lô, cũng không phải list rỗng)"
+    )
+    assert "trả 2 bản dịch cho 3 segment" in exc.value.reason
+
+
+def test_long_decoder_output_is_an_alignment_problem_too():
+    """Chiều NGƯỢC LẠI cũng phải ném: decoder trả THỪA bản dịch.
+
+    Hợp đồng `MtEngine` chỉ nói "KHÔNG trả list ngắn hơn", nên chiều thừa dễ bị
+    coi là chuyện nhỏ. Thực ra nó là chiều NGẶT hơn: `zip` bỏ đi bản dịch thừa
+    mà KHÔNG làm sai số lượng, nên lô ra vẫn "đúng hình dạng" và không ai nghi
+    ngờ. Điều kiện duy nhất chặn cả hai chiều là `len(translated) != len(batch)`
+    — thu hẹp nó thành `<` thì bài ngắn vẫn xanh, và cả suite cũng xanh: một
+    hành vi đã bị xoá mà không có gì đỏ.
+
+    Ngoại lệ cũng phải TRUNG THỰC ở chiều này: phần bản dịch thừa không có id nào
+    để gán, nên `got_ids` không được bịa ra. Bản cũ làm
+    `batch[:len(translated)]` — cắt quá cuối list — nên nó trả về ĐÚNG
+    `expected_ids`, và ngoại lệ tự mâu thuẫn: `reason` nói "4 bản dịch cho 3
+    segment" còn hai trường id lại bằng nhau.
+    """
+    marian = _FakeMarian(["vi1", "vi2", "vi3", "vi4"], outputs=4)  # 3 vào, 4 ra
+    eng = OpusMtEngine(model_factory=lambda: marian)
+    batch = [seg(1, "a"), seg(2, "b"), seg(3, "c")]
+    with pytest.raises(AlignmentProblem) as exc:
+        eng.translate(batch, [], MtOpts(source_lang="zh"))
+    assert exc.value.expected_ids == [1, 2, 3]
+    assert exc.value.got_ids == [], (
+        "không có id nào để gán cho bản dịch thừa: `batch[:len(translated)]` cắt "
+        "quá cuối list nên trả về ĐÚNG expected_ids, làm ngoại lệ tự mâu thuẫn"
+    )
+    assert "trả 4 bản dịch cho 3 segment" in exc.value.reason
+    assert "thừa 1" in exc.value.reason, (
+        "reason phải nói ra phần thừa — got_ids rỗng thì không nói được gì"
+    )

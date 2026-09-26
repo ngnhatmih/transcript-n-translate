@@ -69,22 +69,71 @@ ALLOWED_APP_ADAPTERS = ("app.adapters", "app.config", "app.domain", "app.ports",
 UPWARD_FROM_ADAPTERS = ("app.api", "app.pipeline", "app.worker")
 
 
-def _upward_imports_from_adapters(directory: pathlib.Path) -> list[str]:
-    """Chỉ những import TUYỆT ĐỐI trỏ lên `api`/`pipeline`/`worker`.
+def _is_upward_layer(name: str) -> bool:
+    """`app` (cả tầng ứng dụng) hoặc `app.api`/`app.pipeline`/`app.worker`.
 
-    Dùng lại `_imports_of` (cùng bộ đọc AST với `_import_offenders`) nhưng KHÔNG
-    dùng `_import_offenders`: `FORBIDDEN_ABSOLUTE` của nó gồm `torch`,
+    `name == "app"` là đúng phép kiểm mà `_is_forbidden_absolute` dùng cho
+    `domain/`: cả `import app` lẫn `from app import api` đều cho ra tên `"app"`,
+    và cả hai đều là adapter biết tới tầng trên.
+    """
+    if name == "app":
+        return True
+    return any(name == p or name.startswith(p + ".")
+               for p in UPWARD_FROM_ADAPTERS)
+
+
+def _upward_imports_from_adapters(directory: pathlib.Path) -> list[str]:
+    """Mọi CÁCH VIẾT của một import trỏ lên `api`/`pipeline`/`worker` (I-1).
+
+    Bốn cách viết của cùng một vi phạm đều phải bị chặn:
+
+    * `import app.api.routes` / `from app.api.routes import run` — tên đầy đủ;
+    * `from app import api` — tên module chỉ là `"app"`, tầng nằm ở alias;
+    * `import app` — cả tầng ứng dụng;
+    * `from ..api import routes` (level 2 trong `adapters/*.py`) và
+      `from ...api import routes` (level 3 trong `adapters/mt/*.py`).
+
+    Helper này tự đi AST thay vì dùng `_imports_of`: phải nhìn tới TỪNG `alias`
+    thì `from app import registry` (module GIÁ TRỊ dùng chung, được phép) mới
+    vẫn xanh trong khi `from app import api` bị chặn — `_imports_of` gộp mỗi
+    node thành một cặp `(tên, level)` nên làm mất danh sách alias.
+
+    Quy tắc `level >= 2` là quy tắc THÔ, y hệt `_relative_offenders` đang áp cho
+    `domain/`/`ports/`: nó không phân giải tên tương đối thành tên tuyệt đối, nên
+    nó cũng chặn `from ..domain import X` (một import XUỐNG hợp lệ). Trên cây
+    sạch, `adapters/` không có dòng level >= 2 nào; muốn nới quy tắc này ra thì
+    phải phân giải tên thật.
+
+    KHÔNG dùng `_import_offenders`: `FORBIDDEN_ABSOLUTE` của nó gồm `torch`,
     `transformers`, `sqlite3` — những thứ adapter ĐƯỢC PHÉP dùng, nên một guard
     adapter gọi helper đó sẽ ĐỎ trên cây sạch vì `torch`.
     """
     offenders: list[str] = []
     for py in _py_files(directory):
-        for name, level in _imports_of(py):
-            if level != 0:
-                continue
-            if any(name == p or name.startswith(p + ".")
-                   for p in UPWARD_FROM_ADAPTERS):
-                offenders.append(f"{py.name}: import {name}")
+        tree = ast.parse(py.read_text(encoding="utf-8"), filename=str(py))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    if _is_upward_layer(alias.name):
+                        offenders.append(f"{py.name}: import {alias.name}")
+            elif isinstance(node, ast.ImportFrom):
+                if node.level >= 2:
+                    # `'.' * node.level`, KHÔNG phải `'..' * (level - 1)` của
+                    # `_relative_offenders`: công thức đó vẽ level 3 thành BỐN
+                    # dấu chấm, mà `adapters/mt/*.py` chính là level 3 — thông
+                    # báo lỗi phải đọc ra đúng cú pháp đã vi phạm.
+                    dots = "." * node.level
+                    offenders.append(f"{py.name}: {dots}{node.module or ''}")
+                elif node.level == 1:
+                    continue
+                elif (node.module or "") == "app":
+                    # `from app import api`: tầng nằm ở alias, không ở module.
+                    for alias in node.names:
+                        if _is_upward_layer("app." + alias.name):
+                            offenders.append(
+                                f"{py.name}: from app import {alias.name}")
+                elif _is_upward_layer(node.module or ""):
+                    offenders.append(f"{py.name}: import {node.module}")
     return offenders
 
 
@@ -446,16 +495,48 @@ def test_adapters_guard_can_fail():
     Brief chỉ đòi "forbid app.api/pipeline/worker"; nếu chỉ thăm dò một tầng thì
     hai tầng còn lại có thể bị bỏ quên trong `UPWARD_FROM_ADAPTERS` mà không ai
     biết.
+
+    I-1: một tầng nằm ĐÚNG trong danh sách chặn vẫn lọt qua bốn cách viết khác
+    của CÙNG một vi phạm, nên mỗi cách viết phải có một bài tự kiểm riêng:
+    `from app import api` (tên module chỉ là `"app"`, tầng nằm ở alias),
+    `import app` (cả tầng ứng dụng), `from ..api import routes` trong
+    `adapters/*.py` (tương đối, level 2) và `from ...api import routes` trong
+    `adapters/mt/*.py` (level 3) — bài cuối cần một thư mục con nên nằm ở test
+    riêng bên dưới. Bốn dòng đầu ở lại `adapters/` gốc, nơi `..` đã là `app`.
     """
-    for index, module in enumerate(("app.api.routes", "app.pipeline.translate",
-                                    "app.worker.loop")):
+    for index, source in enumerate((
+            "from app.api.routes import run\n",
+            "from app.pipeline.translate import run\n",
+            "from app.worker.loop import run\n",
+            "import app.api.routes\n",
+            "from app import api\n",
+            "import app\n",
+            "from ..api import routes\n",
+    )):
         rogue = ADAPTERS / f"_rogue_probe_upward_{index}.py"
         try:
-            rogue.write_text(f"from {module} import run\n", encoding="utf-8")
+            rogue.write_text(source, encoding="utf-8")
             with pytest.raises(AssertionError):
                 test_adapters_do_not_import_upward_layers()
         finally:
             rogue.unlink(missing_ok=True)
+
+
+def test_adapters_guard_can_fail_on_an_upward_relative_import_from_subpackage():
+    """`from ...api import routes` trong `adapters/mt/` cũng trỏ lên `app.api`.
+
+    `..` đếm theo gói chứa tệp: ở `adapters/*.py` hai dấu chấm đã tới `app`,
+    nhưng ở `adapters/mt/*.py` phải ba dấu chấm. Nếu lưới chỉ thăm dò ở gốc
+    `adapters/` thì đúng những thư mục adapter thật đang sống (`adapters/mt/`,
+    `adapters/asr/`) lại không được chứng minh là có bảo vệ.
+    """
+    rogue = ADAPTERS / "mt" / "_rogue_probe_upward_relative_3.py"
+    try:
+        rogue.write_text("from ...api import routes\n", encoding="utf-8")
+        with pytest.raises(AssertionError):
+            test_adapters_do_not_import_upward_layers()
+    finally:
+        rogue.unlink(missing_ok=True)
 
 
 def test_adapters_guard_allows_the_shared_value_module():
@@ -466,8 +547,11 @@ def test_adapters_guard_allows_the_shared_value_module():
     """
     safe = ADAPTERS / "_guard_probe_registry.py"
     try:
-        safe.write_text("from app.registry import EngineSpec\n",
-                        encoding="utf-8")
+        safe.write_text(
+            "from app.registry import EngineSpec\n"
+            "from app import registry\n",
+            encoding="utf-8",
+        )
         test_adapters_do_not_import_upward_layers()
     finally:
         safe.unlink(missing_ok=True)
