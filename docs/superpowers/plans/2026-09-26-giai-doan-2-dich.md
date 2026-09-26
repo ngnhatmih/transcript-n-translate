@@ -53,6 +53,23 @@ thì **mục này đúng**. (Việc gấp các hiệu chỉnh này vào thân t�
 14. `capabilities` và `opts` là dict **dùng chung** cho mọi nơi giữ danh sách spec đã nạp (cảnh báo ở
     `registry.py:21-27`): ghi vào `spec.capabilities["available"]` là sửa **tại chỗ** — chấp nhận được vì
     `build_components()` nạp registry **một lần**, nhưng **không** được ghi vào đó trong route (mỗi request một lần).
+15. 🔴 **`registry.json` ĐÃ KHAI ĐỦ CẢ BỐN ENGINE MT TỪ GIAI ĐOẠN 1a.** Cấu trúc thật là các mảng theo `kind`:
+    `{_ghi_chu, default_asr, default_mt, asr: [...], mt: [...]}` — **không có** khoá `engines`. Mảng `mt` đã có
+    `opus-mt`, `qwen2.5-3b`, `qwen2.5-7b`, **`hy-mt-1.5-7b`** (chú ý: id là `hy-mt-1.5-7b`, **không** phải
+    `hy-mt1.5`), mỗi entry có `capabilities` gồm `glossary_prompt`, `glossary_patch`, `chimera`, `batch_json`.
+    ⇒ **Task 12 Step 3 (thêm ba entry engine) PHẢI BỎ** — làm theo là **nhân bản entry** và `by_id()` sẽ trả
+    bản đầu tiên. `default_mt` cũng **đã** là `"opus-mt"`.
+16. `load_registry` nằm ở **`app/adapters/registry_file.py:12`**, không phải `app/registry.py`. Nó đọc mảng theo
+    `_KINDS` và dựng `EngineSpec` với `kind=<tên mảng>`.
+17. "Engine có hỗ trợ glossary không" đã có sẵn dữ liệu: **`spec.capabilities["glossary_prompt"]`**. Dùng nó làm
+    nguồn sự thật cho `supports_glossary()` của engine Ollama, đừng hardcode `True` trong adapter.
+18. Vì `registry.json` không có trường `available`, Task 12 **thêm** nó bằng cách ghi vào
+    `spec.capabilities["available"]` lúc `build_components()` chạy: `runtime == "ollama"` ⇒ dò `ollama_available()`;
+    `runtime == "inprocess"` ⇒ `True`. Đây là **dữ liệu dẫn xuất**, không phải sửa file JSON.
+
+⚠️ **Trạng thái gấp hiệu chỉnh:** Task 1–5 **không** bị ảnh hưởng bởi mục nào ở trên (chúng chỉ tạo module `domain/`
+thuần và migration), nên **chạy được ngay**. Các mục 1–18 phải được gấp vào thân Task **6, 11, 12, 13, 14, 15, 17**
+trước khi dispatch các task đó.
 
 ## Global Constraints
 
