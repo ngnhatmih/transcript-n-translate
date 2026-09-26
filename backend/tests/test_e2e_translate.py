@@ -102,9 +102,8 @@ def _assert_repo_data_dirs_untouched(before: dict[pathlib.Path, bool]) -> None:
     )
 
 
-@pytest.fixture()
-def wired(tmp_path, monkeypatch):
-    """`(TestClient, repos, worker, mt_engines)` — ráp bằng ĐÚNG hàm của `main.py`.
+def _wired(tmp_path, monkeypatch, *, fail_times: int = 0):
+    """Thân dùng chung của hai fixture ráp dây: `wired` (engine lành) và `wired_hong`.
 
     Fixture này cố ý KHÔNG dựng lại `PhaseQueueWorker`/`create_app`: chép lại
     assembly thì nó trôi khỏi `main.py` mà không test nào bắt (bài học Task 19
@@ -114,8 +113,21 @@ def wired(tmp_path, monkeypatch):
     MỘT đối tượng: `repos` đọc thẳng qua cổng còn request đi qua `build_app()`,
     nên bài dưới vừa khẳng định được hợp đồng HTTP vừa đọc được trạng thái THẬT
     trong DB.
+
+    `fail_times > 0` chỉ đổi ENGINE GIẢ (nó ném `RuntimeError` ngay lần
+    `translate` ĐẦU TIÊN); route, worker, broker và registry vẫn là của
+    production, nên bài "bản dịch hỏng" đi đúng đường ống thật (I-2).
     """
     from app import config, main
+    from app.adapters.registry_file import load_registry
+
+    #: I-1 · Đối số chạy vào adapter THẬT. `model_ref` được đọc từ
+    #: `registry.json` THẬT qua `load_registry()` — KHÔNG hard-code chuỗi — nên
+    #: registry đổi model_ref thì phép ghim này đi theo. Còn `main.py` truyền
+    #: `spec.id` (`"opus-mt"`) là đỏ NGAY, vì production sẽ chết ở
+    #: `MarianTokenizer.from_pretrained("opus-mt")` ở lần dịch thật đầu tiên
+    #: (review Task 17, I-1/M5).
+    registry_mt_ref = {s.id: s.model_ref for s in load_registry()}[DEFAULT_MT]
 
     repo_data_before = _snapshot_repo_data_dirs()
     data = tmp_path / "data"
@@ -148,10 +160,18 @@ def wired(tmp_path, monkeypatch):
 
         Nên `model_ref` là thứ bản giả NUỐT và bỏ qua, đúng vai "adapter thay
         thế": nó chỉ cần chịu được cách gọi của production.
+
+        Nuốt KHÔNG có nghĩa là không kiểm. Đối số nhận được vẫn phải là
+        `model_ref` của registry (khẳng định ngay sau `build_components()`),
+        vì một phép `assert model_ref` kiểu truthiness nuốt luôn cả `spec.id` —
+        đúng lỗ I-1 mà review Task 17 tìm ra.
         """
-        assert model_ref, "production luôn truyền `spec.model_ref`, không để rỗng"
         kwargs.setdefault("mapping", {SRC_1: OUT_1, SRC_2: OUT_2})
-        return FakeMtEngine(**kwargs)
+        engine = FakeMtEngine(fail_times=fail_times, **kwargs)
+        #: Ghi lại ĐỐI SỐ mà production vừa truyền, để phép ghim dưới đây đọc
+        #: được nó từ ĐÚNG engine mặc định mà `_build_mt_engines` đã dựng.
+        engine.model_ref_seen = model_ref
+        return engine
 
     monkeypatch.setattr(main, "OpusMtEngine", fake_opus_factory)
     #: "Ollama chết / chưa pull model nào" ⇒ không engine Ollama nào sẵn sàng,
@@ -174,12 +194,42 @@ def wired(tmp_path, monkeypatch):
         f"in-process; mt_engines = {sorted(mt_engines)}"
     )
 
+    #: I-1 · Đối số chạy vào adapter THẬT phải là `model_ref` của registry,
+    #: KHÔNG phải `spec.id`. `_build_mt_engines` gọi
+    #: `OpusMtEngine(spec.model_ref)` BẰNG VỊ TRÍ, nên một phép `assert
+    #: model_ref` (truthiness) không gác được gì: truyền `spec.id` cũng lọt.
+    seen_ref = getattr(mt_engines[DEFAULT_MT], "model_ref_seen", None)
+    assert seen_ref == registry_mt_ref, (
+        f"`main.py` phải truyền `model_ref` của registry cho engine mặc định "
+        f"{DEFAULT_MT!r}: đã nhận {seen_ref!r}, phải là {registry_mt_ref!r}"
+    )
+
     app = main.build_app(repos, specs, worker, broker, mt_engines)
     with TestClient(app) as c:
         c.repos = repos          # type: ignore[attr-defined]
         c.worker = worker        # type: ignore[attr-defined]
         c.mt_engines = mt_engines  # type: ignore[attr-defined]
         yield c, repos, worker, mt_engines
+
+
+@pytest.fixture()
+def wired(tmp_path, monkeypatch):
+    """`(TestClient, repos, worker, mt_engines)` — ráp bằng ĐÚNG hàm của `main.py`.
+
+    Engine giả LÀNH: dùng cho đường thành công (bài F) và cho vế đối chứng
+    "worker CHƯA chạy" (bài C). Vế "worker chạy và HỎNG" có fixture riêng dưới.
+    """
+    yield from _wired(tmp_path, monkeypatch)
+
+
+@pytest.fixture()
+def wired_hong(tmp_path, monkeypatch):
+    """Như `wired`, nhưng engine giả hỏng ngay lần `translate` ĐẦU TIÊN (I-2).
+
+    Chỉ engine đổi; mọi thứ khác vẫn là bộ ráp của production, nên đây là đường
+    "worker CHẠY và HỎNG" thật — thứ mà bài C (worker chưa chạy) không phủ.
+    """
+    yield from _wired(tmp_path, monkeypatch, fail_times=1)
 
 
 class _NeverUsedAsr:
@@ -352,6 +402,40 @@ def test_a_translation_that_never_ran_leaves_the_transcript_reviewed(wired):
     assert repos.get_translation(created.json()["translation"]["id"]).status == "queued"
     assert repos.get_transcript(tid).status == "reviewed", (
         "job chưa chạy thì chưa có bản dịch nào để gọi transcript là `translated`"
+    )
+
+
+def test_a_failed_translation_leaves_the_transcript_reviewed(wired_hong):
+    """I-2 · VẾ "và **KHÔNG** khi thất bại" của correction box B, qua đường ống THẬT.
+
+    Bài F chỉ đi đường thành công; bài C chỉ chứng minh "worker CHƯA chạy" —
+    không bài nào chứng minh "worker CHẠY và HỎNG". Mutation M4 của review Task 17
+    (ghi `translated` trong nhánh `except Exception` của `translate.py`) giữ tệp
+    này xanh trước khi có bài này, trong khi mốc `translated` lúc đó là lời nói
+    dối trên chính bản dịch hỏng.
+
+    Không gán thẳng trường nào của `translation`/`transcript`: cả hai trạng thái
+    đều đến từ route thật → job thật → worker thật → `TranslateHandler` thật.
+    """
+    c, repos, worker, _mt_engines = wired_hong
+    tid = _transcript(repos)
+    assert c.post(f"/api/transcripts/{tid}/approve").status_code == 200
+
+    created = c.post("/api/translations",
+                     json={"transcript_id": tid, "engine": DEFAULT_MT})
+    assert created.status_code == 201, created.text
+    tr_id = created.json()["translation"]["id"]
+    job_id = created.json()["job"]["id"]
+
+    _drain(worker, job_id)
+    job = repos.get_job(job_id)
+    assert job.state == "failed", f"{job.state}: {job.error}"
+    assert repos.get_translation(tr_id).status == "failed", (
+        "engine ném lỗi thì hàng dịch phải để lại `failed`, không treo ở `queued`"
+    )
+    assert repos.get_transcript(tid).status == "reviewed", (
+        "bản dịch HỎNG thì transcript phải còn `reviewed`: ghi `translated` ở "
+        "nhánh `except Exception` là nói dối trên chính bản dịch hỏng đó (M4)"
     )
 
 

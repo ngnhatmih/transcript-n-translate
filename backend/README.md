@@ -158,7 +158,10 @@ Mỗi lần chạy như vậy là một lần **ĐO**, không phải một lần
 | `opus-mt` | 4 / 4 | 6,7 s | `None` / `None` (in-process, không có token count) |
 | `qwen2.5-3b` | 4 / 4 | 2,9 s | 219 / 149 |
 
-Bóc băng `fw-small`: 4 segment trong 1,0 s, **RTF 0,049**. Sau **mọi** lần
+Bóc băng `fw-small`: **1,0 s / RTF 0,049** là con số của **`smoke_asr.py`** (đo
+riêng, model đã nạp sẵn trong tiến trình), **KHÔNG** phải của `smoke_mt.py`. Giai
+đoạn bóc băng **bên trong** `smoke_mt.py` — hai lần chạy thật của Task 16, cùng wav
+21,48 s — đo được **3,7 s**, vì tiến trình mới còn phải nạp model. Sau **mọi** lần
 `release()`, `ollama ps` **rỗng** — model dịch thật sự rời VRAM, không chỉ được
 đánh dấu là đã rời.
 
@@ -202,7 +205,16 @@ giả, và không phải bài `live`:
 
 Nó đi qua cả ba mốc `draft -> reviewed -> translated`, khẳng định `approve` ghi
 `reviewed` (không phải `translated`), và khẳng định `translated` chỉ xuất hiện sau
-khi bản dịch xong — kèm một bài đối chứng cho chính mốc đó.
+khi bản dịch xong — kèm một bài đối chứng cho chính mốc đó, và một bài cho vế ngược
+lại: bản dịch **HỎNG** thì transcript phải còn `reviewed`. Bài cũng ghim đối số chạy
+vào adapter thật: `model_ref` truyền cho engine mặc định được so với chính
+`registry.json` (không hard-code chuỗi).
+
+**Giới hạn: engine Ollama KHÔNG nằm trên đường của bài này.** Fixture coi như chưa
+pull model nào (`ollama_available → set()`), nên `qwen2.5-3b/7b` và `hy-mt-1.5-7b`
+không được dựng và không được chạy; bài chỉ phủ đường **in-process** `opus-mt`.
+Đường Ollama do `tests/test_mt_live.py` phủ khi chạy `-m live` (cần model thật) và
+bởi `scripts/smoke_mt.py`.
 
 ## Chưa kiểm chứng
 

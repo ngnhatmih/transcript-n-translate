@@ -4230,7 +4230,7 @@ cd backend
 Get-ChildItem -Recurse -Directory -Filter __pycache__ | Remove-Item -Recurse -Force
 python -B -m pytest
 ```
-Kỳ vọng: `576 passed`.
+Kỳ vọng: KHÔNG giảm so với baseline 795 (thực tế 798).
 
 ```bash
 git add backend/tests/test_e2e_translate.py README.md
