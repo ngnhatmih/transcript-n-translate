@@ -213,6 +213,21 @@ def test_smoke_mt_exits_nonzero_with_zero_segments(monkeypatch, tmp_path, capsys
     assert asr.released, "engine ASR vẫn phải được giải phóng trên nhánh hỏng"
 
 
+def _fake_mt_spec(model_ref: str = "stub-model"):
+    """``EngineSpec`` tối thiểu cho engine dịch giả.
+
+    PHẢI là spec thật chứ không phải ``None``: ``run_media`` đọc
+    ``mt_spec.model_ref`` để IN RA model đã dùng, nên trả ``None`` làm nó nổ
+    ``AttributeError`` — và vì ``run_media`` bắt mọi exception quanh lời gọi
+    ``translate``, cái nổ đó biến thành mã 3 (engine không dựng được) thay vì
+    thất bại alignment mà bài muốn kiểm. Test xanh vì lý do sai.
+    """
+    from app.registry import EngineSpec
+    return EngineSpec(id="stub-mt", label="Stub MT", kind="mt",
+                      runtime="inprocess", model_ref=model_ref, vram_mb=0,
+                      langs=("zh",), capabilities={}, opts={})
+
+
 def test_smoke_mt_reports_zero_alignments_as_failure(monkeypatch, tmp_path, capsys):
     """Bản dịch RỖNG cũng là hỏng: 'có segment' không đồng nghĩa 'có bản dịch'."""
     smoke, _asr, _mt, audio = _drive_media(
@@ -224,7 +239,8 @@ def test_smoke_mt_reports_zero_alignments_as_failure(monkeypatch, tmp_path, caps
             return [dataclasses.replace(s, text="  ") for s in batch]
 
     empty = _EmptyMt()
-    monkeypatch.setattr(smoke, "build_mt_engine", lambda engine_id: (None, empty))
+    monkeypatch.setattr(smoke, "build_mt_engine",
+                        lambda engine_id: (_fake_mt_spec(), empty))
 
     code = smoke.run_media(str(audio), "zh", "opus-mt", "vi")
     out = capsys.readouterr().out
@@ -239,8 +255,8 @@ def test_smoke_mt_succeeds_and_prints_numbers_with_real_segments(
     smoke, _asr, _mt, audio = _drive_media(
         monkeypatch, tmp_path,
         asr_segments=[_segment(0, "你好"), _segment(1, "谢谢"), _segment(2, "再见")])
-    monkeypatch.setattr(smoke, "build_mt_engine", lambda engine_id: (
-        None, _StubMt()))
+    monkeypatch.setattr(smoke, "build_mt_engine",
+                        lambda engine_id: (_fake_mt_spec(), _StubMt()))
 
     code = smoke.run_media(str(audio), "zh", "opus-mt", "vi")
     out = capsys.readouterr().out
@@ -255,6 +271,62 @@ def test_smoke_mt_usage_error_is_not_a_success():
     smoke = _load_smoke_mt()
     assert smoke.main([]) == 2
     assert smoke.main(["--help"]) == 0
+
+
+def test_smoke_mt_unknown_engine_id_exits_three_and_names_the_real_ones(capsys):
+    """id sai phải thoát 3 và LIỆT KÊ id có thật, không phải một ngõ cụt.
+
+    Đo được trên lần chạy thật: ``fw-tiny`` (id brief đưa) KHÔNG có trong
+    ``registry.json``, và bản đầu tiên chết ở ``by_id`` với ``KeyError``. Sau đó
+    bản thứ hai in đúng thông báo nhưng ``SystemExit`` lọt ra ngoài nên tiến trình
+    thoát 1 chứ không phải 3 — mã thoát là thứ duy nhất máy đọc được.
+    """
+    smoke = _load_smoke_mt()
+    code = smoke.run_synthetic("fw-tiny", "zh", "vi")
+    out = capsys.readouterr().out
+
+    assert code == 3, f"engine không dựng được là mã 3, không phải {code}:\n{out}"
+    assert "opus-mt" in out and "qwen2.5-3b" in out, (
+        f"phải liệt kê id DỊCH có thật để người chạy biết dùng gì:\n{out}"
+    )
+
+
+def test_smoke_mt_unknown_asr_id_exits_three(monkeypatch, tmp_path, capsys):
+    smoke = _load_smoke_mt()
+    audio = tmp_path / "a.wav"
+    audio.write_bytes(b"RIFF")
+    monkeypatch.setattr(smoke, "resolve_hf_home", lambda: str(tmp_path))
+
+    def _boom(_engine_id):
+        raise SystemExit("engine asr 'fw-tiny' không có trong registry.json.")
+
+    monkeypatch.setattr(smoke, "build_asr_engine", _boom)
+    code = smoke.run_media(str(audio), "zh", "opus-mt", "vi")
+    out = capsys.readouterr().out
+
+    assert code == 3, f"id ASR sai phải là mã 3, nhận {code}:\n{out}"
+
+
+def test_smoke_mt_main_understands_the_asr_flag():
+    """``--asr <id>`` phải được lấy ra khỏi tham số VỊ TRÍ, không lẫn vào chúng.
+
+    Không có phép tách này thì ``media zh opus-mt --asr fw-small`` khiến ``--asr``
+    thành ``target_lang`` và script dịch sang một "ngôn ngữ" tên là ``--asr``.
+    """
+    seen: dict = {}
+    smoke = _load_smoke_mt()
+
+    def _spy(media, source_lang, engine_id, target_lang, asr_id="fw-small"):
+        seen.update(media=media, source=source_lang, engine=engine_id,
+                    target=target_lang, asr=asr_id)
+        return 0
+
+    smoke.run_media = _spy
+    code = smoke.main(["clip.wav", "zh", "opus-mt", "--asr", "fw-large-v3-turbo"])
+
+    assert code == 0
+    assert seen == {"media": "clip.wav", "source": "zh", "engine": "opus-mt",
+                    "target": "vi", "asr": "fw-large-v3-turbo"}, seen
 
 
 def test_smoke_mt_synthetic_path_builds_segments_without_hand_building():
