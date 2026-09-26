@@ -44,18 +44,29 @@ def _mark_availability(specs) -> None:
     chỗ được — và phải sửa tại chỗ, vì chính danh sách `specs` này là thứ
     `GET /api/registry` và `mt_engines` cùng đọc.
 
-    `runtime == "ollama"` ⇒ DÒ SỐNG (hardcode `true` cho một engine Ollama chưa
-    cài là xếp một job chắc chắn chết vào hàng đợi thay vì từ chối sớm);
-    `runtime == "inprocess"` ⇒ `True` (không có tiến trình ngoài nào để hỏi).
+    Fix round 1 (I-1): `available` nghĩa là "engine này phục vụ được job NGAY BÂY
+    GIỜ", không phải "tiến trình Ollama có sống". Với `runtime == "ollama"` điều
+    đó cần HAI thứ: tiến trình trả lời được VÀ `spec.model_ref` có trong
+    `/api/tags` (đã pull). "Ollama sống" là điều kiện cần nhưng KHÔNG đủ — nó là
+    tín hiệu riêng của `/api/status`. Bản cũ chỉ kiểm điều kiện cần, nên trên máy
+    chỉ pull `qwen2.5:3b-instruct-q4_K_M` thì `GET /api/registry` vẫn khai
+    `available: true` cho `qwen2.5-7b`/`hy-mt-1.5-7b`: người dùng chọn một engine
+    mà API nói đã sẵn sàng rồi job chết ở tận worker — đúng lớp lỗi I-3 của GĐ1a.
+
+    Phép dò trả về TÊN model đã pull (`set()` khi không dùng được), nên ở đây chỉ
+    còn một phép kiểm thành viên cho mỗi engine. `runtime == "inprocess"` ⇒ `True`:
+    không có tiến trình ngoài nào để hỏi, và việc dựng được engine in-process được
+    ghim bằng `test_real_mt_engines_are_constructible_from_the_shipped_registry`
+    (adapter THẬT, registry THẬT).
     """
-    ollama_alive: bool | None = None
+    pulled: set[str] | None = None
     for spec in specs:
         if spec.kind != "mt":
             continue
         if spec.runtime == "ollama":
-            if ollama_alive is None:
-                ollama_alive = ollama_available()
-            spec.capabilities["available"] = ollama_alive
+            if pulled is None:
+                pulled = ollama_available()
+            spec.capabilities["available"] = spec.model_ref in pulled
         else:
             spec.capabilities["available"] = True
 
@@ -70,6 +81,13 @@ def _build_mt_engines(specs) -> dict[str, object]:
 
     Cờ glossary là DỮ LIỆU của `spec.capabilities["glossary_prompt"]`, không
     phải hằng số của adapter: QA gắn `engine_no_glossary` theo cờ đó.
+
+    Fix round 1 (I-2): `engine_id=spec.id` được truyền TƯỜNG MINH. `spec.id` là
+    NGUỒN CHÂN LÝ, không phải quy tắc suy từ tag: tag của HY-MT cho ra
+    `hy-mt1.5-7b-q4_K_M` còn id registry là `hy-mt-1.5-7b`, nên để adapter tự
+    suy là ghi `prompt_version` tra theo một id không tồn tại. Truyền id vào biến
+    cảnh báo "Task 12 phải đánh khoá theo `spec.id`" từ một câu trong docstring
+    thành một dây nối chạy được.
     """
     engines: dict[str, object] = {}
     for spec in specs:
@@ -78,6 +96,7 @@ def _build_mt_engines(specs) -> dict[str, object]:
         if spec.runtime == "ollama":
             engines[spec.id] = OllamaMtEngine(
                 spec.model_ref,
+                engine_id=spec.id,
                 supports_glossary=bool(spec.capabilities.get("glossary_prompt", False)),
             )
         else:

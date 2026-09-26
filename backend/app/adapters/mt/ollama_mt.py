@@ -51,6 +51,11 @@ _TEMPERATURE = 0.1
 def _engine_id_from_model(model: str) -> str:
     """`qwen2.5:3b-instruct-q4_K_M` -> `qwen2.5-3b`, khớp `id` trong registry.json.
 
+    ĐIỂM RƠI, không phải nguồn: người gọi ĐÃ BIẾT id registry thì phải truyền
+    `engine_id=` vào `OllamaMtEngine` (Task 12 truyền `spec.id`), và giá trị đó
+    THẮNG. Hàm này chỉ để dựng được engine khi người gọi không có spec trong tay
+    (test, script) — xem `__init__`.
+
     KHÔNG dùng `model.split(":")[0]`: `model_ref` của registry là
     `qwen2.5:3b-instruct-q4_K_M`, nên cách đó cho ra `qwen2.5` — lệch `id` engine
     (`qwen2.5-3b`) và lệch khoá `PROMPT_VERSION`, làm `prompt_version` rơi về
@@ -61,9 +66,11 @@ def _engine_id_from_model(model: str) -> str:
     lẫn `PROMPT_VERSION` đã có sẵn.
 
     GIỚI HẠN: quy tắc này hiệu chỉnh cho tag của Qwen. `hy-mt1.5-7b:q4_K_M` (id
-    registry `hy-mt-1.5-7b`) sẽ cho ra `hy-mt1.5-7b-q4_K_M`, tức lớp này KHÔNG phục
-    vụ được HY-MT — đúng phạm vi giai đoạn 2 (HY-MT hoãn), nhưng Task 12 vẫn phải
-    đánh khoá `mt_engines` bằng `spec.id` chứ không bằng `engine.engine_id`.
+    registry `hy-mt-1.5-7b`) sẽ cho ra `hy-mt1.5-7b-q4_K_M`, tức quy tắc này
+    KHÔNG phục vụ được HY-MT. Fix round 1 (I-2) đóng lớp lỗi đó ở ĐÚNG chỗ nó
+    phát sinh: `engine_id` nay là THAM SỐ của `OllamaMtEngine`, và composition
+    root truyền `spec.id` — nên id hợp lệ không còn phụ thuộc vào việc quy tắc suy
+    diễn có tái tạo được tag hay không.
     """
     name, _, tag = model.partition(":")
     if not tag:
@@ -85,8 +92,18 @@ def _nanos_to_ms(total_duration_ns: object) -> int | None:
 class OllamaMtEngine:
     def __init__(self, model: str = DEFAULT_MODEL, *, base_url: str = DEFAULT_BASE_URL,
                  keep_alive: str = DEFAULT_KEEP_ALIVE, client: object | None = None,
-                 supports_glossary: bool = True) -> None:
+                 supports_glossary: bool = True,
+                 engine_id: str | None = None) -> None:
         self._model = model
+        # Fix round 1 (I-2): id engine là THAM SỐ, không phải thứ luôn được SUY ra.
+        # `spec.id` của registry là nguồn chân lý, và composition root truyền nó
+        # vào; quy tắc suy từ tag chỉ là ĐIỂM RƠI cho người gọi không có spec
+        # (test, script). Vì sao cần: tag của HY-MT (`hy-mt1.5-7b:q4_K_M`) suy ra
+        # `hy-mt1.5-7b-q4_K_M` trong khi id registry là `hy-mt-1.5-7b`, nên để
+        # adapter tự suy thì `prompt_version` tra theo một id không tồn tại và bị
+        # đóng dấu "unknown" vào `translations`/`llm_calls`. Giữ điểm rơi để test
+        # dựng engine không kèm id vẫn chạy.
+        self._engine_id = engine_id if engine_id else _engine_id_from_model(model)
         self._base_url = base_url.rstrip("/")
         self._keep_alive = keep_alive
         # Client được TIÊM vào: test chạy được khi Ollama tắt. Chỉ dựng client thật
@@ -105,7 +122,7 @@ class OllamaMtEngine:
 
     @property
     def engine_id(self) -> str:
-        return _engine_id_from_model(self._model)
+        return self._engine_id
 
     @property
     def prompt_version(self) -> str:

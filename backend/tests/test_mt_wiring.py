@@ -14,10 +14,14 @@ vá CẢ `app.config` lẫn `main`: vá mỗi `main` thì `build_components()` v
 `data/` THẬT của repo (Q5 của review Task 19), và `_assert_repo_data_untouched`
 dưới đây biến lời hứa đó thành thứ chạy được.
 
-`ollama_available` được vá TƯỜNG MINH trong fixture (mặc định: sống) để suite
-không phụ thuộc việc Ollama có đang chạy trên máy hay không; RIÊNG
-`test_real_probe_tolerates_both_answers` gọi `build_components()` mà KHÔNG vá
-nó, đúng yêu cầu "phải chịu được cả hai giá trị".
+`ollama_available` được vá TƯỜNG MINH trong fixture (mặc định: sống, đã pull mọi
+`model_ref` của registry thật) để suite không phụ thuộc việc Ollama có đang chạy
+trên máy hay không; RIÊNG `test_real_probe_tolerates_both_answers` gọi
+`build_components()` mà KHÔNG vá nó, đúng yêu cầu "phải chịu được cả hai giá trị".
+
+Fix round 1 (I-1): phép dò trả về TÊN model đã pull (`set()` khi không dùng
+được), nên bộ vá ở đây trả về một `set` — không còn `bool`. "Ollama sống" và
+"model đã pull" là HAI câu hỏi khác nhau, và fixture này điều khiển cả hai.
 """
 from __future__ import annotations
 
@@ -27,7 +31,7 @@ import pathlib
 
 import pytest
 
-from app.adapters.registry_file import load_default_asr, load_default_mt
+from app.adapters.registry_file import load_default_asr, load_default_mt, load_registry
 from app.domain import job_state as js
 from app.domain.models import Job, Segment
 from app.pipeline.translate import TranslateHandler
@@ -48,12 +52,17 @@ class _RecordingMtEngine:
     trường bằng cách dựng tay).
     """
 
-    def __init__(self, model_ref: str, *, supports_glossary: bool = False) -> None:
+    def __init__(self, model_ref: str, *, supports_glossary: bool = False,
+                 engine_id: str | None = None) -> None:
         self.model_ref = model_ref
         self._supports_glossary = supports_glossary
         self.releases = 0
         self.batches: list[list[int]] = []
         self.last_stats = None
+        #: Fix round 1 (I-2): ghi lại ĐÚNG thứ `_build_mt_engines` truyền vào.
+        #: `None` = "không truyền gì", nên `main.py` bỏ tham số là bài ghim dây
+        #: nối đỏ ngay, chứ không âm thầm rơi về điểm rơi suy từ tag.
+        self.received_engine_id = engine_id
 
     @property
     def engine_id(self) -> str:
@@ -102,6 +111,21 @@ def _snapshot() -> dict[pathlib.Path, bool]:
     return {d: d.exists() for d in _repo_data_dirs()}
 
 
+def _all_real_model_refs() -> set[str]:
+    """Mọi `model_ref` của registry THẬT — cái một máy "đủ điều kiện" phải có.
+
+    Dùng làm mặc định của bộ vá `ollama_available` (fix round 1, I-1): mặc định
+    của suite là "Ollama sống VÀ đã pull mọi thứ registry khai", tức mọi engine
+    đều phục vụ được. Quét từ registry thật chứ không viết tay danh sách: thêm
+    một engine Ollama mới vào `registry.json` mà quên đây thì fixture tự nhiên
+    coi nó "chưa pull", và mọi bài dùng harness đỏ vì một lý do không liên quan.
+    """
+    from app.adapters.registry_file import load_registry
+
+    return {s.model_ref for s in of_kind(load_registry(), "mt")
+            if s.runtime == "ollama"}
+
+
 def _assert_repo_data_untouched(before: dict[pathlib.Path, bool]) -> None:
     created = [str(d) for d, existed in before.items() if not existed and d.exists()]
     assert not created, (
@@ -128,9 +152,17 @@ class _Harness:
         monkeypatch.setattr(main, "DB_PATH", data / "app.db")
 
         self.data = data
+        # Fix round 1 (I-1): phép dò nay trả về TÊN model đã pull. Hai nút điều
+        # khiển TÁCH BIỆT, vì "Ollama sống" ≠ "model này đã pull":
+        # `ollama_alive` là tiến trình, `pulled` là tập model trong `/api/tags`.
+        # Mặc định: sống + đã pull MỌI `model_ref` của registry thật (quét ở
+        # `_all_real_model_refs`), tức "máy đủ điều kiện chạy mọi engine" — còn
+        # các bài về từng nửa của I-1 tự hạ một trong hai nút.
         self.ollama_alive = True
+        self.pulled = _all_real_model_refs()
         monkeypatch.setattr(main, "ollama_available",
-                            lambda *a, **k: self.ollama_alive)
+                            lambda *a, **k: set(self.pulled) if self.ollama_alive
+                            else set())
         self.mt_engines: list[_RecordingMtEngine] = []
 
         def mt_factory(*args, **kwargs):
@@ -190,6 +222,17 @@ def test_mt_engines_are_keyed_by_registry_spec_id_not_engine_id(harness):
             "engine giả cố ý có engine_id khác spec.id; nếu bằng nhau thì bài "
             "này không còn chứng minh được điều D nói"
         )
+        # Fix round 1 (I-2): với engine Ollama, `spec.id` phải được TRUYỀN vào
+        # adapter (`engine_id=`), không phải để nó tự suy từ tag — tag HY-MT suy
+        # ra một id không có trong registry. `opus-mt` dựng qua `OpusMtEngine`,
+        # không có tham số này (id của nó là dữ liệu cố định của adapter).
+        spec = by_id(specs, engine_id)
+        if spec.runtime == "ollama":
+            assert engine.received_engine_id == engine_id, (
+                f"{engine_id}: composition root phải truyền THẲNG `spec.id` vào "
+                f"OllamaMtEngine(engine_id=...), nhận được "
+                f"{engine.received_engine_id!r}"
+            )
 
 
 def test_ollama_availability_is_probed_here_and_now_not_hardcoded(harness):
@@ -197,9 +240,12 @@ def test_ollama_availability_is_probed_here_and_now_not_hardcoded(harness):
 
     Hardcode `true` cho một engine Ollama chưa cài thì job sẽ chết trong worker
     thay vì bị từ chối sớm (I-3 của 1a).
-    """
-    from app.registry import of_kind
 
+    Fix round 1 (I-1): đây là NỬA THỨ NHẤT — tiến trình Ollama TẮT. Nửa thứ hai
+    (tiến trình sống nhưng model CHƯA pull) nằm ở
+    `test_an_alive_ollama_without_the_model_is_not_available`: bản cũ của bài
+    này chỉ có nửa thứ nhất, nên nó xanh với một phép dò chỉ hỏi "Ollama có sống".
+    """
     harness.ollama_alive = False
     _repos, specs_down, _worker, _broker, engines_down = harness.build()
     assert set(engines_down) == {"opus-mt"}, (
@@ -213,11 +259,100 @@ def test_ollama_availability_is_probed_here_and_now_not_hardcoded(harness):
     harness.ollama_alive = True
     _repos, specs_up, _worker, _broker, engines_up = harness.build()
     assert set(engines_up) == {s.id for s in of_kind(specs_up, "mt")}, (
-        "Ollama sống thì mọi engine ollama sẵn sàng và phải có engine: "
-        f"{sorted(engines_up)}"
+        "Ollama sống VÀ đã pull mọi model_ref thì mọi engine sẵn sàng và phải có "
+        f"engine: {sorted(engines_up)}"
     )
     for spec in of_kind(specs_up, "mt"):
         assert spec.capabilities["available"] is True
+
+
+def test_an_alive_ollama_without_the_model_is_not_available(harness):
+    """Fix round 1 (I-1), NỬA QUAN TRỌNG NHẤT: "Ollama sống" KHÔNG ĐỦ.
+
+    Đây là lớp lỗi I-3 của GĐ1a, đo được trên chính máy này: chỉ
+    `qwen2.5:3b-instruct-q4_K_M` được pull, nhưng `GET /api/registry` vẫn khai
+    `available: true` cho `qwen2.5-7b` và `hy-mt-1.5-7b`. Người dùng chọn một
+    engine mà API nói đã sẵn sàng, rồi job chết ở tận worker.
+
+    Tiến trình SỐNG, `/api/tags` trả về ĐÚNG một model: ba engine còn lại phải
+    thành KHÔNG sẵn sàng, và không engine nào trong số đó được dựng hay đăng ký
+    với governor.
+    """
+    only_three_b = by_id(load_registry(), "qwen2.5-3b").model_ref
+    harness.ollama_alive = True
+    harness.pulled = {only_three_b}
+
+    _repos, specs, worker, _broker, mt_engines = harness.build()
+
+    ollama_specs = [s for s in of_kind(specs, "mt") if s.runtime == "ollama"]
+    assert len(ollama_specs) >= 2, (
+        "registry.json phải còn ít nhất hai engine ollama để bài này có nghĩa"
+    )
+    for spec in ollama_specs:
+        expected = spec.model_ref == only_three_b
+        assert spec.capabilities["available"] is expected, (
+            f"{spec.id}: ollama sống nhưng đã pull {sorted(harness.pulled)}; "
+            f"available phải là {expected}, không phải "
+            f"{spec.capabilities['available']}"
+        )
+        assert (spec.id in mt_engines) is expected, (
+            f"{spec.id}: available={spec.capabilities['available']} nhưng "
+            f"có trong mt_engines: {spec.id in mt_engines}"
+        )
+
+    assert mt_engines, "engine có model đã pull phải được dựng"
+    assert "opus-mt" in mt_engines, "engine in-process không phụ thuộc Ollama"
+    registered = set(worker.governor._loaded)  # noqa: SLF001 - chính dây nối
+    for spec in ollama_specs:
+        assert (spec.phase_key in registered) is (spec.model_ref == only_three_b), (
+            f"{spec.id}: giai đoạn {'phải' if spec.model_ref == only_three_b else 'không được'}"
+            f" đăng ký với governor: {sorted(registered)}"
+        )
+
+
+def test_an_engine_with_the_pulled_model_is_available(harness):
+    """Nửa ĐỐI CHỨNG của I-1: đủ điều kiện (sống + đã pull) thì PHẢI sẵn sàng.
+
+    Không có bài này thì `available` ghim cứng `False` cũng xanh các bài còn lại.
+    """
+    harness.ollama_alive = True
+    harness.pulled = {"qwen2.5:7b-instruct-q4_K_M"}     # đúng model_ref của 7b
+    _repos, specs, _worker, _broker, mt_engines = harness.build()
+
+    seven = by_id(specs, "qwen2.5-7b")
+    assert seven.model_ref in harness.pulled, "bài này phải pull ĐÚNG model_ref"
+    assert seven.capabilities["available"] is True
+    assert "qwen2.5-7b" in mt_engines
+    assert by_id(specs, "qwen2.5-3b").capabilities["available"] is False
+    assert "qwen2.5-3b" not in mt_engines
+
+
+def test_inprocess_availability_does_not_depend_on_ollama(harness):
+    """I-1, nhánh `runtime == "inprocess"`: engine dựng tại chỗ phục vụ được job
+    mà không cần tiến trình ngoài nào, nên `available` là True kể cả khi Ollama
+    tắt và chưa pull gì.
+
+    Đối chứng nằm ngay trong bài: CÙNG lần dựng đó, mọi engine `ollama` đều
+    không sẵn sàng. Thiếu vế thứ hai thì một `_mark_availability` trả `True` cho
+    TẤT CẢ mọi engine vẫn xanh bài này.
+    """
+    harness.ollama_alive = False
+    harness.pulled = set()
+    _repos, specs, _worker, _broker, mt_engines = harness.build()
+
+    inprocess = [s for s in of_kind(specs, "mt") if s.runtime == "inprocess"]
+    assert inprocess, "registry.json phải còn engine in-process (opus-mt)"
+    for spec in inprocess:
+        assert spec.capabilities["available"] is True, (
+            f"{spec.id} in-process không có tiến trình ngoài nào để hỏi"
+        )
+        assert spec.id in mt_engines
+
+    ollama_specs = [s for s in of_kind(specs, "mt") if s.runtime == "ollama"]
+    assert ollama_specs, "registry.json phải còn engine ollama để đối chứng"
+    assert all(s.capabilities["available"] is False for s in ollama_specs), (
+        "cùng lần dựng: Ollama chết thì engine ollama phải KHÔNG sẵn sàng"
+    )
 
 
 def test_real_probe_tolerates_both_answers(tmp_path, monkeypatch):
@@ -225,6 +360,10 @@ def test_real_probe_tolerates_both_answers(tmp_path, monkeypatch):
 
     Bài này cố ý KHÔNG vá `ollama_available`, nên nó phải xanh trên cả máy có
     Ollama lẫn máy không có — không được hardcode giá trị nào.
+
+    Fix round 1 (I-1): phép dò nay trả TÊN model đã pull (có thể là `set()`), nên
+    khẳng định dưới đây bám vào quan hệ `available ⇔ id có trong mt_engines`,
+    đúng cả khi máy này chỉ pull một phần registry.
     """
     from app import config, main
 
@@ -324,7 +463,9 @@ def test_real_mt_engines_are_constructible_from_the_shipped_registry(tmp_path, m
     monkeypatch.setattr(main, "MEDIA_DIR", data / "media")
     monkeypatch.setattr(main, "OUTPUT_DIR", data / "output")
     monkeypatch.setattr(main, "LOG_DIR", data / "logs")
-    monkeypatch.setattr(main, "ollama_available", lambda *a, **k: True)
+    # Fix round 1 (I-1): phép dò trả về TÊN model đã pull; ở đây pull ĐÚNG mọi
+    # `model_ref` của registry để bài này dựng được adapter THẬT cho mọi engine.
+    monkeypatch.setattr(main, "ollama_available", lambda *a, **k: _all_real_model_refs())
 
     _repos, specs, _worker, _broker, engines = main.build_components()
     _assert_repo_data_untouched(before)
@@ -455,6 +596,55 @@ def test_auto_forward_default_is_on_but_a_user_choice_is_not_overwritten(harness
         pass
     assert [j for j in repos2.list_jobs() if j.type == "translate"] == [], (
         "auto_forward='0' thì KHÔNG được đẻ job dịch"
+    )
+
+
+def test_translation_records_the_version_at_forward_time_not_one(harness):
+    """M14 · `transcript_version=transcript.version` là dòng CHƯA BỊ BẮT BẺ.
+
+    Review Task 12 đo được: hardcode `transcript_version=1` để **cả ba** bài liên
+    quan xanh (`3 passed`), vì mọi bài đều chuyển tiếp một transcript còn ở
+    version 1 — ở đó `1` và `transcript.version` là CÙNG một giá trị, nên phép
+    khẳng định không phân biệt được hai thứ.
+
+    Bài này tạo đúng chỗ hai giá trị TÁCH NHAU: thêm transcript (v1), SỬA nó qua
+    `update_transcript_segments` (v2), rồi mới chuyển tiếp. Giá trị đúng là 2;
+    hardcode `1` là đỏ.
+
+    Vì sao đây không phải chi tiết vụn: `transcript_version` là cơ chế DUY NHẤT
+    khiến một bản dịch cũ thành lỗi thời (`is_stale`). Ghim nhầm về 1 nghĩa là
+    một bản dịch sinh ra từ bản đã sửa vẫn được coi là khớp thời, và người dùng
+    không bao giờ được nhắc dịch lại.
+    """
+    repos, _specs, _worker, _broker, _engines = harness.build()
+    handler = _worker.handlers["asr"]
+
+    wav = harness.data / "media" / "v.wav"
+    wav.parent.mkdir(parents=True, exist_ok=True)
+    wav.write_bytes(b"RIFF")
+    sid = repos.add_source(kind="file", origin="v.mp4", media_path=str(wav),
+                           lang="zh", audio_path=str(wav), duration=4.0)
+    tid = repos.add_transcript(
+        source_id=sid, engine=load_default_asr(), lang="zh",
+        segments=[Segment(i=0, start=0.0, end=1.0, text="你好")],
+    )
+    assert repos.get_transcript(tid).version == 1, "điểm xuất phát phải là v1"
+
+    new_version = repos.update_transcript_segments(
+        tid, [Segment(i=0, start=0.0, end=1.0, text="你好 (đã sửa)")])
+    assert new_version == 2, f"update_transcript_segments phải tăng version: {new_version}"
+
+    handler._forward_to_translation(tid, "zh")  # noqa: SLF001 - chính đường thật
+
+    mt_jobs = [j for j in repos.list_jobs() if j.type == "translate"]
+    assert len(mt_jobs) == 1, mt_jobs
+    translation = repos.get_translation(mt_jobs[0].payload["translation_id"])
+    assert translation.transcript_version == 2, (
+        "bản dịch phải ghim version của transcript TẠI THỜI ĐIỂM chuyển tiếp "
+        f"(2), không phải hằng số 1: nhận được {translation.transcript_version}"
+    )
+    assert translation.transcript_version == repos.get_transcript(tid).version, (
+        "giá trị ghi vào hàng `translations` phải là version ĐỌC TỪ REPO"
     )
 
 

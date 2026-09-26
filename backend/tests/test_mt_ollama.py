@@ -19,7 +19,8 @@ import dataclasses
 
 import pytest
 
-from app.adapters.mt.ollama_mt import OllamaMtEngine
+from app.adapters.mt.ollama_mt import OllamaMtEngine, _engine_id_from_model
+from app.adapters.mt.prompts import PROMPT_VERSION
 from app.domain.alignment import AlignmentProblem
 from app.domain.models import Segment, Term, Word
 from app.domain.mt import MtOpts
@@ -135,19 +136,56 @@ def test_engine_id_scales_to_the_7b_sibling():
     assert eng.engine_id == "qwen2.5-7b"
 
 
-def test_hy_mt_tag_is_not_reproducible_so_callers_must_key_by_spec_id():
+def test_hy_mt_tag_is_not_reproducible_so_the_id_must_be_passed_in():
     """GIỚI HẠN đã biết của quy tắc suy id: nó hiệu chỉnh cho tag của Qwen. Tag thật
     của HY-MT (`registry.json:84` ghi id `hy-mt-1.5-7b`) KHÔNG tái tạo được, nên
-    `prompt_version` rơi về "unknown".
+    người gọi PHẢI truyền `engine_id` vào.
 
-    Bài này ghim giới hạn đó bằng TEST chứ không để nó sống trong docstring: Task 12
-    PHẢI đánh khoá `mt_engines` bằng `spec.id`, và KHÔNG được dùng `engine_id` hay
-    `prompt_version` làm khoá cho `translations`/`llm_calls`."""
+    Fix round 1 (I-2): bài này ghim ĐIỂM RƠI (không truyền id ⇒ vẫn ra chuỗi suy
+    từ tag, và với HY-MT thì chuỗi đó SAI), còn đường đi thật — truyền `spec.id`
+    — được ghim ngay bài dưới. Giữ điểm rơi là có chủ ý: test và script dựng
+    engine mà không có `EngineSpec` trong tay vẫn phải chạy được."""
     eng = OllamaMtEngine(model="hy-mt1.5-7b:q4_K_M", client=_FakeClient())
     assert eng.engine_id == "hy-mt1.5-7b-q4_K_M"      # số đo, không phải suy đoán
     assert eng.engine_id != "hy-mt-1.5-7b", "quy tắc lại tái tạo được id registry?"
-    assert eng.prompt_version == "unknown", (
-        "đóng dấu prompt_version lạ vào translations là nói dối về engine")
+
+
+def test_an_explicitly_passed_engine_id_wins_over_the_tag_rule():
+    """Fix round 1 (I-2): `spec.id` của registry là NGUỒN CHÂN LÝ, quy tắc suy từ
+    tag chỉ là điểm rơi.
+
+    Vì sao phải là THAM SỐ chứ không phải một câu dặn trong docstring: tag của
+    HY-MT suy ra `hy-mt1.5-7b-q4_K_M`, nên engine dựng qua composition root mang
+    một id KHÔNG có trong registry — và `prompt_version` tra theo id đó sẽ đóng
+    dấu "unknown" vào `translations`/`llm_calls`. Truyền `spec.id` vào thì id
+    engine khớp ĐÚNG thứ registry khai, và phép tra `PROMPT_VERSION` có cơ hội
+    trúng.
+
+    Bài ghim CẢ HAI chiều: id truyền vào thắng (khác hẳn chuỗi suy từ tag), và
+    `support_glossary=False` của HY-MT không bị ảnh hưởng."""
+    eng = OllamaMtEngine(model="hy-mt1.5-7b:q4_K_M", client=_FakeClient(),
+                         engine_id="hy-mt-1.5-7b", supports_glossary=False)
+    assert eng.engine_id == "hy-mt-1.5-7b", (
+        "id truyền tường minh phải THẮNG quy tắc suy từ tag"
+    )
+    assert eng.engine_id != _engine_id_from_model("hy-mt1.5-7b:q4_K_M"), (
+        "nếu hai giá trị bằng nhau thì bài này không chứng minh được điều gì"
+    )
+    assert eng.supports_glossary() is False
+
+    # Cùng id đó, khi registry THẬT khai prompt cho nó, phải tra ra bản thật.
+    # Hiện `PROMPT_VERSION` chưa có khoá HY-MT (việc của task HY-MT), nên ở đây
+    # ghim PHÉP TRA, không ghim giá trị: tra theo id đã truyền.
+    assert eng.prompt_version == PROMPT_VERSION.get("hy-mt-1.5-7b", "unknown")
+
+
+def test_tag_fallback_still_serves_the_caller_that_has_no_id():
+    """Điểm rơi phải giữ nguyên hành vi cho người gọi KHÔNG có spec trong tay
+    (`scripts/`, test): không truyền `engine_id` thì id vẫn suy từ `model_ref`,
+    và với Qwen thì nó ra ĐÚNG id registry."""
+    eng = OllamaMtEngine(model="qwen2.5:3b-instruct-q4_K_M", client=_FakeClient())
+    assert eng.engine_id == "qwen2.5-3b"
+    assert eng.prompt_version == "qwen-json-p1"
 
 
 def test_prompt_version_resolves_instead_of_falling_back_to_unknown():

@@ -801,7 +801,11 @@ def built(tmp_path, monkeypatch):
     # tại. Fixture này không kiểm phép dò đó (nó có bài riêng ở
     # `tests/test_mt_wiring.py`), nên nó ghim kết quả thành "tắt" để suite không
     # phụ thuộc việc Ollama có đang chạy trên máy hay không.
-    monkeypatch.setattr(main, "ollama_available", lambda *a, **k: False)
+    #
+    # Fix round 1 (I-1): phép dò nay trả về TÊN model đã pull, và tập RỖNG nghĩa
+    # là "không engine ollama nào phục vụ được" — cùng kết quả như bản cũ trả
+    # `False`, nên Ý NGHĨA của fixture này không đổi, chỉ kiểu giá trị đổi.
+    monkeypatch.setattr(main, "ollama_available", lambda *a, **k: set())
     repos, specs, worker, broker, mt_engines = main.build_components()
     _assert_repo_data_dirs_untouched(repo_data_before)
     return main, repos, specs, worker, engine, broker, mt_engines
@@ -975,9 +979,11 @@ def test_build_components_does_not_overwrite_an_auto_forward_choice(built):
 def test_build_components_registers_only_available_mt_engines(monkeypatch, tmp_path):
     """Engine MT CHƯA sẵn sàng không được đăng ký; engine sẵn sàng thì phải có.
 
-    Fixture ghim `ollama_available()` = False (spec mt của registry giả ở đây là
-    runtime `ollama`), nên không giai đoạn dịch nào được mở. Bài đối chứng — dò
-    sống trả True thì giai đoạn dịch PHẢI có mặt — nằm ở
+    Fixture ghim `ollama_available()` = `set()` — tiến trình không trả lời được,
+    hoặc chưa pull model nào (I-1 không phân biệt hai thứ đó: cả hai đều nghĩa là
+    engine `ollama` không phục vụ được job) — còn spec mt của registry giả ở đây
+    là runtime `ollama`, nên không giai đoạn dịch nào được mở. Bài đối chứng —
+    dò sống trả về ĐÚNG `model_ref` thì giai đoạn dịch PHẢI có mặt — nằm ở
     `tests/test_mt_wiring.py::test_governor_has_a_releaser_for_every_mt_phase`.
     """
     from app import config, main
@@ -994,7 +1000,7 @@ def test_build_components_registers_only_available_mt_engines(monkeypatch, tmp_p
     monkeypatch.setattr(main, "MEDIA_DIR", data / "media")
     monkeypatch.setattr(main, "OUTPUT_DIR", data / "output")
     monkeypatch.setattr(main, "LOG_DIR", data / "logs")
-    monkeypatch.setattr(main, "ollama_available", lambda *a, **k: False)
+    monkeypatch.setattr(main, "ollama_available", lambda *a, **k: set())
     repos, specs, worker, broker, mt_engines = main.build_components()
     _assert_repo_data_dirs_untouched(repo_data_before)
 

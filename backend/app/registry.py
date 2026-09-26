@@ -8,6 +8,12 @@ kéo `httpx` vào lúc import (import nằm trong hàm) — module này vẫn im
 mọi tầng, kể cả nơi `httpx` chưa cài. Nếu sau này có chỗ dò Ollama dùng chung
 (`app/api/routes_registry.probe_ollama` cũng đang dò), gộp chúng lại là việc của
 task dọn dẹp, không phải lý do để bịa thêm một tầng nữa.
+
+Fix round 1 (I-1): `ollama_available()` nay trả TÊN các model đã pull, không
+phải một `bool`. "Ollama sống" là điều kiện CẦN nhưng KHÔNG ĐỦ để một engine
+`runtime == "ollama"` phục vụ được job — còn phải có model trong `/api/tags`.
+Câu hỏi "tiến trình Ollama có sống không" là tín hiệu RIÊNG của `/api/status`
+(`routes_registry.probe_ollama`), không phải của trường `capabilities["available"]`.
 """
 from __future__ import annotations
 
@@ -128,29 +134,60 @@ DEFAULT_OLLAMA_BASE_URL = "http://127.0.0.1:11434"
 
 
 def ollama_available(base_url: str = DEFAULT_OLLAMA_BASE_URL,
-                     timeout: float = 1.5) -> bool:
-    """Ollama có sống không. Dò MỘT lần lúc dựng, KHÔNG dò mỗi request.
+                     timeout: float = 1.5) -> set[str]:
+    """TÊN các model Ollama đã pull. Dò MỘT lần lúc dựng, KHÔNG dò mỗi request.
+
+    Trả về `set()` khi KHÔNG dùng được — tiến trình chết, cổng đóng, timeout,
+    DNS hỏng, chưa cài `httpx`, hoặc phản hồi dị dạng. Tập RỖNG là câu trả lời
+    an toàn: câu hỏi của người gọi luôn là "engine này phục vụ được job NGAY BÂY
+    GIỜ không", và một tiến trình không trả lời được thì câu trả lời là "không".
+    Vì vậy "Ollama chết" và "Ollama sống nhưng chưa pull model nào" cho ra CÙNG
+    một kết quả ở đây — và đó là điều đúng cho `available`, vì cả hai đều nghĩa
+    là không engine `ollama` nào chạy được. Ai cần phân biệt "sống/chết" thì hỏi
+    `/api/status` (`app/api/routes_registry.probe_ollama`).
 
     Vì sao phải dò thật thay vì hardcode: một engine Ollama được khai "có sẵn"
     trong khi tiến trình Ollama không chạy thì job dịch sẽ được xếp vào hàng đợi
     rồi chết trong worker, thay vì bị từ chối SỚM ngay lúc dựng (đúng lỗi I-3 mà
     GĐ1a đã trả giá với engine ASR).
 
-    Chỉ hỏi `/api/tags` có trả 200 hay không — tức "Ollama có sống", KHÔNG phải
-    "model này đã pull". Phép dò theo từng model là việc khác, và nó sẽ đổi hành
-    vi `available` của cả registry; ghi ở đây để không ai đọc nhầm phạm vi.
+    Fix round 1 (I-1): bản cũ chỉ hỏi `/api/tags` có trả 200 hay không, tức
+    "Ollama có sống" — KHÔNG phải "model này đã pull". Hệ quả đo được trên máy
+    chỉ có `qwen2.5:3b-instruct-q4_K_M`: `GET /api/registry` vẫn khai
+    `available: true` cho `qwen2.5-7b` và `hy-mt-1.5-7b`, người dùng chọn một
+    engine mà API nói đã sẵn sàng, rồi job chết ở tận worker (`KeyError`) —
+    đúng lớp lỗi I-3 của GĐ1a. Nay tên model được đọc từ chính phản hồi ĐÃ GỌI
+    đó, và người gọi chỉ còn một phép kiểm thành viên cho mỗi engine.
 
-    Mọi lỗi (chưa cài `httpx`, cổng đóng, timeout, DNS) đều là `False`: câu hỏi
-    là "có dùng được ngay bây giờ không", và câu trả lời an toàn cho một job sắp
-    xếp hàng là "không".
+    Tên đọc từ `models[].name`/`model` — đúng chuỗi người dùng gõ `ollama pull`,
+    ví dụ `qwen2.5:3b-instruct-q4_K_M`, nên nó so KHỚP TUYỆT ĐỐI với
+    `spec.model_ref`. Giữ luôn cả `name` lẫn `model`: Ollama trả `model` ở các
+    bản cũ và `name` ở các bản mới, và bỏ sót một khoá thì một model ĐÃ pull bị
+    coi là thiếu — tức lại rơi về đúng lỗi "engine sẵn sàng mà job chết".
     """
     import httpx
 
     try:
         with httpx.Client(timeout=timeout) as client:
-            return client.get(f"{base_url.rstrip('/')}/api/tags").status_code == 200
+            resp = client.get(f"{base_url.rstrip('/')}/api/tags")
+            if resp.status_code != 200:
+                return set()
+            data = resp.json()
     except Exception:
-        return False
+        return set()
+
+    models = data.get("models") if isinstance(data, dict) else None
+    if not isinstance(models, list):
+        return set()
+    names: set[str] = set()
+    for entry in models:
+        if not isinstance(entry, dict):
+            continue
+        for key in ("name", "model"):
+            value = entry.get(key)
+            if isinstance(value, str) and value:
+                names.add(value)
+    return names
 
 
 def default_mt_engine(specs: Iterable[EngineSpec], *, declared: str | None = None,

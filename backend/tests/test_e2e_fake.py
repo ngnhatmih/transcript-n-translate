@@ -136,9 +136,14 @@ class FakeMtEngine:
     (hai task trong phase này đã nuốt 7/13 trường theo cách đó).
     """
 
-    def __init__(self, model_ref: str, *, supports_glossary: bool = False) -> None:
+    def __init__(self, model_ref: str, *, supports_glossary: bool = False,
+                 engine_id: str | None = None) -> None:
         self.model_ref = model_ref
         self._supports_glossary = supports_glossary
+        #: Fix round 1 (I-2): `_build_mt_engines` truyền `spec.id` TƯỜNG MINH vào
+        #: adapter Ollama, nên engine giả phải nhận tham số đó (giống chữ ký của
+        #: `OllamaMtEngine`) — và ghi lại để bài ghim dây nối đọc được.
+        self.received_engine_id = engine_id
         self.release_count = 0
         self.batches: list[list[int]] = []
         self.last_stats = None
@@ -205,7 +210,10 @@ def wired(tmp_path, monkeypatch):
     monkeypatch.setattr(main, "SingleGpuGovernor", TracingGovernor)
     # Task 12: `MT_SPEC` là runtime `ollama`, nên `available` của nó do phép dò
     # quyết định. Ghim để suite tất định, và thay adapter HTTP bằng engine giả.
-    monkeypatch.setattr(main, "ollama_available", lambda *a, **k: True)
+    # Fix round 1 (I-1): phép dò trả về TÊN model đã pull, nên ở đây trả đúng
+    # `MT_SPEC.model_ref` — "Ollama sống" không còn đủ để engine sẵn sàng.
+    monkeypatch.setattr(main, "ollama_available",
+                        lambda *a, **k: {MT_SPEC.model_ref})
     monkeypatch.setattr(main, "OllamaMtEngine", mt_factory)
 
     repos, specs, worker, broker, mt_engines = main.build_components()
