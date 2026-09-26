@@ -3153,15 +3153,14 @@ git commit -m "feat(worker): phuc hoi sau crash + huy hop tac qua checkpoint"
 
 > **ĐÍNH CHÍNH (R48 = DOC-01, R53 = DOC-03).** Khối Interfaces bản đầu còn một dòng
 > `IngestHandler(repos, clock)` với `handles() -> "ingest"`. Dòng đó **sai ở hai tầng** và đã bị bỏ:
-> (a) `IngestHandler` **không thuộc Task 11** — nó được thêm ở **Task 15** (mục
-> *"## Task 15: FastAPI app + route sources & registry"*, đoạn `Thêm \`IngestHandler\` vào
-> \`backend/app/pipeline/ingest.py\``), nên đây là
-> một phép chiếu tới task sau bị viết như đặc tả của task hiện tại; và (b) chữ ký nêu ra cũng sai:
+> (a) `IngestHandler` **không thuộc Task 11** — nó được thêm ở **Task 15** (mục "Task 15: FastAPI app +
+> route sources & registry", đoạn *"Thêm `IngestHandler` vào `backend/app/pipeline/ingest.py`"*), nên đây
+> là một phép chiếu tới task sau bị viết như đặc tả của task hiện tại; và (b) chữ ký nêu ra cũng sai:
 > chữ ký **đã ship** là
 > `IngestHandler(repos, *, audio_dir=None, media_root=None, specs=None, declared_default_asr=None)`
-> (`IngestHandler.__init__` trong `backend/app/pipeline/ingest.py`) — **không** có tham số `clock`, và ba tham số từ khoá cuối
-> chỉ `app/main.py` truyền (I-3, I-6). DOC-03 ("R53 = thông tin", ledger ghi *không làm gì*) tự đóng
-> kèm DOC-01: cùng một dòng, cùng một edit.
+> (`IngestHandler.__init__` trong `backend/app/pipeline/ingest.py`) — **không** có tham số `clock`, và ba
+> tham số từ khoá cuối chỉ `app/main.py` truyền (I-3, I-6). DOC-03 ("R53 = thông tin", ledger ghi
+> *không làm gì*) tự đóng kèm DOC-01: cùng một dòng, cùng một edit.
 
 - [ ] **Step 1: Viết test thất bại**
 
