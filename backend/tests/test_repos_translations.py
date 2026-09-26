@@ -133,3 +133,36 @@ def test_upsert_term_bumps_glossary_version_once_per_call(repos):
     assert repos.glossary_version() == first + 1
     repos.upsert_term(lang="zh", term="剑", translation="gươm", note="sửa", approved=True)
     assert repos.glossary_version() == first + 2
+    # Không có phương thức tăng version riêng: nếu có, tầng API sẽ gọi kèm và
+    # version tăng gấp đôi mỗi lần sửa glossary (mục hiệu chỉnh #2).
+    assert not hasattr(repos, "bump_glossary_version")
+
+
+def test_port_declares_the_translation_storage_methods():
+    """M-1 của review Task 18: `add_translation` chỉ có trên ADAPTER, không có
+    trên cổng — một phương thức production sắp cần lại không nằm trong giao
+    diện, nên handler/route buộc phải với tay xuống `SqliteRepos` (đúng thứ R74
+    cấm).
+
+    `Repos` là `Protocol` nên Python KHÔNG kiểm lúc chạy: thiếu khai báo vẫn
+    import và chạy được, chỉ lộ ra khi có người viết handler theo đúng cổng. Vì
+    vậy phải ghim bằng `dir()`.
+    """
+    from app.ports.repos import Repos
+
+    for name in ("add_translation", "get_translation", "update_translation_segments",
+                 "set_translation_status"):
+        assert name in dir(Repos), f"cổng Repos thiếu {name}"
+
+
+def test_set_status_rejects_the_error_argument_that_has_no_column(repos):
+    """Bảng `translations` KHÔNG có cột `error` (schema.py:30-44).
+
+    Lỗi của job nằm ở `jobs.error`. Nhận một tham số `error` rồi lặng lẽ bỏ qua
+    còn tệ hơn ném lỗi: `TranslateHandler` sẽ tưởng nó ghi được lý do hỏng.
+    """
+    tid = _transcript(repos)
+    tr_id = _translation(repos, tid)
+    with pytest.raises(TypeError):
+        repos.set_translation_status(tr_id, "failed", error="nổ")
+
