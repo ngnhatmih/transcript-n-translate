@@ -1696,8 +1696,17 @@ def parse_batch_response(raw: str, batch: list[Segment]) -> list[Segment]:
 
     # Duyệt theo batch để thứ tự đầu ra LUÔN bằng thứ tự đầu vào, kể cả khi model
     # trả mục xáo trộn.
-    return [Segment(i=s.i, start=s.start, end=s.end, text=got[s.i],
-                    words=s.words, speaker=s.speaker) for s in batch]
+    #
+    # ⚠️ HIỆU CHỈNH SAU KHI LÀM (Task 8 đã xong ở `fc32ca8`): bản đầu của dòng này
+    # dựng `Segment(i=…, start=…, end=…, text=…, words=…, speaker=…)` bằng tay, tức
+    # chỉ chép 6/13 trường và ÂM THẦM NUỐT `emotion`, `events`, `avg_logprob`,
+    # `no_speech_prob`, `suspect`, `t`, `qa` — ĐÚNG lỗi mà review Task 7 vừa bắt ở
+    # `fakes_mt.py`. Dùng `replace` mới đúng. (Review Task 8 xác nhận `suspect` còn
+    # bị lật `True` → `False`.) Ngoài ra bản đầu còn thiếu phép kiểm SỐ LƯỢNG mục
+    # (nên id trùng bị nuốt im lặng), ép `str()` lên `text` không phải chuỗi (ra phụ
+    # đề `"None"`), và để `int(item["i"])` ném `TypeError` trần — cả ba đã được vá ở
+    # `fc32ca8`; xem `review-task-8.md` cho bản sửa đúng.
+    return [replace(s, text=got[s.i]) for s in batch]
 ```
 
 - [ ] **Step 4: Chạy test để chắc chắn nó XANH**
