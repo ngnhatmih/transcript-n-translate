@@ -125,6 +125,12 @@ async def upload(file: UploadFile = File(...), lang: str = Form(DEFAULT_LANG),
         raise HTTPException(422, "tệp rỗng")
 
     digest = await run_in_threadpool(ingest.sha256_file, target)
+    # API-06 (R40): spec §8.1 ghi tên tệp là `<sha256>`, ở đây cố ý rút còn 16
+    # hex. Đây là QUYẾT ĐỊNH có ý thức, không phải sót: tên tệp ngắn, và 16 hex
+    # (64 bit) đủ chống trùng ở quy mô GĐ1a. Đổi sang 64 hex là đổi hợp đồng
+    # `media_path` (R37/StubIngest của Task 19 suy tên `.wav` từ nó) nên phải
+    # làm cùng lúc, không lẻ. Hợp đồng 16 ký tự được ghim bởi
+    # `test_upload_still_accepts_a_normal_filename`.
     stem = digest[:16]
     final = media_dir / f"{stem}{target.suffix}"
     # Tên theo nội dung: hai lần tải cùng một video dùng chung một tệp, và lần

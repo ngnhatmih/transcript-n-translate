@@ -12,14 +12,10 @@ from app.domain import job_state as js
 from app.domain.models import Job
 from app.ports.asr import ASREngine
 from app.ports.repos import Repos
-from app.registry import EngineSpec, by_id
+from app.registry import (MT_DEFAULT_SETTING, EngineSpec, by_id,
+                          default_mt_engine)
 
 AUTO_FORWARD_SETTING = "auto_forward"
-
-
-class EngineFactory:
-    def __call__(self, spec: EngineSpec) -> ASREngine:  # pragma: no cover - Protocol
-        raise NotImplementedError
 
 
 class TranscribeHandler:
@@ -30,11 +26,15 @@ class TranscribeHandler:
         engine_factory: Callable[[EngineSpec], ASREngine],
         *,
         workdir: str | pathlib.Path,
+        declared_default_mt: str | None = None,
     ) -> None:
         self._repos = repos
         self._specs = list(specs)
         self._factory = engine_factory
         self._workdir = pathlib.Path(workdir)
+        #: Khoá `default_mt` của registry (R58/WQ-02), do `main.py` nạp. Vắng nó
+        #: thì `_default_mt_engine` mới rơi về phần tử đầu của danh sách `mt`.
+        self._declared_default_mt = declared_default_mt
         self._engine: ASREngine | None = None
         self._engine_id: str | None = None
 
@@ -112,8 +112,15 @@ class TranscribeHandler:
         ))
 
     def _default_mt_engine(self) -> str | None:
-        configured = self._repos.get_setting("default_mt_engine")
-        if configured:
-            return configured
-        mt_specs = [s for s in self._specs if s.kind == "mt"]
-        return mt_specs[0].id if mt_specs else None
+        """Engine dịch mặc định — DỮ LIỆU, không phải thứ tự dòng trong registry.
+
+        R58/WQ-02: bản cũ lấy thẳng `mt_specs[0].id`, tức thứ tự mảng `mt` của
+        `registry.json` quyết định engine mặc định của cả pipeline (hiện ra đúng
+        `opus-mt` chỉ do may). Nay khoá `default_mt` do `main.py` nạp được ưu
+        tiên; chỉ khi registry không khai báo gì thì mới rơi về phần tử đầu.
+        """
+        return default_mt_engine(
+            self._specs,
+            declared=self._declared_default_mt,
+            configured=self._repos.get_setting(MT_DEFAULT_SETTING),
+        )

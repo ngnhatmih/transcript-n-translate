@@ -8,9 +8,8 @@ from __future__ import annotations
 import hashlib
 import json
 import pathlib
-import shutil
 import subprocess
-from typing import Callable, Iterable, Protocol
+from typing import Callable, Iterable
 
 from app.domain import job_state as _job_state
 from app.domain.models import Job
@@ -27,10 +26,6 @@ class IngestError(RuntimeError):
 AUDIO_SAMPLE_RATE = 16000
 AUDIO_CHANNELS = 1
 _CHUNK = 1024 * 1024
-
-
-class ProgressCallback(Protocol):
-    def __call__(self, fraction: float) -> None: ...
 
 
 def sha256_file(path: str | pathlib.Path) -> str:
@@ -145,19 +140,6 @@ def download_url(
 
 def _ytdlp_cmd(url: str, out_dir: pathlib.Path) -> list[str]:
     return ["yt-dlp", "--no-playlist", "-o", str(out_dir / "%(id)s.%(ext)s"), url]
-
-
-def find_local_media(directory: str | pathlib.Path, stem: str) -> pathlib.Path | None:
-    directory = pathlib.Path(directory)
-    for candidate in directory.glob(f"{stem}.*"):
-        if candidate.suffix.lower() not in {".wav", ".part", ".ytdl"}:
-            return candidate
-    return None
-
-
-def free_space_gb(path: str | pathlib.Path) -> float:
-    usage = shutil.disk_usage(str(path))
-    return usage.free / (1024 ** 3)
 
 
 #: Giữ tên cũ cho ai còn import; giá trị thật nằm ở `app.registry` (I-3).

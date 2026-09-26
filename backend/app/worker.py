@@ -110,6 +110,17 @@ class PhaseQueueWorker:
             # Hàng đợi rỗng thật sự: đây mới là lúc kết thúc vòng lặp.
             return False
 
+        # R43/WQ-01: `oldest_queued()` và `next_queued_for_phase()` phải giữ
+        # CÙNG một vị từ (`state = queued`) và cùng `ORDER BY id`; ở đây bốc
+        # thẳng job của `oldest_queued()` mà không hỏi lại truy vấn kia, nên
+        # thêm một bộ lọc (ví dụ theo `workspace`) vào MỘT trong hai sẽ khiến
+        # `tick()` chạy SAI job mà không có test nào đỏ — bất biến đó được ghim
+        # bởi `test_worker_phases.
+        # test_oldest_queued_and_next_queued_for_phase_agree_on_the_same_job`.
+        #
+        # Quyết định GĐ1a (đừng "sửa" nhầm): hàng đợi là FIFO TOÀN CỤC, KHÔNG
+        # lọc theo `workspace` — hai workspace dùng chung một worker và một GPU.
+        # Nếu sau này cần hàng đợi theo workspace thì phải lọc ở CẢ HAI truy vấn.
         self._enter_phase(nxt.phase)
         self._run_one(nxt)
         return True

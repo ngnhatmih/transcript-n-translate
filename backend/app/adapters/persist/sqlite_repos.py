@@ -37,9 +37,16 @@ class SqliteRepos:
     liệu lệch nhau mà không có gì cuốn lại.
     """
 
-    def __init__(self, db_path: str | pathlib.Path, *, clock: Clock) -> None:
+    def __init__(self, db_path: str | pathlib.Path, *, clock: Clock,
+                 log_dir: str | pathlib.Path | None = None) -> None:
         self.db_path = str(db_path)
         self._clock = clock
+        #: `None` = không ghi log ra tệp (test dựng repos trần, hành vi cũ). Có
+        #: giá trị thì mỗi job được một tệp `job-<id>.log` dưới thư mục này —
+        #: spec §5.5: log đầy đủ nằm ở TỆP, `jobs.log_tail` chỉ giữ 100 dòng
+        #: cuối cho UI. `main.py` truyền `config.LOG_DIR` (đã được
+        #: `ensure_dirs()` tạo), nên cột `log_path` không còn là trường chết.
+        self._log_dir = pathlib.Path(log_dir) if log_dir is not None else None
 
     # ---------- hạ tầng ----------
     def _connect(self) -> sqlite3.Connection:
@@ -337,13 +344,34 @@ class SqliteRepos:
                          (max(0.0, min(1.0, float(progress))), job_id))
 
     def append_job_log(self, job_id: int, line: str) -> None:
+        """Nối một dòng vào log của job: `log_tail` (cho UI) + TỆP nếu có `log_dir`.
+
+        `log_path` được gán ngay lần ghi log đầu tiên, nên cột đó (và hằng số
+        `dirs["log"]` của `app.state`) không còn là hợp đồng chết của spec §5.5.
+        Không có `log_dir` thì hành vi y hệt bản cũ: chỉ `log_tail`.
+        """
         with self._connect() as conn:
             row = conn.execute("SELECT log_tail FROM jobs WHERE id=?", (job_id,)).fetchone()
             if row is None:
                 raise NotFound(f"job {job_id} không tồn tại")
             lines = (row["log_tail"] + "\n" + line).splitlines()[-LOG_TAIL_LINES:]
-            conn.execute("UPDATE jobs SET log_tail=? WHERE id=?",
-                         ("\n".join(lines), job_id))
+            path = self._append_to_job_log_file(job_id, line)
+            if path is None:
+                conn.execute("UPDATE jobs SET log_tail=? WHERE id=?",
+                             ("\n".join(lines), job_id))
+            else:
+                conn.execute("UPDATE jobs SET log_tail=?, log_path=? WHERE id=?",
+                             ("\n".join(lines), str(path), job_id))
+
+    def _append_to_job_log_file(self, job_id: int, line: str) -> pathlib.Path | None:
+        """Ghi thêm một dòng vào `<log_dir>/job-<id>.log`; `None` nếu không có `log_dir`."""
+        if self._log_dir is None:
+            return None
+        path = self._log_dir / f"job-{job_id}.log"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8") as fh:
+            fh.write(line + "\n")
+        return path
 
     def request_cancel(self, job_id: int) -> None:
         with self._connect() as conn:

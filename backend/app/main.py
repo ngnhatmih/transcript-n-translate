@@ -15,7 +15,7 @@ from fastapi import FastAPI
 from app.adapters.clock_system import SystemClock
 from app.adapters.governor.single_gpu import SingleGpuGovernor
 from app.adapters.persist.sqlite_repos import SqliteRepos
-from app.adapters.registry_file import load_default_asr, load_registry
+from app.adapters.registry_file import load_default_asr, load_default_mt, load_registry
 from app.api.app import create_app
 from app.api.sse import JobEventBroker
 from app.config import (API_HOST, API_PORT, DB_PATH, HF_HOME, LOG_DIR, MEDIA_DIR,
@@ -39,7 +39,9 @@ def build_components():
     bao giờ nhận được gì — job chạy xong mà giao diện đứng im.
     """
     ensure_dirs()
-    repos = SqliteRepos(DB_PATH, clock=SystemClock())
+    # DC-03: `log_dir` biến `log_path` + `data/logs/job-<id>.log` của spec §5.5
+    # từ hợp đồng chết thành thứ chạy thật.
+    repos = SqliteRepos(DB_PATH, clock=SystemClock(), log_dir=LOG_DIR)
     repos.init_schema()
     specs = load_registry()
     governor = SingleGpuGovernor(repos)
@@ -57,7 +59,11 @@ def build_components():
         ) from exc
 
     transcribe_handler = TranscribeHandler(
-        repos, specs, engine_factory=_engine_factory, workdir=MEDIA_DIR
+        repos, specs, engine_factory=_engine_factory, workdir=MEDIA_DIR,
+        # R58/WQ-02: engine dịch mặc định là DỮ LIỆU của registry (`default_mt`),
+        # không phải thứ tự mảng `mt`. Thiếu dây này thì mặc định âm thầm quay về
+        # "phần tử đầu tiên", đúng lỗi mà khoá `default_mt` sinh ra để chặn.
+        declared_default_mt=load_default_mt(),
     )
     handlers = {
         # I-3 + I-6: handler thật nhận registry và gốc media; thiếu chúng thì nó

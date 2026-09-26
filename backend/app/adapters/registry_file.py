@@ -4,7 +4,7 @@ import json
 import pathlib
 
 from app.config import REGISTRY_PATH
-from app.registry import DEFAULT_ASR_KEY, EngineSpec
+from app.registry import DEFAULT_ASR_KEY, DEFAULT_MT_KEY, EngineSpec
 
 _KINDS = ("asr", "mt")
 
@@ -38,4 +38,16 @@ def load_default_asr(path: str | pathlib.Path | None = None) -> str | None:
     p = pathlib.Path(path) if path is not None else REGISTRY_PATH
     raw = json.loads(p.read_text(encoding="utf-8"))
     declared = raw.get(DEFAULT_ASR_KEY)
+    return str(declared) if declared else None
+
+
+def load_default_mt(path: str | pathlib.Path | None = None) -> str | None:
+    """Khoá `default_mt` của registry, hoặc `None` khi registry không khai báo (R58).
+
+    `None` KHÔNG có nghĩa là "không có mặc định": `app.registry.default_mt_engine`
+    rơi về phần tử ĐẦU của danh sách `mt` — đúng hành vi cũ, chỉ còn là điểm rơi.
+    """
+    p = pathlib.Path(path) if path is not None else REGISTRY_PATH
+    raw = json.loads(p.read_text(encoding="utf-8"))
+    declared = raw.get(DEFAULT_MT_KEY)
     return str(declared) if declared else None

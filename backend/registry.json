@@ -2,6 +2,8 @@
   "_ghi_chu": "Thêm model mới = sửa file này. KHÔNG hard-code ở pipeline hay giao diện. Frontend đọc qua GET /api/registry.",
   "_ghi_chu_default_asr": "I-3: engine ASR mặc định của mọi upload là DỮ LIỆU ở đây (đổi được không cần sửa code). Id phải có trong danh sách `asr` bên dưới, nếu không tiến trình sẽ từ chối khởi động kèm chỉ dẫn.",
   "default_asr": "fw-large-v3-turbo",
+  "_ghi_chu_default_mt": "R58: engine DỊCH mặc định khi auto_forward bật. Id phải có trong danh sách `mt` bên dưới. Không khai báo khoá này thì pipeline rơi về phần tử ĐẦU của mảng `mt` (thứ tự dòng), nên hãy khai báo tường minh.",
+  "default_mt": "opus-mt",
   "asr": [
     {
       "id": "fw-large-v3-turbo",

@@ -61,8 +61,12 @@ def by_id(specs: Iterable[EngineSpec], engine_id: str) -> EngineSpec:
 #: Khoá trong `registry.json` khai báo engine ASR mặc định.
 DEFAULT_ASR_KEY = "default_asr"
 
+#: Khoá trong `registry.json` khai báo engine DỊCH mặc định (R58).
+DEFAULT_MT_KEY = "default_mt"
+
 #: Khoá trong bảng `settings` cho phép người dùng đè lên khai báo của registry.
 ASR_DEFAULT_SETTING = "default_asr_engine"
+MT_DEFAULT_SETTING = "default_mt_engine"
 
 #: Giá trị dùng khi registry KHÔNG khai báo `default_asr` (giữ nguyên hành vi
 #: của GĐ1a). Nó chỉ là ĐIỂM RƠI, không phải nguồn: hàm dưới vẫn phải chứng minh
@@ -107,3 +111,25 @@ def default_asr_engine(specs: Iterable[EngineSpec], *, declared: str | None = No
 def estimate_vram_mb(specs: Iterable[EngineSpec], engine_ids: Iterable[str]) -> int:
     specs = list(specs)
     return sum(by_id(specs, eid).vram_mb for eid in engine_ids)
+
+
+def default_mt_engine(specs: Iterable[EngineSpec], *, declared: str | None = None,
+                      configured: str | None = None) -> str | None:
+    """Engine DỊCH mặc định — chọn từ DỮ LIỆU, không từ thứ tự dòng (R58).
+
+    Thứ tự ưu tiên: setting của người dùng (`configured`) -> khai báo
+    `default_mt` của registry (`declared`) -> phần tử ĐẦU của danh sách `mt`
+    (hành vi cũ, nay chỉ còn là điểm rơi khi registry không khai báo gì).
+
+    Vì sao cần dấu hiệu tường minh: trước bản vá chỉ có nhánh cuối, nên đảo thứ
+    tự mảng `mt` trong `registry.json` — hoặc thêm một model Ollama 5200 MB lên
+    đầu — là đổi engine mặc định của cả pipeline một cách im lặng, không test
+    nào ghim. Không ném khi id vắng trong registry: job `translate` của GĐ1a vốn
+    chưa có handler, nên hỏng ở worker mới là chỗ báo đúng.
+    """
+    if configured:
+        return configured
+    if declared:
+        return declared
+    mt_specs = [s for s in specs if s.kind == "mt"]
+    return mt_specs[0].id if mt_specs else None
