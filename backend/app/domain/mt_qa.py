@@ -23,28 +23,34 @@ from .models import Segment, Term
 class QaLimits:
     max_cps: float = 21.0          # ký tự mỗi giây; trên ngưỡng là khó đọc
     min_len_ratio: float = 0.25    # bản dịch ngắn hơn thế này là cụt
-    max_len_ratio: float = 4.0     # dài hơn thế này là lan man / lặp
+    # ĐÚNG bằng `qa_rules.LENGTH_RATIO_MAX` (5.0), và cùng phép đo — giữ hai con
+    # số này lệch nhau là tự mâu thuẫn. Số đo ghi ở `qa_rules.py:13-19`: fixture
+    # 6 -> 26 ký tự = 4.33, nên 4.0 vẫn cờ nhầm một bản dịch đúng; 5.0 qua cả
+    # hai fixture mà vẫn bắt được ca bịa/lặp (~159 lần).
+    max_len_ratio: float = 5.0     # dài hơn thế này là lan man / lặp
 
 
 def _window(src: Segment, out: Segment) -> float:
-    """Thời lượng dùng để tính CPS, tính bằng giây.
+    """Thời lượng dùng để tính CPS, tính bằng giây: cửa sổ của segment NGUỒN.
 
-    Cửa sổ của BẢN DỊCH là thứ quyết định: đó là khoảng thời gian dòng chữ thật
-    sự nằm trên màn hình, nên CPS phải đo trên nó. Segment nguồn không cứu được
-    một bản dịch không có cửa sổ riêng, và cũng không nên: nếu engine trả
-    `start == end` thì dòng phụ đề đó không có thời lượng hiển thị nào cả.
+    Cửa sổ NGUỒN là khoảng thời gian người xem thật sự thấy dòng dịch:
+    `subtitle_format.to_srt/to_vtt/to_ass` ghi mốc `seg.start --> seg.end` của
+    `segments` NGUỒN và chỉ tra bản dịch theo VỊ TRÍ (`subtitle_format.py:56-64`
+    và `:71-78`; `pipeline/export.py:80` bắt `len(translations) ==
+    len(transcript.segments)`). Đo CPS trên cửa sổ của chính bản dịch là đo một
+    khoảng không ai thấy — cùng một dòng có thể bị tốc độ sai chỉ vì engine trả
+    mốc thời gian khác.
 
-    Chỉ khi bản dịch có cửa sổ dương mới xét tới nguồn, và khi đó nguồn chỉ dùng
-    để KẸP LÊN: một cửa sổ dài hơn thực tế làm CPS trông thấp giả tạo, nên lấy
-    cửa sổ NGẮN hơn (bảo thủ hơn) giữa hai vế.
+    Cửa sổ bản dịch chỉ là DỰ PHÒNG khi cửa sổ nguồn không dương (dữ liệu nguồn
+    hỏng): vẫn còn hơn là không đo được gì.
 
-    Trả `0.0` khi bản dịch không có cửa sổ dương: CPS không đo được.
+    Trả `0.0` chỉ khi CẢ HAI cửa sổ đều không dương — lúc đó CPS thật sự không
+    đo được và bên gọi báo `nowindow` thay vì bịa ra một con số.
     """
-    out_window = out.end - out.start
-    if out_window <= 0:
-        return 0.0
     src_window = src.end - src.start
-    return min(out_window, src_window) if src_window > 0 else out_window
+    if src_window > 0:
+        return src_window
+    return out.end - out.start
 
 
 def qa_translation(src: list[Segment], out: list[Segment], *, glossary: list[Term],
@@ -75,12 +81,13 @@ def qa_translation(src: list[Segment], out: list[Segment], *, glossary: list[Ter
 
         duration = _window(s, t)
         if duration <= 0:
-            # 0 giây là DỮ LIỆU HỎNG, không phải "hơi nhanh": dòng phụ đề không
-            # có cửa sổ hiển thị thì không ai đọc được. Báo bất kể `max_cps`, và
-            # báo thay vì để ZeroDivisionError giết cả job dịch. Chuỗi vẫn bắt
-            # đầu bằng `cps:{id}=` như mọi issue CPS khác, kèm `0.0s` để người
-            # đọc thấy ngay đây không phải một con số đo được.
-            issues.append(f"cps:{s.i}=0.0s/{len(text)}c")
+            # KHÔNG có cửa sổ dương nào để đo (cả nguồn lẫn bản dịch đều <= 0):
+            # đây là DỮ LIỆU HỎNG, không phải "hơi nhanh". Báo bất kể `max_cps`,
+            # và báo thay vì để ZeroDivisionError giết cả job dịch. Chuỗi vẫn bắt
+            # đầu bằng `cps:{id}=` như mọi issue CPS khác, nhưng ghi `nowindow`
+            # kèm số ký tự: KHÔNG in một thời lượng chưa từng đo được (`0.0s` cho
+            # một cửa sổ âm là con số bịa), và nói rõ đây không phải một tốc độ.
+            issues.append(f"cps:{s.i}=nowindow/{len(text)}c")
         elif len(text) / duration > limits.max_cps:
             issues.append(f"cps:{s.i}={len(text) / duration:.1f}>{limits.max_cps}")
 
