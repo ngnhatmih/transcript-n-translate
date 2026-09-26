@@ -4152,3 +4152,96 @@ git commit -m "test(e2e): nghiem thu dau-cuoi workspace 2 + tai lieu"
 HY-MT1.5 · chế độ Chimera · toàn bộ frontend · glossary tự đề xuất bằng LLM · dịch sang đích ngôn ngữ khác `vi` ·
 bỏ route export cũ.
 
+---
+
+### Task 18: Ghi `glossary_version` vào bản dịch khi dịch lại
+
+> **Task này được MỞ SAU, từ review Task 14 (mục F1, mức Critical).** Reviewer ruling rằng nó **không** được sửa
+> trong Task 14 (sai tệp), và **cũng không** thuộc Task 15 (approve/export) hay Task 16 (Ollama + smoke) — nên nó
+> phải có chủ sở hữu riêng. Đây là chủ sở hữu đó.
+
+**Vấn đề đã đo được:** spec §8.1 nói `translations.glossary_version` là **dấu vết duy nhất** cho biết một bản dịch
+đã dùng glossary nào. Route glossary (Task 14) đặt `glossary_version` vào payload của job dịch lại — nhưng
+`TranslateHandler.run` **chỉ đọc năm khoá** và `set_translation_status` **không ghi được cột đó**. Đo thật: một bản
+dịch tạo ở version 0, được dịch lại sau khi glossary đổi, **vẫn giữ giá trị cũ**. Nghĩa là dấu vết nói dối.
+
+**Files:**
+- Modify: `backend/app/ports/repos.py` — thêm `glossary_version` vào `set_translation_status`
+- Modify: `backend/app/adapters/persist/sqlite_repos.py:309-329` — thêm vào vòng `sets`/`args`
+- Modify: `backend/app/pipeline/translate.py` — ghi version **lúc handler dựng glossary**
+- Test: `backend/tests/test_translate_handler.py` + `backend/tests/test_repos_translations.py`
+
+**Interfaces:**
+- Consumes: `repos.glossary_version() -> int` · `repos.list_terms(*, lang=None)` · `approved(terms)`
+- Produces: `set_translation_status(translation_id: int, status: str, *, qa_issues=None, tokens_in=None,
+  tokens_out=None, duration_ms=None, glossary_version: int | None = None) -> None` — `None` vẫn nghĩa là "không đụng
+  cột đó", đúng quy ước đã có.
+
+- [ ] **Step 1: Viết test đỏ ở tầng repo**
+
+```python
+def test_set_status_can_record_the_glossary_version_used(repos):
+    tid = _transcript(repos)
+    tr_id = repos.add_translation(transcript_id=tid, transcript_version=1,
+                                  engine="opus-mt", segments=[], prompt_version="p1",
+                                  glossary_version=0)
+    repos.set_translation_status(tr_id, "done", glossary_version=7)
+    assert repos.get_translation(tr_id).glossary_version == 7
+
+
+def test_set_status_without_glossary_version_leaves_it_alone(repos):
+    """`None` = không đụng cột, KHÔNG phải ghi NULL — cùng quy ước với token/qa."""
+    tid = _transcript(repos)
+    tr_id = repos.add_translation(transcript_id=tid, transcript_version=1,
+                                  engine="opus-mt", segments=[], prompt_version="p1",
+                                  glossary_version=7)
+    repos.set_translation_status(tr_id, "failed", tokens_in=5)
+    got = repos.get_translation(tr_id)
+    assert got.glossary_version == 7 and got.tokens_in == 5
+```
+
+- [ ] **Step 2: Chạy để chắc chắn ĐỎ** — `python -B -m pytest tests/test_repos_translations.py -k glossary_version`
+  Kỳ vọng: `TypeError: set_translation_status() got an unexpected keyword argument 'glossary_version'`.
+
+- [ ] **Step 3: Thêm tham số vào port và adapter**
+
+Trong `ports/repos.py`, thêm `glossary_version: int | None = None` vào chữ ký. Trong `sqlite_repos.py`, thêm cặp
+`("glossary_version", glossary_version)` vào **chính vòng lặp** `sets`/`args` đang có — vòng lặp đó đã bỏ qua `None`,
+nên quy ước "None = không đụng" tự động đúng.
+
+- [ ] **Step 4: Test đỏ ở tầng handler**
+
+```python
+def test_retranslation_records_the_glossary_version_it_actually_used(repos, transcript):
+    """Dấu vết phải là version ĐỌC LÚC CHẠY, không phải giá trị trong payload.
+
+    `job.payload` là ảnh chụp lúc enqueue; nếu một lần sửa glossary khác xen vào
+    trước khi job chạy thì payload đã CŨ. Vì vậy handler phải đọc
+    `repos.glossary_version()` ngay chỗ nó dựng `glossary = approved(...)`.
+    """
+    tid, _ = transcript
+    tr_id = repos.add_translation(transcript_id=tid, transcript_version=1,
+                                  engine="fake-mt", segments=[], prompt_version="p1",
+                                  glossary_version=0)
+    repos.upsert_term(lang="zh", term="câu 1", translation="cau 1",
+                      note=None, approved=True)          # bump version
+    expected = repos.glossary_version()
+    _handler(repos, FakeMtEngine(), batch_chars=1).translate(
+        translation_id=tr_id, transcript_id=tid, engine_id="fake-mt",
+        source_lang="zh", target_lang="vi", job=_Job())
+    assert repos.get_translation(tr_id).glossary_version == expected >= 1
+```
+
+- [ ] **Step 5: Sửa handler** — trong `translate()`, ngay sau khi dựng `glossary = approved(...)`, giữ
+  `glossary_version = self._repos.glossary_version()`; và trong lời gọi `set_translation_status(..., "done", ...)`
+  truyền `glossary_version=glossary_version`. **Không** đọc từ `job.payload`.
+
+- [ ] **Step 6: Chạy để chắc chắn XANH**, rồi cả suite. Kỳ vọng: baseline **766 passed** không giảm.
+
+- [ ] **Step 7: Mutation** — bỏ `glossary_version=glossary_version` khỏi lời gọi `set_translation_status` ⇒ test Step 4
+  phải đỏ. Đổi sang đọc từ `job.payload` ⇒ phải đỏ nếu payload thiếu khoá, và **ghi rõ** trong báo cáo là mutation đó
+  có giết được không (nếu không thì nói thẳng vì sao). Phục hồi, verify **hash + byte trong không gian chuẩn hoá +
+  `git diff --quiet HEAD`**.
+
+- [ ] **Step 8: Commit** — `feat(translate): ghi glossary_version thuc dung vao ban dich`.
+
