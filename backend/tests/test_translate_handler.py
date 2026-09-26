@@ -127,10 +127,10 @@ def _noop(_progress, _line):
     pass
 
 
-def _call(handler, repos, tr_id, tid, engine_id="fake-mt", job=None):
+def _call(handler, repos, tr_id, tid, engine_id="fake-mt", job=None, report=_noop):
     handler.translate(translation_id=tr_id, transcript_id=tid, engine_id=engine_id,
                       source_lang="zh", target_lang="vi", job=job or _Job(),
-                      report=_noop)
+                      report=report)
 
 
 def test_handles_translate(repos):
@@ -320,6 +320,23 @@ def test_cancel_on_the_last_batch_writes_nothing_more_and_leaves_status_cancelle
     assert got.status == "cancelled"
     assert [s.i for s in got.segments] == [1, 2, 3, 4]
     assert got.qa_issues == [], "huỷ thì không được ghi QA của một bản dịch chưa xong"
+
+
+def test_each_segment_failure_is_logged_with_its_own_id(repos, transcript):
+    """Dòng log lúc hỏng phải nói ĐÚNG id vừa hỏng, không phải id nào khác.
+
+    Thông báo lỗi cuối cùng chỉ nói "còn thiếu id nào"; dòng log giữa đường mới
+    là chỗ duy nhất nói id nào VỪA hỏng và vì sao, nên nó cũng là chỗ duy nhất
+    phân biệt được "hỏng ở 3" với "hỏng ở 5".
+    """
+    tid, _ = transcript
+    tr_id = _translation(repos, tid)
+    seen = []
+    with pytest.raises(RuntimeError):
+        _call(_handler(repos, FakeMtEngine(drop_ids={3}), batch_chars=1),
+              repos, tr_id, tid, report=lambda p, line: seen.append(line))
+    assert any("segment 3" in line for line in seen), seen
+    assert not any("segment 5 thất bại" in line for line in seen)
 
 
 def test_retry_resumes_from_first_missing_segment(repos, transcript):
