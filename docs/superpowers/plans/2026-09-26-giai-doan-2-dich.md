@@ -2764,6 +2764,68 @@ git commit -m "feat(pipeline): TranslateHandler voi checkpoint, alignment 3 buoc
 
 ### Task 12: Registry + nối dây vào composition root
 
+> 🔴 **HIỆU CHỈNH BẮT BUỘC CHO TASK NÀY — ĐỌC HẾT TRƯỚC KHI VIẾT. Phần code bên dưới SAI ở nhiều chỗ; mục này thắng.**
+>
+> **A. Hình dạng THẬT của composition root (đã đọc mã, không suy đoán):**
+> - `build_components()` trả **tuple 4 phần tử** `(repos, specs, worker, broker)` — `main.py:112`. **Không** dataclass.
+>   ⇒ Mở rộng thành **tuple 5 phần tử** thêm `mt_engines` ở cuối, và cập nhật **mọi** chỗ unpack trong test
+>   (`tests/test_api_sources.py`, `tests/test_e2e_fake.py`) — đừng thêm shim tương thích.
+> - `build_app(repos, specs, worker, broker) -> FastAPI` — `main.py:115`, **tham số vị trí**. Thêm `mt_engines` vào cuối.
+> - `create_app(*, repos, specs, media_dir, out_dir, worker=, log_dir=, broker=)` — `api/app.py:22`. Tham số là
+>   **`specs: list[EngineSpec]`**, không phải `registry`.
+> - Dependency thật là **`get_specs`** (`api/deps.py:17`) trả `list[EngineSpec]`. **Không có** `get_registry`.
+> - Tra engine theo id: **`app.registry.by_id(specs, engine_id)`** (`registry.py:54`).
+> - `PhaseQueueWorker` nhận `handlers` là **dict khoá theo `handles()`** (`main.py:83-93`), không phải list.
+> - `load_registry` nằm ở **`app/adapters/registry_file.py:12`**, không phải `app/registry.py`.
+>
+> **B. `EngineSpec` (`registry.py:19-37`) có ĐÚNG các trường:** `id, label, kind ('asr'|'mt'), runtime
+> ('inprocess'|'ollama'), model_ref, vram_mb, langs, capabilities: dict, opts: dict` + property `phase_key`.
+> **KHÔNG có** `workspace`, `available`, `prompt_version`. Hệ quả:
+> - "engine dịch" nhận biết bằng **`spec.kind == "mt"`**.
+> - Sẵn sàng hay không: ghi vào **`spec.capabilities["available"]`** lúc dựng (dict này sửa được tại chỗ dù dataclass
+>   `frozen`). `runtime == "ollama"` ⇒ dò sống; `runtime == "inprocess"` ⇒ `True`.
+> - Hỗ trợ glossary: **`spec.capabilities["glossary_prompt"]`** — truyền vào `OllamaMtEngine(supports_glossary=…)`.
+> - Phiên bản prompt: **`PROMPT_VERSION[spec.id]`** từ `adapters/mt/prompts.py`.
+> - Khoá giai đoạn: dùng luôn **`spec.phase_key`**, đừng tự nối chuỗi.
+>
+> **C. BỎ HẲN Step 3 của task này.** Step 3 bảo thêm ba entry engine vào một mảng `engines` — **cả hai đều sai**:
+> `registry.json` **không có** khoá `engines` (nó có mảng theo `kind`: `asr`, `mt`), và mảng **`mt` ĐÃ CÓ ĐỦ**
+> `opus-mt`, `qwen2.5-3b`, `qwen2.5-7b`, `hy-mt-1.5-7b` với `capabilities.glossary_prompt`/`glossary_patch`/`chimera`/
+> `batch_json`. `default_mt` **đã** là `"opus-mt"`. ⇒ Làm theo Step 3 là **NHÂN BẢN ENTRY**. **Không sửa
+> `registry.json`** trừ khi bạn tìm ra một khiếm khuyết thật — và nếu có thì **báo lại**, đừng tự sửa im lặng.
+>
+> **D. Khoá `mt_engines` theo `spec.id`, KHÔNG theo `engine_id`.** Đo ở Task 10: quy tắc suy `engine_id` từ tag
+> **không** tái tạo được id registry cho HY-MT (`hy-mt1.5-7b-q4_K_M` vs `hy-mt-1.5-7b`) ⇒ khoá theo `engine_id`
+> sẽ `KeyError` khi có người chọn HY-MT.
+>
+> **E. `auto_forward` — chỗ này là TÍCH HỢP THẬT, không phải thêm handler:**
+> - `main.py:109-110` đang **ép `auto_forward = "0"`** vì Giai đoạn 1a chưa có handler `translate`. **Nay có rồi** ⇒
+>   đổi mặc định sang **`"1"`**, vẫn **chỉ ghi khi chưa ai đặt** để không đè lựa chọn của người dùng.
+> - **`TranscribeHandler._forward_to_translation` (`pipeline/transcribe.py:106`) ĐÃ TỒN TẠI** và
+>   `_default_mt_engine` ở `:114`. Nó phải được sửa để: **tạo dòng `translations` TRƯỚC**, rồi tạo job `translate` với
+>   payload mới (`translation_id`, `transcript_id`, `engine_id`, `source_lang`, `target_lang`) — đúng khoá mà
+>   `TranslateHandler.run` đọc. **Không sửa** thì mọi job dịch tự sinh sẽ hỏng payload và ném `KeyError` trong handler.
+>   Đọc `pipeline/translate.py` (Task 11 đã ship) để lấy **đúng** tên khoá, đừng đoán.
+>
+> **F. Nối `TranslateHandler` và đăng ký releaser:**
+> - Dựng `mt_engines = {spec.id: engine}` cho mọi `spec.kind == "mt"` mà `available`.
+> - `TranslateHandler(repos, mt_engines)` vào **dict** handler dưới khoá `"translate"`.
+> - Đăng ký releaser cho **mỗi** engine dịch: `governor.register(spec.phase_key, engine.release)`. Releaser **bắt
+>   buộc idempotent** — cả hai engine đã được test đúng như vậy.
+>
+> **G. Luật chung của phase này:**
+> - **KHÔNG dựng `Segment(...)` bằng tay** ở bất cứ đâu (hai task đã ship lỗi đó, nuốt 7/13 trường; dùng
+>   `dataclasses.replace` nếu cần).
+> - **Với hành vi đi qua worker/API, test phải đi qua ĐƯỜNG THẬT** (`PhaseQueueWorker` + `SqliteRepos`) — không gán
+>   thẳng trường của đối tượng giả. Task 11 có một test huỷ **tự thoả mãn** vì gán thẳng `job.cancel_requested`, và
+>   nó xanh trong khi production huỷ **không hoạt động**.
+> - Brief **không** dự đoán số test (bảy dự đoán của tôi đã sai). Báo số **thật**; mỗi test chạy mutation rồi báo
+>   **kết quả quan sát được**.
+> - Phục hồi mutation phải kiểm **cả hash LẪN byte**. Sandbox từ chối `$env:TEMP` **và** mọi ghi ngoài workspace —
+>   scratch để trong workspace nhưng ngoài cây repo, rồi xoá.
+> - Ollama **đang chạy** trên máy này với model `qwen2.5:3b-instruct-q4_K_M` đã pull ⇒ `available` của nó **sẽ là
+>   `True`**; test của bạn phải chịu được cả hai giá trị, đừng hardcode.
+
 **Files:**
 - Modify: `backend/app/registry.py`
 - Modify: `backend/registry.json`
