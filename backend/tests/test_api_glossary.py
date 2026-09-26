@@ -428,6 +428,11 @@ def test_the_retranslate_job_is_consumed_by_the_real_handler(wired):
     # Năm khoá handler ĐỌC phải có mặt với đúng giá trị; thừa/thiếu một khoá là
     # job chết `KeyError` ở tận worker, sau khi hàng đã được ghi.
     assert HANDLER_PAYLOAD_KEYS <= set(job.payload), job.payload
+    # Khoá `glossary_version` (spec §8.1) phải được ghim THEO TÊN: phép so
+    # tập-con ở trên không đỏ khi khoá này biến mất, nên nó từng sống sót qua
+    # đúng mutant "payload bỏ glossary_version". Giá trị là version đọc LÚC XẾP
+    # JOB — ở đây chỉ có một lần ghi nên nó bằng version hiện tại của glossary.
+    assert job.payload["glossary_version"] == repos.glossary_version() == 1
     assert job.payload["translation_id"] == tr_id
     assert job.payload["transcript_id"] == tid
     assert job.payload["engine_id"] == INPROCESS_ENGINE_ID

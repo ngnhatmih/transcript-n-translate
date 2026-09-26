@@ -111,7 +111,16 @@ def _recompute_affected(repos, *, lang: str, old: list[Term],
 
 
 def _enqueue_retranslate(repos, *, affected: list[int], lang: str) -> list[int]:
-    """Sinh job "Dịch lại · do glossary đổi" cho bản dịch của transcript bị ảnh hưởng.
+    """Sinh job "Dịch lại · do glossary đổi" cho MỌI bản dịch của transcript bị ảnh hưởng.
+
+    KHÔNG lọc theo `status`: hàng đang `queued`/`running`/`failed` tại lúc
+    glossary đổi vẫn phải chạy lại. Một bộ lọc `status == "done"` sẽ bỏ IM LẶNG
+    đúng những bản dịch chưa xong — tức là những hàng duy nhất còn có thể dịch
+    sai — nên ở đây chấp nhận cái giá: một hàng chưa xong có thể nhận hai job,
+    job thừa chỉ tốn thêm một lượt engine. Đây là lựa chọn có chủ ý, "job trùng"
+    thay vì "bản dịch bị bỏ quên", và cũng không có idempotency guard:
+    `TranslateHandler` đọc lại glossary HIỆN TẠI lúc nó chạy, nên hai job cho
+    cùng một hàng tính ra cùng một kết quả.
 
     `affected` là id TRANSCRIPT do `_recompute_affected` trả về, và mọi id trong
     đó đều thuộc `lang` (đó là điều kiện để lọt vào danh sách), nên
