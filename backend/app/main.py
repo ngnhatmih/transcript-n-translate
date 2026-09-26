@@ -27,8 +27,9 @@ from app.pipeline.export import ExportHandler
 from app.pipeline.ingest import IngestHandler
 from app.pipeline.transcribe import AUTO_FORWARD_SETTING, TranscribeHandler
 from app.pipeline.translate import TranslateHandler
-from app.registry import (ASR_DEFAULT_SETTING, MT_DEFAULT_SETTING,
-                          default_asr_engine, default_mt_engine, ollama_available)
+from app.registry import (ASR_DEFAULT_SETTING, DEFAULT_MT_KEY, MT_DEFAULT_SETTING,
+                          by_id, default_asr_engine, default_mt_engine,
+                          ollama_available)
 from app.worker import PhaseQueueWorker
 
 #: `auto_forward` nay mặc định BẬT: từ Task 12 đã có handler `translate` thật,
@@ -140,8 +141,8 @@ def build_components():
     # định cùng họ mà khác bảo đảm là bất nhất quán.
     declared_mt = load_default_mt()
     try:
-        default_mt_engine(specs, declared=declared_mt,
-                          configured=repos.get_setting(MT_DEFAULT_SETTING))
+        mt_engine_id = default_mt_engine(specs, declared=declared_mt,
+                                         configured=repos.get_setting(MT_DEFAULT_SETTING))
     except KeyError as exc:
         raise RuntimeError(
             f"cấu hình engine dịch mặc định không dùng được: {exc}"
@@ -150,6 +151,41 @@ def build_components():
     # Task 12: `available` phải có TRƯỚC khi dựng engine, vì nó quyết định engine
     # nào tồn tại. Dò ở đây (một lần) chứ không ở mỗi request.
     _mark_availability(specs)
+
+    # Correction C của Task 13 (Important mang từ Task 12): TỒN TẠI là chưa đủ —
+    # engine mặc định còn phải SẴN SÀNG. `available=False` chỉ đóng dropdown của
+    # giao diện, nó KHÔNG đóng đường setting/`default_mt`: đặt
+    # `MT_DEFAULT_SETTING='hy-mt-1.5-7b'` trên máy chưa pull model đó vẫn sinh
+    # một hàng `translations` (`engine='hy-mt-1.5-7b'`, `status='queued'`) rồi job
+    # chết `KeyError` ở tận worker — đo thật ở re-review Task 12. Cùng bài học
+    # I-3: *fail ở chỗ sớm nhất*. Phép kiểm đứng SAU `_mark_availability` vì cờ
+    # đó là thứ nó đọc.
+    #
+    # `default_mt` đã ship là `opus-mt` (`runtime == "inprocess"` ⇒ luôn
+    # `available`), nên khởi động bình thường không đổi hành vi.
+    if mt_engine_id is not None and not by_id(
+            specs, mt_engine_id).capabilities.get("available"):
+        raise RuntimeError(
+            f"engine dịch mặc định {mt_engine_id!r} không sẵn sàng: nó có trong "
+            f"registry nhưng model chưa được pull hoặc runtime không phục vụ "
+            f"được. Sửa {DEFAULT_MT_KEY!r} trong registry.json hoặc setting "
+            f"{MT_DEFAULT_SETTING!r} sang một engine đang sẵn sàng "
+            f"(GET /api/registry trả `available` cho từng engine)."
+        )
+
+    # Task 13 (correction B): `prompt_version` là DỮ LIỆU DẪN XUẤT của
+    # composition root, tính MỘT lần ở đây rồi đặt cạnh `available` trong
+    # `spec.capabilities`. Route bản dịch KHÔNG được import `app.adapters` (đã có
+    # test canh: `test_api_layer_does_not_import_adapters`), nên đây là chỗ duy
+    # nhất nối `adapters/mt/prompts.py` với tầng HTTP. `TranscribeHandler` nhận
+    # CÙNG dict này — hai nơi cùng ghi `translations.prompt_version` thì phải đọc
+    # cùng một nguồn, không phải hai bản sao của cùng một biểu thức.
+    prompt_versions = {spec.id: PROMPT_VERSION.get(spec.id, "unknown")
+                       for spec in specs if spec.kind == "mt"}
+    for spec in specs:
+        if spec.kind == "mt":
+            spec.capabilities["prompt_version"] = prompt_versions[spec.id]
+
     mt_engines = _build_mt_engines(specs)
 
     transcribe_handler = TranscribeHandler(
@@ -160,9 +196,10 @@ def build_components():
         declared_default_mt=declared_mt,
         # `_forward_to_translation` phải tạo hàng `translations` kèm
         # `prompt_version`, mà giá trị đó là dữ liệu của `adapters/mt/prompts.py`
-        # — composition root là chỗ duy nhất được phép biết adapter.
-        prompt_versions={spec.id: PROMPT_VERSION.get(spec.id, "unknown")
-                         for spec in specs if spec.kind == "mt"},
+        # — composition root là chỗ duy nhất được phép biết adapter. Dùng LẠI
+        # đúng dict đã đặt vào `spec.capabilities` ở trên: hai đường cùng ghi
+        # `translations.prompt_version` mà tính riêng thì chúng trôi khỏi nhau.
+        prompt_versions=prompt_versions,
     )
     handlers = {
         # I-3 + I-6: handler thật nhận registry và gốc media; thiếu chúng thì nó

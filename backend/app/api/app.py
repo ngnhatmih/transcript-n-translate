@@ -50,12 +50,18 @@ def create_app(*, repos, specs: list[EngineSpec], media_dir, out_dir,
     )
 
     from app.api import (routes_export, routes_jobs, routes_media,
-                         routes_registry, routes_sources, routes_transcripts)
+                         routes_registry, routes_sources, routes_transcripts,
+                         routes_translations)
 
     app.include_router(routes_registry.router)
     app.include_router(routes_sources.router)
     app.include_router(routes_media.router)
     app.include_router(routes_transcripts.router)
     app.include_router(routes_export.router)
+    # Task 13: `prefix="/api/translations"` là tiền tố TĨNH, không đụng route
+    # `/{...}` động của các router khác, nên thứ tự ở đây không phải chuyện đúng
+    # sai — nhưng vẫn đặt cạnh nhóm route tài nguyên (trước `routes_jobs`) để tệp
+    # này đọc như một danh sách tài nguyên.
+    app.include_router(routes_translations.router)
     app.include_router(routes_jobs.router)
     return app

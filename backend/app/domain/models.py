@@ -161,6 +161,11 @@ class TranslationSummary:
 
     Không phải `Translation` rút gọn: `Translation.segments` là trường BẮT BUỘC,
     nên nhét `[]` vào đó là bịa ra một bản dịch rỗng.
+
+    `status` (Task 13) có mặt vì route danh sách bản dịch trả nó cho giao diện:
+    một job vừa được xếp và một bản dịch đã xong trông y hệt nhau nếu thiếu nó,
+    mà giao diện Workspace 2 phân biệt hai thứ đó. Trường này KHÔNG làm hỏng lý do
+    tồn tại của lớp này — thứ bị bỏ lại vẫn là `segments`.
     """
     id: int | None
     transcript_id: int
@@ -168,6 +173,7 @@ class TranslationSummary:
     engine: str
     target_lang: str
     prompt_version: str
+    status: str = "queued"
     created_at: str = ""
 
 

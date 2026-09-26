@@ -344,7 +344,7 @@ class SqliteRepos:
         with self._connect() as conn:
             rows = conn.execute(
                 "SELECT id, transcript_id, transcript_version, engine, target_lang,"
-                " prompt_version, created_at FROM translations"
+                " prompt_version, status, created_at FROM translations"
                 " WHERE transcript_id=? ORDER BY id DESC",
                 (transcript_id,),
             ).fetchall()
@@ -352,7 +352,7 @@ class SqliteRepos:
             id=r["id"], transcript_id=r["transcript_id"],
             transcript_version=r["transcript_version"], engine=r["engine"],
             target_lang=r["target_lang"], prompt_version=r["prompt_version"],
-            created_at=r["created_at"],
+            status=r["status"], created_at=r["created_at"],
         ) for r in rows]
 
     # ---------- jobs ----------

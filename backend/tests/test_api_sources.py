@@ -26,7 +26,7 @@ from app.adapters.persist.sqlite_repos import SqliteRepos
 from app.api.app import create_app
 from app.domain import job_state as js
 from app.domain.models import Job, Segment, Source
-from app.registry import EngineSpec
+from app.registry import EngineSpec, by_id
 from tests.fakes import RecordingHandler, a_job
 
 
@@ -703,7 +703,7 @@ MT_SPEC = EngineSpec(id="qwen2.5-7b", label="Qwen", kind="mt", runtime="ollama",
 
 
 def _registry_with_the_shipped_mt_default(specs: list[EngineSpec]) -> list[EngineSpec]:
-    """Registry giả + id `default_mt` THẬT, khi danh sách chưa có nó.
+    """Registry giả + engine mặc định THẬT, khi danh sách chưa có nó.
 
     WQ-02/F3: composition root nay đối chiếu id mặc định với chính `specs` và
     hỏng NGAY lúc dựng khi không khớp, nên một registry rút gọn phải TỰ NHẤT
@@ -711,13 +711,27 @@ def _registry_with_the_shipped_mt_default(specs: list[EngineSpec]) -> list[Engin
     một lý do không liên quan tới thứ nó đang kiểm. Id thật được thêm vào CUỐI
     danh sách `mt` để "phần tử đầu mảng" vẫn khác mặc định: đó chính là thứ khiến
     bài ghim dây nối `default_mt` có năng lực phát hiện.
+
+    Task 13 (correction C): engine mặc định thêm vào đây là spec THẬT của
+    `registry.json`, KHÔNG phải một `dataclasses.replace(MT_SPEC, ...)`. Bản cũ
+    dựng một `opus-mt` giả mang `runtime="ollama"` và `model_ref="qwen2.5:7b"` —
+    một engine KHÔNG hề tồn tại trong registry thật. Từ khi `build_components()`
+    đòi engine mặc định phải SẴN SÀNG, một spec giả như vậy làm cả fixture đỏ vì
+    lý do bịa: nó khai một engine `ollama` chưa pull. Lấy spec thật (in-process,
+    `available=True` luôn đúng) vừa làm fixture trung thực với sản xuất, vừa khiến
+    mọi bài dưới đây chạy trên engine mặc định CÓ THẬT.
     """
-    from app.adapters.registry_file import load_default_mt
+    from app.adapters.registry_file import load_default_mt, load_registry
 
     declared = load_default_mt()
     if declared is None or declared in {s.id for s in specs}:
         return list(specs)
-    return list(specs) + [dataclasses.replace(MT_SPEC, id=declared)]
+    real = [s for s in load_registry() if s.id == declared]
+    assert real, (
+        f"registry.json khai `default_mt` = {declared!r} nhưng không có spec nào "
+        f"mang id đó — sửa registry.json, đây không phải lỗi của fixture"
+    )
+    return list(specs) + real
 
 
 class _RecordingEngine:
@@ -910,16 +924,29 @@ def test_build_components_registers_every_asr_engine_with_the_governor(built):
 
     Không có dây này thì `before_phase`/`after_phase` là hàm rỗng và model ASR
     KHÔNG BAO GIỜ được đổ — đúng cái mà hàng đợi theo giai đoạn sinh ra để làm.
+
+    Task 13 (correction C): fixture nay có thêm engine mặc định THẬT `opus-mt`
+    (in-process ⇒ luôn sẵn sàng), nên `governor._loaded` có thêm giai đoạn của nó.
+    Khẳng định vì thế là "tập con + đúng một releaser cho ASR", không phải đẳng
+    thức với một phần tử: ghim đẳng thức là ghim luôn số engine MT của fixture,
+    một thứ không liên quan tới dây nối đang được kiểm.
     """
     main, repos, specs, worker, engine, broker, mt_engines = built
     governor = worker.governor
 
-    assert set(governor._loaded) == {ASR_SPEC.phase_key}
+    assert ASR_SPEC.phase_key in governor._loaded
     assert ASR_SPEC.phase_key == js.phase_of("asr", "fw-large-v3-turbo")
 
     releaser = governor._loaded[ASR_SPEC.phase_key]
     assert getattr(releaser, "__self__", None) is worker.handlers["asr"]
     assert getattr(releaser, "__func__", None) is type(worker.handlers["asr"]).release
+
+    # Mọi engine dịch ĐÃ DỰNG cũng phải có releaser riêng, khoá theo
+    # `spec.phase_key` — thiếu vòng đó thì model dịch nằm mãi trong VRAM.
+    for engine_id in mt_engines:
+        assert by_id(specs, engine_id).phase_key in governor._loaded, (
+            f"engine {engine_id} không có releaser trong governor"
+        )
 
 
 def test_registered_releaser_actually_unloads_the_loaded_model(built):
@@ -985,6 +1012,12 @@ def test_build_components_registers_only_available_mt_engines(monkeypatch, tmp_p
     là runtime `ollama`, nên không giai đoạn dịch nào được mở. Bài đối chứng —
     dò sống trả về ĐÚNG `model_ref` thì giai đoạn dịch PHẢI có mặt — nằm ở
     `tests/test_mt_wiring.py::test_governor_has_a_releaser_for_every_mt_phase`.
+
+    Task 13 (correction C): `_registry_with_the_shipped_mt_default` nay thêm spec
+    THẬT của engine mặc định (`opus-mt`, in-process ⇒ luôn `available`), nên
+    "rỗng" KHÔNG còn là khẳng định đúng. Thứ bài này ghim là quan hệ: mọi engine
+    `available` đều có mặt, mọi engine không `available` đều vắng — và vế ĐỐI
+    CHỨNG nằm ngay trong bài, không phải suy từ chỗ khác.
     """
     from app import config, main
 
@@ -1004,8 +1037,21 @@ def test_build_components_registers_only_available_mt_engines(monkeypatch, tmp_p
     repos, specs, worker, broker, mt_engines = main.build_components()
     _assert_repo_data_dirs_untouched(repo_data_before)
 
-    assert mt_engines == {}
-    assert set(worker.governor._loaded) == {ASR_SPEC.phase_key}
+    mt_specs = [s for s in specs if s.kind == "mt"]
+    available = {s.id for s in mt_specs if s.capabilities.get("available")}
+    assert available, "vế đối chứng: engine in-process (opus-mt) PHẢI sẵn sàng"
+    assert set(mt_engines) == available, (
+        f"engine dựng được phải ĐÚNG BẰNG engine sẵn sàng: {sorted(mt_engines)} "
+        f"vs {sorted(available)}"
+    )
+    # `MT_SPEC` là engine `ollama` và phép dò trả `set()`: nó phải VẮNG.
+    assert MT_SPEC.id not in mt_engines, (
+        "engine ollama chưa pull không được có engine trong `mt_engines`"
+    )
+    registered = set(worker.governor._loaded)  # noqa: SLF001 - chính dây nối
+    assert ASR_SPEC.phase_key in registered
+    assert registered == {ASR_SPEC.phase_key} | {s.phase_key for s in mt_specs
+                                                 if s.capabilities.get("available")}
 
 
 def test_build_components_wires_the_job_log_dir(built):
