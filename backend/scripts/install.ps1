@@ -117,6 +117,16 @@ Assert-LastExit "cài jieba"
     "transformers==4.46.3" "sentencepiece==0.2.0" "sacremoses==0.1.1"
 Assert-LastExit "cài requirements.txt"
 
+# Task 16: tải TRƯỚC weight OPUS-MT (~300 MB). Đây là chỗ đúng vì `transformers`
+# vừa được cài ở dòng trên, và vì `HF_HOME` đã được ghim từ bước 2 — tải ở đây
+# thì lần chạy THẬT đầu tiên của engine dịch không phải chờ mạng, và một lần hỏng
+# vì mạng không còn trông y hệt một lần hỏng vì model.
+#
+# Chạy SAU khi `pip install` xong: `download_mt_models.py` import `transformers`,
+# nên gọi trước đó là hỏng chắc chắn.
+& $py -X utf8 -B scripts\download_mt_models.py
+Assert-LastExit "tải weight OPUS-MT"
+
 Write-Host "== 6/7 · cổng import faster_whisper (R71) ==" -ForegroundColor Cyan
 # R71: `pip install` XANH không có nghĩa là `import` chạy được. faster_whisper
 # 1.1.1 làm `import requests` trong utils.py, còn huggingface_hub 1.x đã bỏ phụ
@@ -136,10 +146,36 @@ print('faster_whisper', faster_whisper.__version__, '| import OK')
 Assert-LastExit "import faster_whisper"
 
 Write-Host "== 7/7 · ollama + yt-dlp ==" -ForegroundColor Cyan
+# Task 16: `ollama` + `qwen2.5:3b-instruct-q4_K_M` là engine dịch CHỦ LỰC của
+# Giai đoạn 2. Daemon chạy nền ở 127.0.0.1:11434 và `ollama pull` tải ~1,9 GB.
+# Bước này KHÔNG được làm hỏng phần cài đặt còn lại: thiếu ollama thì engine dịch
+# thứ hai vắng mặt, còn `opus-mt` (đã tải ở bước 5) vẫn dịch được.
 if (Get-Command ollama -ErrorAction SilentlyContinue) {
     Write-Host "   ollama đã có sẵn"
+    # `$modelRef` lấy từ registry.json — nguồn chân lý duy nhất. Viết cứng tag ở
+    # đây là tạo chỗ thứ hai phải sửa khi registry đổi, và nó sẽ lệch trong im lặng.
+    #
+    # Bắt mã thoát NGAY sau lệnh ngoài: `$LASTEXITCODE` là biến tự động dùng chung,
+    # nên một lệnh khác ở giữa (kể cả `Write-Host` có gọi hàm) là đọc nhầm giá trị
+    # của chính nó. Gán vào biến riêng trước khi dùng.
+    $modelRef = & $py -X utf8 -B -c "from app.adapters.registry_file import load_registry; print(next(s.model_ref for s in load_registry() if s.id == 'qwen2.5-3b'))"
+    $refExit = $LASTEXITCODE
+    if ($refExit -eq 0 -and $modelRef) {
+        Write-Host "   kéo model dịch $modelRef (~1,9 GB) ..."
+        & ollama pull $modelRef
+        # `Test-1a` ghim rằng so sánh "khác 0" trực tiếp là KHÔNG được xuất hiện
+        # trong file này: giá trị đó là `$null` khi bước không chạy lệnh ngoài nào.
+        # Dùng lại đúng phép kiểm null-safe của `Assert-LastExit`, nhưng KHÔNG
+        # `throw`: kéo model dịch hỏng không được làm hỏng phần cài đặt còn lại.
+        if (@($null, 0) -notcontains $LASTEXITCODE) {
+            Write-Host "   CẢNH BÁO: kéo $modelRef hỏng — engine qwen2.5-3b sẽ không chạy" -ForegroundColor Yellow
+        }
+    } else {
+        Write-Host "   CẢNH BÁO: không đọc được registry.json để biết model cần kéo" -ForegroundColor Yellow
+    }
 } else {
     Write-Host "   chưa có ollama — cài bằng: winget install Ollama.Ollama" -ForegroundColor Yellow
+    Write-Host "   rồi chạy lại: ollama pull qwen2.5:3b-instruct-q4_K_M" -ForegroundColor Yellow
 }
 if (-not (Get-Command yt-dlp -ErrorAction SilentlyContinue)) {
     & $py -m pip install --no-cache-dir --upgrade yt-dlp

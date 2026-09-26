@@ -35,7 +35,8 @@ pip chậm một cách bệnh hoạn trên máy này.
 ## Kiểm thử
 
 ```powershell
-.\.venv\Scripts\python.exe -m pytest                       # toàn bộ, không cần model
+.\.venv\Scripts\python.exe -m pytest                        # toàn bộ, không cần model
+.\.venv\Scripts\python.exe -m pytest -m live                # CHẠM model thật (OPUS-MT + Ollama)
 .\.venv\Scripts\python.exe scripts\smoke_asr.py clip.mp4 zh # model thật, cần GPU
 ```
 
@@ -43,9 +44,58 @@ pip chậm một cách bệnh hoạn trên máy này.
 là thành chế độ im lặng gấp đôi và **mất dòng "N passed"** — khi đó không ai biết
 bao nhiêu test đã chạy.
 
+`pytest.ini` cũng đã có `-m "not live"`, nên lần chạy mặc định **bỏ qua** các bài
+chạm model thật trong `tests/test_mt_live.py`. Đó là chủ ý: máy chưa tải weight
+không được đỏ vì lý do không liên quan tới code. Muốn chạy chúng thì `-m live`, và
+mỗi lần chạy như vậy là một lần **ĐO** — đừng thay bằng test giả.
+
 `scripts/smoke_asr.py` **không** thuộc bộ pytest: nó tải model ~1,6 GB và cần
 GPU. Nó tự ép UTF-8 cho stdout (console Windows mặc định cp1252, còn script in
 tiếng Trung/Việt) và tự đặt cache model trước khi nạp `faster_whisper`.
+
+### Smoke test DỊCH — in ra SỐ, và thoát khác 0 khi không có gì để dịch
+
+```powershell
+# 1) tải weight OPUS-MT trước, để lần chạy thật đầu tiên không phải chờ mạng
+$env:HF_HOME = "D:\models\hf"
+.\.venv\Scripts\python.exe -B scripts\download_mt_models.py
+
+# 2) chạy THẬT cả hai engine trên cùng một tệp
+.\.venv\Scripts\python.exe -B scripts\smoke_mt.py clip.wav zh opus-mt vi
+.\.venv\Scripts\python.exe -B scripts\smoke_mt.py clip.wav zh qwen2.5-3b vi
+
+# 3) chỉ đo đường DỊCH (không cần âm thanh), và chỉ ra engine bóc băng khác
+.\.venv\Scripts\python.exe -B scripts\smoke_mt.py --synthetic opus-mt
+.\.venv\Scripts\python.exe -B scripts\smoke_mt.py clip.wav zh qwen2.5-3b vi --asr fw-large-v3-turbo
+```
+
+`smoke_mt.py` **không** thuộc bộ pytest: nó nạp weight thật và gọi Ollama thật.
+Nó in **số** cho mỗi lần chạy (segment vào/ra, thời gian, `tokens_in`/
+`tokens_out`) và mã thoát phản ánh kết quả thật:
+
+| mã | nghĩa |
+|----|-------|
+| `0` | dịch được, số segment ra **bằng** số vào |
+| `1` | chạy được nhưng đường ống SAI: **0 segment**, lệch alignment, hoặc bản dịch rỗng |
+| `2` | sai cách dùng, hoặc không thấy tệp |
+| `3` | không dựng/nạp được engine (thiếu weight, Ollama tắt, id sai) |
+
+**`0` segment KHÔNG phải thành công.** Một lần chạy "xanh" trên không có gì đúng
+là kiểu thất bại mà Giai đoạn 1a đã trả giá (19 task xanh trong khi đường ASR chết
+vì chưa từng ai chạy nó), nên nó thoát khác 0 kèm lý do.
+
+`--asr <id>` chọn engine bóc băng (mặc định `fw-small`). Id **không có** trong
+`registry.json` bị từ chối kèm danh sách id có thật — `fw-tiny` là ví dụ: nó từng
+nằm trong tài liệu nhưng **không tồn tại** trong registry.
+
+`tokens_in`/`tokens_out` chỉ có ở engine chạy qua Ollama (`qwen2.5-3b`,
+`qwen2.5-7b`, `hy-mt-1.5-7b`); OPUS-MT chạy trong tiến trình và không có token
+count, nên nó in `None` chứ **không** in `0` — "chưa đo được" khác "nhanh bằng không".
+
+`download_mt_models.py` in ra đường dẫn cache THẬT và dung lượng THẬT. Nó đặt
+`HF_HOME` **trước** khi import `transformers`, vì `huggingface_hub` đọc biến đó
+ngay lúc import: đặt sau thì model rơi vào cache mặc định trên ổ C: dù dòng log
+in ra đường dẫn đúng.
 
 ## Chưa kiểm chứng
 
