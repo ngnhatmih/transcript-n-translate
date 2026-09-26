@@ -2318,6 +2318,34 @@ git commit -m "feat(mt): adapter Ollama cho Qwen2.5 (keep_alive, token count, re
 
 ### Task 11: `pipeline/translate.py` — `TranslateHandler`
 
+> 🔴 **HIỆU CHỈNH BẮT BUỘC CHO TASK NÀY (mục này thắng phần code bên dưới):**
+> 1. **`report` nhận HAI tham số.** Giao thức thật là
+>    `JobHandler.run(self, job, report: Callable[[float, str], None])` — `worker.py:24`. **Mọi** chỗ trong code ở
+>    Step 3 dưới đây gọi `report("...")` với **một** tham số là **SAI**; phải là `report(job.progress, "...")`.
+>    Implementer phải **đọc `backend/app/worker.py:19-30`** trước khi viết, và đọc một handler đã ship
+>    (`pipeline/transcribe.py`, `pipeline/export.py`) để bắt chước cách nó gọi `report`.
+> 2. **`update_translation_segments` nay NÉM `NotFound`** khi `id` không tồn tại (vòng sửa Task 6, `ead5b4b`).
+>    Nghĩa là một `id` sai **không còn im lặng**: handler phải để nó thành job `FAILED` với thông báo hành động được,
+>    **không** nuốt lỗi. Đây chính là điều mà bản no-op im lặng đã che mất.
+> 3. **Ai cộng dồn danh sách — đã chốt ở spec §3 (sửa sau Task 6):** **adapter CHỈ ghi đúng danh sách được đưa, nó
+>    KHÔNG tự nối.** Handler giữ `done` trong bộ nhớ, `done.extend(translated)`, rồi gọi
+>    `update_translation_segments(id, done)`. Vì vậy `len(done)` **là** tiến độ.
+> 4. **`engines` được khoá theo `spec.id` của registry**, không theo `engine_id` của engine. Lý do đã đo ở Task 10:
+>    quy tắc suy `engine_id` từ tag **không** tái tạo được id registry cho HY-MT (`hy-mt1.5-7b-q4_K_M` vs
+>    `hy-mt-1.5-7b`) ⇒ khoá theo `engine_id` sẽ `KeyError`. Task 12 chịu trách nhiệm dựng dict đúng khoá; task này
+>    chỉ cần `self._engines[engine_id]` và một test cho ca id lạ.
+> 5. **Chữ ký thật của các hàm bạn gọi** (đọc lại trước khi viết):
+>    `qa_translation(src, out, *, glossary, supports_glossary, limits)` với `QaLimits(max_len_ratio=5.0)` (đã sửa ở
+>    Task 5) · `batch_segments(segments, *, max_chars)` · `check_alignment(src, out)` ném `AlignmentProblem` có
+>    `.expected_ids`/`.got_ids`/`.reason` · `approved(terms)` · `MtOpts(source_lang, target_lang="vi")` ·
+>    `MtEngine.translate(batch, glossary, opts)`.
+> 6. **KHÔNG dựng `Segment` bằng tay** ở bất cứ đâu trong handler — engine đã trả `Segment` đúng; dùng lại chính
+>    object đó. Hai task trước trong phase này đã ship lỗi dựng tay làm nuốt 7/13 trường.
+> 7. Brief **không** dự đoán số test (sáu dự đoán của tôi đã sai). Báo số **thật**, và với mỗi test chạy mutation rồi
+>    báo **kết quả quan sát được**, kể cả "mutant này sống sót, và đây là lý do".
+> 8. **Phục hồi mutation phải kiểm CẢ hash LẪN byte** (`core.autocrlf=true` làm hash khớp trên CRLF). Sandbox từ chối
+>    ghi `$env:TEMP` **và** ghi ra ngoài workspace — scratch để trong workspace nhưng ngoài cây repo, rồi xoá.
+
 **Đây là task trung tâm của phase.** Nó ghép mọi thứ đã làm: chia lô, gọi engine, chính sách alignment ba bước, checkpoint, hủy, retry, QA.
 
 **Files:**
