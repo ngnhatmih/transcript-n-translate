@@ -3323,8 +3323,29 @@ git commit -m "feat(api): route translations (tao, liet ke kem co stale, sua tay
 >    truyền **danh sách thô** là đúng — đừng lọc trước khi gọi, nếu không ca "bỏ duyệt" sẽ không bao giờ được phát hiện.
 > 4. Endpoint `GET /api/glossary/version` **không có trong spec §11** — nó là tiện ích tôi thêm cho test. Giữ nếu thấy
 >   rẻ, nhưng **ghi rõ trong báo cáo** rằng nó là phần thêm ngoài spec.
-> 5. Brief **không** dự đoán số test nữa; báo cáo số **thật**. Sandbox từ chối ghi `$env:TEMP` — scratch để ngoài repo
->    nhưng trong workspace rồi xoá.
+> 5. Brief **không** dự đoán số test nữa; báo cáo số **thật**. Sandbox từ chối ghi `$env:TEMP` — scratch để ngoài
+>    repo nhưng trong workspace rồi xoá.
+> 6. **Chữ ký thật của thứ bạn gọi** (đọc lại trước khi viết): `repos.upsert_term(*, lang, term, translation, note,
+>    approved) -> int` · `repos.list_terms(*, lang=None) -> list[Term]` · `repos.glossary_version() -> int` (getter;
+>    **đã** tự tăng bên trong `upsert_term`) · `affected_segments(segments, old, new) -> list[int]` · `repos.list_jobs(*,
+>    states=...) -> list[Job]` · `repos.add_job(job) -> int` · `phase_of(job_type, engine)`.
+>    **Dùng đúng tên khoá payload mà `pipeline/translate.py` đọc** (Task 11 đã ship) — đọc tệp đó, đừng đoán.
+> 7. **`affected_segments` nay so ánh xạ của THUẬT NGỮ ĐÃ DUYỆT ở cả hai phía** (ruling T4/F2). Hệ quả trực tiếp:
+>    - Truyền **danh sách thô** vào nó, **đừng lọc trước** — nếu lọc thì ca "bỏ duyệt" không bao giờ được phát hiện.
+>    - **Đổi một thuật ngữ CHƯA duyệt thì KHÔNG ảnh hưởng gì** (bản nháp không được áp dụng). Đừng "sửa" để nó báo
+>      ảnh hưởng — đó là hành vi có chủ ý và đã có test ở Task 4.
+>    - Chuyển một thuật ngữ sang **đã duyệt** thì **CÓ** ảnh hưởng (nó thành bắt buộc); **bỏ duyệt** cũng **CÓ**.
+> 8. **Luật chung của phase này:**
+>    - **`app/api` KHÔNG được import `app.adapters`**, không được dùng `sqlite3`/`db_path`/`_connect(` (có test canh).
+>    - **KHÔNG dựng `Segment(...)` bằng tay** — dùng `dataclasses.replace` (hai task đã ship lỗi nuốt 7/13 trường).
+>    - **Test qua ĐƯỜNG THẬT** (`build_components()` + `build_app()` + `TestClient`), không dựng lại assembly và
+>      **không gán thẳng trường của đối tượng giả** — Task 11 từng có test huỷ tự thoả mãn vì đúng cách đó.
+>    - **COMMIT TRƯỚC khi chạy mutation**, và không để harness mutation chạy `git checkout` trên cây còn chỉnh sửa
+>      chưa commit — đã có hai lần mất chỉnh sửa vì cách đó.
+>    - Phục hồi mutation phải kiểm **hash** và **byte trong không gian chuẩn hoá của git** (`core.autocrlf=true`:
+>      blob HEAD là LF còn cây làm việc là CRLF; so byte thô giữa hai chuẩn hoá là **dừng harness vì lý do sai**) —
+>      cộng `git diff --quiet HEAD`.
+>    - Mỗi test chạy một mutation và **báo kết quả quan sát được**, kể cả "mutant này sống sót, và đây là lý do".
 
 **Files:**
 - Create: `backend/app/api/routes_glossary.py`
