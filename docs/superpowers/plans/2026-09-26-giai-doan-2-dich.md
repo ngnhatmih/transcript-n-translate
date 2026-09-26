@@ -4194,6 +4194,14 @@ bỏ route export cũ.
 `TranslateHandler.run` **chỉ đọc năm khoá** và `set_translation_status` **không ghi được cột đó**. Đo thật: một bản
 dịch tạo ở version 0, được dịch lại sau khi glossary đổi, **vẫn giữ giá trị cũ**. Nghĩa là dấu vết nói dối.
 
+> **Phạm vi thứ hai, thêm vào từ review Task 15:** spec §8.6 nói chuỗi trạng thái là
+> `draft → reviewed → translated`. Sau khi `approve` được trả về `reviewed` (ruling của reviewer: `translated`
+> **không** thuộc cửa duyệt — đo được rằng duyệt một transcript **chưa có bản dịch nào** sẽ ghi một trạng thái
+> **sai ngay lúc ghi**), thì **không còn chỗ nào ghi `translated`**. Giá trị cuối chuỗi mất người sản xuất.
+> Task này là chủ sở hữu `pipeline/translate.py`, nên nó cũng đảm nhận: **khi một bản dịch hoàn thành
+> (`status='done'`), đặt `transcripts.status = 'translated'`** — và **không** đặt khi bản dịch thất bại hay bị huỷ.
+> Đây là chỗ duy nhất biết chắc một bản dịch đã xong thật.
+
 **Files:**
 - Modify: `backend/app/ports/repos.py` — thêm `glossary_version` vào `set_translation_status`
 - Modify: `backend/app/adapters/persist/sqlite_repos.py:309-329` — thêm vào vòng `sets`/`args`
