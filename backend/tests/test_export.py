@@ -132,9 +132,21 @@ NON_CONTIGUOUS_TRANSLATIONS = ["một", "hai", "ba"]
 
 
 def _srt_bodies(out: str) -> list[str]:
-    """Các dòng văn bản của SRT (bỏ chỉ số và dòng thời gian)."""
-    return [ln for ln in out.splitlines() if ln not in ("", "1", "2", "3")
-            and "-->" not in ln]
+    """Các dòng VĂN BẢN của SRT, bóc theo VỊ TRÍ — không theo GIÁ TRỊ.
+
+    Mỗi khối SRT là ba phần: `chỉ số`, `thời gian`, rồi các dòng văn bản, ngăn
+    nhau bằng dòng rỗng. Bỏ hai dòng đầu của mỗi khối là đủ.
+
+    EX-03 (F3/Task 14): bản cũ lọc `ln not in ("", "1", "2", "3")` — theo GIÁ
+    TRỊ — nên nó nuốt luôn dòng VĂN BẢN có nội dung đúng bằng `"1"`/`"2"`/`"3"`.
+    Với một fixture văn-bản-số, phép so bản dịch (R65) trở nên yếu đi mà không
+    ai thấy: cùng một giá trị bị lọc ở cả hai vế thì một bản dịch rơi mất vẫn
+    "bằng nhau".
+    """
+    bodies: list[str] = []
+    for block in out.strip().split("\n\n"):
+        bodies.extend(block.splitlines()[2:])
+    return bodies
 
 
 def _vtt_bodies(out: str) -> list[str]:
@@ -186,6 +198,23 @@ def test_bilingual_non_contiguous_keeps_every_pair_together():
     assert _ass_bodies(
         to_ass(segs, translations=NON_CONTIGUOUS_TRANSLATIONS, bilingual=True)
     ) == ["一\\\\Nmột", "二\\\\Nhai", "三\\\\Nba"]
+
+
+def test_srt_body_extraction_keeps_text_lines_that_look_like_indices():
+    """EX-03 · bóc theo VỊ TRÍ: dòng văn bản đúng bằng "1"/"2" vẫn phải còn.
+
+    Đây là chứng minh của lỗi: với `_srt_bodies` lọc theo giá trị, cả ba bản
+    dịch số bị nuốt nên phép so R65 ở trên trở thành so hai danh sách rỗng.
+    """
+    segs = _non_contiguous()
+    numeric = ["1", "2", "3"]
+
+    assert _srt_bodies(to_srt(segs, translations=numeric)) == numeric
+    # Song ngữ: dòng nguồn (chữ Hán) và dòng dịch (số) xen kẽ, đủ sáu dòng —
+    # lọc theo giá trị chỉ còn ba dòng chữ Hán.
+    assert _srt_bodies(
+        to_srt(segs, translations=numeric, bilingual=True)
+    ) == ["一", "1", "二", "2", "三", "3"]
 
 
 # --------------------------------------------------------------------------
@@ -285,7 +314,6 @@ def test_successful_run_matches_the_formatter_and_writes_utf8(
     raw.decode("utf-8")
     assert raw.startswith(b"\xef\xbb\xbf") is False
     assert raw == expected.encode("utf-8")
-    assert target.read_text(encoding="utf-8") == expected
     # Chế độ song ngữ thật sự có cả nguồn lẫn bản dịch, đúng thứ tự từng cặp.
     bodies = {"srt": _srt_bodies, "vtt": _vtt_bodies, "ass": _ass_bodies}[fmt](expected)
     if fmt == "ass":
@@ -372,3 +400,44 @@ def test_export_rejects_a_stem_that_is_only_dotdot(repos, tmp_path, transcript_i
             _job(transcript_id=transcript_id, format="srt", stem=".."),
             lambda *_: None,
         )
+
+
+def test_missing_transcript_id_is_an_actionable_error(repos, tmp_path):
+    """EX-04 (F4/Task 14): job thiếu `transcript_id` ⇒ `ValueError` NÊU TÊN KHOÁ.
+
+    Bản cũ đi thẳng vào `int(payload["transcript_id"])` nên ném
+    `KeyError: 'transcript_id'` trần từ tận worker — không nói được job thiếu
+    gì, và không phải lớp lỗi hành động được (cùng họ F2 của Task 12).
+    """
+    with pytest.raises(ValueError, match="thiếu transcript_id"):
+        _handler(repos, tmp_path).run(_job(format="srt"), lambda *_: None)
+
+
+def test_missing_transcript_id_is_reported_before_the_format_is_checked(repos, tmp_path):
+    """Payload vừa THIẾU id vừa SAI định dạng: lỗi phải nêu đúng thứ đang thiếu.
+
+    Thứ tự validate không được để ca này nổi lên thành "định dạng không hỗ trợ"
+    (hay thành `KeyError`): sửa định dạng xong job vẫn chết vì thiếu id, nên
+    thông báo phải chỉ thẳng vào `transcript_id` ngay từ lần chạy đầu.
+    """
+    with pytest.raises(ValueError, match="thiếu transcript_id"):
+        _handler(repos, tmp_path).run(_job(format="docx"), lambda *_: None)
+
+
+def test_empty_stem_falls_back_instead_of_raising(repos, tmp_path, transcript_id):
+    """DOC-09 (N6): `stem=""` là falsy nên handler đổi thành `None` TRƯỚC khi
+    gọi `safe_basename`, tức lùi về `transcript-<id>`; đưa thẳng `""` vào
+    `safe_basename` thì ném `InvalidBasename`.
+
+    Cùng một giá trị `""` đi hai đường khác nhau là CỐ Ý (giữ ngữ nghĩa
+    `payload.get("stem") or ...` cũ): route upload từ chối `""` của client bằng
+    422 (`test_upload_answers_422_for_an_empty_filename`), còn export ở đây lùi
+    về tên mặc định. "Sửa" một trong hai cho giống nhau mà không đọc hợp đồng ở
+    `safe_basename` sẽ làm đỏ một trong hai test.
+    """
+    _handler(repos, tmp_path).run(
+        _job(transcript_id=transcript_id, format="srt", stem=""), lambda *_: None
+    )
+    assert (tmp_path / "out" / f"transcript-{transcript_id}.srt").is_file(), (
+        sorted(p.name for p in (tmp_path / "out").iterdir())
+    )

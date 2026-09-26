@@ -27,7 +27,11 @@ class SingleGpuGovernor:
         VRAM (`releases` đứng ở 1 dù engine vẫn nạp).
 
         Gọi lặp lại là an toàn vì releaser BẮT BUỘC idempotent — `release()` là
-        no-op khi không có model nào đang nạp — nên không thể double-free.
+        no-op khi không có model nào đang nạp — nên không thể double-free. Yêu
+        cầu đó là HỢP ĐỒNG của port (`ports/governor.ResourceGovernor`), không
+        phải chi tiết của riêng adapter này: đổi một releaser thành không
+        idempotent thì nó sẽ bị double-fire ở đây chứ không bị từ chối lúc
+        đăng ký.
         """
         self._loaded[phase] = releaser
 

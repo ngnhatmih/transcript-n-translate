@@ -112,6 +112,41 @@ def test_flatten_accepts_list_of_lists_from_vad_and_drops_non_dicts():
     assert _flatten(None) == [], "kết quả rỗng không được làm nổ adapter"
 
 
+def test_flatten_treats_tuples_exactly_like_lists():
+    """EX-05 (F3/Task 13): `_span_ms` nhận `(list, tuple)` ở MỌI chỗ, còn
+    `_flatten` chỉ bóc `list` — nên một `tuple` nằm TRONG `raw` bị bỏ im lặng.
+
+    Cùng một hình dạng dữ liệu mà hai hàm trong cùng tệp xử lý khác nhau là
+    nguồn mất đoạn không báo: `raw` là tuple thì bản cũ vẫn chạy (vì nó lặp qua
+    `raw`), nhưng phần tử tuple lồng bên trong thì biến mất.
+    """
+    a, b = {"text": "a"}, {"text": "b"}
+    assert _flatten((a, b)) == [a, b]
+    assert _flatten([(a, b)]) == [a, b], (
+        "tuple NẰM TRONG raw bị bản cũ bỏ: đây là ca lỗi của EX-05"
+    )
+    assert _flatten(((a,), (b,))) == [a, b]
+    assert _flatten([((a,), [b, ("rác",)])]) == [a, b], (
+        "tuple lồng nhiều cấp vẫn phải được đệ quy, phần tử lạ thì bỏ"
+    )
+
+
+def test_flatten_recurses_all_the_way_down_instead_of_dropping_silently():
+    """EX-06 (F4/Task 13): lồng sâu hơn hai cấp KHÔNG được trả `[]` im lặng.
+
+    Bản cũ chỉ bóc đúng một cấp nên `[[[d]]]` -> `[]`: mất sạch đoạn mà không
+    nói gì, trái tinh thần fail-loudly của R62. Hợp đồng (đã ghi trong docstring
+    của `_flatten`): đệ quy tới HẾT lồng và trả về MỌI `dict`.
+    """
+    a, b = {"text": "a"}, {"text": "b"}
+    assert _flatten([[[a]]]) == [a]
+    assert _flatten([[[[a]]], [[[b]]]]) == [a, b]
+    assert _flatten([[[["rác"]]]]) == [], (
+        "không có dict nào thì trả rỗng — `transcribe()` mới là chỗ ném "
+        "RuntimeError, không phải chỗ này nuốt lặng lẽ"
+    )
+
+
 # --------------------------------------------------------------------------
 # R61: hợp đồng nạp model và gọi generate qua `model_factory`.
 # --------------------------------------------------------------------------
@@ -205,7 +240,9 @@ def test_benign_event_does_not_mark_segment_suspect(sv_spec):
 ])
 def test_raw_without_usable_segments_raises(sv_spec, raw):
     engine = SenseVoiceEngine(sv_spec, model_factory=_RecordingFactory(raw))
-    with pytest.raises(RuntimeError):
+    # EX-07 (F5/Task 13): `match=` là thứ duy nhất phân biệt "nổ đúng chỗ" với
+    # "nổ vì bất kỳ RuntimeError nào từ bất kỳ đâu trong khối".
+    with pytest.raises(RuntimeError, match="không trả về đoạn nào"):
         engine.transcribe("a.wav", "zh")
 
 
@@ -257,7 +294,8 @@ def test_partial_explicit_timing_is_not_silently_completed(sv_spec):
     engine = SenseVoiceEngine(
         sv_spec, model_factory=_RecordingFactory([{"text": "<|zh|><|Speech|>你好", "start": 0}])
     )
-    with pytest.raises(RuntimeError):
+    # EX-07 (F5/Task 13): phải là lỗi MỐC THỜI GIAN, không phải RuntimeError nào khác.
+    with pytest.raises(RuntimeError, match="mốc thời gian"):
         engine.transcribe("a.wav", "zh")
 
 

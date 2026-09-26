@@ -72,6 +72,19 @@ def test_status_endpoint_reports_phase_and_queue(client):
     assert body["ollama"] in {"unknown", "up", "down"}
 
 
+def test_status_reports_the_vram_key_the_spec_promises(client):
+    """API-04 (R77): spec §11 ghim `GET /api/status` trả cả VRAM.
+
+    GĐ1a CHƯA đo được VRAM (chưa có API đọc số của card), nên giá trị phải là
+    `None` TƯỜNG MINH — khoá vẫn có, JSON là `null` — cùng khuôn với
+    `ollama: "unknown"`. Frontend code theo hình dạng hợp đồng nên nó đọc
+    `body["vram"]`, không phải phòng thủ bằng `if "vram" in body`.
+    """
+    body = client.get("/api/status").json()
+    assert "vram" in body, sorted(body)
+    assert body["vram"] is None
+
+
 def test_status_counts_queued_jobs_and_ignores_finished_ones(client):
     """`queue_depth` phải là số job đang CHỜ, không phải số job đã tạo."""
     created = client.post(
@@ -195,6 +208,49 @@ def test_upload_answers_422_for_a_filename_that_is_not_a_file(client, bad):
         files={"file": (bad, io.BytesIO(b"x"), "video/mp4")},
         data={"lang": "zh"},
     )
+    assert resp.status_code == 422, resp.text
+    assert "tên tệp" in resp.text
+
+
+def _upload_raw_multipart(client, filename_header: str):
+    """POST multipart THÔ, để `filename=""` tới được tận route.
+
+    `httpx` biến `files={"file": ("", ...)}` thành một trường FORM chuỗi, nên
+    FastAPI trả 422 ngay ở khâu validate `UploadFile` và `safe_basename` KHÔNG
+    hề chạy — một test như vậy xanh mà không chứng minh gì. Gửi thân multipart
+    tự dựng thì Starlette giữ nguyên `filename=""` và `file.filename` mới thật
+    sự là chuỗi rỗng.
+    """
+    boundary = "----phu-de-lab-doc09"
+    body = (
+        f"--{boundary}\r\n"
+        f'Content-Disposition: form-data; name="file"; filename="{filename_header}"\r\n'
+        "Content-Type: video/mp4\r\n"
+        "\r\n"
+        "x\r\n"
+        f"--{boundary}\r\n"
+        'Content-Disposition: form-data; name="lang"\r\n'
+        "\r\n"
+        "zh\r\n"
+        f"--{boundary}--\r\n"
+    ).encode("utf-8")
+    return client.post(
+        "/api/sources/upload",
+        content=body,
+        headers={"Content-Type": f"multipart/form-data; boundary={boundary}"},
+    )
+
+
+def test_upload_answers_422_for_an_empty_filename(client):
+    """DOC-09 (N6): route upload KHÔNG lùi về `fallback` khi client gửi `""`.
+
+    Cùng giá trị `""` mà `ExportHandler` lùi về `transcript-<id>` (xem
+    `test_export.py::test_empty_stem_falls_back_instead_of_raising`), còn ở đây
+    là lỗi ĐẦU VÀO của client ⇒ 422 nêu tên trường. Hai hành vi khác nhau là CỐ
+    Ý, đã ghi ở docstring `safe_basename`; làm chúng giống nhau sẽ đỏ một trong
+    hai test.
+    """
+    resp = _upload_raw_multipart(client, "")
     assert resp.status_code == 422, resp.text
     assert "tên tệp" in resp.text
 

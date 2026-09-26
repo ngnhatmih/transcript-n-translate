@@ -164,13 +164,26 @@ def _timing_seconds(item: dict, engine_id: str) -> tuple[float, float]:
 
 
 def _flatten(raw) -> list[dict]:
-    """FunASR trả về list[dict] hoặc list[list[dict]] tuỳ cấu hình VAD."""
+    """FunASR trả về list[dict] hoặc list[list[dict]] tuỳ cấu hình VAD.
+
+    EX-05/EX-06 (F3/F4 của review Task 13) — HỢP ĐỒNG, ghim bằng test:
+
+    * `list` và `tuple` được đối xử NHƯ NHAU ở MỌI cấp. `_span_ms` đã nhận
+      `(list, tuple)` ở mọi chỗ, nên một `tuple` lồng trong `raw` là cùng một
+      hình dạng dữ liệu; bản cũ chỉ bóc `list` nên phần tử `tuple` bị BỎ.
+    * Đệ quy tới HẾT lồng, không dừng ở cấp hai. Bản cũ trả `[]` cho
+      `[[[d]]]` — mất sạch đoạn mà không nói gì, trái tinh thần fail-loudly
+      (R62). Ở đây `[[[d]]]` -> `[d]`.
+    * Phần tử không phải `dict`/`list`/`tuple` bị BỎ QUA (không ném) — "không
+      có đoạn nào dùng được" vẫn là lỗi ồn ào ở tầng trên: `transcribe()` thấy
+      danh sách rỗng thì ném `RuntimeError`.
+    """
     if not raw:
         return []
     out: list[dict] = []
     for item in raw:
-        if isinstance(item, list):
-            out.extend(i for i in item if isinstance(i, dict))
+        if isinstance(item, (list, tuple)):
+            out.extend(_flatten(item))
         elif isinstance(item, dict):
             out.append(item)
     return out

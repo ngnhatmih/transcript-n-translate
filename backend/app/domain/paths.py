@@ -83,6 +83,15 @@ def safe_basename(name: str | None, fallback: str = "upload.bin") -> str:
     `name is None` (không có tên) dùng `fallback`. Mọi tên KHÔNG hợp lệ đều ném
     `InvalidBasename`, không âm thầm đổi thành `fallback`: nuốt lỗi ở đây thì
     tên rác của client biến thành một tệp trông hợp lệ mà không ai biết.
+
+    DOC-09 (N6): `None` và falsy KHÁC nhau, và đó là CỐ Ý — chỉ `None` mới dùng
+    `fallback`, còn `""`, `"."`, `".."` đều ném. Vì vậy người gọi nào nhận giá
+    trị tuỳ chọn từ BÊN NGOÀI phải tự quyết trước khi gọi:
+    `ExportHandler` (`app/pipeline/export.py`) đổi `stem` falsy thành `None` để
+    giữ đúng ngữ nghĩa `payload.get("stem") or f"transcript-{id}"` cũ, nên
+    `stem=""` lùi về tên mặc định; route upload (`app/api/routes_sources.py`)
+    đưa thẳng `filename` vào, nên `""` của client là **422**. Làm hai đường
+    giống nhau là ĐỔI HỢP ĐỒNG, không phải sửa lỗi — đọc docstring này trước.
     """
     if name is None:
         return fallback

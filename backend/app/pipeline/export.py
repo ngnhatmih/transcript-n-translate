@@ -58,7 +58,16 @@ class ExportHandler:
 
     def run(self, job: Job, report: Callable[[float, str], None]) -> None:
         payload = job.payload
-        transcript_id = int(payload["transcript_id"])
+        # EX-04 (F4/Task 14): kiểm `transcript_id` TRƯỚC `fmt`. Đi thẳng vào
+        # `int(payload["transcript_id"])` thì một job dị dạng nổi lên ở tận
+        # worker thành `KeyError: 'transcript_id'` trần — không phải lớp lỗi
+        # hành động được và không nói job thiếu gì. Kiểm trước cũng để một
+        # payload vừa thiếu id vừa sai định dạng báo ĐÚNG thứ đang thiếu, thay
+        # vì để phép validate định dạng che mất.
+        raw_transcript_id = payload.get("transcript_id")
+        if not raw_transcript_id:
+            raise ValueError("job export thiếu transcript_id")
+        transcript_id = int(raw_transcript_id)
         fmt = str(payload.get("format", "srt")).lower()
         bilingual = bool(payload.get("bilingual", False))
         if fmt not in FORMATS:
