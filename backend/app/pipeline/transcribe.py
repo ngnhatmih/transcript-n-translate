@@ -6,7 +6,7 @@ lại model cho từng job là lãng phí 4-8 giây mỗi lần.
 from __future__ import annotations
 
 import pathlib
-from typing import Callable, Iterable
+from typing import Callable, Iterable, Mapping
 
 from app.domain import job_state as js
 from app.domain.models import Job
@@ -16,6 +16,12 @@ from app.registry import (MT_DEFAULT_SETTING, EngineSpec, by_id,
                           default_mt_engine)
 
 AUTO_FORWARD_SETTING = "auto_forward"
+
+#: Ngôn ngữ đích của bản dịch tự sinh. Chưa phải setting (không có khoá nào
+#: trong bảng `settings` cho nó), nhưng phải là HẰNG SỐ DÙNG CHUNG giữa hàng
+#: `translations` và payload của job — lệch một chữ ở đây là bản dịch được ghi
+#: bằng ngôn ngữ khác với thứ handler đọc từ payload.
+DEFAULT_TARGET_LANG = "vi"
 
 
 class TranscribeHandler:
@@ -27,6 +33,7 @@ class TranscribeHandler:
         *,
         workdir: str | pathlib.Path,
         declared_default_mt: str | None = None,
+        prompt_versions: Mapping[str, str] | None = None,
     ) -> None:
         self._repos = repos
         self._specs = list(specs)
@@ -35,6 +42,12 @@ class TranscribeHandler:
         #: Khoá `default_mt` của registry (R58/WQ-02), do `main.py` nạp. Vắng nó
         #: thì `_default_mt_engine` mới rơi về phần tử đầu của danh sách `mt`.
         self._declared_default_mt = declared_default_mt
+        #: `{engine_id: prompt_version}` — DỮ LIỆU của `adapters/mt/prompts.py`,
+        #: do composition root bơm vào. `add_translation` BẮT BUỘC có
+        #: `prompt_version`, mà `pipeline/` không được biết adapter (chỉ
+        #: `main.py` được phép), nên nó đi qua đây y như `declared_default_mt`.
+        #: Vắng mặt thì ghi `"unknown"`: bịa ra một phiên bản prompt còn tệ hơn.
+        self._prompt_versions = dict(prompt_versions or {})
         self._engine: ASREngine | None = None
         self._engine_id: str | None = None
 
@@ -97,18 +110,52 @@ class TranscribeHandler:
         report(0.95, f"lưu transcript #{transcript_id}")
 
         if (self._repos.get_setting(AUTO_FORWARD_SETTING, "1") or "1") == "1":
-            self._forward_to_translation(source_id, transcript_id, lang)
+            self._forward_to_translation(transcript_id, lang)
             report(0.98, "đã tạo job dịch ở workspace 2")
         else:
             report(0.98, "giữ lại để sửa (auto_forward tắt)")
         report(1.0, "xong")
 
-    def _forward_to_translation(self, source_id: int, transcript_id: int, lang: str) -> None:
+    def _forward_to_translation(self, transcript_id: int, lang: str) -> None:
+        """Tạo HÀNG `translations` trước, rồi mới xếp job `translate`.
+
+        Thứ tự này là bắt buộc, không phải phong cách: `TranslateHandler` ghi
+        checkpoint và trạng thái lên hàng đó, và nó tra `translation_id` từ
+        payload. Không có hàng thì job tự sinh sẽ `NotFound`/`KeyError` ở tận
+        worker — đúng lớp lỗi mà Giai đoạn 1a đã trả giá (handler được dựng mà
+        thiếu thứ nó cần).
+
+        Payload là ĐÚNG năm khoá `TranslateHandler.run` đọc
+        (`pipeline/translate.py:71-77`): `translation_id`, `transcript_id`,
+        `engine_id`, `source_lang`, `target_lang`. `source_id` đã bị bỏ: handler
+        dịch không đọc nó, còn nguồn thì tra được qua transcript.
+
+        `transcript_version` là version của transcript VỪA tạo (đọc lại từ
+        repo), không phải "version hiện tại" tại thời điểm job chạy — job có thể
+        chạy sau khi người dùng sửa transcript, và khi đó bản dịch này phải được
+        coi là lệch thời (`is_stale`).
+        """
         engine_id = self._default_mt_engine()
+        transcript = self._repos.get_transcript(transcript_id)
+        translation_id = self._repos.add_translation(
+            transcript_id=transcript_id,
+            transcript_version=transcript.version,
+            engine=engine_id or "",
+            target_lang=DEFAULT_TARGET_LANG,
+            segments=[],
+            prompt_version=self._prompt_versions.get(engine_id or "", "unknown"),
+            status="queued",
+        )
         self._repos.add_job(Job(
             id=None, workspace=2, type="translate", engine=engine_id,
             phase=js.phase_of("translate", engine_id),
-            payload={"transcript_id": transcript_id, "source_id": source_id, "lang": lang},
+            payload={
+                "translation_id": translation_id,
+                "transcript_id": transcript_id,
+                "engine_id": engine_id,
+                "source_lang": lang,
+                "target_lang": DEFAULT_TARGET_LANG,
+            },
         ))
 
     def _default_mt_engine(self) -> str | None:

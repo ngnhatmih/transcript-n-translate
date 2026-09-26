@@ -14,6 +14,9 @@ from fastapi import FastAPI
 
 from app.adapters.clock_system import SystemClock
 from app.adapters.governor.single_gpu import SingleGpuGovernor
+from app.adapters.mt.ollama_mt import OllamaMtEngine
+from app.adapters.mt.opus_mt import OpusMtEngine
+from app.adapters.mt.prompts import PROMPT_VERSION
 from app.adapters.persist.sqlite_repos import SqliteRepos
 from app.adapters.registry_file import load_default_asr, load_default_mt, load_registry
 from app.api.app import create_app
@@ -23,21 +26,73 @@ from app.config import (API_HOST, API_PORT, DB_PATH, HF_HOME, LOG_DIR, MEDIA_DIR
 from app.pipeline.export import ExportHandler
 from app.pipeline.ingest import IngestHandler
 from app.pipeline.transcribe import AUTO_FORWARD_SETTING, TranscribeHandler
+from app.pipeline.translate import TranslateHandler
 from app.registry import (ASR_DEFAULT_SETTING, MT_DEFAULT_SETTING,
-                          default_asr_engine, default_mt_engine)
+                          default_asr_engine, default_mt_engine, ollama_available)
 from app.worker import PhaseQueueWorker
 
-# MT là Giai đoạn 2.
-_AUTO_FORWARD_OFF = "0"
+#: `auto_forward` nay mặc định BẬT: từ Task 12 đã có handler `translate` thật,
+#: nên bóc băng xong đẩy một job dịch là đường đi ĐÚNG, không còn là đường đẻ ra
+#: job chắc chắn FAILED như Giai đoạn 1a.
+_AUTO_FORWARD_ON = "1"
+
+
+def _mark_availability(specs) -> None:
+    """Ghi `capabilities["available"]` cho mọi engine DỊCH, dò Ollama MỘT lần.
+
+    `EngineSpec` là dataclass `frozen` nhưng `capabilities` là dict nên sửa tại
+    chỗ được — và phải sửa tại chỗ, vì chính danh sách `specs` này là thứ
+    `GET /api/registry` và `mt_engines` cùng đọc.
+
+    `runtime == "ollama"` ⇒ DÒ SỐNG (hardcode `true` cho một engine Ollama chưa
+    cài là xếp một job chắc chắn chết vào hàng đợi thay vì từ chối sớm);
+    `runtime == "inprocess"` ⇒ `True` (không có tiến trình ngoài nào để hỏi).
+    """
+    ollama_alive: bool | None = None
+    for spec in specs:
+        if spec.kind != "mt":
+            continue
+        if spec.runtime == "ollama":
+            if ollama_alive is None:
+                ollama_alive = ollama_available()
+            spec.capabilities["available"] = ollama_alive
+        else:
+            spec.capabilities["available"] = True
+
+
+def _build_mt_engines(specs) -> dict[str, object]:
+    """`{spec.id: engine}` cho mọi engine dịch ĐANG sẵn sàng.
+
+    Khoá là `spec.id` của registry, KHÔNG phải `engine.engine_id`: quy tắc suy
+    `engine_id` từ tag không tái tạo được id registry cho HY-MT
+    (`hy-mt1.5-7b-q4_K_M` vs `hy-mt-1.5-7b`), nên đánh khoá theo engine sẽ
+    `KeyError` ngay khi có người chọn HY-MT.
+
+    Cờ glossary là DỮ LIỆU của `spec.capabilities["glossary_prompt"]`, không
+    phải hằng số của adapter: QA gắn `engine_no_glossary` theo cờ đó.
+    """
+    engines: dict[str, object] = {}
+    for spec in specs:
+        if spec.kind != "mt" or not spec.capabilities.get("available"):
+            continue
+        if spec.runtime == "ollama":
+            engines[spec.id] = OllamaMtEngine(
+                spec.model_ref,
+                supports_glossary=bool(spec.capabilities.get("glossary_prompt", False)),
+            )
+        else:
+            engines[spec.id] = OpusMtEngine(spec.model_ref)
+    return engines
 
 
 def build_components():
-    """Dựng repos, specs, worker và MỘT broker đã nối dây.
+    """Dựng repos, specs, worker, MỘT broker và `mt_engines` đã nối dây.
 
-    Không chạy vòng lặp, không mở mạng. Broker trả về ở đây là đường dây duy
-    nhất nối worker với `/api/jobs/stream`: worker publish vào nó, `build_app()`
-    truyền chính nó cho `create_app()`. Dựng hai broker riêng thì stream không
-    bao giờ nhận được gì — job chạy xong mà giao diện đứng im.
+    Không chạy vòng lặp, không mở mạng (trừ một lần dò Ollama lúc dựng). Broker
+    trả về ở đây là đường dây duy nhất nối worker với `/api/jobs/stream`: worker
+    publish vào nó, `build_app()` truyền chính nó cho `create_app()`. Dựng hai
+    broker riêng thì stream không bao giờ nhận được gì — job chạy xong mà giao
+    diện đứng im.
     """
     ensure_dirs()
     # DC-03: `log_dir` biến `log_path` + `data/logs/job-<id>.log` của spec §5.5
@@ -73,12 +128,22 @@ def build_components():
             f"cấu hình engine dịch mặc định không dùng được: {exc}"
         ) from exc
 
+    # Task 12: `available` phải có TRƯỚC khi dựng engine, vì nó quyết định engine
+    # nào tồn tại. Dò ở đây (một lần) chứ không ở mỗi request.
+    _mark_availability(specs)
+    mt_engines = _build_mt_engines(specs)
+
     transcribe_handler = TranscribeHandler(
         repos, specs, engine_factory=_engine_factory, workdir=MEDIA_DIR,
         # R58/WQ-02: engine dịch mặc định là DỮ LIỆU của registry (`default_mt`),
         # không phải thứ tự mảng `mt`. Thiếu dây này thì mặc định âm thầm quay về
         # "phần tử đầu tiên", đúng lỗi mà khoá `default_mt` sinh ra để chặn.
         declared_default_mt=declared_mt,
+        # `_forward_to_translation` phải tạo hàng `translations` kèm
+        # `prompt_version`, mà giá trị đó là dữ liệu của `adapters/mt/prompts.py`
+        # — composition root là chỗ duy nhất được phép biết adapter.
+        prompt_versions={spec.id: PROMPT_VERSION.get(spec.id, "unknown")
+                         for spec in specs if spec.kind == "mt"},
     )
     handlers = {
         # I-3 + I-6: handler thật nhận registry và gốc media; thiếu chúng thì nó
@@ -87,6 +152,10 @@ def build_components():
         "ingest": IngestHandler(repos, specs=specs, media_root=MEDIA_DIR,
                                 declared_default_asr=declared_asr),
         "asr": transcribe_handler,
+        # Task 12: cùng lớp lỗi với `publish=` bị bỏ quên ở Giai đoạn 1a — dựng
+        # `TranslateHandler` mà KHÔNG trao `mt_engines` thì mọi job dịch tự sinh
+        # `KeyError` trong handler, và bóc băng xong chẳng có bản dịch nào.
+        "translate": TranslateHandler(repos, mt_engines),
         "export": ExportHandler(repos, out_dir=OUTPUT_DIR),
     }
     broker = JobEventBroker()
@@ -102,24 +171,32 @@ def build_components():
             # (worker gọi nó ở cả `before_phase` lẫn `after_phase`).
             governor.register(spec.phase_key, transcribe_handler.release)
 
-    # `TranscribeHandler` coi `auto_forward` vắng mặt là BẬT. Trong Giai đoạn 1a
-    # chưa có handler 'translate', nên bật = mỗi nguồn bóc băng xong đẩy một job
-    # `translate` vào hàng đợi và worker đánh dấu nó FAILED. Chỉ ghi khi chưa ai
-    # đặt, để lựa chọn của người dùng không bị ghi đè.
+    # Cùng lý do với ASR, cho MỌI engine dịch đã dựng: engine dịch nằm trong
+    # `mt_engines` chứ không trong handler, nên không đăng ký ở đây thì không ai
+    # đổ model Ollama khi rời giai đoạn dịch. Khoá giai đoạn lấy từ
+    # `spec.phase_key` (đi qua `phase_of`), không tự nối chuỗi từ `kind`.
+    for engine_id, engine in mt_engines.items():
+        spec = next(s for s in specs if s.id == engine_id)
+        governor.register(spec.phase_key, engine.release)
+
+    # `TranscribeHandler` coi `auto_forward` vắng mặt là BẬT, và từ Task 12 điều
+    # đó là ĐÚNG: đã có handler `translate` thật. Chỉ ghi khi chưa ai đặt, để lựa
+    # chọn của người dùng không bị ghi đè.
     if repos.get_setting(AUTO_FORWARD_SETTING) is None:
-        repos.set_setting(AUTO_FORWARD_SETTING, _AUTO_FORWARD_OFF)
+        repos.set_setting(AUTO_FORWARD_SETTING, _AUTO_FORWARD_ON)
 
-    return repos, specs, worker, broker
+    return repos, specs, worker, broker, mt_engines
 
 
-def build_app(repos, specs, worker, broker) -> FastAPI:
+def build_app(repos, specs, worker, broker, mt_engines) -> FastAPI:
     """Ráp app HTTP từ ĐÚNG những thành phần `build_components()` trả về.
 
     Tách khỏi `main()` để test gọi được đường dây thật, không phải bản sao của
     nó: bỏ `broker=broker` ở đây là app tự dựng broker riêng và stream câm.
     """
     return create_app(repos=repos, specs=specs, media_dir=MEDIA_DIR,
-                      out_dir=OUTPUT_DIR, worker=worker, log_dir=LOG_DIR, broker=broker)
+                      out_dir=OUTPUT_DIR, worker=worker, log_dir=LOG_DIR,
+                      broker=broker, mt_engines=mt_engines)
 
 
 def _prepare_local_model_caches() -> None:
@@ -151,9 +228,9 @@ def _engine_factory(spec):
 def main() -> None:
     import uvicorn
 
-    repos, specs, worker, broker = build_components()
+    repos, specs, worker, broker, mt_engines = build_components()
     worker.recover()
-    app = build_app(repos, specs, worker, broker)
+    app = build_app(repos, specs, worker, broker, mt_engines)
     thread = threading.Thread(target=worker.run_forever, name="phase-queue", daemon=True)
     thread.start()
     uvicorn.run(app, host=API_HOST, port=API_PORT, log_level="info")

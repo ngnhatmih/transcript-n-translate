@@ -7,45 +7,48 @@ upload -> ingest -> asr -> export -> tải về.
 
 ## Fixture đi qua ĐÚNG bộ ráp của production
 
-`wired` gọi `main.build_components()` + `main.build_app()` (main.py:32-84) chứ
-KHÔNG tự ráp lại `PhaseQueueWorker`/`create_app`. Nhờ vậy mọi dây của production
-đều được chạy thật và test không thể trôi khỏi nó: vòng `governor.register()`
-cho từng spec ASR (main.py:61-65), `auto_forward="0"` mặc định (main.py:71-72),
-`publish=broker.publish` ở worker (main.py:55), và `broker=` ở app
-(main.py:83-84). Chỉ DUY NHẤT khúc ffmpeg bị thay (`StubIngest`), vì
-`IngestHandler` thật cần ffmpeg.
+`wired` gọi `main.build_components()` + `main.build_app()` chứ KHÔNG tự ráp lại
+`PhaseQueueWorker`/`create_app`. Nhờ vậy mọi dây của production đều được chạy
+thật và test không thể trôi khỏi nó: vòng `governor.register()` cho từng spec ASR
+và từng engine dịch (main.py), `auto_forward="1"` mặc định, `publish=broker.publish`
+ở worker, và `broker=`/`mt_engines=` ở app. Chỉ DUY NHẤT hai adapter model bị thay
+(`StubIngest` cho khúc ffmpeg của `IngestHandler`, `FakeMtEngine` cho khúc HTTP
+tới Ollama).
 
 `ensure_dirs()` (config.py:38-40) đọc biến toàn cục của CHÍNH `app.config`, nên
 fixture phải vá CẢ `app.config` lẫn `main`: vá mỗi `main` thì
 `main.build_components()` vẫn tạo `data/` THẬT của repo.
 
-## Vì sao có ĐÚNG hai lần đổi giai đoạn
+## Vì sao nay có BA lần đổi giai đoạn
 
-Production đặt `auto_forward="0"` (main.py:71-72), nên job ASR KHÔNG đẻ job
-`translate`, và nhịp chạy chỉ vào hai giai đoạn:
+Task 12 nối handler `translate` vào composition root và đổi `auto_forward` mặc
+định sang `"1"`, nên bóc băng xong THẬT SỰ đẻ ra job dịch và worker chạy nó:
 
-    ingest:-               x3  -> vào giai đoạn lần 1
-    asr:fw-large-v3-turbo  x3  -> vào giai đoạn lần 2
-    hàng đợi cạn           -> tick() trả False
+    ingest:-                     x3  -> vào giai đoạn lần 1
+    asr:fw-large-v3-turbo        x3  -> vào giai đoạn lần 2
+    translate:qwen2.5-7b         x3  -> vào giai đoạn lần 3
+    hàng đợi cạn                 -> tick() trả False
 
 `phase_switches` KHÔNG phải một quan sát độc lập với `governor.entered`: cả hai
 đều được đặt trong `worker._enter_phase` (worker.py:117-120) với cùng một tham
 số `phase`, nên về cấu trúc `phase_switches == len(entered)`. Test khẳng định
 đúng đẳng thức đó, không trình bày chúng như hai nhân chứng.
 
-Đường `translate` của GĐ1a (job không có handler -> FAILED ồn ào) vẫn được canh,
-nhưng bằng một job XẾP TAY trong `test_full_pipeline_from_upload_to_srt`, không
-mượn `auto_forward` bật — đó là cấu hình production không chạy.
+Engine dịch thật (`OllamaMtEngine`) bị thay bằng `FakeMtEngine` đúng như engine
+ASR bị thay: khúc HTTP tới Ollama là thứ duy nhất còn là hàng giả, còn VIỆC RÁP
+DÂY (`mt_engines`, `governor.register`, `TranslateHandler`) là của `main.py`.
 """
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import pathlib
 
 import pytest
 from fastapi.testclient import TestClient
 
 from app.adapters.governor.single_gpu import SingleGpuGovernor
+from app.adapters.mt.prompts import PROMPT_VERSION
 from app.domain import job_state as js
 from app.domain.models import Job, Segment
 from app.pipeline.transcribe import AUTO_FORWARD_SETTING
@@ -126,15 +129,46 @@ class StubIngest:
         report(1.0, "ingest giả")
 
 
+class FakeMtEngine:
+    """Engine dịch giả: chỉ thay đúng khúc HTTP tới Ollama.
+
+    `translate` dùng `dataclasses.replace` chứ KHÔNG dựng `Segment(...)` bằng tay
+    (hai task trong phase này đã nuốt 7/13 trường theo cách đó).
+    """
+
+    def __init__(self, model_ref: str, *, supports_glossary: bool = False) -> None:
+        self.model_ref = model_ref
+        self._supports_glossary = supports_glossary
+        self.release_count = 0
+        self.batches: list[list[int]] = []
+        self.last_stats = None
+
+    @property
+    def engine_id(self) -> str:
+        return "fake-mt"
+
+    def supports_glossary(self) -> bool:
+        return self._supports_glossary
+
+    def translate(self, batch, glossary, opts):
+        self.batches.append([s.i for s in batch])
+        return [dataclasses.replace(s, text=f"[{opts.target_lang}] {s.text}")
+                for s in batch]
+
+    def release(self) -> None:
+        self.release_count += 1
+
+
 @pytest.fixture()
 def wired(tmp_path, monkeypatch):
     """Ráp app bằng ĐÚNG `main.build_components()` + `main.build_app()`.
 
-    Chỉ ba thứ được thay: registry (spec nhỏ, không nạp model), engine thật
-    (bằng `FakeASREngine`) và governor (bằng `TracingGovernor`, vẫn là
-    `SingleGpuGovernor` thật). Mọi đường dẫn bị chuyển vào `tmp_path` — cả
-    `app.config` lẫn `main`, vì `ensure_dirs()` đọc biến toàn cục của
-    `app.config` chứ không đọc tên đã import vào `main`.
+    Chỉ bốn thứ được thay: registry (spec nhỏ, không nạp model), engine thật
+    (bằng `FakeASREngine`/`FakeMtEngine`), governor (bằng `TracingGovernor`, vẫn
+    là `SingleGpuGovernor` thật) và phép dò Ollama (ghim `True` để suite không
+    phụ thuộc việc Ollama có đang chạy trên máy hay không). Mọi đường dẫn bị
+    chuyển vào `tmp_path` — cả `app.config` lẫn `main`, vì `ensure_dirs()` đọc
+    biến toàn cục của `app.config` chứ không đọc tên đã import vào `main`.
     """
     from app import config, main
 
@@ -149,10 +183,16 @@ def wired(tmp_path, monkeypatch):
     monkeypatch.setattr(main, "LOG_DIR", data / "logs")
 
     created: list[FakeASREngine] = []
+    mt_created: list[FakeMtEngine] = []
 
     def factory(spec):
         engine = FakeASREngine(spec)
         created.append(engine)
+        return engine
+
+    def mt_factory(*args, **kwargs):
+        engine = FakeMtEngine(*args, **kwargs)
+        mt_created.append(engine)
         return engine
 
     monkeypatch.setattr(main, "load_registry", lambda: [ASR_SPEC, MT_SPEC])
@@ -163,16 +203,22 @@ def wired(tmp_path, monkeypatch):
     monkeypatch.setattr(main, "load_default_mt", lambda: MT_SPEC.id)
     monkeypatch.setattr(main, "_engine_factory", factory)
     monkeypatch.setattr(main, "SingleGpuGovernor", TracingGovernor)
+    # Task 12: `MT_SPEC` là runtime `ollama`, nên `available` của nó do phép dò
+    # quyết định. Ghim để suite tất định, và thay adapter HTTP bằng engine giả.
+    monkeypatch.setattr(main, "ollama_available", lambda *a, **k: True)
+    monkeypatch.setattr(main, "OllamaMtEngine", mt_factory)
 
-    repos, specs, worker, broker = main.build_components()
+    repos, specs, worker, broker, mt_engines = main.build_components()
     # ingest thật cần ffmpeg; đó là khúc duy nhất còn giả.
     worker.handlers["ingest"] = StubIngest(repos, specs)
-    app = main.build_app(repos, specs, worker, broker)
+    app = main.build_app(repos, specs, worker, broker, mt_engines)
 
     with TestClient(app) as c:
         c.repos = repos
         c.worker = worker
         c.created = created
+        c.mt_created = mt_created
+        c.mt_engines = mt_engines
         c.governor = worker.governor
         c.broker = broker
         yield c
@@ -230,36 +276,34 @@ def test_full_pipeline_from_upload_to_srt(wired):
     running = wired.get("/api/status").json()
     assert running["queue_depth"] == 0, "hàng đợi phải cạn"
 
-    # GĐ1a chưa có handler dịch: job phải FAILED RÕ RÀNG chứ không treo ở `queued`.
-    # Không thêm handler giả cho `translate` — làm vậy là che mất đúng cái lỗ hổng
-    # mà khẳng định này canh. Nhưng cấu hình production có `auto_forward="0"`, nên
-    # đường bóc băng KHÔNG đẻ job dịch: muốn canh nhánh này thì phải TỰ xếp job,
-    # đừng mượn `auto_forward` bật (đó là cấu hình production không chạy).
-    assert wired.repos.get_setting(AUTO_FORWARD_SETTING) == "0", (
-        "production đặt auto_forward='0' (main.py:71-72); fixture phải giống"
+    # Task 12: cấu hình production nay là `auto_forward="1"` (đã có handler
+    # `translate`), nên chính đường bóc băng THẬT SỰ đẻ ra job dịch — không còn
+    # phải xếp tay một job để canh nhánh "không có handler".
+    assert wired.repos.get_setting(AUTO_FORWARD_SETTING) == "1", (
+        "production đặt auto_forward='1' kể từ khi có handler translate"
     )
-    jobs = wired.get("/api/jobs").json()
-    assert [j for j in jobs if j["type"] == "translate"] == [], (
-        "auto_forward='0' không được đẻ job dịch"
-    )
-
-    source_id = wired.repos.list_sources()[0].id
-    wired.repos.add_job(Job(
-        id=None, workspace=2, type="translate", engine=MT_SPEC.id,
-        phase=js.phase_of("translate", MT_SPEC.id),
-        payload={"transcript_id": tid, "source_id": source_id, "lang": "zh"},
-    ))
-    while wired.worker.tick():
-        pass
-
     translate_jobs = [j for j in wired.get("/api/jobs").json() if j["type"] == "translate"]
-    assert len(translate_jobs) == 1
-    assert translate_jobs[0]["state"] == "failed", (
-        "GĐ1a chưa có handler dịch; job phải failed rõ ràng chứ không treo"
+    assert len(translate_jobs) == 1, (
+        f"bóc băng xong phải tự đẻ ĐÚNG một job dịch: {translate_jobs}"
     )
-    assert "không có handler" in (translate_jobs[0]["error"] or "")
+    assert translate_jobs[0]["state"] == "done", translate_jobs[0]
+    assert translate_jobs[0]["engine"] == MT_SPEC.id
     assert wired.governor.entered[-1] == js.phase_of("translate", MT_SPEC.id), (
-        f"job dịch xếp tay phải mở giai đoạn dịch: {wired.governor.entered}"
+        f"job dịch tự sinh phải mở giai đoạn dịch: {wired.governor.entered}"
+    )
+    translations = wired.get(f"/api/transcripts/{tid}").json()["translations"]
+    assert len(translations) == 1, translations
+    summary = translations[0]
+    assert summary["engine"] == MT_SPEC.id
+    assert summary["translated_from_version"] == 1
+    assert summary["stale"] is False, "vừa dịch xong từ version 1 thì không được coi là cũ"
+    assert summary["prompt_version"] == PROMPT_VERSION[MT_SPEC.id], (
+        "prompt_version là DỮ LIỆU của `adapters/mt/prompts.py` do `main.py` bơm "
+        f"vào; nhận được {summary['prompt_version']!r}"
+    )
+    assert wired.repos.get_translation(summary["id"]).status == "done"
+    assert wired.mt_engines[MT_SPEC.id].batches == [[0, 1, 2]], (
+        "engine dịch của CHÍNH composition root phải là cái đã được gọi"
     )
 
     read = wired.get(f"/api/transcripts/{tid}/readability",
@@ -293,29 +337,36 @@ def test_fake_asr_model_loaded_exactly_once_for_the_phase(wired):
     assert len(wired.created) == 1, (
         f"3 job cùng engine phải nạp model 1 lần, thực tế {len(wired.created)}"
     )
-    # Đây là cấu hình PRODUCTION: `main.build_components()` đặt `auto_forward="0"`
-    # (main.py:71-72). Fixture tự ráp dây thì biến đó vắng mặt, `TranscribeHandler`
-    # hiểu là BẬT, và test sẽ khẳng định một cấu hình production không chạy.
-    assert wired.repos.get_setting(AUTO_FORWARD_SETTING) == "0", (
-        "fixture phải chạy đúng cấu hình production (auto_forward='0')"
+    # Đây là cấu hình PRODUCTION: `main.build_components()` đặt `auto_forward="1"`
+    # kể từ Task 12 (đã có handler `translate` thật). Fixture tự ráp dây thì biến
+    # đó vắng mặt và `TranscribeHandler` hiểu là BẬT — nay hai đường giống nhau.
+    assert wired.repos.get_setting(AUTO_FORWARD_SETTING) == "1", (
+        "fixture phải chạy đúng cấu hình production (auto_forward='1')"
     )
-    assert wired.governor.entered == ["ingest:-", "asr:fw-large-v3-turbo"], (
-        f"truy vết giai đoạn sai: {wired.governor.entered}"
-    )
+    assert wired.governor.entered == [
+        "ingest:-", "asr:fw-large-v3-turbo", f"translate:{MT_SPEC.id}",
+    ], f"truy vết giai đoạn sai: {wired.governor.entered}"
     # `phase_switches` KHÔNG phải một quan sát độc lập với `entered`: cả hai đều
     # được đặt trong `worker._enter_phase` (worker.py:117-120) với cùng một tham
     # số `phase`. Đây là MỘT đẳng thức, không phải hai nhân chứng.
-    assert wired.worker.phase_switches == len(wired.governor.entered) == 2, (
-        "auto_forward='0' chỉ vào ingest:- rồi asr:fw-large-v3-turbo, "
+    assert wired.worker.phase_switches == len(wired.governor.entered) == 3, (
+        "auto_forward='1' vào ingest:- rồi asr:fw-large-v3-turbo rồi giai đoạn dịch, "
         f"thực tế {wired.worker.phase_switches} lần đổi giai đoạn: "
         f"{wired.governor.entered}"
     )
     # Rời giai đoạn ASR là model phải được ĐỔ, qua đúng vòng
-    # `governor.register()` mà `main.py:61-65` chạy. `release()` của handler
-    # idempotent nên gọi lặp không tính thêm lần nào.
+    # `governor.register()` của `main.py`. `release()` của handler idempotent nên
+    # gọi lặp không tính thêm lần nào.
     assert wired.created[0].release_count == 1, (
         "đổi giai đoạn mà không đổ model thì VRAM rò rỉ: "
         f"{wired.created[0].release_count} lần đổ"
+    )
+    # Và engine DỊCH cũng phải được đăng ký với governor: ba job dịch chạy trong
+    # đúng một giai đoạn, nên `release()` của nó được gọi ở cả `before_phase` của
+    # giai đoạn khác lẫn `after_phase` của chính nó.
+    engine = wired.mt_engines[MT_SPEC.id]
+    assert engine.release_count >= 1, (
+        "engine dịch không được đăng ký releaser: model Ollama nằm mãi trong VRAM"
     )
 
 

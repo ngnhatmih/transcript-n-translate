@@ -25,7 +25,7 @@ from app.adapters.clock_system import SystemClock
 from app.adapters.persist.sqlite_repos import SqliteRepos
 from app.api.app import create_app
 from app.domain import job_state as js
-from app.domain.models import Job, Source
+from app.domain.models import Job, Segment, Source
 from app.registry import EngineSpec
 from tests.fakes import RecordingHandler, a_job
 
@@ -775,6 +775,10 @@ def built(tmp_path, monkeypatch):
     THẬT của repo (đúng cái bẫy đã biết ở Q5 của review Task 19). Khẳng định
     `_assert_repo_data_dirs_untouched` ngay dưới đây biến lời hứa đó thành thứ
     chạy được: bỏ các dòng vá `config` là MỌI test dùng fixture này đỏ.
+
+    Task 12: `build_components()` trả TUPLE 5 phần tử, `mt_engines` ở CUỐI
+    (correction A — không đổi sang dataclass), nên fixture trả thêm nó cho những
+    bài cần ráp `build_app()`.
     """
     from app import config, main
 
@@ -793,9 +797,14 @@ def built(tmp_path, monkeypatch):
     monkeypatch.setattr(main, "load_registry",
                         lambda: _registry_with_the_shipped_mt_default([ASR_SPEC, MT_SPEC]))
     monkeypatch.setattr(main, "_engine_factory", lambda spec: engine, raising=False)
-    repos, specs, worker, broker = main.build_components()
+    # Task 12: composition root dò Ollama SỐNG để quyết định engine dịch nào tồn
+    # tại. Fixture này không kiểm phép dò đó (nó có bài riêng ở
+    # `tests/test_mt_wiring.py`), nên nó ghim kết quả thành "tắt" để suite không
+    # phụ thuộc việc Ollama có đang chạy trên máy hay không.
+    monkeypatch.setattr(main, "ollama_available", lambda *a, **k: False)
+    repos, specs, worker, broker, mt_engines = main.build_components()
     _assert_repo_data_dirs_untouched(repo_data_before)
-    return main, repos, specs, worker, engine, broker
+    return main, repos, specs, worker, engine, broker, mt_engines
 
 
 def test_build_components_refuses_a_registry_that_cannot_satisfy_the_default_asr(
@@ -868,7 +877,7 @@ def test_build_components_wires_the_ingest_guards_into_the_real_handler(built, t
     """
     from app.pipeline.ingest import IngestError
 
-    main, repos, specs, worker, engine, broker = built
+    main, repos, specs, worker, engine, broker, mt_engines = built
     handler = worker.handlers["ingest"]
 
     # I-6: media nằm NGOÀI gốc media -> từ chối trước khi chạm ffmpeg/ffprobe.
@@ -898,7 +907,7 @@ def test_build_components_registers_every_asr_engine_with_the_governor(built):
     Không có dây này thì `before_phase`/`after_phase` là hàm rỗng và model ASR
     KHÔNG BAO GIỜ được đổ — đúng cái mà hàng đợi theo giai đoạn sinh ra để làm.
     """
-    main, repos, specs, worker, engine, broker = built
+    main, repos, specs, worker, engine, broker, mt_engines = built
     governor = worker.governor
 
     assert set(governor._loaded) == {ASR_SPEC.phase_key}
@@ -911,7 +920,7 @@ def test_build_components_registers_every_asr_engine_with_the_governor(built):
 
 def test_registered_releaser_actually_unloads_the_loaded_model(built):
     """Kiểm tra cái releaser đã đăng ký là hàm ĐỔ MODEL, không phải hàm rỗng."""
-    main, repos, specs, worker, engine, broker = built
+    main, repos, specs, worker, engine, broker, mt_engines = built
     handler = worker.handlers["asr"]
 
     # Nạp engine vào handler bằng đúng đường mà `run()` đi. Gọi thẳng hàm riêng
@@ -936,30 +945,41 @@ def test_registered_releaser_actually_unloads_the_loaded_model(built):
     assert engine.releases == 2, "before_phase của giai đoạn khác không đổ model ASR"
 
 
-def test_build_components_defaults_auto_forward_off_until_mt_exists(built):
-    """`auto_forward` mặc định BẬT, mà GĐ1a chưa có handler 'translate'.
+def test_build_components_defaults_auto_forward_on_now_that_mt_exists(built):
+    """Task 12 · `auto_forward` mặc định BẬT, và nay điều đó là ĐÚNG.
 
-    Bật thì mỗi nguồn bóc băng xong sẽ đẩy một job `translate` vào hàng đợi, và
-    worker (đúng như Task 9 khoá lại) đánh dấu nó FAILED. Nên mặc định phải là
-    '0' cho tới khi có Giai đoạn 2.
+    GĐ1a ép '0' vì chưa có handler `translate`: bật thì mỗi nguồn bóc băng xong
+    đẩy một job `translate` vào hàng đợi và worker đánh dấu nó FAILED. Nay handler
+    đó đã được nối dây, nên mặc định phải là '1' — còn '0' nghĩa là bóc băng xong
+    chẳng bao giờ có bản dịch.
     """
-    main, repos, specs, worker, engine, broker = built
+    main, repos, specs, worker, engine, broker, mt_engines = built
 
-    assert repos.get_setting("auto_forward") == "0"
-    assert set(worker.handlers) == {"ingest", "asr", "export"}
+    assert repos.get_setting("auto_forward") == "1"
+    assert set(worker.handlers) == {"ingest", "asr", "translate", "export"}
 
 
 def test_build_components_does_not_overwrite_an_auto_forward_choice(built):
-    """Người dùng đã đặt '1' thì `build_components()` không được ghi đè."""
-    main, repos, specs, worker, engine, broker = built
+    """Người dùng đã đặt '0' thì `build_components()` không được ghi đè.
 
-    repos.set_setting("auto_forward", "1")
+    Đặt '0' chứ không phải '1': từ Task 12 mặc định đã là '1', nên một bài đặt
+    '1' rồi khẳng định '1' sẽ xanh kể cả khi dây "chỉ ghi khi chưa ai đặt" bị gỡ.
+    """
+    main, repos, specs, worker, engine, broker, mt_engines = built
+
+    repos.set_setting("auto_forward", "0")
     main.build_components()
-    assert repos.get_setting("auto_forward") == "1"
+    assert repos.get_setting("auto_forward") == "0"
 
 
-def test_build_components_only_registers_asr_engines(monkeypatch, tmp_path):
-    """Engine MT không được đăng ký: GĐ1a chạy nó qua Ollama, không qua handler này."""
+def test_build_components_registers_only_available_mt_engines(monkeypatch, tmp_path):
+    """Engine MT CHƯA sẵn sàng không được đăng ký; engine sẵn sàng thì phải có.
+
+    Fixture ghim `ollama_available()` = False (spec mt của registry giả ở đây là
+    runtime `ollama`), nên không giai đoạn dịch nào được mở. Bài đối chứng — dò
+    sống trả True thì giai đoạn dịch PHẢI có mặt — nằm ở
+    `tests/test_mt_wiring.py::test_governor_has_a_releaser_for_every_mt_phase`.
+    """
     from app import config, main
 
     repo_data_before = _snapshot_repo_data_dirs()
@@ -974,9 +994,11 @@ def test_build_components_only_registers_asr_engines(monkeypatch, tmp_path):
     monkeypatch.setattr(main, "MEDIA_DIR", data / "media")
     monkeypatch.setattr(main, "OUTPUT_DIR", data / "output")
     monkeypatch.setattr(main, "LOG_DIR", data / "logs")
-    repos, specs, worker, broker = main.build_components()
+    monkeypatch.setattr(main, "ollama_available", lambda *a, **k: False)
+    repos, specs, worker, broker, mt_engines = main.build_components()
     _assert_repo_data_dirs_untouched(repo_data_before)
 
+    assert mt_engines == {}
     assert set(worker.governor._loaded) == {ASR_SPEC.phase_key}
 
 
@@ -989,7 +1011,7 @@ def test_build_components_wires_the_job_log_dir(built):
     của `build_components()` rồi đòi tệp log nằm ĐÚNG `main.LOG_DIR` — gỡ dây
     là đỏ ngay.
     """
-    main, repos, specs, worker, engine, broker = built
+    main, repos, specs, worker, engine, broker, mt_engines = built
     worker.handlers["asr"] = RecordingHandler(job_type="asr")
     jid = repos.add_job(a_job(None, job_type="asr", engine=ASR_SPEC.id))
 
@@ -1017,20 +1039,29 @@ def test_build_components_wires_the_declared_default_mt_engine(built):
     """
     from app.adapters.registry_file import load_default_mt
 
-    main, repos, specs, worker, engine, broker = built
+    main, repos, specs, worker, engine, broker, mt_engines = built
     declared = load_default_mt()
 
     handler = worker.handlers["asr"]
     assert handler._declared_default_mt == declared, (  # noqa: SLF001 - đọc thẳng dây nối
         "handler của composition root phải nhận ĐÚNG giá trị `load_default_mt()`"
     )
-    handler._forward_to_translation(1, 1, "zh")  # noqa: SLF001 - chính đường thật
+    # Task 12: `_forward_to_translation` nay tạo HÀNG `translations` trước, nên
+    # nó đọc transcript thật — không còn gọi được với id tượng trưng.
+    sid = repos.add_source(kind="file", origin="a.mp4", media_path="a.mp4", lang="zh")
+    tid = repos.add_transcript(source_id=sid, engine=ASR_SPEC.id, lang="zh",
+                               segments=[Segment(i=0, start=0.0, end=1.0, text="你好")])
+    handler._forward_to_translation(tid, "zh")  # noqa: SLF001 - chính đường thật
     mt_jobs = [j for j in repos.list_jobs() if j.type == "translate"]
     first_mt = [s.id for s in specs if s.kind == "mt"][0]
     assert [j.engine for j in mt_jobs] == [declared], (
         "handler của composition root phải dùng khoá `default_mt`, không phải "
         f"phần tử đầu của mảng `mt` ({first_mt})"
     )
+    translation = repos.get_translation(mt_jobs[0].payload["translation_id"])
+    assert translation.transcript_id == tid
+    assert translation.transcript_version == 1
+    assert translation.engine == declared
 
 
 def test_the_worker_and_the_stream_share_the_broker_of_the_assembled_app(built):
@@ -1044,10 +1075,13 @@ def test_the_worker_and_the_stream_share_the_broker_of_the_assembled_app(built):
     Engine/handler được thay bằng stub (đúng như `built` đã thay engine), còn
     repos/worker/app/broker là những thành phần THẬT của `main.py`.
     """
-    main, repos, specs, worker, engine, broker = built
+    main, repos, specs, worker, engine, broker, mt_engines = built
     worker.handlers["asr"] = RecordingHandler(job_type="asr")
-    app = main.build_app(repos, specs, worker, broker)
+    app = main.build_app(repos, specs, worker, broker, mt_engines)
     assert app.state.broker is broker, "app phải đọc đúng broker của build_components()"
+    assert app.state.mt_engines is mt_engines, (
+        "app phải đọc ĐÚNG dict mt_engines của build_components(), không phải bản sao"
+    )
     repos.add_job(a_job(None, job_type="asr", engine="fw-large-v3-turbo"))
 
     async def run_a_job():

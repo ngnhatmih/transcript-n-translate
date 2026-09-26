@@ -1,6 +1,13 @@
 """Kiểu dữ liệu của registry và các phép tra cứu. Thuần, không đọc tệp.
 
 Việc đọc tệp nằm ở adapters/registry_file.py.
+
+Một ngoại lệ CÓ GHI NHẬN cho tính "thuần" ở trên: `ollama_available()` dò sống
+tiến trình Ollama. Nó nằm đây theo đúng Step 4 của brief Task 12, và nó KHÔNG
+kéo `httpx` vào lúc import (import nằm trong hàm) — module này vẫn import được ở
+mọi tầng, kể cả nơi `httpx` chưa cài. Nếu sau này có chỗ dò Ollama dùng chung
+(`app/api/routes_registry.probe_ollama` cũng đang dò), gộp chúng lại là việc của
+task dọn dẹp, không phải lý do để bịa thêm một tầng nữa.
 """
 from __future__ import annotations
 
@@ -111,6 +118,39 @@ def default_asr_engine(specs: Iterable[EngineSpec], *, declared: str | None = No
 def estimate_vram_mb(specs: Iterable[EngineSpec], engine_ids: Iterable[str]) -> int:
     specs = list(specs)
     return sum(by_id(specs, eid).vram_mb for eid in engine_ids)
+
+
+#: Ollama mặc định nghe ở đây. `OLLAMA_HOST` (biến chính thức của Ollama) được
+#: `routes_registry.probe_ollama` tôn trọng cho endpoint `/api/status`; ở đây
+#: dùng hằng số tường minh để một biến môi trường dạng `host:port` (không scheme)
+#: không âm thầm làm phép dò này trả `False` — đúng lỗi API-02 của GĐ1a.
+DEFAULT_OLLAMA_BASE_URL = "http://127.0.0.1:11434"
+
+
+def ollama_available(base_url: str = DEFAULT_OLLAMA_BASE_URL,
+                     timeout: float = 1.5) -> bool:
+    """Ollama có sống không. Dò MỘT lần lúc dựng, KHÔNG dò mỗi request.
+
+    Vì sao phải dò thật thay vì hardcode: một engine Ollama được khai "có sẵn"
+    trong khi tiến trình Ollama không chạy thì job dịch sẽ được xếp vào hàng đợi
+    rồi chết trong worker, thay vì bị từ chối SỚM ngay lúc dựng (đúng lỗi I-3 mà
+    GĐ1a đã trả giá với engine ASR).
+
+    Chỉ hỏi `/api/tags` có trả 200 hay không — tức "Ollama có sống", KHÔNG phải
+    "model này đã pull". Phép dò theo từng model là việc khác, và nó sẽ đổi hành
+    vi `available` của cả registry; ghi ở đây để không ai đọc nhầm phạm vi.
+
+    Mọi lỗi (chưa cài `httpx`, cổng đóng, timeout, DNS) đều là `False`: câu hỏi
+    là "có dùng được ngay bây giờ không", và câu trả lời an toàn cho một job sắp
+    xếp hàng là "không".
+    """
+    import httpx
+
+    try:
+        with httpx.Client(timeout=timeout) as client:
+            return client.get(f"{base_url.rstrip('/')}/api/tags").status_code == 200
+    except Exception:
+        return False
 
 
 def default_mt_engine(specs: Iterable[EngineSpec], *, declared: str | None = None,
