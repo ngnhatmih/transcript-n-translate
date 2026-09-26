@@ -223,7 +223,8 @@ class SqliteRepos:
             glossary_version=row["glossary_version"],
             qa_issues=json.loads(row["qa_issues"] or "[]"),
             tokens_in=row["tokens_in"], tokens_out=row["tokens_out"],
-            duration_ms=row["duration_ms"], created_at=row["created_at"],
+            duration_ms=row["duration_ms"], status=row["status"],
+            created_at=row["created_at"],
         )
 
     def list_translations(self) -> list[Translation]:
@@ -242,26 +243,78 @@ class SqliteRepos:
                         prompt_version: str, glossary_version: int | None = None,
                         qa_issues: list[str] | None = None,
                         tokens_in: int | None = None, tokens_out: int | None = None,
-                        duration_ms: int | None = None) -> int:
+                        duration_ms: int | None = None,
+                        status: str = "queued") -> int:
         """Ghi một bản dịch.
 
         `transcript_version` là version của transcript mà bản dịch này dịch TỪ —
         không phải version hiện tại của transcript. Đây chính là giá trị mà
         `is_stale()` so với version hiện tại; ghi nhầm thành "version hiện tại"
         thì mọi bản dịch vừa dịch xong đều trông như đã lỗi thời.
+
+        `status` được GHI TƯỜNG MINH chứ không để cột tự lấy default: GĐ1a không
+        có ai ghi cột này, nên default `'queued'` của schema chưa từng được ghim;
+        một bản dịch tạo ra ở trạng thái khác phải đọc lên đúng trạng thái đó.
         """
         with self._connect() as conn:
             cur = conn.execute(
                 "INSERT INTO translations(transcript_id, transcript_version, engine,"
                 " target_lang, segments, prompt_version, glossary_version, qa_issues,"
-                " tokens_in, tokens_out, duration_ms, created_at)"
-                " VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+                " tokens_in, tokens_out, duration_ms, status, created_at)"
+                " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (transcript_id, transcript_version, engine, target_lang,
                  segments_to_json(segments), prompt_version, glossary_version,
                  json.dumps(qa_issues or [], ensure_ascii=False), tokens_in,
-                 tokens_out, duration_ms, self._clock.now_iso()),
+                 tokens_out, duration_ms, status, self._clock.now_iso()),
             )
             return int(cur.lastrowid)
+
+    def get_translation(self, translation_id: int) -> Translation:
+        """Một bản dịch đầy đủ (có `segments`) theo id.
+
+        Ném `NotFound` chứ không trả `None`: người gọi là handler dịch, và một
+        `None` lọt xuống đó sẽ thành `AttributeError` ở tận đâu đó thay vì một
+        lỗi nói đúng thứ đang thiếu. Cùng loại lỗi với `get_transcript`.
+        """
+        with self._connect() as conn:
+            row = conn.execute("SELECT * FROM translations WHERE id=?",
+                               (translation_id,)).fetchone()
+        if row is None:
+            raise NotFound(f"translation {translation_id} không tồn tại")
+        return self._row_to_translation(row)
+
+    def update_translation_segments(self, translation_id: int,
+                                    segments: list[Segment]) -> None:
+        """Checkpoint tiến độ: ghi ĐÈ `segments` bằng danh sách ĐÃ APPEND.
+
+        Người gọi truyền cả danh sách đã dịch tới lúc này (không phải lô vừa
+        xong), nên `len(segments)` chính là tiến độ và không cần bảng
+        `translation_segments` riêng (spec §3). Không đụng `status`.
+        """
+        with self._connect() as conn:
+            conn.execute("UPDATE translations SET segments=? WHERE id=?",
+                         (segments_to_json(segments), translation_id))
+
+    def set_translation_status(self, translation_id: int, status: str, *,
+                               qa_issues: list[str] | None = None,
+                               tokens_in: int | None = None,
+                               tokens_out: int | None = None,
+                               duration_ms: int | None = None) -> None:
+        """Ghi trạng thái và (tuỳ chọn) số liệu QA/token.
+
+        Tham số `None` nghĩa là "không đụng tới cột đó", không phải "ghi NULL":
+        một job hỏng giữa đường vẫn phải giữ token đã tiêu của các lô đã xong.
+        """
+        sets, args = ["status=?"], [status]
+        for column, value in (("qa_issues", qa_issues), ("tokens_in", tokens_in),
+                              ("tokens_out", tokens_out), ("duration_ms", duration_ms)):
+            if value is not None:
+                sets.append(f"{column}=?")
+                args.append(json.dumps(value, ensure_ascii=False)
+                            if column == "qa_issues" else value)
+        args.append(translation_id)
+        with self._connect() as conn:
+            conn.execute(f"UPDATE translations SET {', '.join(sets)} WHERE id=?", args)
 
     def list_translations_for_transcript(
             self, transcript_id: int) -> list[TranslationSummary]:
