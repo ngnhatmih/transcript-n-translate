@@ -15,6 +15,7 @@ from __future__ import annotations
 from dataclasses import replace
 from typing import Callable
 
+from app.domain.alignment import AlignmentProblem
 from app.domain.models import Segment, Term
 from app.domain.mt import MtOpts
 
@@ -50,6 +51,18 @@ class OpusMtEngine:
             return []
         marian = self._ensure_loaded()
         translated = marian.translate([s.text for s in batch])   # type: ignore[attr-defined]
+        # `zip` một mình sẽ IM LẶNG cắt cụt khi decoder trả ít hơn đầu vào, mà
+        # hợp đồng `MtEngine` cấm trả list ngắn hơn: mất một dòng phụ đề không
+        # tín hiệu là đúng kiểu thất bại âm thầm mà `AlignmentProblem` tồn tại để
+        # chặn. Bên gọi (Task 11) bắt riêng ngoại lệ này để thử lại cả lô hoặc
+        # lùi về dịch từng segment.
+        if len(translated) != len(batch):
+            raise AlignmentProblem(
+                expected_ids=[s.i for s in batch],
+                got_ids=[s.i for s in batch[:len(translated)]],
+                reason=(f"opus-mt trả {len(translated)} bản dịch cho "
+                        f"{len(batch)} segment"),
+            )
         return [replace(s, text=t) for s, t in zip(batch, translated)]
 
     def release(self) -> None:
