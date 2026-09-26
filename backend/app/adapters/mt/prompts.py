@@ -70,11 +70,21 @@ def parse_batch_response(raw: str, batch: list[Segment]) -> list[Segment]:
 
     got: dict[int, str] = {}
     for item in data["translations"]:
-        if not isinstance(item, dict) or "i" not in item or "text" not in item:
-            raise ValueError(f"mục thiếu 'i' hoặc 'text': {item!r}")
-        got[int(item["i"])] = str(item["text"])
+        if not isinstance(item, dict) or "i" not in item or not isinstance(item.get("text"), str):
+            raise ValueError(f"mục thiếu 'i' hoặc 'text' không phải chuỗi: {item!r}")
+        try:
+            key = int(item["i"])
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"'i' không phải số nguyên: {item['i']!r}") from exc
+        got[key] = item["text"]
 
     expected_ids = [s.i for s in batch]
+    # ĐẾM số mục, không chỉ so TẬP id: `got` là dict nên id trùng bị nuốt trước khi
+    # so sánh, và một mục thừa là dấu hiệu engine lẫn lộn — Task 11 phải thử lại cả
+    # lô thay vì âm thầm nhận bản dịch thứ hai của cùng một id.
+    if len(data["translations"]) != len(batch):
+        raise AlignmentProblem(expected_ids, sorted(got),
+                               f"engine trả {len(data['translations'])} mục, cần {len(batch)}")
     if sorted(got) != sorted(expected_ids):
         raise AlignmentProblem(expected_ids, sorted(got),
                                f"engine trả id {sorted(got)}, cần {sorted(expected_ids)}")

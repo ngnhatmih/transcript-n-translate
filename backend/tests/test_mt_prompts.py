@@ -87,6 +87,44 @@ def test_parse_raises_valueerror_when_translations_key_missing():
         parse_batch_response('{"ket_qua": []}', [seg(1, "a")])
 
 
+def test_parse_raises_alignment_when_the_reply_has_more_items_than_the_batch():
+    """Phải ĐẾM số mục, không chỉ so tập id (review Task 8, I-1).
+
+    `got` là dict nên id trùng bị nuốt TRƯỚC khi so sánh: 3 mục cho 2 segment,
+    id `[1, 1, 2]`, vẫn qua được `sorted(got) != sorted(expected_ids)` và trả về
+    `['B', 'C']` — không lỗi, không log, Task 11 không có cớ thử lại. Mutant thêm
+    đúng dòng đếm này từng sống sót với 13 passed, nên bài này ghim nó.
+    """
+    batch = [seg(1, "a"), seg(2, "b")]
+    raw = '{"translations": [{"i": 1, "text": "A"}, {"i": 1, "text": "B"}, {"i": 2, "text": "C"}]}'
+    with pytest.raises(AlignmentProblem):
+        parse_batch_response(raw, batch)
+
+
+def test_parse_raises_valueerror_when_text_is_not_a_string():
+    """`str()` hoá `None` thành phụ đề `"None"` (review Task 8, I-2).
+
+    Chỉ kiểm tra khoá `text` CÓ mặt là không đủ: `null` thành chuỗi `"None"`,
+    dict thành `repr` `"{'vi': 'A'}"` — cả hai đều là nội dung phụ đề trông hợp
+    lệ, id vẫn khớp nên không tầng nào phía sau phát hiện được.
+    """
+    for bad in ('{"translations": [{"i": 1, "text": null}]}',
+                '{"translations": [{"i": 1, "text": {"vi": "A"}}]}',
+                '{"translations": [{"i": 1, "text": 123}]}'):
+        with pytest.raises(ValueError):
+            parse_batch_response(bad, [seg(1, "a")])
+
+
+def test_parse_raises_valueerror_when_i_is_not_an_integer():
+    """`int(null)` ném `TypeError` — ngoài cả `AlignmentProblem` lẫn `ValueError` (review I-3).
+
+    `TypeError` không thuộc taxonomy của `app/domain/alignment.py:8-12`, nên bên
+    gọi mất luôn quyết định thử lại cả lô hay lùi về từng segment.
+    """
+    with pytest.raises(ValueError):
+        parse_batch_response('{"translations": [{"i": null, "text": "A"}]}', [seg(1, "a")])
+
+
 def test_parse_accepts_reordered_items_and_restores_input_order():
     batch = [seg(1, "a"), seg(2, "b")]
     raw = '{"translations": [{"i": 2, "text": "B"}, {"i": 1, "text": "A"}]}'
