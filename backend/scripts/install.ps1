@@ -109,7 +109,12 @@ Assert-LastExit "cài setuptools + wheel"
 # `--no-build-isolation` SAU khi setuptools+wheel đã có.
 & $py -m pip install --no-cache-dir --no-build-isolation "jieba==0.42.1"
 Assert-LastExit "cài jieba"
-& $py -m pip install --no-cache-dir -r requirements.txt
+# Task 9: ba gói của OPUS-MT (Marian) cài chung dòng này. Chúng có wheel trên
+# Windows nên KHÔNG dính kiểu treo của `jieba` (R70) — chỉ `jieba` mới cần
+# `--no-build-isolation` và một dòng riêng. Nêu tường minh ở đây để engine dịch
+# duy nhất chạy được offline hiện ra trong log cài đặt thay vì lẫn trong `-r`.
+& $py -m pip install --no-cache-dir -r requirements.txt `
+    "transformers==4.46.3" "sentencepiece==0.2.0" "sacremoses==0.1.1"
 Assert-LastExit "cài requirements.txt"
 
 Write-Host "== 6/7 · cổng import faster_whisper (R71) ==" -ForegroundColor Cyan

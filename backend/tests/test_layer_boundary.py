@@ -27,6 +27,7 @@ import pytest
 BACKEND = pathlib.Path(__file__).resolve().parents[1]
 DOMAIN = BACKEND / "app" / "domain"
 PORTS = BACKEND / "app" / "ports"
+ADAPTERS = BACKEND / "app" / "adapters"
 
 FORBIDDEN_ABSOLUTE = {
     "fastapi", "starlette", "uvicorn",
@@ -49,6 +50,42 @@ STDLIB = frozenset(sys.stdlib_module_names)
 #: từ app — quyền đó đã được ghim bởi `test_guard_allows_safe_app_modules`.
 ALLOWED_APP_DOMAIN = ("app.config", "app.domain")
 ALLOWED_APP_PORTS = ("app.domain",)
+#: `adapters/` được phép biết domain/ports của mình, module hằng `app.config`,
+#: chính nó (`app.adapters.*` — import nội bộ gói), và `app.registry` — đó là
+#: module GIÁ TRỊ dùng chung (`EngineSpec`), không phải một tầng, và bốn dòng
+#: `from app.registry import EngineSpec` đã có sẵn trong `adapters/`. Đưa nó vào
+#: danh sách trắng là chủ ý, không phải bỏ sót: một guard naive chặn
+#: `app.registry` sẽ ĐỎ ngay trên cây sạch.
+#:
+#: Danh sách này KHÔNG được truyền vào `_import_offenders` (xem
+#: `_upward_imports_from_adapters`); nó là bản ghi chủ ý của luật, và
+#: `test_adapters_allowlist_excludes_every_upward_layer` ghim rằng nó không bao
+#: giờ được chứa `api`/`pipeline`/`worker`.
+ALLOWED_APP_ADAPTERS = ("app.adapters", "app.config", "app.domain", "app.ports",
+                        "app.registry")
+
+#: Ba tầng mà adapter TUYỆT ĐỐI không được biết (`app.registry` KHÔNG nằm ở đây:
+#: nó là module giá trị dùng chung, xem `ALLOWED_APP_ADAPTERS`).
+UPWARD_FROM_ADAPTERS = ("app.api", "app.pipeline", "app.worker")
+
+
+def _upward_imports_from_adapters(directory: pathlib.Path) -> list[str]:
+    """Chỉ những import TUYỆT ĐỐI trỏ lên `api`/`pipeline`/`worker`.
+
+    Dùng lại `_imports_of` (cùng bộ đọc AST với `_import_offenders`) nhưng KHÔNG
+    dùng `_import_offenders`: `FORBIDDEN_ABSOLUTE` của nó gồm `torch`,
+    `transformers`, `sqlite3` — những thứ adapter ĐƯỢC PHÉP dùng, nên một guard
+    adapter gọi helper đó sẽ ĐỎ trên cây sạch vì `torch`.
+    """
+    offenders: list[str] = []
+    for py in _py_files(directory):
+        for name, level in _imports_of(py):
+            if level != 0:
+                continue
+            if any(name == p or name.startswith(p + ".")
+                   for p in UPWARD_FROM_ADAPTERS):
+                offenders.append(f"{py.name}: import {name}")
+    return offenders
 
 
 def _is_forbidden_absolute(name: str, *, allowed_app: tuple[str, ...],
@@ -365,5 +402,72 @@ def test_ports_guard_allows_a_real_protocol():
         )
         test_ports_has_no_forbidden_absolute_imports()
         test_ports_declares_only_protocols()
+    finally:
+        safe.unlink(missing_ok=True)
+
+
+# ---------------------------------------------------------------------------
+# app/adapters — được import xuống, KHÔNG được import lên (I-4, Task 8 review)
+# ---------------------------------------------------------------------------
+
+def test_adapters_directory_exists():
+    assert ADAPTERS.is_dir(), f"thiếu thư mục {ADAPTERS}"
+
+
+def test_adapters_allowlist_excludes_every_upward_layer():
+    """Danh sách trắng của adapter không được chứa `api`/`pipeline`/`worker`.
+
+    Ghim sự NHẤT QUÁN giữa bản ghi chủ ý (`ALLOWED_APP_ADAPTERS`) và danh sách
+    chặn thật (`UPWARD_FROM_ADAPTERS`): nếu ai đó thêm `app.api` vào danh sách
+    trắng "cho hết đỏ", test này ĐỎ thay vì để luật bị nới im lặng.
+    """
+    overlap = [p for p in UPWARD_FROM_ADAPTERS if p in ALLOWED_APP_ADAPTERS]
+    assert overlap == [], f"danh sách trắng của adapter chứa tầng trên: {overlap}"
+
+
+def test_adapters_do_not_import_upward_layers():
+    """`adapters/` cài đặt hợp đồng; nó không được biết `api`/`pipeline`/`worker`.
+
+    Dùng `_upward_imports_from_adapters` (cùng `_imports_of` với
+    `_import_offenders`) chứ không dùng `_import_offenders`: xem docstring của
+    helper đó — `FORBIDDEN_ABSOLUTE` coi `torch`/`sqlite3` là tội, còn adapter
+    thì không.
+    """
+    offenders = _upward_imports_from_adapters(ADAPTERS)
+    assert not offenders, (
+        "adapters/ không được import lên tầng trên (api/pipeline/worker):\n  "
+        + "\n  ".join(offenders)
+    )
+
+
+def test_adapters_guard_can_fail():
+    """Lưới phải ĐỎ được với TỪNG tầng bị cấm, không chỉ `app.api`.
+
+    Brief chỉ đòi "forbid app.api/pipeline/worker"; nếu chỉ thăm dò một tầng thì
+    hai tầng còn lại có thể bị bỏ quên trong `UPWARD_FROM_ADAPTERS` mà không ai
+    biết.
+    """
+    for index, module in enumerate(("app.api.routes", "app.pipeline.translate",
+                                    "app.worker.loop")):
+        rogue = ADAPTERS / f"_rogue_probe_upward_{index}.py"
+        try:
+            rogue.write_text(f"from {module} import run\n", encoding="utf-8")
+            with pytest.raises(AssertionError):
+                test_adapters_do_not_import_upward_layers()
+        finally:
+            rogue.unlink(missing_ok=True)
+
+
+def test_adapters_guard_allows_the_shared_value_module():
+    """Chống bắt nhầm: `app.registry` là module GIÁ TRỊ dùng chung, không phải tầng.
+
+    Đây là dòng đã có sẵn trong `adapters/`; nếu guard chặn nó thì nó ĐỎ ngay
+    trên cây sạch và bị vô hiệu hoá trong thực tế.
+    """
+    safe = ADAPTERS / "_guard_probe_registry.py"
+    try:
+        safe.write_text("from app.registry import EngineSpec\n",
+                        encoding="utf-8")
+        test_adapters_do_not_import_upward_layers()
     finally:
         safe.unlink(missing_ok=True)

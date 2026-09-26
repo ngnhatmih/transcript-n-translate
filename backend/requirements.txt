@@ -16,6 +16,14 @@ requests==2.32.3
 funasr==1.2.6
 modelscope==1.22.0
 
+# --- MT: OPUS-MT (Marian) chạy trong tiến trình, CPU (Task 9) ---
+# KHÔNG cần service ngoài — đây là engine dịch duy nhất chạy được trên máy này
+# hôm nay. `sentencepiece` là BẮT BUỘC: tokenizer của OPUS-MT là SentencePiece,
+# thiếu nó thì `MarianTokenizer.from_pretrained` ném ở runtime dù mọi test xanh.
+transformers==4.46.3
+sentencepiece==0.2.0
+sacremoses==0.1.1
+
 # --- Tiện ích ---
 httpx==0.28.1
 yt-dlp==2025.1.15
