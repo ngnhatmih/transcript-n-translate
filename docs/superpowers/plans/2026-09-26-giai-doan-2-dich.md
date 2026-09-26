@@ -2002,6 +2002,28 @@ git commit -m "feat(mt): adapter OPUS-MT (Marian, CPU, khong glossary)"
 
 ### Task 10: `adapters/mt/ollama_mt.py` — Qwen2.5 qua Ollama
 
+> 🔴 **HIỆU CHỈNH BẮT BUỘC CHO TASK NÀY (mục này thắng phần code bên dưới):**
+> 1. **BỎ tham số `releaser_hook`.** Governor gọi thẳng `engine.release()` (Task 12 đăng ký nó), nên một hook **bên
+>    trong** `release()` là thừa — và tệ hơn, nó cho phép người gọi **nhét việc vào đường đổ model**, đúng chỗ không
+>    nên có side effect lạ. `release()` chỉ làm một việc: đổ model khỏi VRAM, idempotent.
+> 2. **`supports_glossary()` phải là DỮ LIỆU, không phải hằng `True`.** Hiệu chỉnh 17: nguồn sự thật là
+>    `spec.capabilities["glossary_prompt"]`. Adapter **không** có spec, nên nhận cờ đó qua constructor
+>    (`supports_glossary: bool = True`) và Task 12 truyền từ spec. Test phải ghim **cả hai** giá trị.
+> 3. **`model` là `model_ref` của registry, không phải chuỗi tôi bịa.** `registry.json` ghi
+>    `"model_ref": "qwen2.5:3b-instruct-q4_K_M"`, không phải `"qwen2.5:3b"`. Task 12 truyền `model_ref` vào; mặc định
+>    trong adapter chỉ để chạy được test. **Nếu tag đó không tồn tại trên Ollama thì đó là lỗi của `registry.json`** —
+>    báo lại, đừng tự đổi tag trong adapter, vì Task 12's probe availability dựa vào chính tag đó.
+> 4. **ĐO TRƯỚC, VIẾT SAU — đây là lý do task này tồn tại.** Các khoá tôi giả định dưới đây (`message.content`,
+>    `prompt_eval_count`, `eval_count`, `total_duration`) là **giả định**, chưa từng đo trong dự án. Gọi thật
+>    `POST /api/chat` rồi **dán nguyên văn** phản hồi vào báo cáo, và viết parser theo **số đo**, không theo mục này.
+>    Nếu đo ra khác, **sửa parser**, đừng sửa test cho vừa.
+> 5. **Đo `keep_alive` bằng `ollama ps`**: gọi với `keep_alive: "30m"` rồi `ollama ps`; gọi với `keep_alive: 0` rồi
+>    `ollama ps` lại. Nếu `keep_alive: 0` **không** đổ model thì `release()` phải đổi cách. Ghi cả ba lần chạy
+>    `ollama ps` nguyên văn.
+> 6. Brief **không** dự đoán số test; báo số **thật**, và với mỗi test chạy mutation rồi báo **kết quả quan sát được**.
+> 7. **Phục hồi mutation phải kiểm CẢ hash LẪN byte** — `core.autocrlf=true` làm `git hash-object` khớp trên nội dung
+>    CRLF. So thêm với `git cat-file -p HEAD:<path>`. Sandbox từ chối ghi `$env:TEMP` và cả thư mục ngoài workspace.
+
 **Files:**
 - Create: `backend/tests/test_mt_ollama.py`
 - Create: `backend/app/adapters/mt/ollama_mt.py`
