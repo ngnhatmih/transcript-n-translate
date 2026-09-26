@@ -795,6 +795,21 @@ git commit -m "feat(domain): thuật ngữ trong segment + segment ảnh hưởn
 
 ### Task 5: `domain/mt_qa.py` — QA tất định sau dịch
 
+> ⚠️ **HIỆU CHỈNH SAU KHI LÀM (Task 5 đã xong ở `91aea83`) — hai chỗ brief dưới đây SAI, giữ lại làm hồ sơ:**
+> 1. **Step 1 có 8 hàm `test_`, không phải 9.** Câu "Kỳ vọng: `9 passed`" ở Step 4 là sai; thực tế `8 passed`.
+> 2. **Step 3 KHÔNG qua nổi Step 1 của chính nó** (`1 failed, 7 passed`), vì Step 1 dựng cửa sổ **output** bằng 0
+>    trong khi Step 3 đo CPS theo **nguồn** ⇒ nhánh đó là code chết. Tệ hơn, **assertion của Step 1 khẳng định một
+>    khiếm khuyết**: nó đòi một lời phàn nàn cho một dòng đọc được. Sự thật đã được kiểm bằng đọc
+>    `subtitle_format.py:61,74,111` và `pipeline/export.py:80`: **phụ đề render thời gian NGUỒN**. Bản đã ship đo
+>    theo cửa sổ nguồn trước, dùng cửa sổ bản dịch làm dự phòng, và in `cps:{i}=nowindow/{n}c` khi **không** cửa sổ
+>    nào dương — không bịa ra `0.0s`.
+> 3. **`max_len_ratio` phải là `5.0`**, không phải `4.0`: `qa_rules.LENGTH_RATIO_MAX` dùng **cùng phép đo** và đã
+>    ship 5.0 vì 4.0 báo động giả. Đo thật: `你好世界 → Xin chào thế giới` = 4.25; `龙 → con rồng` = 8.00.
+> 4. Test `test_zero_duration_does_not_divide_by_zero` của brief **đã bị thay** bằng bản mạnh hơn (so danh sách
+>    chính xác + ghim `nowindow`) — việc sửa này là **đúng**, không phải nới test.
+>
+> Phần dưới giữ nguyên văn bản gốc để đối chiếu.
+
 **Files:**
 - Create: `backend/tests/test_mt_qa.py`
 - Create: `backend/app/domain/mt_qa.py`
