@@ -212,6 +212,35 @@ def test_export_without_bilingual_omits_the_source(wired):
     assert "你好" not in r.text
 
 
+def test_export_defaults_to_srt(wired):
+    """`format` có mặc định `srt` (spec §11 ghi `?format=` là tuỳ chọn)."""
+    c, repos, _out, _worker = wired
+    _, tr_id = _ready(repos)
+
+    default = c.get(f"/api/export/{tr_id}")
+    explicit = c.get(f"/api/export/{tr_id}?format=srt")
+
+    assert default.status_code == 200, default.text
+    assert default.text == explicit.text
+
+
+def test_export_accepts_an_uppercase_format_like_the_old_route(wired):
+    """`?format=SRT` là CÙNG định dạng, không phải 422.
+
+    `create_export` (đường cũ) hạ `payload.format` xuống chữ thường trước khi kiểm;
+    route spec làm y hệt, nên hai đường nhận cùng một tập đầu vào.
+    """
+    c, repos, _out, _worker = wired
+    _, tr_id = _ready(repos)
+
+    upper = c.get(f"/api/export/{tr_id}?format=SRT")
+    lower = c.get(f"/api/export/{tr_id}?format=srt")
+
+    assert upper.status_code == 200, upper.text
+    assert upper.text == lower.text
+    assert upper.headers["content-type"].startswith("application/x-subrip")
+
+
 def test_export_rejects_bad_format_with_422(wired):
     c, repos, _out, _worker = wired
     _, tr_id = _ready(repos)
@@ -285,6 +314,32 @@ def test_both_export_routes_agree_for_every_format(wired, fmt, bilingual):
                                    fmt=fmt, bilingual=bilingual)
 
     assert spec_route == old_route
+
+
+def test_both_routes_write_byte_identical_files(wired):
+    """Không chỉ cùng nội dung TRẢ VỀ: cùng TỆP trên đĩa, từng byte một.
+
+    `Path.read_text()` dịch `\\r\\n` thành `\\n`, nên một route ghi bằng
+    `Path.write_text()` mặc định (Windows: CRLF) vẫn cho ra nội dung "giống nhau"
+    khi đọc lại — đúng lớp lỗi mà `pipeline/export.py::_write_utf8` ra đời để chặn.
+    Bài này đọc BYTE THÔ, và xoá tệp trước khi gọi route spec để byte đọc sau
+    CHẮC CHẮN do route spec ghi ra.
+    """
+    c, repos, out_dir, worker = wired
+    tid, tr_id = _ready(repos)
+    target = out_dir / f"transcript-{tid}.vi.srt"
+
+    _run_the_old_route(c, repos, worker, tid, _translation_texts(repos, tr_id))
+    from_handler = target.read_bytes()
+    target.unlink()
+
+    r = c.get(f"/api/export/{tr_id}?format=srt")
+
+    assert r.status_code == 200, r.text
+    from_spec_route = target.read_bytes()
+    assert from_spec_route == from_handler
+    assert b"\r\n" not in from_spec_route, "phải là LF, như `_write_utf8` của handler"
+    assert from_spec_route.decode("utf-8") == r.text
 
 
 def test_the_spec_route_materialises_the_same_artifact_name(wired):
