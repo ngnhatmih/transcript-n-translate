@@ -233,6 +233,20 @@ def test_mt_engines_are_keyed_by_registry_spec_id_not_engine_id(harness):
                 f"OllamaMtEngine(engine_id=...), nhận được "
                 f"{engine.received_engine_id!r}"
             )
+            # Fix round 2 (I-9): vế còn lại của cùng dây nối. `engine_id` ĐÃ được
+            # ghim ở trên, nhưng tham số vị trí đầu (`spec.model_ref`) thì không:
+            # `OllamaMtEngine(spec.id, ...)` từng để CẢ SUITE xanh, trong khi
+            # `ollama_mt.py:139` đặt thẳng tham số này vào `"model"` của
+            # `POST /api/chat` — sai thì cả ba engine Ollama chết `404 model not
+            # found` ở tận worker. Kỳ vọng đọc từ CHÍNH `spec` của registry mà
+            # `build_components()` vừa dùng, không hard-code tag (cùng kỷ luật với
+            # phép ghim `opus-mt` ở `test_e2e_translate.py`).
+            assert engine.model_ref == spec.model_ref, (
+                f"{engine_id}: composition root phải truyền THẲNG "
+                f"`spec.model_ref` vào OllamaMtEngine(...), nhận được "
+                f"{engine.model_ref!r} thay vì {spec.model_ref!r} — tag đó đi "
+                f"thẳng vào `POST /api/chat` (`ollama_mt.py:139`)"
+            )
 
 
 def test_ollama_availability_is_probed_here_and_now_not_hardcoded(harness):
