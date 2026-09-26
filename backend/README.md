@@ -54,13 +54,25 @@ GPU. Nó tự ép UTF-8 cho stdout (console Windows mặc định cp1252, còn s
 tiếng Trung/Việt) và tự đặt cache model trước khi nạp `faster_whisper`.
 
 Con số nền của lần chạy mặc định, đo sau khi xoá `__pycache__` (lệnh ở mục
-"Kiểm thử" trên, chạy từ trong `backend\`). Thứ có nghĩa là **798 / 13**, không
-phải số giây — thời gian trôi giữa các lần chạy (đã thấy 24,00–24,15 s) còn con
+"Kiểm thử" trên, chạy từ trong `backend\`). Thứ có nghĩa là **819 / 13**, không
+phải số giây — thời gian trôi giữa các lần chạy (đã thấy 24,00–30,94 s) còn con
 số bài thì không:
 
 ```
-798 passed, 13 deselected, 1 warning
+819 passed, 13 deselected, 1 warning
 ```
+
+Hai con số đó là SỐ BÀI ĐƯỢC CHỌN, và chúng khớp với số mà `--collect-only` báo
+(`tests/test_backend_readme.py::test_readme_baseline_matches_the_tests_actually_
+collected` đối chiếu mỗi lần chạy). Trên máy **không có `ffmpeg`/`ffprobe`** thì
+`tests/test_ingest.py` bị `skipif` ở cấp module, nên dòng tổng kết là
+`818 passed, 13 deselected, 1 skipped` — vẫn ĐÚNG 819 bài được chọn. Đừng "sửa"
+số nền theo `818` nếu chỉ thiếu ffmpeg.
+
+(Con số này từng bị ghi là `798`: bài `test_a_failed_translation_leaves_the_
+transcript_reviewed` được thêm ở `a428334` — **cùng commit đã sửa tệp này** — mà
+số nền không được bump. Nó tồn tại để phát hiện TRÔI, nên một số sai làm mọi lần
+chạy báo dương tính giả.)
 
 Số này chỉ để phát hiện TRÔI: một thay đổi làm nó **giảm** là một bài đã bị gỡ
 hoặc bị bỏ quên, không phải "suite nhanh hơn".
@@ -184,6 +196,19 @@ riêng, model đã nạp sẵn trong tiến trình), **KHÔNG** phải của `sm
 3. **Chưa làm:** HY-MT1.5 (`hy-mt-1.5-7b` có trong registry nhưng chưa lần nào
    chạy), **chế độ Chimera**, và **toàn bộ frontend**. Backend là thứ đang chạy
    được; giao diện thì chưa có.
+   * **"Thuật ngữ cấm" của spec §8 (QA tất định): CHƯA LÀM, và đây là chỗ ghi
+     nhận chính thức.** Spec Giai đoạn 2 §8 hứa QA gắn cờ *thuật ngữ cấm*, nhưng
+     không có mô hình dữ liệu nào cho nó: `glossary` chỉ có `approved`, không có
+     cột `forbidden`, và spec nền cũng không định nghĩa khái niệm đó. Bảng phủ
+     spec của plan gán §8 cho T5/T13, nên nửa "thuật ngữ cấm" từng là một lỗ
+     hổng **không được ghi ở đâu cả**. Quyết định: **không** hiện thực trong
+     Giai đoạn 2 (nó cần một quyết định về mô hình dữ liệu trước), và ghi nó vào
+     đây + vào sổ nợ của ledger. Nửa còn lại của §8 (CPS, tỉ lệ độ dài, cờ
+     engine-không-glossary, cờ `stale`) **đã** có.
+   * **`llm_calls` (spec §4.2) thì NAY ĐÃ CÓ** — mỗi lần chạm engine ghi một
+     hàng, và `translations.tokens_in/tokens_out/duration_ms` là TỔNG của các
+     hàng đó. Trước vòng sửa cuối, bảng này chỉ có test chạm tới, và số của bản
+     dịch chỉ là số của lô CUỐI.
 4. **`HF_HOME` và lần chạy thật tiếp theo.** Mặc định là `D:\models\hf`. Trong
    phiên đo gần nhất, **ghi sang D: bị từ chối** (`WinError 5`:
    `mkdir FAILED PermissionError ... 'D:\models'`), nên trọng số OPUS-MT đã bị
