@@ -2,7 +2,9 @@
 
 Đây là bài DUY NHẤT trong phase chạy trọn chuỗi §8.6 `draft -> reviewed ->
 translated` qua `main.build_components()` + `main.build_app()` rồi tới tận tệp
-phụ đề xuất ra. Không bài nào khác đi hết đường đó:
+phụ đề xuất ra. Nói chính xác: các bài khác **có** dùng bộ ráp thật
+(`test_mt_wiring.py`, `test_e2e_fake.py`), nhưng không bài nào đi hết chuỗi
+trạng thái đó:
 
 * `test_api_*` dựng app bằng `create_app()` với repos tự tay — chúng kiểm HỢP
   ĐỒNG HTTP, không kiểm bộ ráp.
@@ -10,7 +12,8 @@ phụ đề xuất ra. Không bài nào khác đi hết đường đó:
   `auto_forward`: nó KHÔNG chạm `POST /api/translations`, và không khẳng định
   mốc `translated` của transcript.
 * `test_mt_wiring.py` khẳng định dây nối `mt_engines`/governor nhưng cũng đi
-  nhánh tự động, không đi qua route tạo bản dịch.
+  nhánh tự động, không đi qua route tạo bản dịch, và không khẳng định mốc
+  `translated`.
 
 ## Vì sao fixture CHÉP từ `tests/test_api_sources.py` chứ không tự nghĩ ra
 

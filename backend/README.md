@@ -53,6 +53,16 @@ mỗi lần chạy như vậy là một lần **ĐO** — đừng thay bằng te
 GPU. Nó tự ép UTF-8 cho stdout (console Windows mặc định cp1252, còn script in
 tiếng Trung/Việt) và tự đặt cache model trước khi nạp `faster_whisper`.
 
+Con số nền của lần chạy mặc định, đo sau khi xoá `__pycache__` (lệnh ở mục
+"Kiểm thử" trên, chạy từ trong `backend\`):
+
+```
+798 passed, 13 deselected, 1 warning in 24.15s
+```
+
+Số này chỉ để phát hiện TRÔI: một thay đổi làm nó **giảm** là một bài đã bị gỡ
+hoặc bị bỏ quên, không phải "suite nhanh hơn".
+
 ### Smoke test DỊCH — in ra SỐ, và thoát khác 0 khi không có gì để dịch
 
 ```powershell
@@ -96,6 +106,101 @@ count, nên nó in `None` chứ **không** in `0` — "chưa đo được" khác
 `HF_HOME` **trước** khi import `transformers`, vì `huggingface_hub` đọc biến đó
 ngay lúc import: đặt sau thì model rơi vào cache mặc định trên ổ C: dù dòng log
 in ra đường dẫn đúng.
+
+## Giai đoạn 2 — Workspace 2 (dịch)
+
+Workspace 2 là đường **dịch**: `draft -> reviewed -> translated` (spec §8.6), rồi
+xuất phụ đề. Đây là trạng thái **đã đo** của nó, kèm những gì **chưa** biết.
+
+### Cài
+
+`transformers` cho OPUS-MT đã nằm trong `requirements.txt` (`transformers==4.46.3`),
+nên `scripts/install.ps1` là đủ cho engine dịch in-process. Engine chạy qua Ollama
+cần thêm **một tiến trình ngoài venv**:
+
+```powershell
+ollama pull qwen2.5:3b-instruct-q4_K_M   # đúng `model_ref` trong registry.json
+```
+
+`GET /api/registry` trả `available` cho từng engine, và `available` nghĩa là
+**"phục vụ được job NGAY BÂY GIỜ"**: với engine `runtime == "ollama"` điều đó cần
+CẢ tiến trình trả lời được **VÀ** `model_ref` có trong `/api/tags`. "Ollama đang
+chạy" là điều kiện cần nhưng **không đủ** — chọn một engine mà API khai sẵn sàng
+rồi job chết ở tận worker là lớp lỗi đã bị bịt (từ chối 409 ngay lúc tạo bản dịch).
+
+### Chạy
+
+```powershell
+# chỉ đo đường DỊCH, không cần âm thanh
+.\.venv\Scripts\python.exe -B scripts\smoke_mt.py --synthetic opus-mt
+
+# đo cả đường bóc băng, và chỉ ra engine bóc băng khác
+.\.venv\Scripts\python.exe -B scripts\smoke_mt.py clip.wav zh qwen2.5-3b vi --asr fw-large-v3-turbo
+```
+
+`tests/test_mt_live.py` là các bài **chạm model thật**, mặc định bị `pytest.ini`
+bỏ qua (`-m "not live"`). Chạy chúng bằng:
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest -m live
+```
+
+Mỗi lần chạy như vậy là một lần **ĐO**, không phải một lần "chắc là đúng".
+
+### Số đo đã có
+
+Đo trên một wav tiếng Trung thật (21,5 s), qua `smoke_mt.py`:
+
+| engine | segment vào/ra | thời gian | `tokens_in`/`tokens_out` |
+|---|---|---|---|
+| `opus-mt` | 4 / 4 | 6,7 s | `None` / `None` (in-process, không có token count) |
+| `qwen2.5-3b` | 4 / 4 | 2,9 s | 219 / 149 |
+
+Bóc băng `fw-small`: 4 segment trong 1,0 s, **RTF 0,049**. Sau **mọi** lần
+`release()`, `ollama ps` **rỗng** — model dịch thật sự rời VRAM, không chỉ được
+đánh dấu là đã rời.
+
+### Giới hạn — đọc trước khi tin bất cứ con số nào ở trên
+
+1. **`DEFAULT_MAX_CHARS = 1200` CHƯA TỪNG BỊ ÉP.** Lô lớn nhất đo được chỉ **94 ký
+   tự**, và alignment **chưa lần nào vỡ** trên 18 segment. Giữ 1200 nghĩa là
+   *"không có cơ sở đo để đổi"*, **KHÔNG** phải *"đã xác nhận 1200 là đúng"*.
+   **Ngưỡng hỏng thật vẫn chưa biết.** Muốn biết thì phải đo lại: nạp một
+   transcript dài (hàng nghìn ký tự) rồi cho `TranslateHandler` chạy với
+   `batch_chars` giảm dần cho tới khi alignment vỡ. `smoke_mt.py` **không** có cờ
+   cho việc này (nó chạy đúng ngân sách mặc định) — phép đo đó phải viết mới.
+2. **Chất lượng dịch CHƯA được đánh giá.** Chưa có điểm BLEU/MQM, chưa có người
+   đọc duyệt. Không có tuyên bố nào về chất lượng ở đây. Đổi lại, **lỗi thấy được
+   trên đầu ra thật** thì được ghi, vì đó là số thật về sản phẩm chứ không phải
+   phỏng đoán:
+   * `opus-mt` **cắt cụt câu** (bản dịch chỉ phủ phần đầu của câu nguồn) và dịch
+     成本 thành `"10%"`.
+   * `qwen2.5-3b` **để sót chữ Hán** trong bản dịch: `dịch字`, `việc字幕`.
+3. **Chưa làm:** HY-MT1.5 (`hy-mt-1.5-7b` có trong registry nhưng chưa lần nào
+   chạy), **chế độ Chimera**, và **toàn bộ frontend**. Backend là thứ đang chạy
+   được; giao diện thì chưa có.
+4. **`HF_HOME` và lần chạy thật tiếp theo.** Mặc định là `D:\models\hf`. Trong
+   phiên đo gần nhất, **ghi sang D: bị từ chối** (`WinError 5`:
+   `mkdir FAILED PermissionError ... 'D:\models'`), nên trọng số OPUS-MT đã bị
+   **xoá cùng thư mục scratch**. Lần chạy thật tiếp theo **phải tải lại ≈800 MB**:
+
+   ```powershell
+   .\.venv\Scripts\python.exe -B scripts\download_mt_models.py
+   ```
+
+### Nghiệm thu đầu-cuối
+
+`tests/test_e2e_translate.py` chạy trọn chuỗi trên **bộ ráp thật của production**
+(`main.build_components()` + `main.build_app()`), chỉ thay adapter model bằng engine
+giả, và không phải bài `live`:
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest tests\test_e2e_translate.py
+```
+
+Nó đi qua cả ba mốc `draft -> reviewed -> translated`, khẳng định `approve` ghi
+`reviewed` (không phải `translated`), và khẳng định `translated` chỉ xuất hiện sau
+khi bản dịch xong — kèm một bài đối chứng cho chính mốc đó.
 
 ## Chưa kiểm chứng
 
