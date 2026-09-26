@@ -126,7 +126,14 @@ class OllamaMtEngine:
             "options": {"temperature": _TEMPERATURE},
             "messages": [
                 {"role": "system",
-                 "content": system_prompt(glossary, target_lang=opts.target_lang)},
+                 # Cờ và prompt phải nói CÙNG một điều. QA gắn `engine_no_glossary`
+                 # theo `spec.capabilities["glossary_prompt"]` (Task 12 truyền cờ
+                 # vào) — nếu prompt cứ áp glossary thì bản ghi tự mâu thuẫn: nhãn
+                 # nói "không glossary", prompt thì có. `registry.json` đã khai
+                 # `hy-mt-1.5-7b` với `runtime: "ollama"` + `glossary_prompt:
+                 # false`, nên đây là tổ hợp Task 12 dựng thật, không phải nhánh chết.
+                 "content": system_prompt(glossary if self._supports_glossary else [],
+                                          target_lang=opts.target_lang)},
                 {"role": "user",
                  "content": user_prompt(batch, source_lang=opts.source_lang,
                                         target_lang=opts.target_lang)},
@@ -145,7 +152,18 @@ class OllamaMtEngine:
             tokens_out=data.get("eval_count"),
             duration_ms=_nanos_to_ms(data.get("total_duration")),
         )
-        content = (data.get("message") or {}).get("content") or ""
+        # Thân dị dạng phải thành chuỗi RỖNG ở ĐÂY, trước `parse_batch_response`.
+        # Hợp đồng lỗi của adapter chỉ có `ValueError` (parse), `AlignmentProblem`
+        # (lệch) và lỗi HTTP/vận chuyển; một `AttributeError` nổi lên từ tầng này là
+        # loại lỗi thứ tư mà tầng thử lại của Task 11 không lường được, nên nó không
+        # quyết định được thử lại hay lùi về từng segment. Ba hình dạng đã đo: thiếu
+        # khoá `message`, `message` không phải dict, `content` không phải chuỗi.
+        #
+        # KHÔNG dùng `str(raw)`: `str([{...}])` tình cờ parse được thành JSON, tức
+        # nhận một thứ chưa hề qua kiểm.
+        message = data.get("message")
+        raw = message.get("content") if isinstance(message, dict) else None
+        content = raw if isinstance(raw, str) else ""
         return parse_batch_response(content, batch)
 
     def release(self) -> None:

@@ -135,6 +135,21 @@ def test_engine_id_scales_to_the_7b_sibling():
     assert eng.engine_id == "qwen2.5-7b"
 
 
+def test_hy_mt_tag_is_not_reproducible_so_callers_must_key_by_spec_id():
+    """GIỚI HẠN đã biết của quy tắc suy id: nó hiệu chỉnh cho tag của Qwen. Tag thật
+    của HY-MT (`registry.json:84` ghi id `hy-mt-1.5-7b`) KHÔNG tái tạo được, nên
+    `prompt_version` rơi về "unknown".
+
+    Bài này ghim giới hạn đó bằng TEST chứ không để nó sống trong docstring: Task 12
+    PHẢI đánh khoá `mt_engines` bằng `spec.id`, và KHÔNG được dùng `engine_id` hay
+    `prompt_version` làm khoá cho `translations`/`llm_calls`."""
+    eng = OllamaMtEngine(model="hy-mt1.5-7b:q4_K_M", client=_FakeClient())
+    assert eng.engine_id == "hy-mt1.5-7b-q4_K_M"      # số đo, không phải suy đoán
+    assert eng.engine_id != "hy-mt-1.5-7b", "quy tắc lại tái tạo được id registry?"
+    assert eng.prompt_version == "unknown", (
+        "đóng dấu prompt_version lạ vào translations là nói dối về engine")
+
+
 def test_prompt_version_resolves_instead_of_falling_back_to_unknown():
     """`prompt_version` là thứ được đóng dấu vào `translations`/`llm_calls`; tra
     bằng chuỗi sai thì nó lặng lẽ thành "unknown" và không phân biệt được bản dịch
@@ -216,6 +231,31 @@ def test_glossary_reaches_the_system_message():
     assert "rồng" in sent[0]["content"]
 
 
+def test_no_glossary_text_in_the_prompt_when_the_engine_does_not_support_it():
+    """Cờ và prompt phải nói CÙNG một điều, nếu không bản ghi mâu thuẫn: QA gắn
+    `engine_no_glossary` theo `supports_glossary()`, còn prompt thì vẫn áp glossary.
+
+    Đây không phải nhánh chết: `registry.json:87` khai `hy-mt-1.5-7b` với
+    `runtime: "ollama"` và `capabilities.glossary_prompt: false`, nên Task 12 dựng
+    ĐÚNG tổ hợp `OllamaMtEngine(supports_glossary=False)` với glossary truyền vào.
+    Phải ghim CẢ HAI chiều: một bài chỉ khẳng định chiều `False` vẫn xanh nếu
+    adapter bỏ hẳn glossary khỏi mọi prompt."""
+    terms = [Term(id=None, lang="zh", term="龙", translation="rồng", approved=True)]
+
+    client_no = _FakeClient([one_batch_reply()])
+    eng_no = engine(client_no, supports_glossary=False)
+    eng_no.translate([seg(1, "龙")], terms, MtOpts(source_lang="zh"))
+    sent_no = client_no.bodies[0]["json"]["messages"]
+    assert sent_no[0]["role"] == "system"
+    assert "rồng" not in sent_no[0]["content"], "cờ False mà prompt vẫn áp glossary"
+
+    client_yes = _FakeClient([one_batch_reply()])
+    eng_yes = engine(client_yes, supports_glossary=True)
+    eng_yes.translate([seg(1, "龙")], terms, MtOpts(source_lang="zh"))
+    sent_yes = client_yes.bodies[0]["json"]["messages"]
+    assert "rồng" in sent_yes[0]["content"], "cờ True thì glossary phải vào prompt"
+
+
 # --- số đo của lần gọi ---------------------------------------------------------
 
 def test_stats_come_from_the_measured_keys():
@@ -251,6 +291,22 @@ def test_alignment_failure_is_raised_not_hidden():
     eng = engine(client)
     with pytest.raises(AlignmentProblem):
         eng.translate([seg(1, "a")], [], MtOpts(source_lang="zh"))
+
+
+def test_non_string_content_raises_the_error_contract_not_attribute_error():
+    """Hợp đồng lỗi của `MtEngine` chỉ có `ValueError` (parse), `AlignmentProblem`
+    (lệch) và lỗi HTTP/vận chuyển. `content` không phải chuỗi từng ném
+    `AttributeError` từ `prompts.py:63` — loại thứ tư mà tầng thử lại Task 11 không
+    lường được, nên nó không quyết định được thử lại hay lùi về từng segment.
+
+    Thân dị dạng phải được ép về chuỗi rỗng TRƯỚC `parse_batch_response`, để lỗi ra
+    đúng `ValueError` của hợp đồng. KHÔNG được `str(raw)`: `str([{...}])` tình cờ
+    parse được thành JSON, tức nhận một thứ chưa hề qua kiểm."""
+    payload = reply('{"translations":[{"i":1,"text":"x"}]}')
+    payload["message"]["content"] = [{"i": 1, "text": "x"}]
+    client = _FakeClient([payload])
+    with pytest.raises(ValueError):
+        engine(client).translate([seg(1, "a")], [], MtOpts(source_lang="zh"))
 
 
 def test_http_error_response_is_raised():
