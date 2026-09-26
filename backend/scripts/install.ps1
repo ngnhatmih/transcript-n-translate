@@ -150,32 +150,63 @@ Write-Host "== 7/7 · ollama + yt-dlp ==" -ForegroundColor Cyan
 # Giai đoạn 2. Daemon chạy nền ở 127.0.0.1:11434 và `ollama pull` tải ~1,9 GB.
 # Bước này KHÔNG được làm hỏng phần cài đặt còn lại: thiếu ollama thì engine dịch
 # thứ hai vắng mặt, còn `opus-mt` (đã tải ở bước 5) vẫn dịch được.
-if (Get-Command ollama -ErrorAction SilentlyContinue) {
-    Write-Host "   ollama đã có sẵn"
-    # `$modelRef` lấy từ registry.json — nguồn chân lý duy nhất. Viết cứng tag ở
-    # đây là tạo chỗ thứ hai phải sửa khi registry đổi, và nó sẽ lệch trong im lặng.
-    #
-    # Bắt mã thoát NGAY sau lệnh ngoài: `$LASTEXITCODE` là biến tự động dùng chung,
-    # nên một lệnh khác ở giữa (kể cả `Write-Host` có gọi hàm) là đọc nhầm giá trị
-    # của chính nó. Gán vào biến riêng trước khi dùng.
-    $modelRef = & $py -X utf8 -B -c "from app.adapters.registry_file import load_registry; print(next(s.model_ref for s in load_registry() if s.id == 'qwen2.5-3b'))"
-    $refExit = $LASTEXITCODE
-    if ($refExit -eq 0 -and $modelRef) {
-        Write-Host "   kéo model dịch $modelRef (~1,9 GB) ..."
-        & ollama pull $modelRef
+# Fix round 1 (C4): `Get-Command ollama` MỘT MÌNH là phép kiểm SAI trên máy này.
+# `winget install` không làm tươi `$env:PATH` của tiến trình đang chạy, nên lần
+# chạy lại CÙNG shell đó vẫn thấy "chưa có" trong khi binary có thật ở
+# `%LOCALAPPDATA%\Programs\Ollama\ollama.exe` và daemon trả lời ở
+# 127.0.0.1:11434. Hệ quả cũ: lời khuyên `ollama pull ...` in ra KHÔNG chạy được
+# trong chính shell ấy, model dịch chủ lực (~1,9 GB) không bao giờ được kéo, mà
+# log vẫn "XONG" — đúng kiểu hỏng im lặng. Nên phép kiểm phải dò cả đường dẫn
+# chuẩn VÀ hỏi thẳng daemon, vì daemon mới là thứ quyết định `pull` có chạy được.
+$ollamaExe = (Get-Command ollama -ErrorAction SilentlyContinue).Source
+if (-not $ollamaExe -and $env:LOCALAPPDATA) {
+    $ollamaCand = Join-Path $env:LOCALAPPDATA 'Programs\Ollama\ollama.exe'
+    if (Test-Path $ollamaCand) { $ollamaExe = $ollamaCand }
+}
+$ollamaDaemon = $false
+if ($ollamaExe) {
+    try {
+        # 5s: daemon chết thì kết nối bị từ chối NGAY, còn treo là ca bệnh khác.
+        $null = Invoke-RestMethod -Uri 'http://127.0.0.1:11434/api/tags' -TimeoutSec 5
+        $ollamaDaemon = $true
+    } catch {
+        $ollamaDaemon = $false
+    }
+}
+# `$modelRef` lấy từ registry.json — nguồn chân lý duy nhất. Viết cứng tag ở
+# đây là tạo chỗ thứ hai phải sửa khi registry đổi, và nó sẽ lệch trong im lặng.
+#
+# Bắt mã thoát NGAY sau lệnh ngoài: `$LASTEXITCODE` là biến tự động dùng chung,
+# nên một lệnh khác ở giữa (kể cả `Write-Host` có gọi hàm) là đọc nhầm giá trị
+# của chính nó. Gán vào biến riêng trước khi dùng.
+$modelRef = & $py -X utf8 -B -c "from app.adapters.registry_file import load_registry; print(next(s.model_ref for s in load_registry() if s.id == 'qwen2.5-3b'))"
+$refExit = $LASTEXITCODE
+$registryOk = (@($null, 0) -contains $refExit) -and [bool]$modelRef
+# Lời khuyên ở hai nhánh KHÔNG kéo được vẫn phải CHẠY ĐƯỢC, nên khi registry
+# không đọc nổi thì in tag mặc định của GĐ2 làm ĐIỂM RƠI (không phải nguồn).
+$pullRef = 'qwen2.5:3b-instruct-q4_K_M'
+if ($registryOk) { $pullRef = $modelRef }
+if ($ollamaExe -and $ollamaDaemon) {
+    Write-Host "   ollama đã có sẵn: $ollamaExe (daemon trả lời ở 127.0.0.1:11434)"
+    if ($registryOk) {
+        Write-Host "   kéo model dịch $pullRef (~1,9 GB) ..."
+        & $ollamaExe pull $pullRef
         # `Test-1a` ghim rằng so sánh "khác 0" trực tiếp là KHÔNG được xuất hiện
         # trong file này: giá trị đó là `$null` khi bước không chạy lệnh ngoài nào.
         # Dùng lại đúng phép kiểm null-safe của `Assert-LastExit`, nhưng KHÔNG
         # `throw`: kéo model dịch hỏng không được làm hỏng phần cài đặt còn lại.
         if (@($null, 0) -notcontains $LASTEXITCODE) {
-            Write-Host "   CẢNH BÁO: kéo $modelRef hỏng — engine qwen2.5-3b sẽ không chạy" -ForegroundColor Yellow
+            Write-Host "   CẢNH BÁO: kéo $pullRef hỏng — engine qwen2.5-3b sẽ không chạy" -ForegroundColor Yellow
         }
     } else {
         Write-Host "   CẢNH BÁO: không đọc được registry.json để biết model cần kéo" -ForegroundColor Yellow
     }
+} elseif ($ollamaExe) {
+    Write-Host "   ollama có ở $ollamaExe nhưng daemon KHÔNG trả lời ở 127.0.0.1:11434" -ForegroundColor Yellow
+    Write-Host "   mở Ollama (hoặc: & '$ollamaExe' serve) rồi chạy: & '$ollamaExe' pull $pullRef" -ForegroundColor Yellow
 } else {
     Write-Host "   chưa có ollama — cài bằng: winget install Ollama.Ollama" -ForegroundColor Yellow
-    Write-Host "   rồi chạy lại: ollama pull qwen2.5:3b-instruct-q4_K_M" -ForegroundColor Yellow
+    Write-Host "   MỞ SHELL MỚI (winget không nạp lại PATH của shell đang chạy), rồi: ollama pull $pullRef" -ForegroundColor Yellow
 }
 if (-not (Get-Command yt-dlp -ErrorAction SilentlyContinue)) {
     & $py -m pip install --no-cache-dir --upgrade yt-dlp

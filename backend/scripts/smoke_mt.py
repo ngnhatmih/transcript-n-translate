@@ -263,7 +263,16 @@ def run_synthetic(engine_id: str, source_lang: str, target_lang: str) -> int:
         # trên lần chạy thật: `--synthetic fw-tiny` in đúng thông báo nhưng thoát 1.
         print(exc)
         return 3
-    except Exception as exc:                                    # noqa: BLE001
+    except (ImportError, OSError) as exc:
+        # Fix round 1 (C2/C5): CHỈ hai loại hỏng THẬT của bước dựng engine — thiếu
+        # thư viện, thiếu weight — mới được gộp vào mã 3. `except Exception` rộng ở
+        # đây nuốt luôn một `KeyError` trần (lỗi lập trình trong `_spec_or_report`)
+        # và biến nó thành "không dựng được engine"; vì `except SystemExit` ngay
+        # trên cũng trả 3, mã thoát KHÔNG phân biệt được hai đường, nên commit
+        # `a650bc1` (id sai phải thoát 3) không có gì gác. Đo được: mutation
+        # `raise SystemExit` -> `raise KeyError` trong `_spec_or_report` vẫn cho ra
+        # mã 3. Engine thật nạp weight/daemon ở `translate` bên dưới, chỗ đó vẫn bắt
+        # rộng và vẫn trả 3 — nên hợp đồng mã thoát không đổi.
         print(f"KHÔNG DỰNG ĐƯỢC ENGINE {engine_id!r}: {type(exc).__name__}: {exc}")
         return 3
 

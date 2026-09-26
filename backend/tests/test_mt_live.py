@@ -289,6 +289,22 @@ def test_smoke_mt_unknown_engine_id_exits_three_and_names_the_real_ones(capsys):
     assert "opus-mt" in out and "qwen2.5-3b" in out, (
         f"phải liệt kê id DỊCH có thật để người chạy biết dùng gì:\n{out}"
     )
+    # Fix round 1 (C5): mã thoát 3 KHÔNG phân biệt được hai đường — `except
+    # SystemExit` của `_spec_or_report` (đường ĐÚNG) và `except Exception` rộng ở
+    # `run_synthetic`, thứ biến một `KeyError` trần thành "không dựng được engine".
+    # Chỉ đường rộng mới in tiền tố này, nên đây là thứ duy nhất ghim được commit
+    # `a650bc1`: mutation `raise SystemExit` -> `raise KeyError` để lại mã 3 y
+    # nguyên và hai dòng assert trên vẫn XANH.
+    assert "KHÔNG DỰNG ĐƯỢC ENGINE" not in out, (
+        "thông báo phải đến từ `except SystemExit` của `_spec_or_report`, KHÔNG "
+        "phải từ `except Exception` rộng — cả hai đường đều trả 3 nên mã thoát "
+        f"không phân biệt nổi chúng:\n{out}"
+    )
+    # Cố ý KHÔNG chỉ dựa vào `"id mt có thật:" in out`: `str(KeyError(msg))` là
+    # `repr(msg)`, nên đường rộng in ra NGUYÊN cụm đó và phép kiểm ấy vẫn xanh.
+    assert "id mt có thật:" in out, (
+        f"phải nêu id DỊCH có thật ngay trong thông báo lỗi:\n{out}"
+    )
 
 
 def test_smoke_mt_unknown_asr_id_exits_three(monkeypatch, tmp_path, capsys):

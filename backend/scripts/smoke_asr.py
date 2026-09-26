@@ -3,8 +3,11 @@
     .venv\\Scripts\\python.exe scripts\\smoke_asr.py <duong-dan-audio> [zh|en] [engine-id]
 
 `engine-id` mặc định là `fw-large-v3-turbo` (engine ASR mặc định của GĐ1a). Lần
-chạy THẬT đầu tiên nên truyền một engine nhỏ — `tiny` — để không phải tải 1,6 GB
-trước khi biết đường ống có thông hay không.
+chạy THẬT đầu tiên nên truyền một engine nhỏ — `fw-small` — để không phải tải
+1,6 GB trước khi biết đường ống có thông hay không. Id có thật trong
+`registry.json` là `fw-large-v3-turbo`, `fw-medium`, `fw-small` và
+`sensevoice-small`; `tiny`/`fw-tiny` KHÔNG tồn tại, nên truyền vào là `by_id`
+ném `KeyError` không kèm danh sách id.
 
 Không thuộc bộ pytest vì nó tải model vài GB và cần GPU.
 
