@@ -107,8 +107,18 @@ _VIETNAMESE = ["Xin chào", "Tạm biệt"]
 
 
 def _ready(repos) -> tuple[int, int]:
-    """Một source + transcript + một bản dịch `done`, trả `(transcript_id, tr_id)`."""
+    """Một source + transcript + một bản dịch `done`, trả `(transcript_id, tr_id)`.
+
+    Có thêm một transcript "nháp" tạo TRƯỚC transcript đích, để
+    `transcript_id != translation_id` (2 vs 1). Khi hai id bằng nhau (cả hai đều 1),
+    một mutant dùng nhầm id này cho id kia vẫn xanh — đo được: mutant
+    `stem = f"transcript-{translation.id}"` sống sót cho tới khi thêm dòng nháp này.
+    Trong sản xuất hai id không liên quan gì tới nhau, và `artifact_name()` khoá tên
+    tệp theo **transcript_id**.
+    """
     sid = repos.add_source(kind="file", origin="x.mp4", media_path="/m/x.mp4")
+    repos.add_transcript(source_id=sid, engine="fw-large-v3-turbo", lang="zh",
+                         segments=list(_SOURCE))          # nháp: chỉ để đẩy id
     tid = repos.add_transcript(source_id=sid, engine="fw-large-v3-turbo", lang="zh",
                                segments=list(_SOURCE))
     translated = [dataclasses.replace(seg, text=text)
@@ -117,6 +127,7 @@ def _ready(repos) -> tuple[int, int]:
         transcript_id=tid, transcript_version=1, engine="opus-mt",
         target_lang="vi", segments=translated, prompt_version="opus-p1",
         status="done")
+    assert tid != tr_id, "fixture phải tách id transcript khỏi id bản dịch"
     return tid, tr_id
 
 
