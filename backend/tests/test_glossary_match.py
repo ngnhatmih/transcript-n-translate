@@ -89,6 +89,19 @@ def test_affected_when_a_shadowed_whitespace_variant_translation_changes():
     assert affected_segments(segs, old, new) == [1]
 
 
+def test_affected_when_the_first_of_two_colliding_rows_translation_changes():
+    """Hàng ĐẦU của cặp trùng danh tính đổi bản dịch.
+
+    Đây là vế còn lại của F1: `terms_in` cho hàng đầu thắng, nên nếu ánh xạ giữ
+    một giá trị duy nhất (last-wins) thì hàng sau che mất hàng đầu và sửa hàng
+    đầu trả về `[]` — đúng false negative mà tập bản dịch tồn tại để chặn.
+    """
+    segs = [seg(1, "con rồng bay")]
+    old = [term("rồng", "FIRST-ROW"), term("Rồng", "case-variant")]
+    new = [term("rồng", "FIRST-ROW-CHANGED"), term("Rồng", "case-variant")]
+    assert affected_segments(segs, old, new) == [1]
+
+
 def test_terms_in_still_reports_one_term_for_duplicate_needles_first_wins():
     got = terms_in("con rồng bay", [term("rồng", "long"), term("Rồng", "CASE-VARIANT")])
     assert [t.term for t in got] == ["rồng"]
