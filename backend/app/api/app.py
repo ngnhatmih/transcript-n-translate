@@ -49,9 +49,9 @@ def create_app(*, repos, specs: list[EngineSpec], media_dir, out_dir,
         allow_headers=["*"],
     )
 
-    from app.api import (routes_export, routes_jobs, routes_media,
-                         routes_registry, routes_sources, routes_transcripts,
-                         routes_translations)
+    from app.api import (routes_export, routes_glossary, routes_jobs,
+                         routes_media, routes_registry, routes_sources,
+                         routes_transcripts, routes_translations)
 
     app.include_router(routes_registry.router)
     app.include_router(routes_sources.router)
@@ -63,5 +63,9 @@ def create_app(*, repos, specs: list[EngineSpec], media_dir, out_dir,
     # sai — nhưng vẫn đặt cạnh nhóm route tài nguyên (trước `routes_jobs`) để tệp
     # này đọc như một danh sách tài nguyên.
     app.include_router(routes_translations.router)
+    # Task 14: tiền tố `/api/glossary` cũng TĨNH, và `GET /api/glossary/version`
+    # được khai TRƯỚC route động duy nhất của router (`PATCH /{term_id}`, khác
+    # method) nên không có chuyện "version" bị bắt làm id thuật ngữ.
+    app.include_router(routes_glossary.router)
     app.include_router(routes_jobs.router)
     return app
