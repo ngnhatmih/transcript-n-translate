@@ -121,7 +121,12 @@ def test_stale_flag_is_computed_not_stored(client):
     body = client.get(f"/api/transcripts/{client.tid}").json()
     assert body["version"] == 2
     assert body["translations"][0]["stale"] is True
-    assert body["translations"][0]["translated_from_version"] == 1
+    # I-4: endpoint chi tiết transcript dùng CHUNG builder với
+    # `/api/translations`, nên khoá ở đây là `transcript_version` + `status`.
+    # Trước bản vá, chỗ này phát `translated_from_version` và KHÔNG có `status`,
+    # nên cùng một hàng đọc ở hai endpoint cho hai hình dạng khác nhau.
+    assert body["translations"][0]["transcript_version"] == 1
+    assert body["translations"][0]["status"] == "queued"
 
 
 def test_export_creates_job_and_download_serves_file(client):

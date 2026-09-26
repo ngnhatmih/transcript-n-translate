@@ -23,7 +23,7 @@ import pytest
 
 from app.adapters.clock_system import SystemClock
 from app.adapters.persist.sqlite_repos import NotFound, SqliteRepos
-from app.domain.models import Job, Segment
+from app.domain.models import CallStats, Job, Segment
 from app.domain.mt import MtOpts
 from app.domain.mt_qa import QaLimits
 from app.pipeline.translate import TranslateHandler
@@ -114,6 +114,46 @@ class _CancelInDbAfterFirstBatch(FakeMtEngine):
         if len(self.calls) == 1:
             self._repos.request_cancel(self._job_id)
         return out
+
+
+class _StatsPerCall(FakeMtEngine):
+    """Engine báo token/thời gian KHÁC NHAU ở mỗi lần gọi, và GHI ĐÈ như adapter thật.
+
+    `OllamaMtEngine.translate` làm đúng thứ này: `self.last_stats = CallStats(...)`
+    mỗi lần gọi. Nên sau một vòng lặp nhiều lô, `last_stats` chỉ còn số của lô
+    CUỐI — và một handler đọc nó ở cuối sẽ báo thiếu chi phí của mọi lô trước.
+    `tokens_in = 10·n` làm phép tổng (60 cho 3 lô) khác hẳn giá trị cuối (30), nên
+    test phân biệt được TỔNG với "lô cuối" mà không cần đếm số lần gọi.
+    """
+
+    def __init__(self, **kw):
+        super().__init__(**kw)
+        self.stats_calls = 0
+
+    def translate(self, batch, glossary, opts):
+        out = super().translate(batch, glossary, opts)
+        self.stats_calls += 1
+        self.last_stats = CallStats(tokens_in=10 * self.stats_calls,
+                                    tokens_out=20 * self.stats_calls,
+                                    duration_ms=100 * self.stats_calls)
+        return out
+
+
+class _StatusSpy:
+    """Bọc `SqliteRepos` để ghi lại MỌI trạng thái được ghi cho một bản dịch."""
+
+    def __init__(self, inner, translation_id):
+        self._inner = inner
+        self._translation_id = translation_id
+        self.writes: list[str] = []
+
+    def __getattr__(self, name):
+        return getattr(self._inner, name)
+
+    def set_translation_status(self, translation_id, status, **kw):
+        if translation_id == self._translation_id:
+            self.writes.append(status)
+        return self._inner.set_translation_status(translation_id, status, **kw)
 
 
 class _BoomOnSecondCall(FakeMtEngine):
@@ -694,8 +734,11 @@ def test_checkpoint_not_found_is_loud_and_not_a_silent_done(repos, transcript):
         _call(_handler(guarded, FakeMtEngine()), repos, tr_id, tid)
     assert guarded.update_calls == 1
     assert repos.get_translation(tr_id).segments == []
-    assert repos.get_translation(tr_id).status == "queued", (
-        "hàng biến mất thì không có gì để đánh dấu `failed`; đừng ghi thêm")
+    assert repos.get_translation(tr_id).status == "running", (
+        "hàng biến mất thì không có gì để đánh dấu `failed`; đừng ghi thêm. "
+        "`running` — không phải `queued` — là trạng thái handler đã ghi lúc bắt "
+        "đầu việc (I-3), và nó ở lại đó vì chính lần ghi `failed` cũng hỏng; "
+        "worker đối chiếu nó ở nhánh job hỏng (`PhaseQueueWorker._settle_translation`)")
 
 
 def test_run_reads_the_job_payload(repos, transcript):
@@ -833,3 +876,223 @@ def test_rerunning_a_finished_translation_calls_no_engine(repos, transcript):
     _call(_handler(repos, engine, batch_chars=1), repos, tr_id, tid)
     assert engine.attempts == []
     assert repos.get_translation(tr_id).status == "done"
+
+
+# ---------------------------------------------------------------------------
+# spec §4.2 — mỗi lời gọi engine để lại MỘT hàng `llm_calls`, và số của cả bản
+# dịch là TỔNG của các hàng đó (I-1 + I-2 của review cuối)
+# ---------------------------------------------------------------------------
+
+def _llm_calls_for(repos, job_id):
+    return repos.list_llm_calls(job_id)
+
+
+def test_a_multi_batch_translation_records_one_llm_call_per_engine_call(
+        repos, transcript):
+    """§4.2: ba lô ⇒ ít nhất ba hàng `llm_calls`, không phải một hàng hay không hàng nào.
+
+    Trước bản vá, `add_llm_call` KHÔNG có người gọi nào trong `app/`: bảng tồn tại
+    và có test ở tầng repo, nhưng production không ghi gì vào đó, nên spec §4.2
+    ("mỗi bước phải đếm được ... để biết engine nào hay hỏng alignment") và §10
+    (đo tỉ lệ hỏng để chọn kích thước lô) không có kênh dữ liệu nào.
+
+    `batch_chars=1` với text `"câu i"` (4 ký tự) ⇒ 5 lô một segment ⇒ ĐÚNG 5 hàng.
+    Khẳng định `>= 2` sẽ xanh cả khi handler ghi một hàng cho cả bản dịch, nên
+    phép đếm phải khớp đúng số lần chạm engine: 5.
+    """
+    tid, _ = transcript
+    tr_id = _translation(repos, tid)
+    engine = FakeMtEngine()
+    _call(_handler(repos, engine, batch_chars=1), repos, tr_id, tid)
+
+    assert len(engine.attempts) == 5, "fixture phải tạo 5 lô một segment"
+    rows = _llm_calls_for(repos, 1)
+    assert len(rows) == len(engine.attempts) == 5, (
+        f"mỗi lần chạm engine phải có ĐÚNG một hàng `llm_calls`: {rows}"
+    )
+    assert [r["engine"] for r in rows] == ["fake-mt"] * 5
+    assert [r["prompt_version"] for r in rows] == ["p1"] * 5, (
+        "`prompt_version` lấy từ hàng `translations` (dữ liệu của registry), "
+        "không phải suy lại từ engine"
+    )
+    assert [r["model_ref"] for r in rows] == ["fake/model"] * 5
+    assert all(r["ok"] == 1 for r in rows), "cả 5 lô đều thành công"
+
+
+def test_a_failed_alignment_attempt_is_recorded_with_ok_false(repos, transcript):
+    """Lần gọi HỎNG cũng là một hàng — đó chính là thứ §10 cần để đếm tỉ lệ hỏng.
+
+    Lô 5 phần tử lệch vì id=3 ⇒ hai lần thử cả lô (đều `ok=0`) rồi 5 lô hạ cấp, 4
+    `ok=1` và một `ok=0`. Nếu chỉ ghi các lần THÀNH CÔNG thì bảng đếm được số lần
+    dịch chứ không đếm được số lần HỎNG, tức là không trả lời được câu §4.2 đặt ra.
+    """
+    tid, _ = transcript
+    tr_id = _translation(repos, tid)
+    engine = FakeMtEngine(drop_ids={3})
+    with pytest.raises(RuntimeError):
+        _call(_handler(repos, engine, batch_chars=10_000), repos, tr_id, tid)
+
+    rows = _llm_calls_for(repos, 1)
+    assert len(rows) == len(engine.attempts) == 7, (
+        "2 lần thử cả lô + 3 lô hạ cấp ([1], [2], [3] rồi dừng ở id hỏng) — "
+        f"nhận {len(rows)} hàng: {rows}"
+    )
+    assert [r["ok"] for r in rows].count(0) == 3, (
+        "hai lần thử lô lớn và lô hạ cấp của id=3 đều phải là `ok=0`"
+    )
+    failing = [r for r in rows if r["ok"] == 0]
+    assert all(r["error"] for r in failing), (
+        "hàng hỏng phải mang lý do, nếu không thì không biết hỏng vì lệch hay vì sập"
+    )
+
+
+def test_a_transport_error_is_recorded_before_it_is_reraised(repos, transcript):
+    """`RuntimeError` trần (Ollama sập) cũng để lại hàng `ok=0` trước khi nổi lên.
+
+    Ca này KHÔNG phải `AlignmentProblem` nên nó không được thử lại — nhưng nó vẫn
+    là một lần chạm engine đã tiêu thời gian, và nếu bị nuốt khỏi `llm_calls` thì
+    nhóm hỏng tốn kém nhất (model/runtime sập) là nhóm duy nhất không đếm được.
+    """
+    tid, _ = transcript
+    tr_id = _translation(repos, tid)
+    with pytest.raises(RuntimeError):
+        _call(_handler(repos, _BoomOnSecondCall(), batch_chars=1), repos, tr_id, tid)
+
+    rows = _llm_calls_for(repos, 1)
+    assert [r["ok"] for r in rows] == [1, 0], (
+        f"lô 1 xong (ok=1), lô 2 sập (ok=0): {rows}"
+    )
+    assert "engine sập giữa đường" in rows[1]["error"]
+
+
+def test_a_multi_batch_translation_stores_the_sum_of_every_call(repos, transcript):
+    """I-2: `tokens_in`/`tokens_out`/`duration_ms` là TỔNG, không phải lô CUỐI.
+
+    Engine ở đây ghi đè `last_stats` mỗi lần gọi như `OllamaMtEngine` thật, và báo
+    `tokens_in = 10·n`. Với 3 lô: tổng là 60, còn đọc `last_stats` sau vòng lặp
+    được 30 — đo trên bản cũ đúng bằng 30, tức bản dịch tự báo thiếu 2/3 chi phí.
+    `duration_ms` đi cùng đường (100+200+300) để phép ghim không chỉ đúng một cột.
+    """
+    tid, _ = transcript
+    tr_id = _translation(repos, tid)
+    engine = _StatsPerCall()
+    # Độ dài các segment là 5,5,5,5,4 ("câu i"), nên `batch_chars=14` cho ra ĐÚNG
+    # 3 lô: [1,2], [3,4], [5]. Không đoán: `engine.calls` được khẳng định ngay
+    # dưới đây, và phép tổng chỉ khác phép "lô cuối" khi có ≥2 lô.
+    _call(_handler(repos, engine, batch_chars=14), repos, tr_id, tid)
+
+    assert engine.calls == [[1, 2], [3, 4], [5]], (
+        f"fixture phải tạo 3 lô để phép tổng khác phép 'lô cuối': {engine.calls}"
+    )
+    got = repos.get_translation(tr_id)
+    assert got.tokens_in == 60, (
+        f"tổng 10+20+30 = 60; 'lô cuối' là 30 (LỖI I-2): {got.tokens_in}"
+    )
+    assert got.tokens_out == 120
+    assert got.duration_ms == 600
+
+
+def test_the_stored_totals_are_derivable_from_the_llm_calls_rows(repos, transcript):
+    """Tổng trên `translations` phải bằng tổng của chính các hàng `llm_calls`.
+
+    Đây là bất biến khiến I-2 không thể tái phát: `translations` không còn tự đọc
+    một biến trong bộ nhớ của engine, nó cộng lại đúng những hàng mà người vận
+    hành nhìn thấy. Một bản vá chỉ sửa một trong hai mặt sẽ đỏ ở đây.
+    """
+    tid, _ = transcript
+    tr_id = _translation(repos, tid)
+    engine = _StatsPerCall()
+    _call(_handler(repos, engine, batch_chars=14), repos, tr_id, tid)
+
+    rows = _llm_calls_for(repos, 1)
+    got = repos.get_translation(tr_id)
+    assert len(rows) == 3, rows
+    assert got.tokens_in == sum(r["tokens_in"] for r in rows)
+    assert got.tokens_out == sum(r["tokens_out"] for r in rows)
+    assert got.duration_ms == sum(r["duration_ms"] for r in rows)
+
+
+def test_an_engine_without_llm_call_rows_leaves_the_totals_unset(repos, transcript):
+    """Không gọi engine lần nào ⇒ `None`, KHÔNG phải `0`.
+
+    "Chưa gọi engine" và "gọi rồi mà engine không báo token" (OPUS-MT chạy trong
+    tiến trình) là hai chuyện khác nhau; ghi `0` cho cả hai là bịa ra một phép đo.
+    """
+    tid, _ = transcript
+    segs = [seg(i, f"[vi]câu {i}") for i in range(1, 6)]
+    tr_id = _translation(repos, tid, segments=copy.deepcopy(segs))
+    engine = _StatsPerCall()
+    _call(_handler(repos, engine, batch_chars=1), repos, tr_id, tid)
+
+    assert engine.attempts == [], "không còn lô nào thì engine không được gọi"
+    got = repos.get_translation(tr_id)
+    assert (got.tokens_in, got.tokens_out, got.duration_ms) == (None, None, None)
+
+
+def test_running_is_written_before_the_first_batch(repos, transcript):
+    """I-3: `running` phải được GHI, và ghi TRƯỚC khi chạm engine.
+
+    Vocabulary của cột đã khai `queued | running | done | failed | cancelled` từ
+    Task 1, nhưng không có dòng production nào ghi `running`; Task 13 phơi cột này
+    ra API nên giao diện Workspace 2 không có cách nào phân biệt "vừa xếp" với
+    "đang chạy". Đo bằng chính lô đầu tiên: lúc engine được gọi, hàng đã `running`.
+    """
+    tid, _ = transcript
+    tr_id = _translation(repos, tid)
+    engine = FakeMtEngine()
+    real = engine.translate        # giữ TRƯỚC khi thay, nếu không `spy` tự gọi mình
+    seen = []
+
+    def spy(batch, glossary, opts):
+        seen.append(repos.get_translation(tr_id).status)
+        return real(batch, glossary, opts)
+
+    engine.translate = spy          # type: ignore[method-assign]
+    _call(_handler(repos, engine, batch_chars=1), repos, tr_id, tid)
+
+    assert seen[0] == "running", (
+        f"trước lô đầu, hàng dịch phải là `running`, nhận {seen[0]!r}: {seen}"
+    )
+    assert repos.get_translation(tr_id).status == "done"
+
+
+def test_running_is_written_after_the_engine_lookup(repos, transcript):
+    """Thứ tự này là một phần của hợp đồng: id engine sai ⇒ hàng vẫn `queued`.
+
+    `test_unknown_engine_id_fails_before_touching_the_translation` ghim hàng còn
+    nguyên `queued` khi `KeyError`; bài này ghim CƠ CHẾ (mọi trạng thái được ghi
+    đều nằm sau phép tra engine), nên một bản vá đặt `running` lên trước sẽ đỏ ở
+    đây kèm lý do, chứ không chỉ đỏ ở một assert ở tệp khác.
+    """
+    tid, _ = transcript
+    tr_id = _translation(repos, tid, engine="khong-co")
+    spy = _StatusSpy(repos, tr_id)
+    with pytest.raises(KeyError):
+        _call(_handler(spy, FakeMtEngine()), repos, tr_id, tid, engine_id="khong-co")
+    assert spy.writes == [], f"không được ghi trạng thái nào: {spy.writes}"
+
+
+def test_a_cancelled_run_leaves_running_behind_it(repos, transcript):
+    """`running` xuất hiện TRƯỚC `cancelled` — thứ tự, không chỉ tập giá trị.
+
+    Một mutant ghi `running` ở CUỐI hàm (sau khi đã `done`/`cancelled`) vẫn cho
+    tập giá trị khác đi, nhưng mutant ghi `running` ngay trước khi trả về sẽ làm
+    hàng cuối cùng là `running` trên một job đã huỷ — đúng thứ I-3 tồn tại để dẹp.
+    """
+    tid, _ = transcript
+    tr_id = _translation(repos, tid)
+    job = _Job()
+    engine = FakeMtEngine()
+    real = engine.translate
+
+    def cancel_after_first(batch, glossary, opts):
+        out = real(batch, glossary, opts)
+        job.cancel_requested = True
+        return out
+
+    engine.translate = cancel_after_first        # type: ignore[method-assign]
+    spy = _StatusSpy(repos, tr_id)
+    _call(_handler(spy, engine, batch_chars=1), repos, tr_id, tid, job=job)
+
+    assert spy.writes == ["running", "cancelled"], spy.writes
+    assert repos.get_translation(tr_id).status == "cancelled"

@@ -702,3 +702,141 @@ def test_availability_of_a_real_registry_engine_holds_either_way(tmp_path, monke
     assert by_id(specs, INPROCESS_ENGINE_ID).capabilities["available"] is True
     assert INPROCESS_ENGINE_ID in mt_engines
     assert repos is not None
+
+
+# ---------------------------------------------------------------------------
+# I-3 (hàng `translations` phải theo số phận của job) và I-4 (một builder JSON
+# cho mọi endpoint) — hai mục của review cuối nhánh
+# ---------------------------------------------------------------------------
+
+def test_cancelling_a_queued_translation_job_also_settles_the_translation(wired):
+    """Huỷ một job `queued` phải rời hàng dịch khỏi `queued`, không chỉ bảng `jobs`.
+
+    Job chưa chạy thì bị huỷ NGAY (`set_job_state`), và nó KHÔNG BAO GIỜ chạy
+    handler — nên nếu chỉ `jobs` được đổi trạng thái thì hàng dịch đứng nguyên ở
+    `queued` VĨNH VIỄN, không còn job nào đứng sau. `GET /api/translations` (Task
+    13 phơi `status`) khi đó hiện một bản dịch "đang chờ" không bao giờ chạy: hai
+    mặt của cùng một bản dịch nói hai chuyện.
+    """
+    c, repos, _specs, worker, _broker, _mt = wired
+    tid, _ = _seed(repos)
+    # `TestClient` đã khởi động luồng worker NỀN của app (`run_forever`), và nó
+    # bốc job trong 0,05 s. Bài này cần job còn `queued` cho tới lúc gọi route
+    # huỷ, nên luồng đó phải dừng TRƯỚC khi job được ghi — nếu không, kết quả phụ
+    # thuộc việc luồng nền có kịp bốc job hay không, tức là một test chập chờn.
+    worker.stop()
+
+    created = c.post("/api/translations", json={"transcript_id": tid,
+                                                "engine": INPROCESS_ENGINE_ID})
+    assert created.status_code == 201, created.text
+    body = created.json()
+    job_id = body["job"]["id"]
+    tr_id = body["translation"]["id"]
+    assert repos.get_translation(tr_id).status == "queued"
+
+    cancelled = c.post(f"/api/jobs/{job_id}/cancel")
+    assert cancelled.status_code == 200, cancelled.text
+    assert cancelled.json()["state"] == "cancelled"
+    assert repos.get_translation(tr_id).status == "cancelled", (
+        "job đã `cancelled` mà bản dịch còn `queued` là trạng thái treo vĩnh viễn"
+    )
+
+    listed = c.get(f"/api/translations?transcript_id={tid}").json()
+    # `_seed` đã để lại một bản dịch `queued` của chính nó, nên tìm ĐÚNG hàng vừa
+    # tạo thay vì so cả danh sách — bài này nói về một bản dịch, không về số hàng.
+    by_id_listed = {r["id"]: r for r in listed}
+    assert by_id_listed[tr_id]["status"] == "cancelled", (
+        "và API phải THẤY trạng thái đó, không chỉ DB"
+    )
+    assert by_id_listed[tr_id]["stale"] is False, (
+        "đổi trạng thái không được đụng tới version đã dịch từ"
+    )
+
+
+def test_cancelling_a_queued_job_of_another_type_writes_no_translation(wired):
+    """Job KHÔNG mang `translation_id` (mọi job `asr`/`ingest`/`export`) là NO-OP.
+
+    Nhánh đối chiếu tra id từ payload; một job không có khoá đó không được làm gì
+    cả — kể cả không được ném. Bài này là vế đối chứng của bài trên: nếu phép đối
+    chiếu "đoán" id (ví dụ theo id job hay theo bản dịch mới nhất), nó sẽ ghi vào
+    một hàng không liên quan.
+    """
+    c, repos, _specs, worker, _broker, _mt = wired
+    tid, tr_id = _seed(repos)
+    # Cùng lý do như bài trên: luồng worker nền dừng trước khi job được ghi, để
+    # trạng thái job không phụ thuộc thời điểm.
+    worker.stop()
+
+    from app.domain.models import Job
+
+    job = Job(id=None, workspace=1, type="ingest", engine=None, phase="ingest:-",
+              payload={"source_id": 1})
+    job_id = repos.add_job(job)
+
+    assert c.post(f"/api/jobs/{job_id}/cancel").status_code == 200
+    assert repos.get_translation(tr_id).status == "queued", (
+        "job khác loại không được chạm vào hàng dịch nào"
+    )
+
+
+def test_the_two_endpoints_describe_a_translation_identically(wired):
+    """I-4: CÙNG một hàng ⇒ CÙNG một object ở hai endpoint.
+
+    `/api/translations` và `/api/transcripts/{id}` từng có hai builder riêng:
+    một bên phát `transcript_version` + `status`, bên kia phát
+    `translated_from_version` và KHÔNG có `status`. Client phải special-case theo
+    endpoint, và endpoint chi tiết transcript — đúng cái Workspace 2 mở cho mỗi
+    video — không phân biệt được một bản dịch `queued` với một bản dịch `done`.
+
+    So `==` trên cả hai object là phép kiểm mạnh nhất: nó bắt mọi khoá thừa,
+    thiếu, đổi tên VÀ mọi giá trị lệch, không chỉ hai khoá được nêu tên.
+    """
+    c, repos, _specs, worker, _broker, _mt = wired
+    tid, tr_id = _seed(repos)
+    # Luồng worker nền dừng trước: job `translate` đang `queued` trong `_seed`
+    # không dành cho nó, và một lần bốc trúng sẽ ghi trạng thái khác vào đúng hàng
+    # mà bài này đang ghim.
+    worker.stop()
+    # Trạng thái KHÁC `queued` để phép so phân biệt được "có `status`" với "có
+    # `status` đúng": cả hai endpoint cùng rơi về `queued` cũng sẽ bằng nhau nếu
+    # builder đọc nhầm hằng số.
+    repos.set_translation_status(tr_id, "done")
+
+    from_list = c.get(f"/api/translations?transcript_id={tid}").json()[0]
+    from_detail = c.get(f"/api/transcripts/{tid}").json()["translations"][0]
+
+    assert from_list == from_detail, (
+        "hai endpoint mô tả CÙNG một hàng bằng hai hình dạng khác nhau:\n"
+        f"  /api/translations      : {sorted(from_list)}\n"
+        f"  /api/transcripts/{{id}} : {sorted(from_detail)}"
+    )
+    assert from_detail["status"] == "done"
+    assert from_detail["transcript_version"] == 1
+    assert "translated_from_version" not in from_detail, (
+        "khoá cũ phải BIẾN MẤT, không phải sống song song: hai tên cho một cột là "
+        "đúng thứ hai builder gây ra"
+    )
+
+
+def test_the_two_endpoints_agree_after_the_transcript_changes(wired):
+    """Cùng builder, nhưng `stale` vẫn phải TÍNH LẠI: sửa transcript ⇒ cả hai đỏ cờ.
+
+    Một builder dùng chung chỉ đáng tin nếu nó không biến `stale` thành hằng số:
+    route danh sách tự tính từ version hiện tại, route chi tiết nhận version từ
+    chính hàng transcript vừa đọc. Bài này sửa transcript qua CỔNG THẬT (tăng
+    version) rồi so lại hai endpoint.
+    """
+    c, repos, _specs, worker, _broker, _mt = wired
+    tid, _tr_id = _seed(repos)
+    # Luồng worker nền dừng trước khi sửa transcript: job `translate` `queued` của
+    # `_seed` không được bốc trong lúc bài này đang đo cờ `stale`.
+    worker.stop()
+
+    repos.update_transcript_segments(
+        tid, [Segment(i=1, start=0.0, end=1.0, text="你好呀")])
+
+    from_list = c.get(f"/api/translations?transcript_id={tid}").json()[0]
+    from_detail = c.get(f"/api/transcripts/{tid}").json()["translations"][0]
+
+    assert from_list["stale"] is True
+    assert from_list == from_detail

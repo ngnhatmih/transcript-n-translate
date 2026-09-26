@@ -431,3 +431,74 @@ def test_the_spec_route_materialises_the_same_artifact_name(wired):
     # Đường cũ ghi CÙNG tệp đó, không phải một tệp thứ hai nằm cạnh.
     assert [p.name for p in out_dir.iterdir() if p.suffix == ".srt"] == [
         f"transcript-{tid}.vi.srt"]
+
+
+# ---------------------------------------------------------------------------
+# Đường GHI của route spec phải đi qua containment (M-3 của review cuối)
+# ---------------------------------------------------------------------------
+
+def test_the_spec_route_proves_containment_before_writing(wired, monkeypatch):
+    """Lần ghi trên đĩa phải đi QUA `domain.paths.resolve_within`, không ghi thẳng.
+
+    Giai đoạn 1a đã trả giá cho một `stem` chưa lọc trên đường export, nên mọi chỗ
+    GHI đều phải chứng minh đích thật nằm trong thư mục cho phép. Route này là chỗ
+    duy nhất trong giai đoạn ghi tệp mà không đi qua đó.
+
+    Đo bằng SPY trên chính hàm dùng chung (không phải bằng một bản sao logic trong
+    test): nếu route quay lại `(out_dir / name).open(...)`, spy không được gọi và
+    bài này đỏ ngay, dù hành vi trên đĩa y hệt (nên một test chỉ so byte sẽ không
+    bao giờ bắt được).
+    """
+    from app.api import routes_translations
+
+    seen: list[tuple[object, object]] = []
+    real = routes_translations.resolve_within
+
+    def spy(root, candidate):
+        seen.append((root, candidate))
+        return real(root, candidate)
+
+    c, repos, out_dir, _worker = wired
+    _, tr_id = _ready(repos)
+    # Vá ĐÚNG tên mà route gọi. `routes_translations` import hàm bằng `from ... import`,
+    # nên nó giữ tham chiếu RIÊNG: vá `app.domain.paths.resolve_within` không tới
+    # được chỗ gọi (xem bài dưới, nơi cùng lý do này được ghim bằng phép ĐỎ).
+    monkeypatch.setattr(routes_translations, "resolve_within", spy)
+
+    r = c.get(f"/api/export/{tr_id}?format=srt")
+
+    assert r.status_code == 200, r.text
+    assert len(seen) == 1, f"phải chứng minh containment ĐÚNG một lần: {seen}"
+    root, candidate = seen[0]
+    assert pathlib.Path(root) == out_dir
+    assert pathlib.Path(candidate) == out_dir / pathlib.Path(candidate).name
+    assert pathlib.Path(candidate).name.endswith(".vi.srt")
+    assert (pathlib.Path(candidate)).is_file(), "chứng minh xong thì vẫn phải ghi"
+
+
+def test_the_spec_route_still_serves_the_body_when_containment_fails(wired,
+                                                                    monkeypatch):
+    """Không chứng minh được containment ⇒ BỎ lần ghi, KHÔNG 500 và KHÔNG ghi bừa.
+
+    Thân phụ đề đã nằm trong response, nên client vẫn nhận đủ nội dung (route này
+    không phục vụ tệp — đường tải tệp là `GET /api/export/{job_id}/download`).
+    Đổi lại: một `500` vì thư mục đầu ra không phân giải được sẽ biến một lần xuất
+    đọc được thành lỗi máy chủ, còn ghi bất chấp là mở lại đúng lớp lỗi 1a.
+    """
+    from app.api import routes_translations
+    from app.domain import paths
+
+    def refuse(root, candidate):
+        raise paths.PathOutsideRoot(f"từ chối trong test: {candidate}")
+
+    c, repos, out_dir, _worker = wired
+    _, tr_id = _ready(repos)
+    monkeypatch.setattr(routes_translations, "resolve_within", refuse)
+
+    r = c.get(f"/api/export/{tr_id}?format=srt")
+
+    assert r.status_code == 200, r.text
+    assert "Xin chào" in r.text, "thân phụ đề vẫn phải được trả về"
+    assert list(out_dir.glob("*.srt")) == [], (
+        "containment không chứng minh được thì KHÔNG được ghi tệp nào"
+    )

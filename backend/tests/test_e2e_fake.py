@@ -303,7 +303,14 @@ def test_full_pipeline_from_upload_to_srt(wired):
     assert len(translations) == 1, translations
     summary = translations[0]
     assert summary["engine"] == MT_SPEC.id
-    assert summary["translated_from_version"] == 1
+    # I-4: cùng builder với `/api/translations` ⇒ `transcript_version` + `status`
+    # (trước bản vá chỗ này phát `translated_from_version` và thiếu `status`, nên
+    # một bản dịch vừa xếp và một bản dịch đã xong trông y hệt nhau ở đây).
+    assert summary["transcript_version"] == 1
+    assert summary["status"] == "done", (
+        "endpoint này phải phân biệt được `queued` với `done`: đây là thứ giao "
+        "diện Workspace 2 dùng để biết bản dịch đã sẵn sàng chưa"
+    )
     assert summary["stale"] is False, "vừa dịch xong từ version 1 thì không được coi là cũ"
     assert summary["prompt_version"] == PROMPT_VERSION[MT_SPEC.id], (
         "prompt_version là DỮ LIỆU của `adapters/mt/prompts.py` do `main.py` bơm "

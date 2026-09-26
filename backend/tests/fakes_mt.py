@@ -25,6 +25,11 @@ class FakeMtEngine:
         self.attempts: list[list[int]] = []
         self.last_opts: MtOpts | None = None
         self.last_glossary: list[Term] | None = None
+        # `model_ref` là thứ `TranslateHandler` ghi vào `llm_calls.model_ref`, và
+        # engine thật (`OpusMtEngine`/`OllamaMtEngine`) đều phơi nó ra. Fake không
+        # có nó thì test `llm_calls` sẽ ghim `None` — tức là ghim luôn cả việc
+        # handler không lấy được tên model từ engine.
+        self.model_ref = "fake/model"
 
     @property
     def engine_id(self) -> str:
