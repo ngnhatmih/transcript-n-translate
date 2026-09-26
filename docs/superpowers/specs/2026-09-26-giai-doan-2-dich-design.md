@@ -99,8 +99,13 @@ Worker vào phase `translate:<engine>` → `TranslateHandler`:
 3. Với **mỗi lô**: dựng prompt → gọi engine → **kiểm alignment** → ghi kết quả → **checkpoint**.
 4. Hết lô: chạy QA tất định, ghi `qa_issues`, `tokens_in/out`, `duration_ms` → `status='done'` → job `done`.
 
-**Checkpoint** ghi **append theo thứ tự** vào `translations.segments`. Vì vậy `len(segments)` **chính là** tiến độ;
-`Job.progress = len(done) / len(total)`. **Không** cần bảng `translation_segments` mới.
+**Checkpoint** ghi vào `translations.segments`. Phân chia trách nhiệm cho rõ (đã bị hiểu sai một lần khi làm Task 6):
+**handler** (`TranslateHandler`) giữ danh sách trong bộ nhớ, **cộng dồn** theo thứ tự (`done + lô mới`), rồi gọi
+`update_translation_segments(id, toàn_bộ_danh_sách)`; **adapter** chỉ ghi **đúng danh sách được đưa** — nó **không**
+tự nối thêm. Vì vậy `len(segments)` **chính là** tiến độ; `Job.progress = len(done) / len(total)`.
+Ghi checkpoint với `id` không tồn tại **phải ném `NotFound`**, không được im lặng thành công — nếu không thì một id
+sai sẽ nuốt cả lô mà job vẫn báo `done`.
+**Không** cần bảng `translation_segments` mới.
 
 **Hủy:** kiểm `cancel_requested` **giữa các lô**; dừng và **giữ nguyên phần đã dịch** (không xoá công đã làm).
 `status='cancelled'`.
