@@ -82,11 +82,50 @@ def test_migration_is_idempotent(tmp_path):
     assert n == 1, "migrate hai lần không được nhân bản dữ liệu"
 
 
+def test_migration_heals_database_stamped_v2_without_status_column(tmp_path):
+    """Đúng trạng thái `init_schema()` CŨ để lại: version đã là '2', cột thì chưa có.
+
+    `CREATE TABLE IF NOT EXISTS` bỏ qua bảng đã tồn tại, còn version thì bị ghi
+    đè, nên một DB Giai đoạn 1a có thể mang `schema_meta.version = '2'` mà vẫn
+    thiếu `translations.status`. Nếu bước migration tin vào `version` (dùng nó
+    làm cổng chặn) thì đúng cái DB này sẽ KHÔNG BAO GIỜ được vá — đó là bug mà
+    Task 1 tồn tại để dập. Test này khoá hành vi tự vá đó lại.
+    """
+    db = tmp_path / "poisoned.db"
+    _make_v1(db)
+
+    conn = sqlite3.connect(db)
+    conn.execute("UPDATE schema_meta SET value='2' WHERE key='version'")
+    conn.commit()
+    before = {r[1] for r in conn.execute("PRAGMA table_info(translations)")}
+    conn.close()
+    assert "status" not in before, "dựng cảnh nhiễm độc: version '2' nhưng còn thiếu cột"
+
+    SqliteRepos(db, clock=SystemClock()).init_schema()
+
+    conn = sqlite3.connect(db)
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(translations)")}
+    row = conn.execute("SELECT id, transcript_version, status FROM translations").fetchone()
+    version = conn.execute("SELECT value FROM schema_meta WHERE key='version'").fetchone()[0]
+    src = conn.execute("SELECT origin FROM sources WHERE id=1").fetchone()
+    conn.close()
+
+    assert "status" in cols, "version nói '2' mà thiếu cột: init_schema phải tự vá"
+    assert row == (7, 1, "queued"), "hàng cũ phải sống sót và nhận default 'queued'"
+    assert src == ("x",), "dữ liệu bảng khác không được mất"
+    assert version == str(SCHEMA_VERSION) == "2", "version phải giữ nguyên '2'"
+
+
 def test_fresh_database_is_created_at_current_version(tmp_path):
     db = tmp_path / "new.db"
     repos = SqliteRepos(db, clock=SystemClock())
     repos.init_schema()
     conn = sqlite3.connect(db)
-    cols = {r[1] for r in conn.execute("PRAGMA table_info(translations)")}
+    info = {r[1]: (r[3], r[4]) for r in conn.execute("PRAGMA table_info(translations)")}
+    version = conn.execute("SELECT value FROM schema_meta WHERE key='version'").fetchone()[0]
     conn.close()
-    assert "status" in cols
+    assert "status" in info
+    assert version == str(SCHEMA_VERSION) == "2", "DB mới phải mang version hiện hành"
+    assert info["status"] == (1, "'queued'"), (
+        "cột status trên DB mới phải NOT NULL DEFAULT 'queued'"
+    )
