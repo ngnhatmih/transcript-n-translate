@@ -2,6 +2,11 @@
 
 `affected_segments` so ÁNH XẠ thuật ngữ -> bản dịch, không chỉ so tập thuật ngữ:
 đổi bản dịch của một thuật ngữ ĐANG xuất hiện cũng làm segment đó phải dịch lại.
+
+Danh tính thuật ngữ là `term.strip().casefold()`, không phải `(lang, term)`.
+Hai hàng khác nhau trong DB vẫn có thể cùng danh tính: khác hoa thường, khác
+khoảng trắng đầu/cuối, hoặc cùng chữ ở hai ngôn ngữ. Và `affected_segments` chỉ
+tính thuật ngữ ĐÃ DUYỆT: nháp không phải ràng buộc.
 """
 from app.domain.glossary_match import affected_segments, approved, terms_in
 from app.domain.models import Segment, Term
@@ -63,3 +68,52 @@ def test_affected_when_a_term_is_removed():
 def test_a_term_not_present_anywhere_affects_nothing():
     segs = [seg(1, "con rồng")]
     assert affected_segments(segs, [], [term("phượng", "phoenix")]) == []
+
+
+# --- F1: hai hàng glossary cùng danh tính `strip().casefold()` ----------------
+# `UNIQUE(lang, term)` của schema KHÔNG chặn được: 'rồng' vs 'Rồng', 'rồng' vs
+# ' rồng ', hoặc cùng chữ ở hai `lang` là những hàng khác nhau nhưng cùng danh
+# tính với module này. Bản dịch của hàng bị che đổi thì segment vẫn phải dịch lại.
+
+def test_affected_when_a_shadowed_duplicate_needle_translation_changes():
+    segs = [seg(1, "con rồng bay")]
+    old = [term("rồng", "long"), term("Rồng", "CASE-VARIANT")]
+    new = [term("rồng", "long"), term("Rồng", "CASE-VARIANT-CHANGED")]
+    assert affected_segments(segs, old, new) == [1]
+
+
+def test_affected_when_a_shadowed_whitespace_variant_translation_changes():
+    segs = [seg(1, "con rồng bay")]
+    old = [term("rồng", "long"), term(" rồng ", "WS-VARIANT")]
+    new = [term("rồng", "long"), term(" rồng ", "WS-VARIANT-CHANGED")]
+    assert affected_segments(segs, old, new) == [1]
+
+
+def test_terms_in_still_reports_one_term_for_duplicate_needles_first_wins():
+    got = terms_in("con rồng bay", [term("rồng", "long"), term("Rồng", "CASE-VARIANT")])
+    assert [t.term for t in got] == ["rồng"]
+
+
+# --- F2: chỉ thuật ngữ ĐÃ DUYỆT mới là ràng buộc ------------------------------
+# Header §8.1: glossary chưa duyệt là bản nháp. `terms_in` vẫn không lọc (Task 14
+# cần danh sách thô), `affected_segments` lọc cả hai vế.
+
+def test_affected_when_a_term_is_approved():
+    segs = [seg(1, "con rồng")]
+    old = [term("rồng", "long", ok=False)]
+    new = [term("rồng", "long", ok=True)]
+    assert affected_segments(segs, old, new) == [1]
+
+
+def test_affected_when_a_term_is_unapproved():
+    segs = [seg(1, "con rồng")]
+    old = [term("rồng", "long", ok=True)]
+    new = [term("rồng", "long", ok=False)]
+    assert affected_segments(segs, old, new) == [1]
+
+
+def test_unapproved_draft_edit_affects_nothing():
+    segs = [seg(1, "con rồng"), seg(2, "con phượng")]
+    old = [term("rồng", "long", ok=False)]
+    new = [term("rồng", "CASE-DRAFT-EDIT", ok=False), term("phượng", "phoenix", ok=False)]
+    assert affected_segments(segs, old, new) == []
