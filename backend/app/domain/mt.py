@@ -5,6 +5,8 @@ có, kể cả OPUS-MT vốn không trả token count. Giá trị cụ thể đo
 """
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 from .models import Segment
 
 #: Ngân sách mặc định. Số này là ĐIỂM KHỞI ĐẦU, không phải số đã tối ưu: spec §12
@@ -34,3 +36,10 @@ def batch_segments(segments: list[Segment], *, max_chars: int) -> list[list[Segm
     if current:
         batches.append(current)
     return batches
+
+
+@dataclass(frozen=True)
+class MtOpts:
+    """Tham số của một lần gọi engine. Bất biến, nên so sánh được trong test."""
+    source_lang: str
+    target_lang: str = "vi"
