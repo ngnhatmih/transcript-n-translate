@@ -54,10 +54,12 @@ GPU. Nó tự ép UTF-8 cho stdout (console Windows mặc định cp1252, còn s
 tiếng Trung/Việt) và tự đặt cache model trước khi nạp `faster_whisper`.
 
 Con số nền của lần chạy mặc định, đo sau khi xoá `__pycache__` (lệnh ở mục
-"Kiểm thử" trên, chạy từ trong `backend\`):
+"Kiểm thử" trên, chạy từ trong `backend\`). Thứ có nghĩa là **798 / 13**, không
+phải số giây — thời gian trôi giữa các lần chạy (đã thấy 24,00–24,15 s) còn con
+số bài thì không:
 
 ```
-798 passed, 13 deselected, 1 warning in 24.15s
+798 passed, 13 deselected, 1 warning
 ```
 
 Số này chỉ để phát hiện TRÔI: một thay đổi làm nó **giảm** là một bài đã bị gỡ
