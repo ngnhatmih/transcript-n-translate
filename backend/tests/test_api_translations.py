@@ -257,17 +257,27 @@ def test_a_created_translation_is_consumed_by_the_real_handler(wired):
 
 
 def test_create_translation_rejects_an_unknown_engine_with_422(wired):
-    """Id lạ là lỗi ĐẦU VÀO, và thông báo phải nêu ĐÚNG id đó.
+    """Id lạ là lỗi ĐẦU VÀO, và thông báo phải nói ĐÚNG nó không có trong registry.
 
     Khẳng định mỗi `status_code == 422` là chưa đủ: rơi về một engine khác (ví dụ
-    `specs[0]`) rồi bị từ chối vì sai `kind` cũng ra 422 — cùng mã, khác lý do, và
-    người dùng gõ nhầm id sẽ nhận một thông báo nói về engine họ không hề gõ.
+    `specs[0]`) rồi bị từ chối vì sai `kind` cũng ra 422 — cùng mã, KHÁC lý do, và
+    thông báo khi đó nói về một engine mà người dùng không hề gõ. Đo thật với
+    mutant `by_id(...)` -> `next(..., specs[0])`: body là
+    `"engine không phải engine dịch: 'khong-co' (kind='asr')"` — nó BỊA ra rằng
+    `khong-co` tồn tại và là engine ASR.
+
+    Nên phép đỏ ở đây bám vào chính lời nói dối đó: một id không có trong registry
+    thì thông báo KHÔNG được gán cho nó một `kind`.
     """
     c, repos, _specs, _worker, _broker, _mt = wired
     tid, _ = _seed(repos)
     r = c.post("/api/translations", json={"transcript_id": tid, "engine": "khong-co"})
     assert r.status_code == 422, r.text
     assert "khong-co" in r.text, f"lỗi phải nêu đúng id người dùng gửi: {r.text!r}"
+    assert "kind=" not in r.text, (
+        "id KHÔNG có trong registry không được gán cho một `kind` — thông báo kiểu "
+        f"'... (kind=asr)' là bịa ra một engine có thật: {r.text!r}"
+    )
     assert [j for j in repos.list_jobs() if j.type == "translate"] == []
 
 
