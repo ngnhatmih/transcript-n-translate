@@ -3159,7 +3159,7 @@ git commit -m "feat(worker): phuc hoi sau crash + huy hop tac qua checkpoint"
 > một phép chiếu tới task sau bị viết như đặc tả của task hiện tại; và (b) chữ ký nêu ra cũng sai:
 > chữ ký **đã ship** là
 > `IngestHandler(repos, *, audio_dir=None, media_root=None, specs=None, declared_default_asr=None)`
-> (`backend/app/pipeline/ingest.py:189`) — **không** có tham số `clock`, và ba tham số từ khoá cuối
+> (`IngestHandler.__init__` trong `backend/app/pipeline/ingest.py`) — **không** có tham số `clock`, và ba tham số từ khoá cuối
 > chỉ `app/main.py` truyền (I-3, I-6). DOC-03 ("R53 = thông tin", ledger ghi *không làm gì*) tự đóng
 > kèm DOC-01: cùng một dòng, cùng một edit.
 
@@ -4895,9 +4895,9 @@ Thêm `IngestHandler` vào `backend/app/pipeline/ingest.py`:
 
 > **Ghi chú (R53 = DOC-03).** Chữ ký trong khối dưới đây là bản **đầu** của plan; code **đã ship**
 > rộng hơn: `IngestHandler(repos, *, audio_dir=None, media_root=None, specs=None, declared_default_asr=None)`
-> (`backend/app/pipeline/ingest.py:189`) — ba tham số cuối do I-3/I-6 thêm và chỉ `app/main.py`
-> (`main.py:66-67`) truyền. `main.py` vì vậy cũng không còn là `IngestHandler(repos)` như khối
-> `build_components()` ở dưới.
+> (`IngestHandler.__init__` trong `backend/app/pipeline/ingest.py`) — ba tham số cuối do I-3/I-6 thêm và
+> chỉ `app/main.py` (khối `handlers` trong `build_components()`) truyền. `main.py` vì vậy cũng không còn
+> là `IngestHandler(repos)` như khối `build_components()` ở dưới.
 
 ```python
 class IngestHandler:
@@ -6486,14 +6486,14 @@ tên cũ trong ghi chú — **không** xuất hiện trong code.
 | # | Mục đã biết là NGOÀI phạm vi GĐ1a | Vì sao (một dòng) |
 |---|---|---|
 | 1 | **Toàn bộ frontend** (spec §9.2–§9.4: ghim dòng, bàn phím, font self-host) | Thuộc "Kế hoạch 2"; cây repo chỉ có `.superpowers/`, `backend/`, `docs/` — không có mã frontend nào. |
-| 2 | **Workspace 2 / dịch máy (MT)** — không có handler `translate` | `backend/app/pipeline/` chỉ có `ingest.py`/`export.py`/`transcribe.py`; `app/main.py:84-89` cố ý đặt `auto_forward="0"` vì GĐ1a chưa có handler `translate`, nên job dịch (nếu ai bật) chỉ bị worker đánh `FAILED`. |
+| 2 | **Workspace 2 / dịch máy (MT)** — không có handler `translate` | `backend/app/pipeline/` chỉ có `ingest.py`/`export.py`/`transcribe.py`; `app/main.py` (`build_components()`, khối `handlers`) cố ý đặt `auto_forward="0"` vì GĐ1a chưa có handler `translate`, nên job dịch (nếu ai bật) chỉ bị worker đánh `FAILED`. |
 | 3 | **`GET /api/translations?transcript_id=` và `PATCH /api/translations/{id}`** (spec §11) | Không có route tương ứng trong `backend/app/api/` (grep `translations` chỉ thấy payload của `routes_transcripts.py`); workspace 2 ⇒ GĐ2. |
 | 4 | **`GET`/`POST`/`PATCH /api/glossary`** (spec §11) | Grep `glossary` trong `backend/app/api/` → 0 hit (port `upsert_term` có sẵn nhưng chưa có route); glossary là workspace 2 ⇒ GĐ2. |
 | 5 | **GĐ1b: subsystem `eval/` + benchmark** (spec §10, `backend/eval/report.md`) | `backend/eval/` chưa tồn tại và **cố ý không được tạo**; Task 20 chỉ thu hai số đầu (RTF, thời gian nạp) bằng smoke **thủ công**, không phải test tự động. |
 | 6 | **Task ASS riêng (EX-02)** | `to_ass` join bằng `"\N"` rồi `_ass_escape` nhân đôi backslash ⇒ tệp ASS song ngữ in một `\` thừa: lỗi người-dùng-thấy-được, nhưng `task-14-brief.md:209` **buộc** giữ ở GĐ1a; sửa cùng adjudication brace-escaping ở task ASS riêng. |
 | 7 | **`.vi` hardcode (EX-08)** | `backend/app/pipeline/export.py:35` (`artifact_name`) gắn `.vi` theo cờ `translated`, không theo ngôn ngữ đích — đúng khi Việt là đích duy nhất; khi có đích thứ hai thì đổi thành `payload.get("lang", "vi")`. Không test: hành vi hiện tại là hợp đồng đúng của GĐ1a. |
-| 8 | **Bảng `translations` chưa có người ghi (DC-04)** | Schema (`schema.py:30`) và đường ĐỌC qua port (`list_translations`, `ports/repos.py:29`) có, nhưng **không writer production** nào gọi `add_translation` (grep chỉ thấy `sqlite_repos.py:196` + test); GĐ1a chỉ đọc nếu có, GĐ2 mới ghi — viết test sẽ phải tự chế writer, tức test chính cái không tồn tại. |
+| 8 | **Bảng `translations` chưa có người ghi (DC-04)** | Schema (`schema.py`, `CREATE TABLE IF NOT EXISTS translations`) và đường ĐỌC qua port (`list_translations`, `ports/repos.py`) có, nhưng **không writer production** nào gọi `add_translation` (grep toàn `backend/` chỉ thấy định nghĩa `add_translation` trong `sqlite_repos.py` + test); GĐ1a chỉ đọc nếu có, GĐ2 mới ghi — viết test sẽ phải tự chế writer, tức test chính cái không tồn tại. |
 | 9 | **`initial_prompt` lấy từ glossary (DOC-06/R40)** | `faster_whisper.py:89,96` đọc `spec.opts["initial_prompt"]` mà `registry.json` **không có khoá đó** (grep), nên "mồi thuật ngữ" của spec §8.2.4 không có đường vào; glossary là workspace 2 ⇒ GĐ2, và GĐ1a không có nguồn dữ liệu để test. |
-| 10 | **API-05 (N7): `origin` thô + `fallback` một-đường** | `routes_sources.py:134` lưu `origin=file.filename` **nguyên vẹn kể cả thành phần đường dẫn** (`a/b/c.mp4`), còn `fallback` của `safe_basename` chỉ tới được khi `filename is None`; re-review kết luận **no action required** — quan sát, không phải defect, không nơi nào dùng `origin` làm đường dẫn. Không test: lý do là "quyết định giữ nguyên", không phải "thiếu test". |
+| 10 | **API-05 (N7): `origin` thô + `fallback` một-đường** | Route upload (`routes_sources.py`, `repos.add_source(kind="file", origin=file.filename or final.name)`) lưu `origin` **nguyên vẹn kể cả thành phần đường dẫn** (`a/b/c.mp4`), còn `fallback` của `safe_basename` chỉ tới được khi `filename is None`; re-review kết luận **no action required** — quan sát, không phải defect, không nơi nào dùng `origin` làm đường dẫn (grep `origin` trong `backend/app`: chỉ gán/lưu/đọc để hiển thị). Không test: lý do là "quyết định giữ nguyên", không phải "thiếu test". |
 | 11 | **`digest[:16]` thay vì `<sha256>` đầy đủ (API-06/R40, đối chiếu spec §8.1)** | Điều chỉnh **có ý thức**: tên tệp ngắn, 16 hex (64 bit) đủ chống trùng ở quy mô GĐ1a; đổi sang 64 hex là đổi hợp đồng `media_path` (R37/StubIngest, Task 19) nên phải làm cùng lúc. Quyết định được ghim bằng chú thích + khẳng định độ dài 16 trong `test_upload_still_accepts_a_normal_filename` — **không phải** lệch im lặng. |
 
