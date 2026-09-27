@@ -51,6 +51,17 @@ let dom: InstanceType<typeof JSDOM> | null = null;
 /** Anh chup trang thai global NGAY TRUOC lan `setupDom` hien hanh. */
 let daLuu: DaLuu[] = [];
 
+/**
+ * Anh chup cua lan `setupDom` DAU TIEN — giu VINH VIEN, khong bao gio bi xoa.
+ *
+ * Vi sao can mot ban thu hai: `daLuu` bi xoa moi lan `teardownDom()` (no la anh chup
+ * de TRA), nen sau khi tra xong thi khong con gi de doi chieu. Mot guard luc THOAT
+ * TIEN TRINH can biet "trang thai nguyen ban cua tien trinh la gi" — va chi ban chup
+ * DAU TIEN moi la nguyen ban: ban chup thu hai tro vao jsdom TRUNG GIAN (xem
+ * `guardGlobalLucThoat`).
+ */
+let anhGoc: DaLuu[] = [];
+
 /** Origin cua server test — dung de resolve URL tuong doi, KHONG phai de gia lap mang. */
 let bridgeOrigin = "";
 
@@ -72,6 +83,8 @@ function luuGlobal(): void {
     key,
     descriptor: Object.getOwnPropertyDescriptor(globalThis, key),
   }));
+  // Ban chup DAU TIEN la nguyen ban cua tien trinh; cac lan sau la jsdom trung gian.
+  if (anhGoc.length === 0) anhGoc = daLuu.map((muc) => ({ ...muc }));
 }
 
 /** Tra tung global ve dung trang thai da ghi: co truoc ⇒ dat lai, khong co truoc ⇒ XOA. */
@@ -160,3 +173,89 @@ export function teardownDom(): void {
   bridgeOrigin = "";
   traGlobal();
 }
+
+/** Hai descriptor co mo ta CUNG mot trang thai khong? Khong goi getter nao ca. */
+function descriptorBang(
+  a: PropertyDescriptor | undefined,
+  b: PropertyDescriptor | undefined,
+): boolean {
+  if (a === undefined || b === undefined) return a === b;
+  return (
+    Object.is(a.value, b.value)
+    && Object.is(a.get, b.get)
+    && Object.is(a.set, b.set)
+    && a.writable === b.writable
+    && a.enumerable === b.enumerable
+    && a.configurable === b.configurable
+  );
+}
+
+/**
+ * Mo ta mot descriptor ma KHONG goi getter cua no: `navigator` cua Node 24 la getter
+ * chi-doc, va sau khi jsdom bi `close()` thi doc sau vao `window` la tu chuoc loi.
+ */
+function moTa(descriptor: PropertyDescriptor | undefined): string {
+  if (descriptor === undefined) return "khong ton tai";
+  if (descriptor.get !== undefined || descriptor.set !== undefined) return "getter/setter";
+  const value: unknown = descriptor.value;
+  if (value === undefined) return "undefined";
+  if (value === null) return "null";
+  const kind = typeof value;
+  if (kind !== "object" && kind !== "function") return `${kind} ${String(value)}`;
+  return Object.prototype.toString.call(value);
+}
+
+/**
+ * GHIM BAT BIEN `if (daLuu.length === 0) luuGlobal();` — "mot `setupDom` = MOT lan cai dat".
+ *
+ * Vi sao phai la mot guard luc THOAT TIEN TRINH, khong phai mot bai test: mutation `R4`
+ * (luon chup lai anh chup global) lam RO RI 10/10 global ma `npm test` VAN XANH
+ * (`pass`/`fail` khong doi mot bai nao) — do la loai loi ma khong bai test nao TRONG
+ * luot chay nhin thay duoc, vi moi bai deu tu chuan hoa truoc khi do. Chi mot phep do o
+ * `process exit` moi bat duoc.
+ *
+ * Cach do: so `Object.getOwnPropertyDescriptor` HIEN TAI cua tung global trong
+ * `MANAGED_GLOBALS` voi descriptor chup o lan `setupDom` DAU TIEN (`anhGoc`). So
+ * DESCRIPTOR chu khong chi gia tri: `navigator` la getter, nen "khoi phuc gia tri" ma
+ * khong khoi phuc descriptor la mot trang thai khac.
+ *
+ * Goi ham nay MOT lan, o cap MODULE cua mot tep test DOM (xem `test/dom.test.ts`).
+ * No chi DANG KY mot listener — khong doi global nao.
+ */
+export function guardGlobalLucThoat(): void {
+  process.on("exit", () => {
+    if (anhGoc.length === 0) {
+      process.stderr.write(
+        "[guard thoat] khong co lan setupDom nao ⇒ khong co global nao phai kiem\n",
+      );
+      return;
+    }
+
+    const ro: string[] = [];
+    for (const { key, descriptor } of anhGoc) {
+      const hienTai = Object.getOwnPropertyDescriptor(globalThis, key);
+      if (!descriptorBang(hienTai, descriptor)) {
+        ro.push(`  ${key}: truoc=${moTa(descriptor)} / sau=${moTa(hienTai)}`);
+      }
+    }
+
+    if (ro.length === 0) {
+      process.stderr.write(
+        `[guard thoat] ${anhGoc.length}/${anhGoc.length} global da ve nguyen trang `
+        + "(so descriptor, khong chi gia tri)\n",
+      );
+      return;
+    }
+
+    process.stderr.write(
+      `[guard thoat] HARNESS DOM RO RI: ${ro.length}/${anhGoc.length} global CHUA ve nguyen trang\n`
+      + `${ro.join("\n")}\n`
+      + "  Moi global phai duoc tra ve DUNG descriptor chup o lan `setupDom` DAU TIEN.\n"
+      + "  Nguyen nhan thuong gap: bo `if (daLuu.length === 0)` trong `luuGlobal()` ⇒ teardown tra\n"
+      + "  ve anh chup cua jsdom TRUNG GIAN (da close) thay vi trang thai nguyen ban.\n"
+      + "  Day la thu summary cua node:test KHONG thay duoc — no chi lo ra o `process exit`.\n",
+    );
+    process.exitCode = 1;
+  });
+}
+

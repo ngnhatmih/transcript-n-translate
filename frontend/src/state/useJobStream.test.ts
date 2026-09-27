@@ -141,37 +141,18 @@ let waitFor: (callback: () => void, options?: { timeout?: number; interval?: num
 let cleanup: () => void;
 let useJobStream: () => Map<number, any>;
 
-before(async () => {
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()));
-  const address = server.address() as AddressInfo;
-  origin = `http://127.0.0.1:${address.port}`;
-  setupDom(origin);
-  const rtl: any = await import("@testing-library/react");
-  const api = rtl.renderHook === undefined ? rtl.default : rtl;
-  renderHook = api.renderHook;
-  waitFor = api.waitFor;
-  cleanup = api.cleanup;
-  const hook: any = await import("./useJobStream.ts");
-  useJobStream = hook.useJobStream;
-});
-
-afterEach(() => {
-  cleanup();
-});
-
-after(async () => {
-  for (const res of [...state.openStreams]) {
-    try {
-      res.end();
-    } catch {
-      // da dong roi
-    }
-  }
-  state.openStreams.clear();
-  for (const socket of [...state.sockets]) socket.destroy();
-  await new Promise<void>((resolve) => server.close(() => resolve()));
-  teardownDOMSafe();
-});
+// ⚠️ HOOK ĐÃ ĐƯỢC CHUYỂN VÀO `describe()` — chúng nằm NGAY DƯỚI, không ở cấp tệp.
+//
+// ĐO ĐƯỢC (không phải suy diễn, xem ERRATA #9 mục 1/6): dưới `--test-isolation=none`
+// hook cấp TỆP bị node:test kéo lên GỐC cả lượt chạy. Với `before` ở cấp tệp, jsdom +
+// cầu nối URL được cài lúc t≈0 và SỐNG TỚI CUỐI LƯỢT; một tệp DOM khác chạy TRƯỚC tệp
+// này mà gọi `teardownDom()` để chuẩn hoá thì ĐÓNG LUÔN jsdom đó, và cả năm bài dưới
+// đây chết `ReferenceError: document is not defined` dù chúng không sai gì.
+// Đó là lần đo thật của Task 4: thêm `src/shell/App.test.tsx` (đứng TRƯỚC theo thứ tự
+// đường dẫn) làm đỏ đúng năm bài này. Bọc hook trong `describe()` thì hook mới thật sự
+// theo suite — và tệp này không còn áp một jsdom lên các tệp khác nữa.
+//
+// `teardownDOMSafe` giữ ở cấp tệp vì nó KHÔNG đặt/trả global: nó chỉ gọi `teardownDom`.
 
 /** `teardownDom` tra `globalThis.fetch` ve nguyen ban — BAT BUOC vi `--test-isolation=none`. */
 function teardownDOMSafe(): void {
@@ -187,6 +168,40 @@ const waitUntil = (condition: () => boolean, timeout = 5000, interval = 20): Pro
   );
 
 describe("useJobStream (server HTTP that trong tien trinh)", () => {
+  before(async () => {
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()));
+    const address = server.address() as AddressInfo;
+    origin = `http://127.0.0.1:${address.port}`;
+    // Chuan hoa TRUOC khi cai: khong dua vao viec tep khac da tra global hay chua.
+    teardownDom();
+    setupDom(origin);
+    const rtl: any = await import("@testing-library/react");
+    const api = rtl.renderHook === undefined ? rtl.default : rtl;
+    renderHook = api.renderHook;
+    waitFor = api.waitFor;
+    cleanup = api.cleanup;
+    const hook: any = await import("./useJobStream.ts");
+    useJobStream = hook.useJobStream;
+  });
+
+  afterEach(() => {
+    cleanup();
+  });
+
+  after(async () => {
+    for (const res of [...state.openStreams]) {
+      try {
+        res.end();
+      } catch {
+        // da dong roi
+      }
+    }
+    state.openStreams.clear();
+    for (const socket of [...state.sockets]) socket.destroy();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    teardownDOMSafe();
+  });
+
   beforeEach(() => {
     resetState();
   });
@@ -228,6 +243,32 @@ describe("useJobStream (server HTTP that trong tien trinh)", () => {
       "su kien da xep hang phai duoc ap SAU anh chup (neu khong thi map dung o trang thai cua anh chup)",
     );
     assert.equal(result.current.get(2)?.id, 2);
+    unmount();
+  });
+
+  it("X1: su kien cho id DA BIET ⇒ cap nhat job do VA khong doc lai anh chup", async () => {
+    // LO HONG DO PHU ma review Task 3 tim duoc: duong "id DA BIET ⇒ ap thang vao map"
+    // khong bai nao ghim — xoa `publish(applyJobEvent(current, event))` van `4/4` xanh.
+    // Bai nay ghim no bang HAI bang chung doc lap:
+    //   (a) job trong map DOI that (state + progress), va
+    //   (b) BO DEM request cua server KHONG tang ⇒ khong he co lan doc anh chup nao.
+    // Dem la bang chung, khong phai suy luan. Mutation: xoa loi goi ap thang ⇒ bai nay DO.
+    state.snapshots = [[makeJob(1)]];
+    const { result, unmount } = renderHook(() => useJobStream());
+
+    await waitUntil(() => result.current.has(1));
+    assert.equal(result.current.get(1)?.state, "queued", "tien de: anh chup cho job 1 o queued");
+    const docAnhChup = state.jobsCalls;
+
+    emit(sse(jobEvent(1, "running", 0.42)));
+
+    await waitUntil(() => result.current.get(1)?.state === "running");
+    assert.equal(result.current.get(1)?.progress, 0.42, "su kien phai duoc ap THANG vao job da co");
+
+    // Cho qua mot vong request (neu co) roi moi dem: mot lan doc anh chup sai cho se
+    // tang bo dem ngay trong vong vai mili giay, khong phai sau 500ms cua `later`.
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    assert.equal(state.jobsCalls, docAnhChup, "id DA BIET ⇒ khong duoc doc lai anh chup /api/jobs");
     unmount();
   });
 

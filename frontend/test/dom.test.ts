@@ -16,9 +16,28 @@
  *     "tra het global" so sanh THAM CHIEU (`===`) voi gia tri chup TRUOC
  *     `setupDom` — ke ca `undefined`.
  *
- * Thu tu bai trong tep nay la CO Y: bai "tra het global" chay TRUOC de anh chup
- * "truoc setupDom" la trang thai nguyen ban cua tien trinh (khong bi bai truoc
- * lam ban) ⇒ witness doc duoc ro rang.
+ * ⚠️ ĐÍNH CHÍNH (`M1`, trả ở Task 4). Bản đầu của đoạn này viết: *"thứ tự bài trong tệp
+ * này là CỐ Ý để ảnh chụp là trạng thái nguyên bản"*. Câu đó ĐÚNG khi chạy LẺ tệp này,
+ * nhưng SAI trong lượt ĐẦY ĐỦ: dưới `--test-isolation=none`, hook cấp TỆP bị node:test
+ * kéo lên GỐC cả lượt chạy (mọi `before` trước MỌI bài, mọi `after` sau MỌI bài — đo
+ * bằng đồng hồ chung, ERRATA #9 mục 1). Thứ tự KHAI BÁO trong tệp không mua được gì
+ * khi cả lượt chạy chung một tiến trình.
+ *
+ * Thứ bảo đảm ảnh chụp là trạng thái NGUYÊN BẢN là LỜI GỌI CHUẨN HOÁ `teardownDom()` ở
+ * đầu MỖI bài dưới đây — không phải thứ tự bài. Reviewer đã đo điều đó bằng mutation
+ * `H1b` (bỏ lời gọi ⇒ CẢ HAI bài cùng đỏ) trong bố cục CŨ, khi `useJobStream.test.ts`
+ * còn để `before` ở cấp TỆP: lúc đó jsdom của tệp kia sống suốt lượt, nên lời gọi ở đây
+ * là thứ ĐÓNG nó.
+ *
+ * Task 4 chuyển hook của `useJobStream.test.ts` vào `describe()`, và việc đó KHÔNG tự
+ * nguyện: thêm `src/shell/App.test.tsx` (đứng TRƯỚC theo thứ tự đường dẫn) làm đỏ ĐÚNG
+ * NĂM bài của tệp kia bằng `ReferenceError: document is not defined` — vì chuẩn hoá của
+ * tệp mới đóng jsdom mà hook cấp tệp của tệp cũ đã cài lúc t≈0. Sau khi chuyển, H1b được
+ * ĐO LẠI và **không giết bài nào** (`pass 48 / fail 2`, đúng hai guard `EMPTY_DB_MSG`).
+ * ⇒ Từ đây lời gọi chuẩn hoá là PHÒNG THỦ, không còn là thứ mà một mutation chứng minh:
+ * nó ở lại vì mỗi bài DOM phải bắt đầu từ một trạng thái XÁC ĐỊNH, không phụ thuộc thứ
+ * tự tệp (ERRATA #9 mục 6) — và vì một bài chết giữa chừng không được để jsdom lại cho
+ * bài sau.
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -26,7 +45,14 @@ import { createServer } from "node:http";
 import type { Server } from "node:http";
 import type { AddressInfo, Socket } from "node:net";
 
-import { setupDom, teardownDom } from "./dom.ts";
+import { setupDom, teardownDom, guardGlobalLucThoat } from "./dom.ts";
+
+// ⚠️ NO DEBT `I1` — guard luc THOAT TIEN TRINH, dang ky o cap MODULE (khong trong hook:
+// no chi DANG KY mot listener, khong dat global nao). Ly do no phai ton tai o day thay vi
+// mot bai test: mutation `R4` (`luuGlobal()` luon chup lai) lam ro ri 10/10 global ma
+// `npm test` VAN XANH — khong bai nao trong luot chay thay duoc, vi moi bai deu tu chuan
+// hoa truoc khi do. Xem `guardGlobalLucThoat()` trong `test/dom.ts`.
+guardGlobalLucThoat();
 
 /** Sau global ma `setupDom` dat vao `globalThis` — va `teardownDom` PHAI tra lai. */
 const DOM_GLOBALS = [
@@ -62,10 +88,13 @@ function coActEnvironment(): boolean {
  * - khong co truoc ⇒ phai bi XOA, khong duoc de lai `undefined`.
  */
 test("teardownDom tra HET global ve dung gia tri truoc setupDom (khong chi fetch)", () => {
-  // Bat dau tu mot trang thai XAC DINH: dong DOM ma suite khac co the con giu.
-  // DO DUOC (khong phai suy dien): duoi `--test-isolation=none`, hook `before`/`after`
-  // o CAP TEP bi node:test keo len GOC ca luot chay, nen `useJobStream.test.ts` co the
-  // dang giu mot jsdom CON SONG ngay luc bai nay chay (xem bao cao Task 3b).
+  // Bat dau tu mot trang thai XAC DINH: dong jsdom ma suite/bai TRUOC co the con giu.
+  // ⚠️ Truoc Task 4, cho nay la thu ĐÓNG jsdom cua `useJobStream.test.ts` — hook cấp TỆP
+  // của tệp đó bị kéo lên GỐC nên jsdom của nó sống suốt lượt chạy (ERRATA #9 mục 1).
+  // Task 4 đã bọc hook đó vào `describe()`, nên từ đây lời gọi này là PHÒNG THỦ: nó bảo
+  // đảm bài này bắt đầu sạch bất kể tệp nào chạy trước và bất kể bài trước có chết giữa
+  // chừng hay không. Đo lại `H1b` sau khi chuyển hook: bỏ lời gọi này KHÔNG giết bài nào
+  // — xem đầu tệp để có số đo, đừng đọc câu này như một bất biến được mutation chứng minh.
   teardownDom();
 
   // Tien de, va la mot yeu cau doc lap cua brief: `setupDom` LUON bat co act, nen
