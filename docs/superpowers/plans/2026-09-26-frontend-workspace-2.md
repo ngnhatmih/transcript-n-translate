@@ -412,9 +412,10 @@ test("b) đường JSX thật qua loader SWC", () => {
 });
 ```
 
-**Hai bài, không phải một** — và đó không phải hình thức: mutation đã đo cho thấy chúng **khác nhau về sức mạnh**.
-Bỏ `transform: { react: { runtime: "automatic" } }` khỏi loader ⇒ **(b) ĐỎ** (`React is not defined`) còn **(a) vẫn XANH**.
-Tức chỉ (b) ghim được runtime JSX; một mình (a) sẽ để loader hỏng đi qua.
+**Hai bài, không phải một** — và đó không phải hình thức.
+⚠️ **ĐÍNH CHÍNH (vòng re-review Task 1 đo lại — câu gốc ở đây SAI):** plan bản đầu viết *"Bỏ `runtime: "automatic"` ⇒ **(b) ĐỎ** còn **(a) vẫn XANH**; tức chỉ (b) ghim được runtime JSX"*.
+**Đo được: `fail 2` — CẢ HAI bài đỏ** (`ReferenceError: React is not defined` ở cả hai), vì `fixtures/Probe.tsx` **cũng là TSX chứa JSX**, nên mất runtime JSX thì chính fixture không biên dịch được. Hai bài **không** khác sức mạnh dưới mutation đó.
+**Hai bài khác sức mạnh ở chỗ khác:** bỏ hẳn `--import` ⇒ `ERR_UNKNOWN_FILE_EXTENSION`, tức bài (a) ghim chính **LOADER**, không chỉ đường JSX.
 (`Probe` render ra `<span class="probe">`, không phải `<p>`.)
 
 `frontend/test/fixtures/Probe.tsx` là một component 3 dòng có một prop. **Mutation để chứng minh test không rỗng:**
