@@ -54,32 +54,38 @@ GPU. Nó tự ép UTF-8 cho stdout (console Windows mặc định cp1252, còn s
 tiếng Trung/Việt) và tự đặt cache model trước khi nạp `faster_whisper`.
 
 Con số nền của lần chạy mặc định, đo sau khi xoá `__pycache__` (lệnh ở mục
-"Kiểm thử" trên, chạy từ trong `backend\`). Thứ có nghĩa là **827 / 13**, không
+"Kiểm thử" trên, chạy từ trong `backend\`). Thứ có nghĩa là **828 / 13**, không
 phải số giây — thời gian trôi giữa các lần chạy (đã thấy 24,00–30,94 s) còn con
 số bài thì không:
 
 ```
-827 passed, 13 deselected, 1 warning
+828 passed, 13 deselected, 1 warning
 ```
 
 Hai con số đó là SỐ BÀI ĐƯỢC CHỌN, và chúng khớp với số mà `--collect-only` báo
 (`tests/test_backend_readme.py::test_readme_baseline_matches_the_tests_actually_
 collected` đối chiếu mỗi lần chạy).
 
-Máy này **CÓ** `ffmpeg 8.1.1` + `ffprobe` trên PATH (đã đo), nên `827/13` ở trên
+Máy này **CÓ** `ffmpeg 8.1.1` + `ffprobe` trên PATH (đã đo), nên `828/13` ở trên
 là số THẬT của nó. Máy **không có** `ffmpeg`/`ffprobe` cho một kết quả KHÁC: cả
 `tests/test_ingest.py` bị `skipif` ở cấp module — **9** bài cùng skip một lượt —
-nên dòng tổng kết của máy đó là **`818 passed, 9 skipped, 13 deselected`**. Đó là
+nên dòng tổng kết của máy đó là **`819 passed, 9 skipped, 13 deselected`**. Đó là
 con số của máy thiếu ffmpeg, **không phải** con số máy này từng in ra; đừng chép
-nó vào khối `827/13` ở trên, và đừng "sửa" số nền xuống `818` chỉ vì thiếu
-ffmpeg. (Con số `818` là SỐ HỌC từ số nền: `827 − 9 = 818`, cùng cách `812` suy
-từ `821`; nó không được ĐO ở đây vì máy này có ffmpeg.)
+nó vào khối `828/13` ở trên, và đừng "sửa" số nền xuống `819` chỉ vì thiếu
+ffmpeg. (Con số `819` là SỐ HỌC từ số nền: `828 − 9 = 819`, cùng cách `818` suy
+từ `827`; nó không được ĐO ở đây vì máy này có ffmpeg.)
 
 (Con số này từng bị ghi là `798`: bài `test_a_failed_translation_leaves_the_
 transcript_reviewed` được thêm ở `a428334` — **cùng commit đã sửa tệp này** — mà
 số nền không được bump. Nó tồn tại để phát hiện TRÔI, nên một số sai làm mọi lần
 chạy báo dương tính giả.
 
+`827/13` → `828/13`: đợt dọn nợ P1 thêm 1 bài vào
+`tests/test_schema_llm_calls_index.py` — một ca dựng DB **v2** (schema của
+`4a747e6`, đã có `translations.status` và `version='2'`, chỉ thiếu
+`idx_llm_calls_job`) để ghim rằng gate `executescript(SCHEMA_SQL)` sau
+`version < SCHEMA_VERSION` là hồi quy: nó giữ ca v1 xanh trong khi mọi DB v2 đang
+tồn tại vĩnh viễn không nhận index.
 Năm lần bump gần nhất. `819/13` → `821/13`: đợt dọn nợ thêm
 `tests/test_schema_llm_calls_index.py` (2 bài chọn được, cả 2 chạy thật).
 `821/13` → `829/13`: đợt dọn nợ P2 (Giai đoạn 2) thêm **8** bài chọn được —
