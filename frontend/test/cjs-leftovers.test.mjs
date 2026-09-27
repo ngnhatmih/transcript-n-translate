@@ -39,7 +39,11 @@ test("sample KHONG duoc rong khi `exports` dung dau dong (thong bao loi phai co 
   assert.ok(hits[0].sample.includes("exports"), `sample phai chua dinh danh: ${JSON.stringify(hits[0])}`);
 });
 
-test("KHONG bao dong gia voi bundle da shim dung (do tren bundle that 665144 ky tu)", () => {
+// Ten bai noi DUNG pham vi cua no: day la chuoi NAM DONG TU DUNG, khong phai bundle that.
+// (Ban dau bai ten la "... do tren bundle that 665144 ky tu" — ten do nhan mot phep do bai
+// KHONG lam. Tinh khong-bao-dong-gia tren bundle THAT duoc `npm run build` chung minh: guard
+// `assert-no-cjs-leftovers` chay o `generateBundle` tren bundle that, va build XANH.)
+test("KHONG bao dong gia voi chuoi da shim dung (nam dong tu dung)", () => {
   const shimmed = [
     "const __cjsModule = { exports: {} };",
     "__cjsModule.exports.probeValue = 41;",

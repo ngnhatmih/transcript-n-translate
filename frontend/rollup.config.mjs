@@ -173,7 +173,13 @@ function htmlPlugin() {
 // BUILD, truoc `generateBundle`, nen guard khong bao gio toi duoc dung ca no sinh ra de bat. Do lai:
 //   chen `import "node:fs";` vao src/main.tsx -> rollup -c chet
 //   `[!] Error: "node:fs" is imported by "src/main.tsx", but could not be resolved` at onwarn
-//   (rollup.config.mjs:204), BUILD EXIT=1, khong mot dong nao cua guard.
+//   (khối `onwarn(...)` ở CUỐI tệp này — CO Y khong ghi so dong: ban dau cho nay ghi `:204`,
+//   dung luc viet nhung `f27cd39` doi so dong, va chinh ban sua nay lai doi tiep. Mot tham chieu
+//   dong trong comment se muc ngay khi ai do sua tep, nen tro bang TEN thay vi so.)
+//   BUILD EXIT=1, khong mot dong nao cua guard.
+//   Va tu `C-1` con mot tang nua: `npm run build` = `tsc --noEmit && rollup -c`, ma tsconfig co
+//   `noUncheckedSideEffectImports`, nen import tran chet o `tsc` TRUOC — muon do rieng tang
+//   `onwarn` thi phai goi thang `node node_modules/rollup/dist/bin/rollup -c`.
 // => Bao ve that den tu `onwarn` duoi day (UNRESOLVED_IMPORT + MISSING_EXPORT), khong phai tu guard.
 // Giu lai mot cai ten noi doi thi lan sau nguoi sua se tin nham cho. Xem them guard CJS o duoi.
 

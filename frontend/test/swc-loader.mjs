@@ -6,7 +6,9 @@
 // trinh hien tai, con `@swc/core` la native binding (napi) — khong spawn. Cung ly do da loai Vite.
 //
 // Day la ha tang cua MOI test UI sau nay: mot loader hong lam 12 task sau do gia. Vi vay
-// `test/swc-loader.test.ts` ghim chinh no bang duong JSX that.
+// `test/swc-loader.test.tsx` ghim chinh no bang duong JSX that.
+// (Ban dau cho nay ghi `.test.ts` — SAI duoi tep; `aac8765` sua o PLAN nhung bo sot comment nay.
+// Vong re-review bat. Duoi `.tsx` la bat buoc: loader dat `tsx: url.endsWith(".tsx")`.)
 import { registerHooks } from "node:module";
 import { readFileSync } from "node:fs";
 import { transformSync } from "@swc/core";
