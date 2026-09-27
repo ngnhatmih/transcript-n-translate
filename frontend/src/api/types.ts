@@ -12,8 +12,9 @@
  * sập khi shape trôi là một contract test, và nó sập ỒN ÀO. Xem `contract.test.ts`.
  *
  * MỨC KIỂM THẬT của MỌI KIỂU đã export — 33 kiểu (23 `interface` + 10 `type`),
- * đọc ra từ `contract.test.ts`, KHÔNG phải lời hứa. Bốn nhóm dưới đây chia ĐỦ 33
- * (10 + 8 + 5 + 10), không thiếu kiểu nào:
+ * đọc ra từ `contract.test.ts`, KHÔNG phải lời hứa. Ba nhóm dưới đây và hai kiểu
+ * nêu riêng cuối cùng chia ĐỦ 33 (10 + 8 + 5 + 8, cộng `JobSlim` + `OllamaState`),
+ * không thiếu kiểu nào:
  *   đếm lại: Select-String -Path src/api/types.ts -Pattern '^export (interface|type) '
  *   đếm `type` riêng: Select-String -Path src/api/types.ts -Pattern '^export type '
  *   kiểu nào test chạm: Get-ChildItem src -Recurse -Filter *.test.ts | Select-String '\bOllamaState\b'
@@ -45,16 +46,19 @@
  *   và `SourceCreated` cũng kết thúc bằng "Created" nhưng là RESPONSE, đã ở nhóm 2;
  *   theo hậu tố `*Create|*Created|*Patch` thì đếm ra 7 `interface`, không phải 5.
  *
- *   9 `type` dưới đây KHÔNG có bài kiểm nào: `JobType`, `JobState`, `SourceLang`,
+ *   8 `type` dưới đây KHÔNG có bài kiểm nào: `JobType`, `JobState`, `SourceLang`,
  *   `SourceKind`, `TranscriptStatus`, `TranslationStatus`, `EngineKind`,
- *   `EngineRuntime`, `OllamaState`. Không `*.test.ts` nào import chúng — đây là 9
- *   trong 10 `type`; `JobSlim` đã ở nhóm 2, và không `type` nào ở nhóm 1.
- *   Cả 9 là union GIÁ TRỊ và đều là KIỂU CỦA MỘT TRƯỜNG của một interface ở nhóm
- *   1 hoặc nhóm 2: `JobType`, `JobState` của `Job`; `SourceLang`, `SourceKind` của
- *   `Source`; `TranscriptStatus` của `Transcript`; `TranslationStatus` của
- *   `Translation`; `EngineKind`, `EngineRuntime` của `EngineSpec`; `OllamaState`
- *   của `Status`. Nên tập giá trị của chúng chỉ được đối chiếu MÃ NGUỒN qua
- *   interface cha — KHÔNG qua một bài test ép tập giá trị.
+ *   `EngineRuntime`. Không `*.test.ts` nào import hay nhắc chúng. Cả 8 là union
+ *   GIÁ TRỊ và đều là KIỂU CỦA MỘT TRƯỜNG của một interface ở nhóm 1 hoặc nhóm 2:
+ *   `JobType`, `JobState` của `Job`; `SourceLang`, `SourceKind` của `Source`;
+ *   `TranscriptStatus` của `Transcript`; `TranslationStatus` của `Translation`;
+ *   `EngineKind`, `EngineRuntime` của `EngineSpec`. Nên tập giá trị của chúng chỉ
+ *   được đối chiếu MÃ NGUỒN qua interface cha — KHÔNG qua một bài test ép tập giá trị.
+ *
+ *   `OllamaState` là `type` DUY NHẤT được test chạm: `contract.test.ts` import nó
+ *   và ép `(["up","down","unknown"] as OllamaState[]).includes(body.ollama)` trong
+ *   bài `/api/status` — kiểm TẬP GIÁ TRỊ, không phải soi khoá của route, nên nó
+ *   KHÔNG thuộc nhóm 1. Nó là `type` của trường `Status.ollama`.
  */
 
 /** Một từ có mốc thời gian. Chỉ có khi engine thật sự sinh word timestamp. */
