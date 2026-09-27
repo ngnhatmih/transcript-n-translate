@@ -11,22 +11,110 @@
  * `await import(...)` sau `setupDom`). React doc `window`/`document` luc nap.
  *
  * BAN QUYEN CUA HARNESS NAY: `--test-isolation=none` nghia la MOI tep test chay
- * trong CUNG mot tien trinh. Nen `teardownDom()` phai tra `globalThis.fetch` ve
+ * trong CUNG mot tien trinh. Nen `teardownDom()` phai tra MOI global no da dat ve
  * nguyen ban — khong tra thi contract test (goi backend that) chay sau se di qua
  * cau noi URL va hong mot cach kho hieu.
+ *
+ * DO DUOC, khong phai suy dien (xem `test/dom.test.ts` va bao cao Task 3b): duoi
+ * `--test-isolation=none`, hook `before`/`after` o CAP TEP bi node:test keo len
+ * GOC cua ca luot chay — MOI `before` chay truoc MOI bai test, MOI `after` chay
+ * sau MOI bai test. Nghia la mot suite DOM co the dang song trong luc cac tep test
+ * khac dang chay. Do chinh la ly do `setupDom` KHONG duoc phep bo qua IM LANG mot
+ * origin khac: suite sau se go cua server cua suite truoc ma khong co gi bao.
  */
 import jsdom from "jsdom";
 
 const { JSDOM } = jsdom;
 
+/** Global ma harness nay dat ⇒ phai tra lai. Mot danh sach de khong bo sot cai nao. */
+const MANAGED_GLOBALS = [
+  "window",
+  "document",
+  "navigator",
+  "HTMLElement",
+  "Node",
+  "Event",
+  "MouseEvent",
+  "getComputedStyle",
+  "fetch",
+  "IS_REACT_ACT_ENVIRONMENT",
+] as const;
+
+interface DaLuu {
+  key: string;
+  /** `undefined` nghia la global do TRUOC DO KHONG TON TAI ⇒ teardown phai XOA no. */
+  descriptor: PropertyDescriptor | undefined;
+}
+
 let dom: InstanceType<typeof JSDOM> | null = null;
-let realFetch: typeof globalThis.fetch | null = null;
+
+/** Anh chup trang thai global NGAY TRUOC lan `setupDom` hien hanh. */
+let daLuu: DaLuu[] = [];
 
 /** Origin cua server test — dung de resolve URL tuong doi, KHONG phai de gia lap mang. */
 let bridgeOrigin = "";
 
+/** `fetch` THAT cua tien trinh. Ghi mot lan: cau noi cua chinh module nay khong bao
+ *  gio duoc boc hai lan (boc chong thi moi lan rebuild lai tao them mot chuoi cau noi). */
+let fetchThat: typeof globalThis.fetch | null = null;
+
+/** Cau noi URL hien hanh do chinh module nay tao (de nhan dien, khong boc lai no). */
+let cauNoi: typeof globalThis.fetch | null = null;
+
+/**
+ * Ghi lai NGUYEN DESCRIPTOR cua tung global, khong chi gia tri: `navigator` cua
+ * Node 24 la getter chi-doc, nen "khoi phuc gia tri" bat buoc phai la "khoi phuc
+ * descriptor" — va "truoc do khong ton tai" phai duoc ghi la `undefined` de
+ * teardown biet ma XOA thay vi dat thanh `undefined`.
+ */
+function luuGlobal(): void {
+  daLuu = MANAGED_GLOBALS.map((key) => ({
+    key,
+    descriptor: Object.getOwnPropertyDescriptor(globalThis, key),
+  }));
+}
+
+/** Tra tung global ve dung trang thai da ghi: co truoc ⇒ dat lai, khong co truoc ⇒ XOA. */
+function traGlobal(): void {
+  for (const { key, descriptor } of daLuu) {
+    if (descriptor === undefined) {
+      delete (globalThis as unknown as Record<string, unknown>)[key];
+    } else {
+      Object.defineProperty(globalThis, key, descriptor);
+    }
+  }
+  daLuu = [];
+}
+
+/** Dat mot global bang `defineProperty`: an toan voi global chi-co-getter cua Node. */
+function datGlobal(key: string, value: unknown): void {
+  Object.defineProperty(globalThis, key, {
+    value,
+    configurable: true,
+    writable: true,
+    enumerable: true,
+  });
+}
+
 export function setupDom(origin: string): void {
-  if (dom !== null) return;
+  if (dom !== null) {
+    // Cung origin: cau noi da tro dung cho ⇒ khong co gi phai lam (idempotent, CO CHU Y).
+    if (origin === bridgeOrigin) return;
+
+    // Origin KHAC: CAM bo qua im lang. Chon "DUNG LAI" thay vi "nem loi" vi T5–T11 se
+    // co nhieu suite DOM tren cung mot tien trinh ⇒ goi lan hai voi origin moi la viec
+    // BINH THUONG, khong phai loi cua nguoi goi. Nem loi chi buoc noi goi tu xu ly mot
+    // tinh huong binh thuong; dung lai thi `fetch("/api/…")` di dung server.
+    dom.window.close();
+    dom = null;
+  }
+
+  // Anh chup chi lay khi CHUA co: nhieu lan `setupDom` (dung lai theo origin moi) trong
+  // cung mot suite la MOT lan cai dat, nen `teardownDom()` phai tra ve trang thai NGAY
+  // TRUOC lan cai dat DAU TIEN — ke ca khi global dang tro vao jsdom song cua suite khac.
+  // Lay lai anh chup o moi lan rebuild se khien teardown tra ve mot jsdom TRUNG GIAN
+  // (da bi close) thay vi trang thai ma suite nay thua huong.
+  if (daLuu.length === 0) luuGlobal();
   bridgeOrigin = origin;
   dom = new JSDOM("<!doctype html><html><body></body></html>", {
     url: origin,
@@ -35,46 +123,40 @@ export function setupDom(origin: string): void {
   });
 
   const w = dom.window;
-  const g = globalThis as unknown as Record<string, unknown>;
-  g.window = w;
-  g.document = w.document;
-  g.HTMLElement = w.HTMLElement;
-  g.Node = w.Node;
-  g.Event = w.Event;
-  g.MouseEvent = w.MouseEvent;
-  g.getComputedStyle = w.getComputedStyle.bind(w);
+  datGlobal("window", w);
+  datGlobal("document", w.document);
+  datGlobal("HTMLElement", w.HTMLElement);
+  datGlobal("Node", w.Node);
+  datGlobal("Event", w.Event);
+  datGlobal("MouseEvent", w.MouseEvent);
+  datGlobal("getComputedStyle", w.getComputedStyle.bind(w));
   // `globalThis.navigator` cua Node 24 la getter chi-doc ⇒ phai defineProperty,
   // gan truc tiep (`g.navigator = ...`) khong nem nhung cung khong doi gi.
-  Object.defineProperty(globalThis, "navigator", {
-    value: w.navigator,
-    configurable: true,
-    writable: true,
-  });
+  datGlobal("navigator", w.navigator);
   // React 19 chi cho `act()` chay khi co co nay.
-  g.IS_REACT_ACT_ENVIRONMENT = true;
+  datGlobal("IS_REACT_ACT_ENVIRONMENT", true);
 
   // CAU NOI URL — KHONG phai gia lap mang: request van la HTTP THAT di ra server
   // that trong tien trinh (xem `useJobStream.test.ts`). Ly do can: `client.ts`
   // goi `fetch("/api/…")` TUONG DOI, ma `fetch` cua Node nem
   // `TypeError: Failed to parse URL from /api/...`.
-  realFetch = globalThis.fetch;
-  const inner = realFetch;
-  g.fetch = (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+  const hienTai = globalThis.fetch;
+  if (fetchThat === null || hienTai !== cauNoi) fetchThat = hienTai;
+  const inner = fetchThat;
+  cauNoi = (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     if (typeof input === "string" && input.startsWith("/")) {
       return inner(`${bridgeOrigin}${input}`, init);
     }
     return inner(input as RequestInfo, init);
   };
+  datGlobal("fetch", cauNoi);
 }
 
 export function teardownDom(): void {
-  if (realFetch !== null) {
-    (globalThis as unknown as Record<string, unknown>).fetch = realFetch;
-    realFetch = null;
-  }
   if (dom !== null) {
     dom.window.close();
     dom = null;
   }
-  delete (globalThis as unknown as Record<string, unknown>).IS_REACT_ACT_ENVIRONMENT;
+  bridgeOrigin = "";
+  traGlobal();
 }

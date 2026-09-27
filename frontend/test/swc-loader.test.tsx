@@ -7,9 +7,15 @@
 // 「nem luc load」nhung SAI nguyen van; vong re-review do lai va sua.)
 // Brief/plan ghi `swc-loader.test.ts` — do la cho sai cua plan, xem bao cao.
 //
-// Khong co DOM trong moi truong nay (khong jsdom, khong Testing Library, npm i bi chan), nen
-// render React THAT bang `renderToStaticMarkup` va khang dinh chuoi HTML. Do khong phai gia lap:
-// day la output that cua react-dom.
+// DOM: `jsdom` + `@testing-library/react` DA CAI va DANG CHAY — co tu `bc0dcae`, moc ma
+// `frontend/test/dom.ts` duoc tao (xem ERRATA #5 muc 2; do lai bang `git log -S` tren
+// `frontend/package.json`). Cau cu o cho nay viet "khong jsdom, khong Testing Library, npm i
+// bi chan" — SAI tu moc do, va da duoc sua o Task 3b: `npm i` chi chet khi cache nam NGOAI
+// workspace (ERRATA #5 muc 1).
+//
+// Hai bai o day VAN dung `renderToStaticMarkup` — nhung KHONG phai vi thieu DOM, ma vi chung
+// ghim `swc-loader`: render that bang react-dom/server khong can `document`, nen phep do nay
+// doc lap voi harness DOM. Xem `test/dom.test.ts` cho phia DOM.
 //
 // Hai bai, khong phai mot: bai (a) chung minh file .tsx chay duoc qua duong goi ham; bai (b)
 // dung JSX that nen no chung minh chinh duong JSX.
