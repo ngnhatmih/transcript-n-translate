@@ -81,7 +81,38 @@ Vòng sửa Task 2 (`166c2a9` + `f5a625b`) đóng 2 Critical + I-1, và **đổi
    ⇒ **Cổng "suite xanh" cho Tasks 3–11 phải đọc lại:** trên máy này, `npm test` đỏ **2 bài** là **đúng** cho tới khi có dữ liệu. Đừng "sửa" nó bằng cách nới guard, và đừng coi 2 đỏ đó là hồi quy của task mình. **Đọc EXIT kèm danh sách bài đỏ** — 2 bài đúng tên là trạng thái hợp lệ; bài thứ ba là hồi quy thật.
 3. **Task 12 PHẢI gieo ĐỦ HAI THỨ vào `data/app.db` thật**: một transcript **có segment**, **và ≥1 hàng `translations`**. Thiếu một trong hai thì guard của Task 2 vẫn đỏ sau Task 12, và e2e sẽ đỏ vì lý do không liên quan tới thứ nó kiểm. Đây là lý do Task 12 tồn tại (ngoài Playwright) — xem thêm ERRATA #2 mục 9.
 
-**Đính chính nhỏ về `Segment`** (brief của người điều phối đếm sai): `Segment` có **5 khoá LUÔN có** (`i`, `start`, `end`, `text`, **`suspect`**) + **8 khoá TUỲ CHỌN** (`words`, `emotion`, `events`, `speaker`, `avg_logprob`, `no_speech_prob`, `t`, `qa`). Brief ghi "13 khoá" nhưng chỉ liệt kê 11 và **bỏ sót `avg_logprob` + `no_speech_prob`**. Và nhóm "chỉ đối chiếu mã nguồn" là **9** interface (10/19 có bài kiểm khoá), không phải 5.
+**Đính chính nhỏ về `Segment`** (brief của người điều phối đếm sai): `Segment` có **5 khoá LUÔN có** (`i`, `start`, `end`, `text`, **`suspect`**) + **8 khoá TUỲ CHỌN** (`words`, `emotion`, `events`, `speaker`, `avg_logprob`, `no_speech_prob`, `t`, `qa`). Brief ghi "13 khoá" nhưng chỉ liệt kê 11 và **bỏ sót `avg_logprob` + `no_speech_prob`**. Và nhóm "chỉ đối chiếu mã nguồn" là **8** `interface` + **1** `type` = **9 KIỂU** (không phải 9 interface, và không phải 5).
+
+## ⚠️ ERRATA #4 — hệ quả của vòng sửa #3 Task 2 (áp cho MỌI task còn lại)
+
+**Vòng sửa #3** (`c65090b` + `3a7d84f`, chỉ comment của `frontend/src/api/types.ts`). Bốn điều phải nhớ:
+
+1. **Một con số viết trong comment là một con số SẼ TRÔI, và brief của người điều phối có thể là nguồn của con số sai.**
+   Re-review `c8180f1` bắt `I1`: header `types.ts` khai `9 type`, đếm thật **10**. Gốc **không phải** implementer —
+   **brief của người điều phối ra lệnh viết con số đó**. Và trong lúc sửa, implementer **tự tạo lại đúng loại lỗi đó**
+   (`c65090b` xếp `OllamaState` vào nhóm "type không có bài kiểm" trong khi nó có **2** hit) rồi tự bắt ở `3a7d84f`.
+   ⇒ **Luật mới, áp cho mọi header/comment của giai đoạn này: mỗi con số phải đi kèm LỆNH sinh ra nó.**
+   Con số không có lệnh sinh ra nó là con số sẽ trôi lần nữa. Và **đừng chép số từ brief**: brief cũng sai.
+2. **BẪY CÚ PHÁP: viết glob chứa `**/` BÊN TRONG khối `/** … */` sẽ ĐÓNG COMMENT SỚM.**
+   `src/**/*.test.ts` chứa chuỗi `*/` ⇒ comment kết thúc giữa dòng, phần còn lại thành **mã**, `tsc` đỏ `TS1127`/parse error.
+   Đo được ở `3a7d84f`. **Cách viết an toàn:** `Get-ChildItem src -Recurse -Filter *.test.ts` (không có `*/`),
+   hoặc chèn khoảng trắng `* /`. **Áp cho mọi doc-comment của Tasks 3–13.**
+   Cùng họ: ký tự Unicode ngoài ASCII (`⊂` U+2282) làm `tsc` đỏ `TS1127` — viết bằng chữ.
+   Và **đừng ghi số dòng cứng** (`(dòng 326)`) vào comment: nó lệch ngay khi tệp đổi (đã đo: 326 → 349).
+3. **Số dòng mà `node --test` báo KHÔNG khớp nguồn** (implementer khai `:222:5` / `:226:16` trong khi nguồn ở đó là
+   `"string",` và `assert.equal(`; nghi source-map của `test/swc-loader.mjs`). ⇒ **Định danh bài đỏ bằng TIÊU ĐỀ**,
+   không bằng số dòng runner. **Trạng thái: chưa kiểm chứng độc lập** — vòng kiểm chứng `verify-task-2-fix-round-3` đang đo.
+4. **Một khoảng `A..B` KHÔNG phải "những gì commit B làm".** Brief của người điều phối khai phạm vi
+   `4a1e33c..c8180f1` là "2 tệp"; thật ra là **3**, vì chính người điều phối commit `5dd0616` (sửa plan này)
+   **nằm giữa hai mốc**. Muốn nói về một commit thì dùng `git show --stat B`.
+5. **Ruling về `M1` (reviewer nói docstring `Segment` mâu thuẫn — người điều phối và implementer đều cho là SAI):**
+   câu *"chỉ tin `words` khi nó có PHẦN TỬ"* là **quy tắc cho BÊN ĐỌC dữ liệu**, không phải ràng buộc kiểu; nó **khớp**
+   với `words?: Word[]` (mảng rỗng nghĩa là "không có mốc thời gian từng từ"). `contract.test.ts` tự ghi điều này
+   (*"'có khoá' chỉ suy ra 'không phải undefined', KHÔNG suy ra 'khác rỗng'"*). **Giữ nguyên docstring.**
+   Reviewer đã đọc một quy tắc tiêu thụ dữ liệu như một ràng buộc kiểu — **reviewer cũng sai được, và phải phản biện.**
+6. **Nợ `N-6` (backend, ngoài phạm vi giai đoạn này):** một hàng `transcripts` có payload hỏng trong cột `segments`
+   làm **sập CẢ** `GET /api/transcripts` bằng 500, không chỉ hàng đó (`list_transcripts` gọi `_row_to_transcript`
+   cho mọi hàng). Đo được với `words` = chuỗi / số / mảng số. **Một hàng hỏng giết cả danh sách.**
 
 ## Quy ước thẩm mỹ — spec UI thắng, skill chỉ là checklist
 
