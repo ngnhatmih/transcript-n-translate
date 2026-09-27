@@ -529,7 +529,13 @@ def test_a_finished_transcription_enqueues_a_translation_the_handler_consumes(
         "correction E: nay ĐÃ có handler `translate` nên mặc định phải BẬT"
     )
 
-    wav = tmp_path / "a.wav"
+    # M-12: wav nằm TRONG gốc media (`harness.data / "media"`), đúng chỗ mà
+    # `IngestHandler`/route upload ghi `audio_path` trong sản xuất. Bản cũ đặt nó
+    # ở `tmp_path` — NGOÀI gốc media — nên nó chỉ xanh được vì `TranscribeHandler`
+    # chưa chứng minh containment; đó là một vị trí mà production không bao giờ
+    # tạo ra, và ba bài anh em dưới đây vốn đã đặt đúng.
+    wav = harness.data / "media" / "a.wav"
+    wav.parent.mkdir(parents=True, exist_ok=True)
     wav.write_bytes(b"RIFF")
     sid = repos.add_source(kind="file", origin="a.mp4", media_path=str(wav),
                            lang="zh", audio_path=str(wav), duration=4.0)
