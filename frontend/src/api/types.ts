@@ -9,8 +9,31 @@
  *   - `backend/app/api/routes_registry.py` — `/api/registry` (khoá theo `kind`) và `/api/status`
  *
  * Vì sao viết tay thay vì sinh từ `/openapi.json`: spec §2 chốt rằng thứ nhỏ nhất
- * sập khi shape trôi là một contract test, và nó sập ỒN ÀO. Xem
- * `contract.test.ts` — mọi khoá dưới đây có bài kiểm trên backend thật.
+ * sập khi shape trôi là một contract test, và nó sập ỒN ÀO. Xem `contract.test.ts`.
+ *
+ * MỨC KIỂM THẬT của từng interface — đọc ra từ `contract.test.ts`, KHÔNG phải lời hứa:
+ *
+ *   CÓ bài kiểm khoá (route được GỌI THẬT, response được soi từng khoá):
+ *     `Status` (`GET /api/status`) · `Registry`, `EngineSpec`, `EngineCapabilities`
+ *     (`GET /api/registry`) · `TranscriptSummary`, `Translation`
+ *     (`GET /api/transcripts`) · `Transcript`, `Segment` (`GET /api/transcripts/{id}`)
+ *     · `GlossaryVersion` (`GET /api/glossary/version`).
+ *     `Word` cũng được soi, nhưng CHỈ khi một segment thật sự có `words` — đó là
+ *     bất biến của `Segment.to_json`, không phải một khoá luôn có.
+ *
+ *   CHỈ được đối chiếu MÃ NGUỒN (đọc `routes_*.py`/`models.py`); một lần trôi khoá
+ *   ở nhóm này KHÔNG làm tệp test đỏ:
+ *     - `SourceCreated`, `TranslationCreated`, `JobSlim`: chỉ có trong body của
+ *       `POST /api/sources/*` và `POST /api/translations`. Gọi thật cần upload thật
+ *       và một engine MT thật — Ollama đang tắt, nên không endpoint nào được gọi.
+ *     - `JobEvent`: chỉ có trên SSE `/api/jobs/stream`; test không mở stream.
+ *     - `AffectedPreview`: route `GET /api/glossary/affected` ra đời ở Task 9.
+ *     - `Source`, `Job`, `Term`, `TermWithAffected`: route `GET` CÓ thật, nhưng bài
+ *       hiện tại chỉ khẳng định "là một mảng" — chưa soi khoá nào.
+ *
+ *   `*Create`/`*Patch` là BODY gửi LÊN (không phải response): đối chiếu với
+ *   `routes_*.py` bằng cách đọc mã, cộng hai bài 422 đo TÊN trường (`transcript_id`,
+ *   `lang`).
  */
 
 /** Một từ có mốc thời gian. Chỉ có khi engine thật sự sinh word timestamp. */

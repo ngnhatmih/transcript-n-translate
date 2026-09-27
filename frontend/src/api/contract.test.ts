@@ -9,26 +9,110 @@
  * Runner: `node --test --test-isolation=none` + loader SWC (`test/swc-loader.mjs`).
  * Vitest không dùng được ở môi trường này (xem `## ⚠️ ERRATA` trong plan) — nên
  * ở đây là `node:test` + `node:assert/strict`, không phải `expect`/`toHaveProperty`.
- *
- * BACKEND PHẢI ĐANG CHẠY. Khởi động: `cd backend` rồi
- * `./.venv/Scripts/python.exe run_api.py` (uvicorn chạy trong tiến trình, không
- * spawn con). Chạy đúng tệp này từ `frontend/`:
+ * Chạy riêng tệp này từ `frontend/`:
  *   node --import ./test/swc-loader.mjs --test --test-isolation=none src/api/contract.test.ts
  * (`npm test -- contract` KHÔNG lọc được: script có glob.)
+ *
+ * BACKEND: TỰ KHỞI ĐỘNG. Đây là RÀNG BUỘC của plan (Global Constraints, dòng 17:
+ * "Backend **không** chạy sẵn: mọi test đầu-cuối phải **tự khởi động** nó và **tự
+ * tắt**"), không phải tiện ích. `before` dò `/api/status` trước; chỉ khi KHÔNG ai
+ * trả lời nó mới `spawn` `backend/.venv/Scripts/python.exe run_api.py` với
+ * `stdio: "ignore"` (sandbox cấm named pipe: `stdio: "pipe"` chết `EPERM`) rồi poll
+ * `/api/status` tới 30 s; `after` tắt ĐÚNG tiến trình nó spawn. Backend do người
+ * khác chạy thì KHÔNG spawn cái thứ hai và KHÔNG tắt nó.
+ *
+ * DỮ LIỆU: hai bài dưới đây ĐỎ khi DB rỗng — CỐ Ý. Một bài xanh-vì-không-có-gì-để-đo
+ * là im lặng, còn spec §2 nói contract test phải sập ỒN ÀO khi shape trôi. DB repo
+ * hiện 0 hàng (`data/app.db`); Task 12 gieo dữ liệu thật vào đó. Trên backend CÓ dữ
+ * liệu thì hai bài này xanh.
  *
  * Ollama KHÔNG cần bật. "Ollama tắt" là trạng thái hợp lệ và được kiểm ở đây
  * (spec §4.8 dành hẳn một màn hình cho nó) — không bài nào phụ thuộc Ollama sống.
  */
-import { before, describe, it } from "node:test";
+import { after, before, describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { spawn, spawnSync } from "node:child_process";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { ApiError, api } from "./client.ts";
 import { exportUrl, mediaUrl, type ExportFormat } from "./endpoints.ts";
-import type { OllamaState, Registry, Status, TranscriptSummary } from "./types.ts";
+import type {
+  OllamaState,
+  Registry,
+  Status,
+  Transcript,
+  TranscriptSummary,
+} from "./types.ts";
 
 /** Origin THẬT của backend. Trong trình duyệt `BASE` là tương đối (proxy 3100 lo). */
 const ORIGIN = "http://127.0.0.1:8620";
 const API = `${ORIGIN}/api`;
+
+/** Thư mục `backend/` — tính từ CHÍNH tệp này, không phụ thuộc cwd của người chạy. */
+const BACKEND_DIR = fileURLToPath(new URL("../../../backend/", import.meta.url));
+const VENV_PYTHON =
+  process.platform === "win32"
+    ? path.join(BACKEND_DIR, ".venv", "Scripts", "python.exe")
+    : path.join(BACKEND_DIR, ".venv", "bin", "python");
+
+const PROBE_TIMEOUT_MS = 2_000;
+const START_TIMEOUT_MS = 30_000;
+const STOP_TIMEOUT_MS = 5_000;
+
+/** Thông điệp cho người ĐỌC, không phải cho máy: nói việc phải làm. */
+const EMPTY_DB_MSG =
+  "DB rong: bai nay khong do duoc gi. Chay backend voi du lieu that, hoac xem Task 12 "
+  + "(gieo du lieu vao data/app.db) truoc khi chay e2e/contract.";
+
+/** Backend do CHÍNH tệp này spawn (null = không phải của mình ⇒ không được tắt). */
+let spawnedPid: number | null = null;
+
+async function backendIsUp(): Promise<boolean> {
+  try {
+    const response = await fetch(`${API}/status`, {
+      signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
+    });
+    return response.ok;
+  } catch {
+    // Chưa lên (ECONNREFUSED) hoặc chưa trả lời kịp — cả hai đều là "chưa dùng được".
+    return false;
+  }
+}
+
+async function waitForBackend(timeoutMs: number): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (await backendIsUp()) return true;
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+  return backendIsUp();
+}
+
+/** Tắt ĐÚNG tiến trình mình spawn. Không có gì của mình ⇒ no-op. */
+function stopSpawnedBackend(): void {
+  if (spawnedPid === null) return;
+  const pid = spawnedPid;
+  spawnedPid = null;
+  // `uvicorn.run` chạy TRONG tiến trình python (không spawn con), nên
+  // `process.kill` là đủ. Vẫn gọi thêm `taskkill /T /F` để quét cả cây con —
+  // nếu sau này `run_api.py` đổi sang reload/multi-worker thì không sót tiến trình mồ côi.
+  // ĐO ĐƯỢC: `backend/.venv/Scripts/python.exe` là một LAUNCHER, nó đẻ tiến trình
+  // python thật (Python310\python.exe) làm CON — nên một backend trông như HAI
+  // tiến trình `python`. `process.kill` trên launcher kéo cả cây theo (đã đo: cổng
+  // thôi trả lời); trong sandbox này `taskkill` trả `Access denied` nên nó chỉ là
+  // lưới an toàn, không phải cơ chế chính.
+  try {
+    process.kill(pid);
+  } catch {
+    // Đã chết rồi — đích của hàm là "không còn sống", không phải "vừa giết".
+  }
+  try {
+    spawnSync("taskkill", ["/PID", String(pid), "/T", "/F"], { stdio: "ignore" });
+  } catch {
+    // taskkill thiếu (không phải Windows) — `process.kill` ở trên đã lo phần đó.
+  }
+}
 
 async function getJson(path: string): Promise<unknown> {
   const response = await fetch(`${API}${path}`);
@@ -38,12 +122,45 @@ async function getJson(path: string): Promise<unknown> {
 
 describe("hop dong API that (backend 8620)", () => {
   before(async () => {
-    const probe = await fetch(`${API}/status`).catch(() => null);
-    assert.ok(
-      probe?.ok,
-      "backend 8620 khong chay — khoi dong backend truoc khi chay test nay: " +
-        "cd backend; ./.venv/Scripts/python.exe run_api.py",
+    // Backend của NGƯỜI KHÁC: không spawn thêm, và `after` sẽ không tắt nó.
+    if (await backendIsUp()) return;
+
+    let spawnError: string | null = null;
+    const child = spawn(VENV_PYTHON, ["run_api.py"], {
+      cwd: BACKEND_DIR,
+      stdio: "ignore",
+      windowsHide: true,
+    });
+    child.on("error", (error: Error) => {
+      spawnError = error.message;
+    });
+    spawnedPid = typeof child.pid === "number" ? child.pid : null;
+
+    if (await waitForBackend(START_TIMEOUT_MS)) return;
+
+    const reason = spawnError === null ? "khong ro loi" : spawnError;
+    stopSpawnedBackend();
+    assert.fail(
+      `backend 8620 khong len sau ${START_TIMEOUT_MS / 1000}s. Lenh da chay: `
+      + `${VENV_PYTHON} run_api.py (cwd=${BACKEND_DIR}); loi spawn: ${reason}. `
+      + "Chay tay lenh do de xem traceback.",
     );
+  });
+
+  after(async () => {
+    // "TỰ TẮT" của Global Constraints: chỉ tắt cái mình spawn.
+    const killed = spawnedPid;
+    stopSpawnedBackend();
+    if (killed === null) return;
+    // Và phải CHỨNG MINH nó đã tắt: cổng thôi trả lời NGAY TRONG tiến trình test.
+    // Chỉ gọi kill rồi tin là chưa đủ — một backend mồ côi sẽ khiến lần chạy sau
+    // dùng nhầm backend cũ mà không ai biết.
+    const deadline = Date.now() + STOP_TIMEOUT_MS;
+    while (Date.now() < deadline) {
+      if (!(await backendIsUp())) return;
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    }
+    assert.fail(`backend 8620 (pid ${killed}) vẫn sống sau khi kill — còn tiến trình mồ côi`);
   });
 
   it("GET /api/status: khoá mà giao diện đọc", async () => {
@@ -118,6 +235,12 @@ describe("hop dong API that (backend 8620)", () => {
 
   it("GET /api/transcripts: hàng tóm tắt có translations[] và KHÔNG kèm segments", async () => {
     const rows = (await getJson("/transcripts")) as TranscriptSummary[];
+
+    // ĐỎ khi rỗng là CHỦ Ý: vòng lặp dưới chỉ chứng minh được hình dạng khi có
+    // hàng thật. Xanh-vì-rỗng là im lặng — đúng thứ spec §2 từ chối.
+    assert.notEqual(rows.length, 0, EMPTY_DB_MSG);
+
+    let translationsSeen = 0;
     for (const row of rows) {
       for (const key of [
         "id", "source_id", "engine", "lang", "version", "status", "created_at", "translations",
@@ -128,6 +251,7 @@ describe("hop dong API that (backend 8620)", () => {
         !Object.hasOwn(row, "segments"),
         `transcript ${row.id}: route DANH SÁCH không được kèm segments`,
       );
+      translationsSeen += row.translations.length;
       for (const translation of row.translations) {
         // Khoá `transcript_version` (KHÔNG phải `translated_from_version`) là
         // đúng thứ Giai đoạn 2 đổi tên — và là lý do tệp này tồn tại.
@@ -143,10 +267,115 @@ describe("hop dong API that (backend 8620)", () => {
         );
       }
     }
-    // DB rỗng là trạng thái HỢP LỆ (máy này đang rỗng), nhưng khi đó vòng lặp
-    // trên không chứng minh được gì về hình dạng. In số hàng ra để người đọc
-    // biết bài này hôm nay có chạm dữ liệu thật hay không — không im lặng.
-    console.log(`[contract] /api/transcripts: ${rows.length} hàng`);
+    // Khoá `transcript_version` nằm trên HÀNG BẢN DỊCH: transcript có mà bản dịch
+    // không thì vòng lặp trên vẫn không soi được gì, và phép đổi tên mà bài này
+    // sinh ra để bắt sẽ đi qua xanh. Nên thiếu bản dịch cũng là ĐỎ.
+    assert.notEqual(
+      translationsSeen,
+      0,
+      "DB khong co BAN DICH nao: khoa `transcript_version` chi nam tren hang `translations`, "
+      + "nen bai nay khong do duoc gi. " + EMPTY_DB_MSG,
+    );
+    console.log(
+      `[contract] /api/transcripts: ${rows.length} hàng, ${translationsSeen} bản dịch`,
+    );
+  });
+
+  it("GET /api/transcripts/{id}: Transcript + Segment (suspect LUÔN có, khoá khác tuỳ engine)", async () => {
+    const rows = (await getJson("/transcripts")) as TranscriptSummary[];
+    assert.notEqual(rows.length, 0, EMPTY_DB_MSG);
+
+    let segmentsSeen = 0;
+    let wordsSeen = 0;
+    for (const row of rows) {
+      const body = (await getJson(`/transcripts/${row.id}`)) as Transcript;
+      // `Transcript` = `TranscriptSummary` + `segments` (routes_transcripts._transcript_json).
+      for (const key of [
+        "id", "source_id", "engine", "lang", "version", "status", "created_at",
+        "translations", "segments",
+      ]) {
+        assert.ok(Object.hasOwn(body, key), `transcript ${row.id}: thiếu khoá ${key}`);
+      }
+      assert.equal(body.id, row.id, "GET /{id} phải trả ĐÚNG transcript đã hỏi");
+      assert.ok(Array.isArray(body.segments), `transcript ${row.id}: segments phải là mảng`);
+      segmentsSeen += body.segments.length;
+
+      for (const seg of body.segments) {
+        const where = `segment ${row.id}/${seg.i}`;
+        // BỐN khoá `to_json` ghi VÔ ĐIỀU KIỆN, cộng `suspect` (ghi ở dưới cùng,
+        // không nằm trong `if` nào) — năm khoá này KHÔNG được phép vắng.
+        for (const key of ["i", "start", "end", "text"]) {
+          assert.ok(Object.hasOwn(seg, key), `${where}: thiếu khoá ${key}`);
+        }
+        assert.equal(typeof seg.i, "number", `${where}: i phải là số`);
+        assert.equal(typeof seg.start, "number", `${where}: start phải là số`);
+        assert.equal(typeof seg.end, "number", `${where}: end phải là số`);
+        assert.equal(typeof seg.text, "string", `${where}: text phải là chuỗi`);
+        assert.ok(
+          Object.hasOwn(seg, "suspect"),
+          `${where}: \`suspect\` phải LUÔN có (kể cả false) — to_json ghi nó vô điều kiện`,
+        );
+        assert.equal(typeof seg.suspect, "boolean", `${where}: suspect phải là boolean`);
+
+        // Nhóm TUỲ CHỌN: chỉ có khi engine thật sự sinh ra. Ở đây KHÔNG được
+        // assert "luôn có" — bất biến của models.py là không bịa khoá rỗng.
+        if (Object.hasOwn(seg, "words")) {
+          assert.ok(
+            Array.isArray(seg.words) && seg.words.length > 0,
+            `${where}: \`words\` chỉ được ghi khi engine có word timestamp`,
+          );
+          for (const word of seg.words ?? []) {
+            for (const key of ["w", "s", "e"]) {
+              assert.ok(Object.hasOwn(word, key), `${where}/word: thiếu khoá ${key}`);
+            }
+            assert.equal(typeof word.w, "string", `${where}/word: w phải là chuỗi`);
+            assert.equal(typeof word.s, "number", `${where}/word: s phải là số`);
+            assert.equal(typeof word.e, "number", `${where}/word: e phải là số`);
+          }
+          wordsSeen += 1;
+        }
+        if (Object.hasOwn(seg, "emotion")) {
+          assert.equal(typeof seg.emotion, "string", `${where}: emotion phải là chuỗi`);
+        }
+        if (Object.hasOwn(seg, "speaker")) {
+          assert.equal(typeof seg.speaker, "string", `${where}: speaker phải là chuỗi`);
+        }
+        if (Object.hasOwn(seg, "t")) {
+          assert.equal(typeof seg.t, "string", `${where}: t phải là chuỗi`);
+        }
+        if (Object.hasOwn(seg, "avg_logprob")) {
+          assert.equal(typeof seg.avg_logprob, "number", `${where}: avg_logprob phải là số`);
+        }
+        if (Object.hasOwn(seg, "no_speech_prob")) {
+          assert.equal(typeof seg.no_speech_prob, "number", `${where}: no_speech_prob phải là số`);
+        }
+        // `to_json` ghi `events`/`qa` bằng `if self.events:` — danh sách RỖNG không
+        // bao giờ được ghi ra, nên "có khoá" kéo theo "không rỗng".
+        if (Object.hasOwn(seg, "events")) {
+          assert.ok(
+            Array.isArray(seg.events) && seg.events.length > 0,
+            `${where}: events chỉ được ghi khi khác rỗng (\`if self.events:\`)`,
+          );
+        }
+        if (Object.hasOwn(seg, "qa")) {
+          assert.ok(
+            Array.isArray(seg.qa) && seg.qa.length > 0,
+            `${where}: qa chỉ được ghi khi khác rỗng (\`if self.qa:\`)`,
+          );
+        }
+      }
+    }
+    // Transcript có mà đoạn không: bài này chưa chạm một `Segment` nào ⇒ ĐỎ, cùng
+    // lý do với bài `translations[]` ở trên.
+    assert.notEqual(
+      segmentsSeen,
+      0,
+      "Khong transcript nao co SEGMENT: bai nay khong do duoc khoa nao cua `Segment`. " + EMPTY_DB_MSG,
+    );
+    console.log(
+      `[contract] /api/transcripts/{id}: ${rows.length} transcript, ${segmentsSeen} segment, `
+      + `${wordsSeen} segment có words`,
+    );
   });
 
   it("GET /api/glossary/version: {glossary_version}", async () => {
