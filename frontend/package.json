@@ -4,7 +4,7 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "dev": "vite",
+    "dev": "vite --configLoader native",
     "build": "tsc -b && vite build",
     "test": "vitest run",
     "e2e": "playwright test"
@@ -21,6 +21,7 @@
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "^4.7.0",
+    "@vitejs/plugin-react-swc": "^4.3.3",
     "typescript": "^7.0.2",
     "vite": "^6.4.3"
   }

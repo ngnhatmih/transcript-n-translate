@@ -1,7 +1,13 @@
 import { defineConfig } from "vite";
-import react from "@vitejs/plugin-react";
+import react from "@vitejs/plugin-react-swc";
 
 export default defineConfig({
+  // Bắt buộc vì sandbox chặn named pipe: Vite gọi exec("net use") để dò ổ đĩa mạng trên
+  // Windows (optimizeSafeRealPathSync). exec() ném `spawn EPERM` NGAY, đồng bộ, và lỗi đó
+  // không được bọc try/catch nên thoát thẳng ra request -> 500. preserveSymlinks: true làm
+  // getRealPath() bỏ qua hẳn safeRealpathSync, nên không còn chạm tới exec đó.
+  // (Repo một package, không symlink -> không có tác dụng phụ.)
+  resolve: { preserveSymlinks: true },
   plugins: [react()],
   server: {
     // Bắt buộc, không phải sở thích: mặc định của Vite là host `localhost`, mà trên Windows
