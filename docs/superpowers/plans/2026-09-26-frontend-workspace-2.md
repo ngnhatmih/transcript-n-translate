@@ -821,6 +821,66 @@ Reviewer chứng minh **hai chiều**:
    ⇒ **LUẬT: để ĐỌC nội dung cũ của một tệp, dùng `git show <rev>:<path>` — TUYỆT ĐỐI không dùng `git checkout <rev> -- <path>`,
    vì nó ghi cả index lẫn worktree.**
 
+## ⚠️ ERRATA #16 — Task 7: `Range` được chứng minh bằng HTTP THẬT, và **tôi lại kể sai một cơ chế của jsdom**
+
+Task 7 xong (`213e555`): `npm test` = `tests 106 / suites 14 / pass 104 / fail 2 / cancelled 0` EXIT=1, `typecheck` 0, `build` 0,
+**+20 bài** (86 → 106), **10 mutation, 0 sống sót**.
+
+### 1. ✅ `Range` của backend đã được CHỨNG MINH — ghi lại làm mẫu
+
+Đo trên **backend THẬT** (`build_components`/`build_app`), **DB scratch ngoài repo**, một source với **WAV thật 64044 byte**,
+cổng **8621**:
+| Ca | Kết quả (nguyên văn) |
+|---|---|
+| `Range: bytes=0-99` | **`HTTP/1.1 206 Partial Content`** · `accept-ranges: bytes` · `content-range: bytes 0-99/64044` · thân **100 byte** |
+| **đối chứng** không `Range` | `200 OK` · `content-length: 64044` |
+| **đối chứng** `bytes=999999-` | **`416`** · `content-range: bytes */64044` |
+Và **`sha256(thân 206) == sha256(100 byte đầu)`** ⇒ 206 trả **ĐÚNG LÁT BYTE**, không chỉ đúng độ dài.
+⇒ Đây là **bằng chứng HTTP thật** cho tiêu chí của task, **không cần trình duyệt** — đúng cách chia đôi Step 4 mà brief đã yêu cầu.
+⇒ **Điều vẫn CHƯA chứng minh:** *"seek trong trình duyệt thật"* — **chưa ai tua rồi nghe thật**. Đừng ghi là đã kiểm.
+
+### 2. ⚠️ LỖI THỨ MƯỜI LĂM CỦA TÔI — tôi lại kể sai cơ chế jsdom
+
+Brief tôi viết: *"jsdom KHÔNG có phát media: `play`/`pause` không được cài đặt **và `currentTime` có thể không đặt được**"*.
+**Vế `currentTime` SAI.** Đo được: **jsdom 30.1.1 CÓ setter thật** cho `HTMLMediaElement.prototype.currentTime`
+(`{get,set,enumerable,configurable}`; đặt `3` đọc lại `3`; `fireEvent.timeUpdate` thấy **đúng giá trị đó**) ⇒ bài "dây nối"
+bơm **vị trí phát THẬT**, **không** cần `defineProperty`.
+**Cái THẬT SỰ không hiện thực:** `play()`/`pause()` (log `Not implemented`, `play()` trả **`undefined`** chứ không phải
+`Promise`), `duration = NaN`, `paused` **luôn `true`**. Hai phương thức đó bị **thay bằng spy trong `describe`**, **trả lại
+trong `after`**, và **chính giới hạn đó được GHIM bằng một bài test trong repo** — làm đúng yêu cầu "khai rõ là giới hạn của jsdom".
+
+⇒ **LUẬT: đừng nói "jsdom không làm được X" như một khối.** Hãy **đo TỪNG PHẦN** của X.
+Đây là **lần thứ TƯ** trong giai đoạn một **cơ chế** bị kể sai (sau `npm i`↔named pipe, nguồn của `9 type`, jsdom↔`0px`) —
+và lần này là **của tôi**. **Cơ chế là thứ phải đo, không phải thứ được suy ra từ tên thư viện.**
+
+### 3. ✅ Luật "ghim LUẬT CSS" (ERRATA #15 mục 3) đã được ÁP DỤNG và CHỨNG MINH
+
+Đo được: `[T7] HINH THUC: LUAT CSS … ✖ DO` trong khi **bảy bài chỉ ghim `className` VẪN XANH** ⇒ phép đo cũ **MÙ**,
+và bài ghim luật **không rỗng** (đúng chuẩn hai vế của ERRATA #11 mục 2).
+Luật thật đã thêm vào `app.css` (+101 dòng, CRLF): `.tp__timecode{font-family:var(--font-mono)}`,
+`.tp__track{position:relative}`, `.tp__readhead{background:var(--signal)}`.
+**Token mồ côi: 13 → 8** (5 token nay có người dùng: `--dur-1`, `--ease-1`, `--fs-note`, `--panel-1`, `--panel-3`).
+
+### 4. ⚠️ `app.css` lại NGOÀI File list — lần thứ HAI liên tiếp
+
+Task 6 và Task 7 **đều** phải sửa `app.css` mà **không** task nào được giao nó. ⇒ **Luật: bất kỳ task nào thêm HÌNH THỨC
+đều phải liệt kê `frontend/src/styles/app.css` trong Files** (và `tokens.css` nếu chạm token). Đã vá Files của Task 7.
+
+### 5. Nợ và điều chỉnh của Task 7
+
+- **`src/lib/playback.ts` (+test)** được thêm **ngoài** Files để hàm thuần chạy được bằng `node:test` thường ⇒ **Files của
+  Task 7 đã được vá** cho khớp.
+- **⚠️ TRONG APP, THANH TRANSPORT LÀ TRẠNG THÁI RỖNG:** **chưa có đường CHỌN KÊNH** ⇒ `sourceId = ui.channelId = null`,
+  `translationId = null`, `segments = []` ⇒ **nút phát VÔ HIỆU**, **không `src`**, **ba nút xuất không `href`**.
+  Mọi khẳng định về thanh này hiện đến từ test truyền prop. ⇒ **Nợ: đường CHỌN KÊNH** (và nó chặn cả Task 6 lẫn 7 khỏi
+  việc render dữ liệu thật).
+- **Tiến bộ:** `App` nay dùng **`useReducer(reduce, initialState)`** — **người gọi THẬT đầu tiên** của reducer Task 4 —
+  và nối `ui.currentSegment` vào `EditScreen`.
+- **`T1` của brief MƠ HỒ:** nó chạy cả hai chiều (một thành `T10`). ⇒ **Luật: mutation phải được viết sao cho CHỈ CÓ MỘT
+  cách hiểu**; nếu không, implementer phải tự chia thành hai mutation và nói ra.
+- **`T4` giết 3 bài, không phải 1** (cả ba đều lấy vị trí phát từ chính listener) — **đúng**, không phải "giết nhầm":
+  điều bắt buộc là **bài ĐỊNH giết phải đỏ**, và phải **nói rõ** nếu giết thêm.
+
 ## Quy ước thẩm mỹ — spec UI thắng, skill chỉ là checklist
 
 Spec `2026-09-25-phu-de-lab-ui-design.md` là **nguồn có thẩm quyền về hình thức** (bạn đã duyệt). Skill
@@ -1601,6 +1661,9 @@ it("danh dau doan nghi ngo bang VAN va LY DO, khong chi bang mau", async () => {
 **Files:**
 - Create: `frontend/src/shell/Transport.tsx`, `frontend/src/shell/Transport.test.tsx`
 - Modify: `frontend/src/shell/App.tsx`
+- ⚠️ **ĐÍNH CHÍNH (ERRATA #16 mục 4/5):** Task 7 **thực tế** còn phải **tạo `frontend/src/lib/playback.ts` + `playback.test.ts`**
+  (để quyết định "tới mốc cuối thì sang đoạn kế" chạy được bằng `node:test` thường) và **sửa `frontend/src/styles/app.css`**
+  (+101 dòng: `.tp__timecode`, `.tp__track`, `.tp__readhead`). **Bất kỳ task nào thêm HÌNH THỨC đều phải liệt kê `app.css`.**
 
 **Interfaces:**
 - Consumes: `endpoints.mediaUrl(sourceId)`, `endpoints.exportUrl(translationId, fmt, bilingual)`
