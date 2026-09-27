@@ -14,6 +14,7 @@ frontend/test-results/
 data/media/
 data/output/
 data/app.db
+data/logs/
 *.db-journal
 # SQLite ở chế độ WAL tạo hai tệp phụ khi DB đang mở. Thiếu hai dòng này thì CHỈ CẦN
 # chạy backend thật (`python run_api.py`, việc Task 12 bắt buộc làm) là `git status`
