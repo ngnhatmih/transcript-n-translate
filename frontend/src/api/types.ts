@@ -11,21 +11,23 @@
  * Vì sao viết tay thay vì sinh từ `/openapi.json`: spec §2 chốt rằng thứ nhỏ nhất
  * sập khi shape trôi là một contract test, và nó sập ỒN ÀO. Xem `contract.test.ts`.
  *
- * MỨC KIỂM THẬT của từng interface — đọc ra từ `contract.test.ts`, KHÔNG phải lời hứa:
+ * MỨC KIỂM THẬT của từng KIỂU đã export (23 `interface` + 9 `type`, không phải
+ * chỉ interface) — đọc ra từ `contract.test.ts`, KHÔNG phải lời hứa:
  *
  *   CÓ bài kiểm khoá (route được GỌI THẬT, response được soi từng khoá):
  *     `Status` (`GET /api/status`) · `Registry`, `EngineSpec`, `EngineCapabilities`
  *     (`GET /api/registry`) · `TranscriptSummary`, `Translation`
  *     (`GET /api/transcripts`) · `Transcript`, `Segment` (`GET /api/transcripts/{id}`)
  *     · `GlossaryVersion` (`GET /api/glossary/version`).
- *     `Word` cũng được soi, nhưng CHỈ khi một segment thật sự có `words` — đó là
- *     bất biến của `Segment.to_json`, không phải một khoá luôn có.
+ *     `Word` cũng được soi, nhưng CHỈ khi một segment thật sự CÓ khoá `words` —
+ *     và khoá đó có thể là mảng RỖNG, xem `Segment` bên dưới.
  *
  *   CHỈ được đối chiếu MÃ NGUỒN (đọc `routes_*.py`/`models.py`); một lần trôi khoá
- *   ở nhóm này KHÔNG làm tệp test đỏ:
- *     - `SourceCreated`, `TranslationCreated`, `JobSlim`: chỉ có trong body của
+ *   ở nhóm này KHÔNG làm tệp test đỏ. Nhóm này là 8 `interface` + 1 `type`:
+ *     - `SourceCreated`, `TranslationCreated`: chỉ có trong body của
  *       `POST /api/sources/*` và `POST /api/translations`. Gọi thật cần upload thật
  *       và một engine MT thật — Ollama đang tắt, nên không endpoint nào được gọi.
+ *     - `JobSlim` (TYPE ALIAS, không phải interface — `Pick<Job, …>`): cùng body đó.
  *     - `JobEvent`: chỉ có trên SSE `/api/jobs/stream`; test không mở stream.
  *     - `AffectedPreview`: route `GET /api/glossary/affected` ra đời ở Task 9.
  *     - `Source`, `Job`, `Term`, `TermWithAffected`: route `GET` CÓ thật, nhưng bài
@@ -46,10 +48,15 @@ export interface Word {
 /**
  * Một đoạn phụ đề (`models.py::Segment.to_json`).
  *
- * BẤT BIẾN của backend: khoá tuỳ chọn CHỈ xuất hiện khi engine thật sự sinh ra
- * nó — backend cố ý KHÔNG bịa `words: []` cho engine không có word timestamp
- * (docstring đầu `models.py`). Nên ở đây chúng là optional, và giao diện phải
- * phân biệt "không có" với "rỗng".
+ * BẤT BIẾN của `to_json`: khoá tuỳ chọn chỉ xuất hiện khi có dữ liệu — `events`
+ * và `qa` ghi bằng truthiness (`if self.events:`) nên danh sách RỖNG không bao
+ * giờ thành khoá, còn `words` ghi bằng `if self.words is not None` nên `[]` VẪN
+ * được ghi (đo trên route thật: PATCH `"words": []` ⇒ 200 ⇒ GET trả `"words":[]`).
+ * Vắng khoá `words` và `words: []` vì thế KHÁC nhau về dữ liệu — cả hai đều nghĩa
+ * là "không có mốc thời gian từng từ", nhưng chỉ vắng khoá mới là "engine không
+ * sinh word timestamp"; đường ASR không sinh `[]` (`faster_whisper.py`: `words or
+ * None`), còn PATCH thì nhận. Giao diện phải đọc theo hướng chỉ tin `words` khi
+ * nó có PHẦN TỬ, đừng tin riêng chuyện "có khoá".
  */
 export interface Segment {
   i: number;

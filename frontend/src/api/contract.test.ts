@@ -324,11 +324,25 @@ describe("hop dong API that (backend 8620)", () => {
         assert.equal(typeof seg.suspect, "boolean", `${where}: suspect phải là boolean`);
 
         // Nhóm TUỲ CHỌN: chỉ có khi engine thật sự sinh ra. Ở đây KHÔNG được
-        // assert "luôn có" — bất biến của models.py là không bịa khoá rỗng.
+        // assert "luôn có" — bất biến của models.py là không BỊA một khoá mà
+        // engine không sinh ra (đúng cho cả `words`: xem ngay dưới).
+        //
+        // `words` là NGOẠI LỆ của nhóm này, và chỗ này TỪNG nói dối về nó:
+        // `to_json` ghi `words` bằng `if self.words is not None`, KHÔNG phải
+        // truthiness như `events`/`qa` ngay dưới đây — nên `[]` VẪN được ghi.
+        // Đo trên route thật: `PATCH /api/transcripts/{id}` với `"words": []`
+        // trả 200, và `GET` sau đó trả nguyên `"words":[]` (lưu y nguyên trong
+        // cột `segments`); ASR thì không sinh `[]` (`faster_whisper.py` truyền
+        // `words or None`) nhưng PATCH nhận raw dict, nên `[]` tới được. Vì vậy
+        // "có khoá" ở đây chỉ suy ra "không phải `undefined`", KHÔNG suy ra
+        // "khác rỗng". Vế "engine có word timestamp thì phải khác rỗng" là bất
+        // biến của ĐƯỜNG ASR, không phải của khoá này; vòng lặp này đọc
+        // `GET /api/transcripts/{id}` — một đường không phân biệt được segment
+        // nào do ASR sinh — nên nó KHÔNG được assert vế đó.
         if (Object.hasOwn(seg, "words")) {
           assert.ok(
-            Array.isArray(seg.words) && seg.words.length > 0,
-            `${where}: \`words\` chỉ được ghi khi engine có word timestamp`,
+            Array.isArray(seg.words),
+            `${where}: \`words\` phải là mảng khi có khoá (rỗng là hợp lệ: \`is not None\`)`,
           );
           for (const word of seg.words ?? []) {
             for (const key of ["w", "s", "e"]) {
