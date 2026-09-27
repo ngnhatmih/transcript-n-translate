@@ -54,25 +54,25 @@ GPU. Nó tự ép UTF-8 cho stdout (console Windows mặc định cp1252, còn s
 tiếng Trung/Việt) và tự đặt cache model trước khi nạp `faster_whisper`.
 
 Con số nền của lần chạy mặc định, đo sau khi xoá `__pycache__` (lệnh ở mục
-"Kiểm thử" trên, chạy từ trong `backend\`). Thứ có nghĩa là **829 / 13**, không
+"Kiểm thử" trên, chạy từ trong `backend\`). Thứ có nghĩa là **827 / 13**, không
 phải số giây — thời gian trôi giữa các lần chạy (đã thấy 24,00–30,94 s) còn con
 số bài thì không:
 
 ```
-829 passed, 13 deselected, 1 warning
+827 passed, 13 deselected, 1 warning
 ```
 
 Hai con số đó là SỐ BÀI ĐƯỢC CHỌN, và chúng khớp với số mà `--collect-only` báo
 (`tests/test_backend_readme.py::test_readme_baseline_matches_the_tests_actually_
 collected` đối chiếu mỗi lần chạy).
 
-Máy này **CÓ** `ffmpeg 8.1.1` + `ffprobe` trên PATH (đã đo), nên `829/13` ở trên
+Máy này **CÓ** `ffmpeg 8.1.1` + `ffprobe` trên PATH (đã đo), nên `827/13` ở trên
 là số THẬT của nó. Máy **không có** `ffmpeg`/`ffprobe` cho một kết quả KHÁC: cả
 `tests/test_ingest.py` bị `skipif` ở cấp module — **9** bài cùng skip một lượt —
-nên dòng tổng kết của máy đó là **`820 passed, 9 skipped, 13 deselected`**. Đó là
+nên dòng tổng kết của máy đó là **`818 passed, 9 skipped, 13 deselected`**. Đó là
 con số của máy thiếu ffmpeg, **không phải** con số máy này từng in ra; đừng chép
-nó vào khối `829/13` ở trên, và đừng "sửa" số nền xuống `820` chỉ vì thiếu
-ffmpeg. (Con số `820` là SỐ HỌC từ số nền: `829 − 9 = 820`, cùng cách `812` suy
+nó vào khối `827/13` ở trên, và đừng "sửa" số nền xuống `818` chỉ vì thiếu
+ffmpeg. (Con số `818` là SỐ HỌC từ số nền: `827 − 9 = 818`, cùng cách `812` suy
 từ `821`; nó không được ĐO ở đây vì máy này có ffmpeg.)
 
 (Con số này từng bị ghi là `798`: bài `test_a_failed_translation_leaves_the_
@@ -80,7 +80,7 @@ transcript_reviewed` được thêm ở `a428334` — **cùng commit đã sửa 
 số nền không được bump. Nó tồn tại để phát hiện TRÔI, nên một số sai làm mọi lần
 chạy báo dương tính giả.
 
-Bốn lần bump gần nhất. `819/13` → `821/13`: đợt dọn nợ thêm
+Năm lần bump gần nhất. `819/13` → `821/13`: đợt dọn nợ thêm
 `tests/test_schema_llm_calls_index.py` (2 bài chọn được, cả 2 chạy thật).
 `821/13` → `829/13`: đợt dọn nợ P2 (Giai đoạn 2) thêm **8** bài chọn được —
 `M-11` 3 bài (`safe_basename` trần độ dài + route upload thật), `M-14` 1 bài
@@ -96,6 +96,12 @@ Ollama (`/api/status`, phép dò availability, `base_url` của engine) cùng đ
 `app.config.resolve_ollama_base_url`, tức cùng tôn trọng `OLLAMA_HOST`. Vì
 `ffmpeg` có mặt, không bài nào skip ở đây — nên nếu con số này "nhảy" mà không có
 bài nào được thêm hay gỡ, đó đúng là TRÔI cần điều tra.)
+`829/13` → `827/13`: cùng đợt P2, `M-3` **gỡ HAI** bài vì tiền đề của chúng là
+lần GHI trên đĩa của route spec (`routes_translations._materialise` gọi
+`domain.paths.resolve_within`), thứ `M-3` xoá hẳn: `test_the_spec_route_proves_containment_before_writing` và
+`test_the_spec_route_still_serves_the_body_when_containment_fails`. Hai vế của chúng KHÔNG mất — xem
+khối thay thế ở cuối `tests/test_api_export_by_translation.py`. `test_the_spec_route_materialises_the_same_artifact_name` được ĐỔI TÊN thành
+`test_the_spec_route_writes_no_artifact_to_disk` (không đổi số lượng).
 
 Số này chỉ để phát hiện TRÔI: một thay đổi làm nó **giảm** là một bài đã bị gỡ
 hoặc bị bỏ quên, không phải "suite nhanh hơn".
