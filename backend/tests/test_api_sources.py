@@ -1592,9 +1592,11 @@ def test_upload_answers_422_promptly_for_a_reserved_device_name(tmp_path, name):
 def test_upload_answers_422_for_an_overlong_filename(tmp_path):
     """Trần độ dài qua ĐƯỜNG THẬT: 302 ký tự an toàn ⇒ 422, không phải 500.
 
-    Đi qua `_post_upload` (app ASGI thật, `raise_app_exceptions=False`) chứ không
-    gọi `safe_basename` trần: thứ hỏng trước bản vá là mã TRẠNG THÁI của route —
-    `open()` ném `OSError` trong `_copy_upload` và FastAPI biến nó thành 500.
+    Đi qua `_upload_status_within` — hàm này gọi `_post_upload`, tức app ASGI
+    THẬT với `raise_app_exceptions=False`, trong một luồng daemon có trần thời
+    gian — chứ không gọi `safe_basename` trần: thứ hỏng trước bản vá là mã TRẠNG
+    THÁI của route, `open()` ném `OSError` trong `_copy_upload` và FastAPI biến
+    nó thành 500.
     """
     status = _upload_status_within(tmp_path, _OVERLONG_FILENAME)
     assert status == 422, f"filename dài {len(_OVERLONG_FILENAME)} -> {status}, phải là 422"

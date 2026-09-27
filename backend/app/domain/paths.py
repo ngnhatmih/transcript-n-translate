@@ -39,6 +39,12 @@ _SAFE_CHARS = re.compile(r"\A[A-Za-z0-9._-]+\Z")
 #: **500** cho một lỗi ĐẦU VÀO — đúng lớp lỗi mà `a*b.mp4` và `CON` đã trả giá
 #: (C-1/API-01). `len()` là phép kiểm thứ tư, cùng lớp `InvalidBasename` để route
 #: map thành 422 như ba phép kia.
+#:
+#: Đây là trần của MỘT THÀNH PHẦN, không phải của cả đường dẫn: độ dài toàn
+#: đường dẫn còn phụ thuộc `LongPathsEnabled` của máy đích (máy này BẬT, nên
+#: `MAX_PATH` 260 không phải thứ chặn tên 302 ký tự ở đây), mà `LongPathsEnabled`
+#: KHÔNG bypass được giới hạn 255 của một thành phần. Vì vậy độ dài toàn đường
+#: dẫn CỐ Ý không được kiểm ở đây — đoán nó là đoán cấu hình của máy khác.
 _MAX_NAME_LENGTH = 255
 
 #: Thiết bị của Windows: `open()` trên tên này KHÔNG mở tệp mà mở thiết bị
