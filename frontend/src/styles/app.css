@@ -1,0 +1,85 @@
+/* app.css — lưới ba vùng (spec UI §3) + MỘT lớp grain toàn trang (§2.4, §8.6).
+   Mọi con số ở đây lấy từ tokens.css; tokens.css là nguồn duy nhất của giá trị. */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--panel-0);
+  color: var(--ink-0);
+  font-family: var(--font-ui);
+  font-size: var(--fs-ui);
+  line-height: var(--lh-body);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* §7 — focus ring 2px --signal; không bao giờ outline:none */
+:focus-visible {
+  outline: var(--focus-w) solid var(--focus-color);
+  outline-offset: 1px;
+}
+
+/* §3 — ba vùng: KÊNH / BÀN LÀM VIỆC / HÀNG ĐỢI, cộng header và thanh transport.
+   Cột 214px / flex / 286px là số của spec §3, khai một lần ở tokens.css. */
+.shell {
+  display: grid;
+  grid-template-rows: var(--head-h) 1fr var(--transport-h);
+  height: 100vh;
+}
+
+.shell__head {
+  border-bottom: var(--rule-w) solid var(--rule);
+}
+
+.shell__mid {
+  display: grid;
+  grid-template-columns: var(--col-channels) 1fr var(--col-queue);
+  min-height: 0;
+}
+
+.shell__channels {
+  border-right: var(--rule-w) solid var(--rule);
+}
+
+.shell__work {
+  min-width: 0;
+}
+
+.shell__queue {
+  border-left: var(--rule-w) solid var(--rule);
+}
+
+.shell__transport {
+  border-top: var(--rule-w) solid var(--rule);
+}
+
+/* §2.4 bề mặt + §8.6 ràng buộc kỹ thuật: grain là MỘT lớp phủ toàn trang,
+   pointer-events:none, và KHÔNG được lặp lại trong từng component.
+   Nhiễu sinh bằng SVG feTurbulence nhúng thẳng — không tài nguyên ngoài, chạy offline. */
+.grain {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  opacity: var(--grain-opacity);
+  z-index: var(--z-grain);
+  background-repeat: repeat;
+  background-size: var(--grain-size) var(--grain-size);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='g'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23g)'/%3E%3C/svg%3E");
+}
+
+/* §2.4 + §7 — prefers-reduced-transparency tắt grain */
+@media (prefers-reduced-transparency: reduce) {
+  .grain {
+    display: none;
+  }
+}
