@@ -930,6 +930,71 @@ Mọi lệnh `git`/`npm` gọi từ Node phải đi qua **`cmd /c "<lệnh> > <t
 chiều cao thanh (jsdom không có layout/CSS); **đường THÀNH CÔNG `200` của `/api/export` kèm thân phụ đề**
 (DB scratch **không có bản dịch**); **nội dung bundle/trang chạy thật** (`build` chỉ xác nhận EXIT=0 + dòng `created dist`).
 
+## ⚠️ ERRATA #18 — Task 8 DỪNG ĐÚNG LÚC: **CPS và cột phải KHÔNG có nguồn HTTP** + một lỗi 500 + một task bị THIẾU
+
+Implementer Task 8 **dừng trước khi viết dòng mã nào** theo §2 của brief và báo cáo. Đó là **hành vi đúng** — brief đã
+gài đúng cơ chế. Ba phát hiện, đều **đo được**:
+
+### 1. ❌ `plan:1771` SAI: `qa_issues` KHÔNG tới được HTTP
+
+- `stale` ✅ **CÓ**: `routes_translations.py:171` `_summary(row, stale=is_stale(...))`, thân thật có `"stale": false`.
+- **Chuỗi `cps:` CÓ thật được sinh** — `mt_qa.py:92` = `f"cps:{s.i}={len(text)/duration:.1f}>{limits.max_cps}"`
+  (**có cả số lẫn ngưỡng**), ghi vào DB (`translate.py:203`), đọc lại **chỉ vào domain object** (`sqlite_repos.py:224`).
+- **Builder JSON DUY NHẤT** của bản dịch là `staleness.py:45-54` = **9 khoá**, **KHÔNG** có `qa_issues`.
+- **Quét MỌI route GET: `qa_issues` có trong thân? `False` ở 12/12.**
+⇒ Câu của plan *"`qa_issues` mang tiền tố `cps:` … tới `GET /api/translations`"* là **SAI** (lần thứ **MƯỜI SÁU** một
+mệnh đề của plan/brief bị đo là sai).
+
+### 2. ❌ Cột PHẢI cũng không có nguồn thật
+
+`segments` của bản dịch **không có trong bất kỳ JSON nào**; **KHÔNG tồn tại route `GET /api/translations/{id}`**.
+Đường HTTP **duy nhất** mang văn bản dịch là `GET /api/export/1?format=srt` ⇒ thân SRT **đã render**, **không** phải
+segment có cấu trúc, và `endpoints.ts` không có wrapper.
+Nguồn CPS **duy nhất** tới được HTTP là `routes_transcripts.py:121-137`, và nó đo **đoạn GỐC**
+(`reading_cps(seg.text, seg.start, seg.end)`) — **không** đo được một hàng `translations`.
+⇒ **2/4 mục "Produces" — trong đó có CỘT CPS — không có nguồn thật.** Không phải "thiếu một phần": **cột phải rỗng thì
+hết là màn Đối chiếu.**
+
+### 3. 🐞 LỖI 500 ĐO ĐƯỢC (kèm đối chứng)
+
+`GET /api/transcripts/{id}/readability` **500** khi transcript có segment **thời lượng `<= 0`**:
+`readability.py:15-16` trả **`inf`** → `routes_transcripts.py:134` cho lọt vào `too_fast` →
+**`ValueError: Out of range float values are not JSON compliant`**.
+**Đối chứng** cùng app, không có segment 0 giây ⇒ `200 {"threshold":20.0,"too_fast":[]}`.
+**Trớ trêu đo được:** `qa_translation` **đã xử đúng** ca này (`mt_qa.py:83-90`, `nowindow`) — tức **nguồn CPS BỀN duy nhất
+lại là nguồn KHÔNG được expose**, còn **nguồn được expose thì SẬP**.
+
+### 4. ⚠️ MỘT TASK BỊ THIẾU TRONG PLAN: **ĐƯỜNG CHỌN KÊNH**
+
+Đo được: `selectChannel` **KHÔNG được dispatch ở đâu trong mã sản phẩm**; `App` truyền `transcript={null}`,
+`sourceId = ui.channelId = null`, `translationId = null`, `segments = []`.
+⇒ Tasks 6, 7, 8 **đều render TRẠNG THÁI RỖNG** vì **không task nào sở hữu việc chọn kênh**. Đây là **lỗ trong plan**,
+không phải lỗi của implementer nào.
+⇒ **Phải giao tường minh một task "CHỌN KÊNH"** trước khi T9–T11 có thể render dữ liệu thật (và trước Task 12).
+**Kèm nợ `M5` của Task 7:** khi có chọn kênh thì **`viTriPhat` của `Transport` phải được reset**.
+
+### 5. QUYẾT ĐỊNH: **chọn A — thêm "Step 0: BACKEND" cho Task 8**
+
+Đúng khuôn **plan đã dùng cho Task 9 Step 0** (*"thêm MỘT endpoint chỉ-đọc, vì §12.3 đòi thứ API chưa phục vụ được"*).
+Phạm vi **hẹp**:
+1. **Sửa lỗi 500** của `readability` (segment thời lượng `<= 0`) — theo đúng cách `mt_qa.py:83-90` (`nowindow`) đã làm,
+   và **có test** (segment 0 giây ⇒ `200`, không `inf`).
+2. **Thêm ĐÚNG MỘT endpoint chỉ-đọc** để §4.3 có nguồn thật. Yêu cầu:
+   - nó phải trả **`segments` của BẢN DỊCH** (để dựng cột phải) **và** dữ liệu CPS **có cấu trúc**;
+   - **client KHÔNG được parse một chuỗi hiển thị để lấy một con số nó hiển thị** ⇒ expose **SỐ**
+     (`cps`, `max_cps`, cờ vượt ngưỡng) chứ không chỉ chuỗi `"cps:3=45.2>20"`;
+   - 404 khi không có, theo **đúng quy ước route hiện có** (đọc `routes_translations.py` để bắt chước);
+   - **client KHÔNG tính lại CPS** (spec §2) — nếu endpoint không đủ thì đó là **lỗi của endpoint**, không phải lý do tính ở client.
+3. **Test backend + baseline:** **ĐO baseline pytest trên NHÁNH NÀY TRƯỚC**, rồi **không được giảm** (ledger ghi baseline
+   của `gd3-frontend` là **821 passed / 13 deselected**; **đo lại, đừng tin con số đó**).
+4. **Files phải được mở rộng** cho phần backend (`backend/app/api/...`, `backend/app/domain/readability.py`, test),
+   **và** `frontend/src/api/types.ts` + `endpoints.ts` cho wrapper/type mới, **và** `frontend/src/styles/app.css`.
+⇒ **Task 8 nay CHẠM BACKEND.** Đó là hệ quả **bắt buộc** của việc §12.4 đòi thứ API chưa phục vụ — và **giống hệt**
+cách Task 9 đã được xử lý, nên **không phải mở rộng phạm vi tuỳ tiện**.
+**Phương án B** (giữ nguyên backend) bị **loại**: nó phải ghi thẳng **§12.4 KHÔNG ĐẠT**, và "cột CPS" khi đó chỉ là CPS
+của **bản GỐC** — không phải thứ tiêu chí yêu cầu. **Phương án C** (hoãn) cũng **không giải quyết gì**: hoãn Task 8
+**không** tạo ra nguồn dữ liệu.
+
 ## Quy ước thẩm mỹ — spec UI thắng, skill chỉ là checklist
 
 Spec `2026-09-25-phu-de-lab-ui-design.md` là **nguồn có thẩm quyền về hình thức** (bạn đã duyệt). Skill
