@@ -187,3 +187,104 @@ body {
 .ed__item.is-current:hover {
   border-left-color: var(--signal);
 }
+
+/* ── §4.1 Thanh TRANSPORT (Task 7) — nút phát, timecode mono, track có đầu đọc, ba nút xuất ──
+   Ô `.shell__transport` (hàng thứ ba của lưới, cao `--transport-h`) là của Task 1;
+   khối này chỉ dựng nội dung BÊN TRONG nó. Mọi giá trị lấy từ tokens.css. */
+
+.tp {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  height: 100%;
+  padding: 0 var(--sp-3);
+  background: var(--panel-1);
+}
+
+/* Nút phát: cùng khuôn với nút xuất (đường kẻ 1px, không shadow mềm — §2.3). */
+.tp__phat {
+  padding: var(--sp-1) var(--sp-2);
+  border: var(--rule-w) solid var(--rule);
+  border-radius: var(--radius);
+  background: var(--panel-2);
+  color: var(--ink-0);
+  font: inherit;
+  cursor: pointer;
+  transition: border-color var(--dur-1) var(--ease-1);
+}
+
+/* §2.2 quy tắc 1 — amber chỉ có MỘT nghĩa: đang hoạt động. Đang phát ⇒ viền amber. */
+.tp__phat[aria-pressed="true"] {
+  border-color: var(--signal);
+  color: var(--signal);
+}
+
+/* Chưa chọn kênh: không có gì để phát thì nút nói thẳng là không bấm được. */
+.tp__phat:disabled {
+  color: var(--ink-2);
+  cursor: default;
+}
+
+/* Timecode §4.1: `0:04.12 / 12:04.30`, cột MONO (IBM Plex Mono). */
+.tp__timecode {
+  font-family: var(--font-mono);
+  font-size: var(--fs-num);
+  color: var(--ink-1);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* Track: một rãnh, đầu đọc amber chạy trong đó. `position: relative` là mốc toạ độ
+   cho `.tp__readhead` (đặt bằng `style.left` theo phần trăm). */
+.tp__track {
+  position: relative;
+  flex: 1;
+  height: var(--sp-1);
+  background: var(--panel-3);
+  border-radius: var(--radius);
+}
+
+.tp__readhead {
+  position: absolute;
+  top: 0;
+  width: var(--rule-w);
+  height: 100%;
+  background: var(--signal);
+  transform: translateX(-50%);
+}
+
+/* Trạng thái rỗng: nói SỰ THẬT của lượt này, không hứa một thứ chưa có đường làm. */
+.tp__rong {
+  margin: 0;
+  color: var(--ink-1);
+  font-size: var(--fs-note);
+}
+
+.tp__nhom-xuat {
+  display: flex;
+  gap: var(--sp-2);
+  margin-left: auto;
+}
+
+.tp__xuat {
+  padding: var(--sp-1) var(--sp-2);
+  border: var(--rule-w) solid var(--rule);
+  border-radius: var(--radius);
+  color: var(--ink-1);
+  font-family: var(--font-label);
+  font-size: var(--fs-label);
+  letter-spacing: var(--track-label);
+  text-decoration: none;
+  transition: color var(--dur-1) var(--ease-1);
+}
+
+.tp__xuat:hover {
+  color: var(--ink-0);
+}
+
+/* Chưa có bản dịch ⇒ nút xuất KHÔNG có `href`: nó nói thật là chưa xuất được gì. */
+.tp__xuat[aria-disabled="true"] {
+  color: var(--ink-2);
+  border-color: var(--panel-3);
+  pointer-events: none;
+}

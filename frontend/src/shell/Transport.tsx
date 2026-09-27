@@ -1,0 +1,225 @@
+/**
+ * Thanh TRANSPORT — nut phat, timecode mono, track co dau doc, ba nut xuat (spec UI §4.1).
+ *
+ * Tieu chi cua task nay khong chi la "co mot thanh o day": phat toi **moc cuoi cua
+ * doan** thi **tu nhay sang doan ke**. Cu nhay do nam trong `src/lib/playback.ts`
+ * (ham thuan, ghim bang `node:test` thuong); tep nay chi NOI DAY: gan `timeupdate`,
+ * goi ham thuan, roi dat lai vi tri phat.
+ *
+ * ⚠️ He qua cua CUNG mot quy tac, do duoc trong luc viet test: vi tri phat VUOT
+ * `segment.end` (vi du `currentSegment` con la doan cu) ⇒ lan `timeupdate` ke tiep dat
+ * lai vi tri ve `start` cua doan KE, ke ca khi do la mot buoc LUI. Do la chu "tu nhay
+ * doan" chu khong phai loi, nhung no chi dung khi `currentSegment` duoc cap nhat theo
+ * nguoi dung — viec do thuoc ve duong CHON DOAN (Task 11), chua co o day.
+ *
+ * ## `ponytail:` TRAN — dung phan tu media GOC, khong dung player library
+ *
+ * `<audio>` la phan tu goc cua trinh duyet va backend da phuc vu `Range`
+ * (`backend/app/api/routes_media.py`: 206 + `Content-Range`, doc theo khoi 256 KB),
+ * nen moi thu "tua" la cua trinh duyet. Mot player library se mang theo mot tang
+ * trang tri, mot API thu hai va mot he CSS thu hai — doi lai khong co gi cho tieu chi
+ * nay. TRAN: **`<video>` thi khong co khung hinh rieng** — nguon video duoc phat bang
+ * chinh `<audio>` nay (trinh duyet van phat duoc vet tieng cua mp4), nen nguoi dung
+ * khong NHIN thay hinh. Duong nang cap: doi the theo duoi `media_path` cua `Source`
+ * (`.mp4/.mkv/.webm` ⇒ `<video>`) va them mot khung hinh — ca hai deu phai do tren
+ * trinh duyet THAT.
+ *
+ * ## `ponytail:` TRAN — cai KHONG do duoc o moi truong nay
+ *
+ * **jsdom KHONG hien thuc `play()`/`pause()`** (do duoc o `Transport.test.tsx`: chung
+ * log `Not implemented: HTMLMediaElement's play() method` va `play()` tra `undefined`
+ * chu khong phai Promise), khong co layout va khong ap CSS. ⇒ **"seek trong trinh
+ * duyet that" CHUA CHUNG MINH** o bat ky dau trong giao dien; thu duy nhat duoc do la
+ * phia MAY CHU (HTTP `Range` ⇒ 206), va no nam o bao cao task. Bon thu duoc do o day
+ * la HANH VI: cai gi co trong DOM, lop nao, chu nao, va `style.left` nao.
+ *
+ * ## Trang thai: vi sao `playing`/`currentSegment` la PROP
+ *
+ * Trang thai client cua ban lam viec nam trong MOT reducer (`src/state/reducer.ts`:
+ * `playing`, `currentSegment`), nen thanh nay la component DIEU KHIEN: no khong giu
+ * ban sao thu hai cua "dang phat hay khong". Rieng **vi tri phat (giay)** la trang
+ * thai CUC BO — `UiState` khong co truong giay nao, va `timeupdate` ban ra ~4 lan/giay
+ * nen keo no vao reducer la mot luong action khong ai doc.
+ *
+ * ## NO — chua co duong CHON KENH, nen hom nay moi prop du lieu deu `null`
+ *
+ * Vung KENH (Task 4) moi CHI HIEN kenh, chua co duong CHON kenh, va chua co duong
+ * chon BAN DICH. Nen `App` truyen `sourceId={null}`/`translationId={null}` — cung lop
+ * TRAN da khai o `<EditScreen transcript={null} />` (Task 6). He qua DO DUOC: nut phat
+ * VO HIEU (khong co gi de phat thi mot nut phat duoc la mot loi hua), khong co `src`,
+ * va ba nut xuat khong co `href` (`aria-disabled`). Thanh nay KHONG tu bia ra nguon.
+ */
+import { useEffect, useRef, useState } from "react";
+import type { SyntheticEvent } from "react";
+
+import { endpoints } from "../api/endpoints.ts";
+import type { ExportFormat } from "../api/endpoints.ts";
+import type { Segment } from "../api/types.ts";
+import { nextSegmentAfter, readheadPercent } from "../lib/playback.ts";
+import { formatTimecode } from "../lib/timecode.ts";
+
+/**
+ * Ba dinh dang xuat cua spec §11, theo THU TU hien thi.
+ *
+ * Ten dinh dang la du lieu cua `pipeline/export.py::FORMATS`; o day chi la NHAN.
+ * URL khong duoc ghep tai cho — xem `endpoints.exportUrl` (route `format` sai ten la 422).
+ */
+const DINH_DANG_XUAT: ReadonlyArray<{ dinhDang: ExportFormat; nhan: string }> = [
+  { dinhDang: "srt", nhan: "SRT" },
+  { dinhDang: "vtt", nhan: "VTT" },
+  { dinhDang: "ass", nhan: "ASS" },
+];
+
+/** Chuoi thay cho tong thoi luong khi chua biet (`Source.duration === null`). */
+export const CHUA_BIET_THOI_LUONG = "--:--.--";
+
+/** Giay HUU HAN va khong am: `currentTime` cua trinh duyet co the la `NaN` khi chua nap xong. */
+function giayAnToan(giay: number): number {
+  return Number.isFinite(giay) && giay > 0 ? giay : 0;
+}
+
+export interface TransportProps {
+  /** Id `sources` dang chon; `null` = chua chon kenh (xem NO o dau tep). */
+  sourceId: number | null;
+  /** Doan cua ban ghi dang mo — nguon cua "moc cuoi cua doan". */
+  segments: Segment[];
+  /** Id ban dich dang xem; `null` = chua co ban dich ⇒ ba nut xuat khong co `href`. */
+  translationId: number | null;
+  /** Thoi luong that cua nguon (`Source.duration`), `null` khi backend chua do duoc. */
+  duration?: number | null;
+  /** `UiState.playing` — component DIEU KHIEN, khong giu ban sao. */
+  playing?: boolean;
+  /** `UiState.currentSegment` — doan dang phat, `null` = khong phat doan nao. */
+  currentSegment?: number | null;
+  /** Xuat kem ban goc (`exportUrl(..., bilingual)`); backend nhan `int` 0/1. */
+  bilingual?: boolean;
+  /** Yeu cau doi trang thai phat — BEN GOI giu su that (reducer). */
+  onPlayingChange?: (playing: boolean) => void;
+  /** Bao da nhay sang doan `i` — BEN GOI ghi lai vao `UiState.currentSegment`. */
+  onSegmentChange?: (i: number) => void;
+}
+
+export function Transport({
+  sourceId,
+  segments,
+  translationId,
+  duration = null,
+  playing = false,
+  currentSegment = null,
+  bilingual = false,
+  onPlayingChange,
+  onSegmentChange,
+}: TransportProps) {
+  const phanTuMedia = useRef<HTMLAudioElement | null>(null);
+  // Vi tri phat: trang thai CUC BO (xem "Trang thai" o dau tep).
+  const [viTriPhat, datViTriPhat] = useState(0);
+  // Da tung YEU CAU phat chua. Dung de KHONG goi `pause()` luc mount: mot lan goi
+  // `pause()` tren phan tu vua dung la mot loi im lang, va duoi jsdom no do
+  // "Not implemented" ra `console.error` — thu ma `App.test.tsx` ghim la khong duoc co.
+  const daPhat = useRef(false);
+
+  const coNguon = sourceId !== null;
+  /** Thoi luong dung duoc: `null`/`0`/khong huu han deu la "chua biet" (xem `readheadPercent`). */
+  const tongThoiLuong =
+    duration !== null && Number.isFinite(duration) && duration > 0 ? duration : null;
+
+  useEffect(() => {
+    const el = phanTuMedia.current;
+    if (el === null || sourceId === null) return;
+    if (playing === daPhat.current) return;
+    daPhat.current = playing;
+    if (playing) {
+      // `play()` tra Promise o trinh duyet THAT va `undefined` o jsdom ⇒ `Promise.resolve`
+      // cho ca hai duong cung chay, va loi tu choi (autoplay) tra trang thai ve BEN GOI.
+      Promise.resolve(el.play()).catch(() => onPlayingChange?.(false));
+    } else {
+      el.pause();
+    }
+  }, [playing, sourceId, onPlayingChange]);
+
+  /**
+   * `timeupdate` cua phan tu media — DAY NOI duy nhat cua "tu nhay doan".
+   *
+   * Quyet dinh nam o `nextSegmentAfter` (ham thuan); o day chi con ba buoc: doc vi tri
+   * THAT tu phan tu, hoi ham thuan, roi dat lai vi tri phat ve `start` cua doan ke.
+   * Buoc thu ba moi la CU NHAY: khoang lang giua hai doan bi bo qua, thay vi de
+   * phan tu phat het khoang do roi moi "phat hien" doan sau.
+   */
+  function khiThoiGian(suKien: SyntheticEvent<HTMLAudioElement>): void {
+    const el = suKien.currentTarget;
+    const giay = giayAnToan(el.currentTime);
+    datViTriPhat(giay);
+
+    const ke = nextSegmentAfter(giay, segments, currentSegment);
+    // Kiem lai bang SO: `segments[ke] === undefined` la mot phep so sanh ma kieu o day
+    // khong cho phep (`noUncheckedIndexedAccess` khong bat), nhung bien `ke` thi kiem duoc.
+    if (ke === null || ke >= segments.length) return;
+
+    el.currentTime = segments[ke].start;
+    datViTriPhat(giayAnToan(segments[ke].start));
+    onSegmentChange?.(ke);
+  }
+
+  const nhan = playing ? "tạm dừng" : "phát";
+
+  return (
+    <div className="tp">
+      {/* Phan tu media GOC: `src` chi duoc dat khi CO nguon — mot `src` tro vao
+          `/api/media/null` la mot request 422 ma khong ai doc. `src` tuong doi vi
+          trinh duyet di qua proxy 3100 (xem `endpoints.mediaUrl`). */}
+      <audio
+        ref={phanTuMedia}
+        className="tp__media"
+        src={sourceId === null ? undefined : endpoints.mediaUrl(sourceId)}
+        onTimeUpdate={khiThoiGian}
+      />
+      <button
+        type="button"
+        className="tp__phat"
+        aria-pressed={playing}
+        disabled={!coNguon}
+        onClick={() => onPlayingChange?.(!playing)}
+      >
+        {nhan}
+      </button>
+      {/* Timecode mono `0:04.12 / 12:04.30` (spec UI §4.1). Tong so lay tu BACKEND
+          (`Source.duration`), khong do lai tu phan tu media: `duration` cua phan tu la
+          `NaN` cho tới khi tai xong metadata, va client do lai la hai nguon su that. */}
+      <span className="tp__timecode">
+        {`${formatTimecode(viTriPhat)} / ${
+          tongThoiLuong === null ? CHUA_BIET_THOI_LUONG : formatTimecode(tongThoiLuong)
+        }`}
+      </span>
+      {/* Track + dau doc: HINH THUC trang tri — thong tin nam o timecode (chu), khong
+          chi o vi tri (spec UI §7). Luat CSS that nam o `app.css` va duoc ghim bang
+          mot bai test DOC tep do (ERRATA #15 muc 3). */}
+      <div className="tp__track" aria-hidden>
+        <div
+          className="tp__readhead"
+          style={{ left: `${readheadPercent(viTriPhat, tongThoiLuong)}%` }}
+        />
+      </div>
+      {coNguon ? null : <p className="tp__rong">chưa chọn kênh để nghe</p>}
+      <div className="tp__nhom-xuat">
+        {DINH_DANG_XUAT.map(({ dinhDang, nhan: nhanXuat }) => (
+          <a
+            key={dinhDang}
+            className="tp__xuat"
+            aria-label={`xuất ${nhanXuat}`}
+            aria-disabled={translationId === null ? "true" : undefined}
+            // URL do `endpoints.exportUrl` sinh ra: client KHONG tu ghep, vi `format`
+            // sai ten la 422 va thu tu tham so la chuyen cua backend.
+            href={
+              translationId === null
+                ? undefined
+                : endpoints.exportUrl(translationId, dinhDang, bilingual)
+            }
+            download
+          >
+            {nhanXuat}
+          </a>
+        ))}
+      </div>
+    </div>
+  );
+}
