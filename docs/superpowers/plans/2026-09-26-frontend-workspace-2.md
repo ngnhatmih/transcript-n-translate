@@ -69,6 +69,19 @@ Task 2 đo trên backend thật và tìm ra chín chỗ plan sai. **Không chỗ
    **Và đây là một ĐÁNH ĐỔI, không phải "hết đường"** (review Task 2 bổ sung): 9 lỗi kia chỉ đến từ **MỘT** nguyên nhân — `@types/node` vắng (TS2591 cho `node:test`/`node:assert/strict`, và TS18046 là hệ quả của `assert.ok` mất assertion-signature). Một **khai báo ambient viết tay (~15 dòng)** cho `node:test`+`node:assert/strict` là đủ để đưa tệp test trở lại tầm `tsc`; giá của nó là một stub **có thể trôi** khỏi API thật. Task 2 **từ chối** stub đó vì nó **bịa API** — quyết định hợp lý — nhưng phải ghi là **quyết định có đánh đổi**, và nếu về sau ai muốn "build xanh bao hàm type sạch cho test" thì đây là đường.
 9. **Bài `translations[]` của contract test hiện RỖNG VỀ DỮ LIỆU** trên DB repo (`0 hàng`), nên nó chỉ được chứng minh không-rỗng nhờ một DB scratch gieo riêng. Muốn ghim thật thì **Task 12 phải gieo dữ liệu vào DB thật** trước khi chạy e2e — đó là lý do Task 12 tồn tại.
 
+## ⚠️ ERRATA #3 — hệ quả của vòng sửa Task 2 (áp cho Tasks 3–12)
+
+Vòng sửa Task 2 (`166c2a9` + `f5a625b`) đóng 2 Critical + I-1, và **đổi hành vi** ở hai chỗ. Ba điều dưới đây là hệ quả, phải đọc trước khi làm Task 3.
+
+1. **`contract.test.ts` nay TỰ KHỞI ĐỘNG backend** (`stdio:"ignore"` + poll 250 ms × 30 s; chỉ spawn khi `/api/status` chưa trả lời; `after` chỉ tắt **pid của chính nó** và **chứng minh** cổng thôi trả lời).
+   ⇒ **Task 2 Step 3 (khoảng dòng 496) nay SAI**: nó viết *"Kỳ vọng: đỏ vì backend chưa chạy (`backend 8620 khong chay`)"*. Với hành vi mới, backend tắt thì test **tự khởi động rồi XANH** — nên đọc câu đó là "kỳ vọng đỏ" sẽ tưởng một hồi quy. Đây là **hành vi đúng theo `Global Constraints` dòng 17** (*"Backend **không** chạy sẵn: mọi test đầu-cuối phải **tự khởi động** nó và **tự tắt**"*).
+   ⚠️ **Và một chỗ brief của người điều phối trích SAI:** nó nói *"bảng preflight ghi rõ cả hai phải tự khởi động backend"* — **không có bảng preflight nào trong plan** (`grep -i preflight` trên plan = **0 hit**). Bảng preflight nằm ở **ledger**, không ở plan. Chỗ duy nhất trong plan đỡ cho ràng buộc này là `Global Constraints` dòng 17. Đừng trích một nguồn không tồn tại.
+2. **`npm test` trên DB repo (0 hàng) nay là `EXIT=1` với 2 bài ĐỎ CHỦ Ý.** Đó là C-2: contract test **phải sập ồn ào** khi không có dữ liệu để đo, thay vì xanh-vì-rỗng (spec §2). Hai guard: **≥1 transcript có segment** và **≥1 hàng `translations`**.
+   ⇒ **Cổng "suite xanh" cho Tasks 3–11 phải đọc lại:** trên máy này, `npm test` đỏ **2 bài** là **đúng** cho tới khi có dữ liệu. Đừng "sửa" nó bằng cách nới guard, và đừng coi 2 đỏ đó là hồi quy của task mình. **Đọc EXIT kèm danh sách bài đỏ** — 2 bài đúng tên là trạng thái hợp lệ; bài thứ ba là hồi quy thật.
+3. **Task 12 PHẢI gieo ĐỦ HAI THỨ vào `data/app.db` thật**: một transcript **có segment**, **và ≥1 hàng `translations`**. Thiếu một trong hai thì guard của Task 2 vẫn đỏ sau Task 12, và e2e sẽ đỏ vì lý do không liên quan tới thứ nó kiểm. Đây là lý do Task 12 tồn tại (ngoài Playwright) — xem thêm ERRATA #2 mục 9.
+
+**Đính chính nhỏ về `Segment`** (brief của người điều phối đếm sai): `Segment` có **5 khoá LUÔN có** (`i`, `start`, `end`, `text`, **`suspect`**) + **8 khoá TUỲ CHỌN** (`words`, `emotion`, `events`, `speaker`, `avg_logprob`, `no_speech_prob`, `t`, `qa`). Brief ghi "13 khoá" nhưng chỉ liệt kê 11 và **bỏ sót `avg_logprob` + `no_speech_prob`**. Và nhóm "chỉ đối chiếu mã nguồn" là **9** interface (10/19 có bài kiểm khoá), không phải 5.
+
 ## Quy ước thẩm mỹ — spec UI thắng, skill chỉ là checklist
 
 Spec `2026-09-25-phu-de-lab-ui-design.md` là **nguồn có thẩm quyền về hình thức** (bạn đã duyệt). Skill
