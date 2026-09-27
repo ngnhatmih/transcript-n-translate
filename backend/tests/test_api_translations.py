@@ -281,6 +281,45 @@ def test_create_translation_rejects_an_unknown_engine_with_422(wired):
     assert [j for j in repos.list_jobs() if j.type == "translate"] == []
 
 
+def test_an_unknown_engine_says_exactly_what_the_registry_says(wired):
+    """M-14 · cùng MỘT lỗi không được có hai hình dạng thông báo.
+
+    `registry.by_id` ném `KeyError(f"engine {engine_id!r} không có trong registry")`,
+    còn route từng bắt nó rồi TỰ GHÉP một câu thứ hai
+    (`f"engine không có trong registry: {body.engine!r}"`) và vứt ngoại lệ gốc.
+    Hai chỗ nói về cùng một sự việc bằng hai câu khác nhau là hai chỗ để trôi, và
+    chỗ trôi đó nằm trên ĐƯỜNG CLIENT ĐỌC.
+
+    Cái bẫy của bản vá hiển nhiên: `str(exc)` của một `KeyError` KHÔNG trả về đối
+    số trần — `KeyError.__str__` repr đối số của nó, nên `str(KeyError("abc"))`
+    bằng `"'abc'"`, kèm một cặp nháy kép. Dùng `str(exc)` là gửi cho client một
+    thông báo dính nháy lạ. Đối số trần là `exc.args[0]`, và bài này ghim cả hai
+    vế: BẰNG đúng chuỗi của registry, và KHÔNG có ký tự `"` nào.
+    """
+    c, repos, specs, _worker, _broker, _mt = wired
+    tid, _ = _seed(repos)
+
+    r = c.post("/api/translations", json={"transcript_id": tid, "engine": "khong-co"})
+
+    assert r.status_code == 422, r.text
+    try:
+        by_id(specs, "khong-co")
+    except KeyError as exc:
+        registry_message = exc.args[0]
+    else:  # pragma: no cover - dựng cảnh: id này KHÔNG được có trong registry
+        pytest.fail("by_id phải ném KeyError cho một id không có trong registry")
+
+    detail = r.json()["detail"]
+    assert detail == registry_message, (
+        f"thông báo của route phải là CHÍNH chuỗi của registry: {detail!r} "
+        f"vs {registry_message!r}"
+    )
+    assert '"' not in detail, (
+        "`str(exc)` của KeyError bọc đối số trong nháy kép — thông báo gửi cho "
+        f"client không được dính nháy lạ: {detail!r}"
+    )
+
+
 def test_create_translation_rejects_an_asr_engine_with_422(wired):
     """`engine` phải là engine DỊCH: nhận id ASR là xếp một job dịch chắc chắn
     `KeyError` trong `mt_engines` (dict chỉ có engine `kind == "mt"`)."""

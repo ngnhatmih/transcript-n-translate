@@ -113,8 +113,12 @@ def create_translation(body: CreateIn, repos=Depends(get_repos),
     try:
         spec = by_id(specs, body.engine)
     except KeyError as exc:
-        raise HTTPException(
-            422, f"engine không có trong registry: {body.engine!r}") from exc
+        # M-14: dùng `exc.args[0]`, KHÔNG tự ghép câu thứ hai và KHÔNG dùng
+        # `str(exc)`. `KeyError.__str__` repr đối số của nó — `str(KeyError("x"))`
+        # là `"'x'"`, kèm một cặp nháy kép — nên "dùng lại `str(exc)`" gửi cho
+        # client một thông báo dính nháy lạ. `args[0]` là ĐỐI SỐ TRẦN mà `by_id`
+        # truyền, tức cùng một lỗi chỉ còn MỘT hình dạng thông báo.
+        raise HTTPException(422, exc.args[0]) from exc
 
     if spec.kind != "mt":
         # Nhận id ASR ở đây là xếp một job `translate` mà `mt_engines` chắc chắn
