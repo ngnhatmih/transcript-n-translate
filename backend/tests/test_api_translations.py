@@ -39,6 +39,7 @@ from app.adapters.clock_system import SystemClock
 from app.adapters.persist.sqlite_repos import SqliteRepos
 from app.domain.job_state import phase_of
 from app.domain.models import Segment, Word
+from app.domain.mt_qa import qa_translation
 from app.registry import by_id, of_kind
 
 #: Model KHÔNG có trong `/api/tags` của bất kỳ máy nào — tên này chỉ tồn tại ở
@@ -840,3 +841,183 @@ def test_the_two_endpoints_agree_after_the_transcript_changes(wired):
 
     assert from_list["stale"] is True
     assert from_list == from_detail
+
+
+# ---------------------------------------------------------------------------
+# GET /api/translations/{id} — chi tiết MỘT bản dịch: đoạn DỊCH + CPS dạng SỐ
+#
+# Vì sao route này tồn tại (đo được, ERRATA #18): `translation_summary_json` phát
+# ĐÚNG 9 khoá và KHÔNG có `segments`; còn `qa_issues` — nơi chuỗi `cps:` sống —
+# KHÔNG xuất hiện trong MỘT response HTTP nào (0/12 route GET). Nên §4.3 (màn Đối
+# chiếu) không có nguồn nào cho cột PHẢI và cho cột CPS.
+#
+# Bất biến trung tâm: con số CPS ở route này và chuỗi `cps:` trong `qa_issues` được
+# sinh bởi CÙNG một hàm (`mt_qa`), nên chúng KHÔNG THỂ lệch nhau. Client KHÔNG
+# được parse chuỗi hiển thị để lấy con số nó hiển thị.
+# ---------------------------------------------------------------------------
+
+
+def test_get_translation_returns_the_translated_segments(wired):
+    """Cột PHẢI của §4.3 cần VĂN BẢN BẢN DỊCH — trước route này không JSON nào có.
+
+    `translation_summary_json` cố ý bỏ `segments` (đúng cho một danh sách), nhưng
+    hệ quả là màn Đối chiếu không có gì để vẽ cột phải.
+    """
+    c, repos, _specs, _worker, _broker, _mt = wired
+    _tid, tr_id = _seed(repos)
+
+    body = c.get(f"/api/translations/{tr_id}").json()
+
+    assert [s["text"] for s in body["segments"]] == ["Xin chào"]
+    assert body["segments"][0]["i"] == 1
+    assert body["id"] == tr_id
+    assert body["stale"] is False
+
+
+def test_get_translation_reports_cps_as_a_number_not_a_display_string(wired):
+    """Client KHÔNG được parse `"cps:1=30.0>21.0"` để lấy con số nó hiển thị.
+
+    Số đo của fixture, tính bằng chính `mt_qa`: cửa sổ NGUỒN 1.0s là cửa sổ người
+    xem thật sự thấy (`subtitle_format` ghi mốc NGUỒN và tra bản dịch theo vị trí),
+    bản dịch 30 ký tự ⇒ 30/1.0 = **30.0 CPS** > `max_cps` 21.0. Đo trên cửa sổ BẢN
+    DỊCH (3.0s) sẽ ra 10.0 — và đó là con số SAI.
+    """
+    c, repos, _specs, _worker, _broker, _mt = wired
+    tid, _tr = _seed(repos)
+    tr_id = repos.add_translation(
+        transcript_id=tid, transcript_version=1, engine=INPROCESS_ENGINE_ID,
+        target_lang="vi",
+        segments=[Segment(i=1, start=0.0, end=3.0, text="y" * 30)],
+        prompt_version="raw-p1")
+
+    row = c.get(f"/api/translations/{tr_id}").json()["cps"]["rows"][0]
+
+    assert isinstance(row["cps"], float), (
+        f"CPS phải là SỐ, không phải chuỗi hiển thị: {row['cps']!r}"
+    )
+    assert row["cps"] == 30.0, (
+        "cửa sổ NGUỒN 1.0s cho 30.0; cửa sổ bản dịch 3.0s cho 10.0"
+    )
+    assert row["max_cps"] == 21.0
+    assert row["over"] is True
+    assert row["i"] == 1
+
+
+def test_the_route_cps_is_the_same_number_the_qa_string_reports(wired):
+    """MỘT nguồn: con số ở route và chuỗi trong `qa_issues` phải khớp nhau.
+
+    Nếu ai đó tính CPS lần thứ hai ở route (một công thức nữa), bài này đỏ — đúng
+    lớp lỗi "hai nơi tính cùng một đại lượng" mà spec frontend §2 dựng ra để chặn.
+    """
+    c, repos, _specs, _worker, _broker, _mt = wired
+    tid, _tr = _seed(repos)
+    src = [Segment(i=1, start=0.0, end=1.0, text="你好")]
+    out = [Segment(i=1, start=0.0, end=3.0, text="y" * 30)]
+    tr_id = repos.add_translation(
+        transcript_id=tid, transcript_version=1, engine=INPROCESS_ENGINE_ID,
+        target_lang="vi", segments=out, prompt_version="raw-p1")
+
+    row = c.get(f"/api/translations/{tr_id}").json()["cps"]["rows"][0]
+    issues = qa_translation(src, out, glossary=[], supports_glossary=True)
+
+    assert f"cps:{row['i']}={row['cps']:.1f}>{row['max_cps']}" in issues, (
+        f"route và `qa_issues` phải nói CÙNG một con số; qa_issues={issues}"
+    )
+
+
+def test_get_translation_computes_stale_server_side(wired):
+    """`stale` TÍNH LẠI từ version hiện tại của transcript, không trả cứng."""
+    c, repos, _specs, _worker, _broker, _mt = wired
+    tid, tr_id = _seed(repos)
+
+    assert c.get(f"/api/translations/{tr_id}").json()["stale"] is False
+
+    # Sửa transcript qua CỔNG THẬT (tăng version) — không gán thẳng trường nào.
+    repos.update_transcript_segments(
+        tid, [Segment(i=1, start=0.0, end=1.0, text="你好呀")])
+
+    assert c.get(f"/api/translations/{tr_id}").json()["stale"] is True
+
+
+def test_get_translation_reports_an_unmeasurable_window_without_crashing(wired):
+    """Cả hai cửa sổ <= 0 ⇒ `cps` là `null`, KHÔNG phải `Infinity`.
+
+    Cùng lớp lỗi đã làm `readability` 500: `reading_cps` trả `inf`, mà `inf` không
+    serialize được. `mt_qa` đã xử đúng ca này từ lâu (`nowindow`); route này đi qua
+    CÙNG hàm nên thừa hưởng cách xử đó thay vì lặp lại lỗi.
+    """
+    c, repos, _specs, _worker, _broker, _mt = wired
+    sid = repos.add_source(kind="file", origin="q.mp4", media_path="m", lang="zh")
+    tid = repos.add_transcript(
+        source_id=sid, engine="fw-large-v3-turbo", lang="zh",
+        segments=[Segment(i=1, start=0.0, end=0.0, text="你好")])
+    tr_id = repos.add_translation(
+        transcript_id=tid, transcript_version=1, engine=INPROCESS_ENGINE_ID,
+        target_lang="vi",
+        segments=[Segment(i=1, start=0.0, end=0.0, text="y" * 30)],
+        prompt_version="raw-p1")
+
+    r = c.get(f"/api/translations/{tr_id}")
+
+    assert r.status_code == 200, r.text
+    assert "Infinity" not in r.text, (
+        "`inf` lọt vào JSON chính là lỗi 500 của `readability`"
+    )
+    row = r.json()["cps"]["rows"][0]
+    assert row["cps"] is None, "không có cửa sổ dương nào thì không được bịa tốc độ"
+    assert row["over"] is False, "không ĐO ĐƯỢC không phải là VƯỢT NGƯỠNG"
+    assert row["chars"] == 30
+
+
+def test_get_unknown_translation_is_404(wired):
+    """Cùng quy ước 404 với `GET /api/transcripts/{id}` và `PATCH /api/translations/{id}`."""
+    c, _repos, _specs, _worker, _broker, _mt = wired
+    assert c.get("/api/translations/999").status_code == 404
+
+
+def test_over_uses_the_unrounded_cps_so_the_client_never_compares_itself(wired):
+    """`over` phải so trên giá trị CHƯA làm tròn.
+
+    Cửa sổ nguồn 100s + 2104 ký tự ⇒ 21,04 CPS > `max_cps` 21,0 ⇒ **VƯỢT**. Nhưng
+    `cps` đã làm tròn để hiển thị là 21,0, nên một client tự so `cps > max_cps` sẽ
+    kết luận "không vượt" — SAI ở đúng biên. Đó là lý do cờ phải đến từ server.
+    """
+    c, repos, _specs, _worker, _broker, _mt = wired
+    sid = repos.add_source(kind="file", origin="w.mp4", media_path="m", lang="zh")
+    tid = repos.add_transcript(
+        source_id=sid, engine="fw-large-v3-turbo", lang="zh",
+        segments=[Segment(i=1, start=0.0, end=100.0, text="你好")])
+    tr_id = repos.add_translation(
+        transcript_id=tid, transcript_version=1, engine=INPROCESS_ENGINE_ID,
+        target_lang="vi",
+        segments=[Segment(i=1, start=0.0, end=100.0, text="y" * 2104)],
+        prompt_version="raw-p1")
+
+    row = c.get(f"/api/translations/{tr_id}").json()["cps"]["rows"][0]
+
+    assert row["cps"] == 21.0, "giá trị HIỂN THỊ đã được làm tròn"
+    assert row["over"] is True, (
+        "21,04 CPS là VƯỢT ngưỡng 21,0; so trên số đã làm tròn sẽ nói sai"
+    )
+
+
+def test_the_detail_route_describes_the_translation_exactly_like_the_list(wired):
+    """Route chi tiết KHÔNG được tự ghép lại phần tóm tắt: 9 khoá phải TRÙNG KHÍT.
+
+    Thêm `segments` + `cps` là đúng mục đích của route; đổi bất kỳ khoá tóm tắt nào
+    là hai hình dạng cho một hàng — đúng lỗi mà builder dùng chung đã dẹp một lần.
+    """
+    c, repos, _specs, _worker, _broker, _mt = wired
+    tid, tr_id = _seed(repos)
+
+    from_list = c.get(f"/api/translations?transcript_id={tid}").json()[0]
+    from_detail = c.get(f"/api/translations/{tr_id}").json()
+
+    extras = {key: from_detail.pop(key) for key in ("segments", "cps")}
+    assert set(extras) == {"segments", "cps"}, (
+        "route chi tiết phải THÊM đúng hai khoá, không hơn"
+    )
+    assert from_detail == from_list, (
+        "route chi tiết và route danh sách mô tả CÙNG một hàng bằng hai hình dạng "
+        f"khác nhau:\n  chi tiết: {sorted(from_detail)}\n  danh sách: {sorted(from_list)}"
+    )

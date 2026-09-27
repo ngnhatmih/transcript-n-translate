@@ -53,6 +53,73 @@ def _window(src: Segment, out: Segment) -> float:
     return out.end - out.start
 
 
+@dataclass(frozen=True)
+class CpsRow:
+    """CPS của MỘT đoạn dịch, dạng SỐ — không phải một chuỗi hiển thị.
+
+    Vì sao tách khỏi `qa_translation`: chuỗi `cps:` trong `translations.qa_issues`
+    VÀ con số mà `GET /api/translations/{id}` trả cho màn Đối chiếu phải là CÙNG một
+    đại lượng. Hai chỗ tính CPS là hai chỗ trôi khỏi nhau — đúng lớp lỗi mà spec
+    frontend §2 dựng ra để chặn. Cả hai đi qua `cps_row` dưới đây.
+
+    `cps is None` nghĩa là KHÔNG ĐO ĐƯỢC (cả cửa sổ nguồn lẫn cửa sổ bản dịch đều
+    không dương). Khác hẳn `0.0` (một tốc độ thật bằng không), và khác `inf`: đó là
+    DỮ LIỆU HỎNG, không phải "hơi nhanh". `chars` vẫn có để nói được đã đếm bao
+    nhiêu ký tự — theo đúng cách nhánh `nowindow` của `qa_translation` đã làm.
+    """
+
+    i: int
+    #: `len(text.strip())` — CÙNG định nghĩa với con số trong chuỗi `cps:`.
+    chars: int
+    #: Cửa sổ NGUỒN (dự phòng: cửa sổ bản dịch), giây.
+    window: float
+    #: `None` = không đo được.
+    cps: float | None
+    max_cps: float
+    over: bool
+
+
+def cps_row(src: Segment, out: Segment, *,
+            limits: QaLimits = QaLimits()) -> CpsRow:
+    """CHỖ DUY NHẤT tính CPS.
+
+    `out` là đoạn DỊCH (bên được đo), `src` là đoạn nguồn cùng `i` (bên cho cửa sổ
+    thời gian). Gọi `cps_row(t, t)` khi không có đoạn nguồn tương ứng: cửa sổ nguồn
+    bằng 0 nên `_window` tự rơi về cửa sổ bản dịch — đúng quy tắc dự phòng đã có,
+    không phải một quy tắc mới.
+
+    `over` so trên giá trị CHƯA làm tròn. Đó là lý do nó phải đi kèm con số ra
+    ngoài: một client tự so `cps` (đã làm tròn để hiển thị) với `max_cps` sẽ nói
+    SAI ở đúng biên (21,04 CPS hiển thị là 21,0).
+    """
+    text = out.text.strip()
+    window = _window(src, out)
+    if window <= 0:
+        return CpsRow(i=out.i, chars=len(text), window=window, cps=None,
+                      max_cps=limits.max_cps, over=False)
+    cps = len(text) / window
+    return CpsRow(i=out.i, chars=len(text), window=window, cps=cps,
+                  max_cps=limits.max_cps, over=cps > limits.max_cps)
+
+
+def cps_issue(row: CpsRow) -> str | None:
+    """Chuỗi `cps:` cho `qa_issues`, sinh TỪ CÙNG dữ liệu với con số của route.
+
+    Trả `None` khi đoạn đó không có gì để báo (đo được và không vượt ngưỡng).
+    Định dạng giữ nguyên y như trước khi tách hàm — nó là hợp đồng grep được.
+
+    Nhánh `nowindow` ghi SỐ KÝ TỰ chứ không ghi một thời lượng: `0.0s` cho một cửa
+    sổ âm là con số bịa, và in `inf` thì `json.dumps` ném `ValueError: Out of range
+    float values are not JSON compliant`. Báo như thế này thay vì để phép chia giết
+    cả job dịch.
+    """
+    if row.cps is None:
+        return f"cps:{row.i}=nowindow/{row.chars}c"
+    if row.over:
+        return f"cps:{row.i}={row.cps:.1f}>{row.max_cps}"
+    return None
+
+
 def qa_translation(src: list[Segment], out: list[Segment], *, glossary: list[Term],
                    supports_glossary: bool, limits: QaLimits = QaLimits()) -> list[str]:
     """Sinh danh sách issue. Rỗng nghĩa là không thấy vấn đề tất định nào.
@@ -79,17 +146,11 @@ def qa_translation(src: list[Segment], out: list[Segment], *, glossary: list[Ter
             issues.append(f"empty:{s.i}")
             continue
 
-        duration = _window(s, t)
-        if duration <= 0:
-            # KHÔNG có cửa sổ dương nào để đo (cả nguồn lẫn bản dịch đều <= 0):
-            # đây là DỮ LIỆU HỎNG, không phải "hơi nhanh". Báo bất kể `max_cps`,
-            # và báo thay vì để ZeroDivisionError giết cả job dịch. Chuỗi vẫn bắt
-            # đầu bằng `cps:{id}=` như mọi issue CPS khác, nhưng ghi `nowindow`
-            # kèm số ký tự: KHÔNG in một thời lượng chưa từng đo được (`0.0s` cho
-            # một cửa sổ âm là con số bịa), và nói rõ đây không phải một tốc độ.
-            issues.append(f"cps:{s.i}=nowindow/{len(text)}c")
-        elif len(text) / duration > limits.max_cps:
-            issues.append(f"cps:{s.i}={len(text) / duration:.1f}>{limits.max_cps}")
+        # CPS: hình dạng chuỗi do `cps_issue` quyết, con số do `cps_row` tính —
+        # CÙNG một chỗ với con số mà `GET /api/translations/{id}` trả ra.
+        issue = cps_issue(cps_row(s, t, limits=limits))
+        if issue is not None:
+            issues.append(issue)
 
         # Mẫu số kẹp xuống 1: segment nguồn rỗng làm mọi bản dịch thành "quá dài"
         # với tỉ lệ vô hạn — đó là lỗi của dữ liệu nguồn, không phải của bản dịch.

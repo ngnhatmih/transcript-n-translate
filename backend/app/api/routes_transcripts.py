@@ -126,13 +126,27 @@ def readability(transcript_id: int, threshold: float = CPS_WARN,
     Ngưỡng mặc định là `CPS_WARN`; client hạ nó xuống để soi trước khi bản dịch
     dài ra (tiếng Việt dài gấp 2-3 lần tiếng Trung, nên dòng dịch đúng nghĩa
     vẫn có thể không đọc kịp).
+
+    Một đoạn có thời lượng `<= 0` KHÔNG được đi qua `reading_cps`: hàm đó trả
+    `float("inf")` (đúng về toán), mà `inf` thì `json.dumps` từ chối —
+    `ValueError: Out of range float values are not JSON compliant` ⇒ cả route 500
+    và người dùng mất TOÀN BỘ danh sách vì MỘT dòng dữ liệu hỏng. Cách xử ở đây
+    theo ĐÚNG nhánh `nowindow` mà `mt_qa.qa_translation` đã dùng: báo là KHÔNG ĐO
+    ĐƯỢC kèm số ký tự, KHÔNG in một tốc độ chưa từng đo được, và báo BẤT KỂ ngưỡng
+    — đây là dữ liệu hỏng, không phải "hơi nhanh". `chars` có mặt ở CẢ HAI nhánh để
+    hình dạng mỗi mục là một: người đọc không phải xử hai hình dạng.
     """
     transcript = _require_transcript(repos, transcript_id)
     too_fast = []
     for seg in transcript.segments:
+        chars = len("".join(seg.text.split()))
+        if seg.end - seg.start <= 0:
+            too_fast.append({"i": seg.i, "cps": None, "chars": chars,
+                             "start": seg.start, "end": seg.end})
+            continue
         cps = reading_cps(seg.text, seg.start, seg.end)
         if cps > threshold:
-            too_fast.append({"i": seg.i, "cps": round(cps, 1),
+            too_fast.append({"i": seg.i, "cps": round(cps, 1), "chars": chars,
                              "start": seg.start, "end": seg.end})
     return {"threshold": threshold, "too_fast": too_fast}
 

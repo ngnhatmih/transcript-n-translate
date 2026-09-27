@@ -282,3 +282,36 @@ def test_approve_does_not_bump_version(client):
     nếu không mọi bản dịch thành lỗi thời chỉ vì người dùng bấm 'duyệt'."""
     client.post(f"/api/transcripts/{client.tid}/approve")
     assert client.get(f"/api/transcripts/{client.tid}").json()["version"] == 1
+
+
+def test_readability_does_not_crash_on_a_zero_duration_segment(client):
+    """MỘT segment 0 giây KHÔNG được làm sập cả route.
+
+    `reading_cps` trả `inf` khi `end - start <= 0` (đúng về toán), nhưng `inf`
+    KHÔNG serialize được: `json.dumps` ném `ValueError: Out of range float values
+    are not JSON compliant` ⇒ route 500, và người dùng mất CẢ danh sách vì MỘT
+    dòng dữ liệu hỏng.
+
+    Cách xử theo ĐÚNG nhánh `nowindow` mà `mt_qa.qa_translation` đã dùng từ lâu:
+    báo là KHÔNG ĐO ĐƯỢC kèm số ký tự, KHÔNG in một tốc độ chưa từng đo được — và
+    báo BẤT KỂ ngưỡng, vì đây là DỮ LIỆU HỎNG chứ không phải "hơi nhanh".
+    """
+    sid = client.repos.add_source(kind="file", origin="z.mp4", media_path="m",
+                                  lang="zh")
+    tid = client.repos.add_transcript(
+        source_id=sid, engine="fw-large-v3-turbo", lang="zh",
+        segments=[Segment(i=0, start=5.0, end=5.0, text="你好")])
+
+    r = client.get(f"/api/transcripts/{tid}/readability")
+
+    assert r.status_code == 200, r.text
+    assert "Infinity" not in r.text, (
+        "`inf` lọt vào JSON chính là lỗi 500 cũ; `json.dumps` ghi nó là `Infinity`"
+    )
+    rows = {item["i"]: item for item in r.json()["too_fast"]}
+    assert 0 in rows, (
+        "segment KHÔNG đo được phải được BÁO, không được im lặng bỏ qua: im lặng "
+        "thì người dùng tưởng dòng đó đọc vừa"
+    )
+    assert rows[0]["cps"] is None, "không đo được thì không được bịa một tốc độ"
+    assert rows[0]["chars"] == 2, "vẫn phải nói được đã đếm bao nhiêu ký tự"

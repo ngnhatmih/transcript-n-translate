@@ -41,6 +41,7 @@ from app.api.deps import get_dirs, get_repos, get_specs
 from app.api.routes_jobs import _job_json
 from app.domain.job_state import phase_of
 from app.domain.models import Job
+from app.domain.mt_qa import QaLimits, cps_row
 from app.domain.paths import PathOutsideRoot, resolve_within
 from app.domain.staleness import is_stale, translation_summary_json
 from app.pipeline.export import FORMATS, MEDIA_TYPES, artifact_name
@@ -171,6 +172,57 @@ def list_translations(transcript_id: int, repos=Depends(get_repos)):
         _summary(row, stale=is_stale(transcript.version, row.transcript_version))
         for row in repos.list_translations_for_transcript(transcript_id)
     ]
+
+
+@router.get("/{translation_id}")
+def get_translation(translation_id: int, repos=Depends(get_repos)):
+    """Chi tiết MỘT bản dịch: đoạn ĐÃ DỊCH + CPS dạng SỐ — nguồn cho §4.3.
+
+    Vì sao cần một route riêng thay vì thêm khoá vào `GET /api/translations`: hình
+    dạng của một phần tử trong danh sách đã được KÝ thành hợp đồng (`contract.test.ts`
+    ghim nó trên backend thật), nên mở rộng nó là phá hợp đồng đã ký. Trước route
+    này KHÔNG JSON nào mang `segments` của bản dịch, và `qa_issues` — nơi chuỗi
+    `cps:` sống — không xuất hiện trong MỘT response HTTP nào, nên màn Đối chiếu
+    không có nguồn nào cho cột phải và cho cột CPS.
+
+    CPS KHÔNG được tính lại ở đây. `mt_qa.cps_row` là chỗ DUY NHẤT tính nó, và cũng
+    là chỗ sinh chuỗi `cps:` trong `qa_issues` — nên con số giao diện hiển thị và
+    chuỗi mà QA ghi lại KHÔNG THỂ lệch nhau, và client không phải parse một chuỗi
+    hiển thị để lấy con số nó hiển thị.
+
+    `segments` là đoạn của BẢN DỊCH, nhưng cửa sổ thời gian để đo CPS vẫn là cửa sổ
+    NGUỒN (`mt_qa._window`): đó mới là khoảng người xem thật sự thấy dòng dịch.
+    Đoạn nguồn không có `i` tương ứng thì `cps_row(t, t)` rơi về cửa sổ bản dịch —
+    quy tắc dự phòng đã có sẵn, không phải quy tắc mới.
+
+    `cps.rows[].over` là thứ client phải đọc, KHÔNG phải tự so `cps > max_cps`:
+    `over` so trên giá trị chưa làm tròn, còn `cps` đã làm tròn để hiển thị nên ở
+    đúng biên (21,04 CPS ⇒ hiện 21,0) phép so của client sẽ nói sai.
+    """
+    row = _require_translation(repos, translation_id)
+    transcript = _require_transcript(repos, row.transcript_id)
+    limits = QaLimits()
+    source_by_id = {s.i: s for s in transcript.segments}
+    rows = [cps_row(source_by_id.get(t.i, t), t, limits=limits)
+            for t in row.segments]
+    return {
+        **_summary(row, stale=is_stale(transcript.version, row.transcript_version)),
+        "segments": [s.to_json() for s in row.segments],
+        "cps": {
+            "max_cps": limits.max_cps,
+            "rows": [
+                {
+                    "i": r.i,
+                    "chars": r.chars,
+                    "window": r.window,
+                    "cps": None if r.cps is None else round(r.cps, 1),
+                    "max_cps": r.max_cps,
+                    "over": r.over,
+                }
+                for r in rows
+            ],
+        },
+    }
 
 
 @router.patch("/{translation_id}")
