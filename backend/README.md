@@ -80,34 +80,35 @@ transcript_reviewed` được thêm ở `a428334` — **cùng commit đã sửa 
 số nền không được bump. Nó tồn tại để phát hiện TRÔI, nên một số sai làm mọi lần
 chạy báo dương tính giả.
 
-`827/13` → `828/13`: đợt dọn nợ P1 thêm 1 bài vào
-`tests/test_schema_llm_calls_index.py` — một ca dựng DB **v2** (schema của
-`4a747e6`, đã có `translations.status` và `version='2'`, chỉ thiếu
-`idx_llm_calls_job`) để ghim rằng gate `executescript(SCHEMA_SQL)` sau
-`version < SCHEMA_VERSION` là hồi quy: nó giữ ca v1 xanh trong khi mọi DB v2 đang
-tồn tại vĩnh viễn không nhận index.
-Năm lần bump gần nhất. `819/13` → `821/13`: đợt dọn nợ thêm
-`tests/test_schema_llm_calls_index.py` (2 bài chọn được, cả 2 chạy thật).
-`821/13` → `829/13`: đợt dọn nợ P2 (Giai đoạn 2) thêm **8** bài chọn được —
-`M-11` 3 bài (`safe_basename` trần độ dài + route upload thật), `M-14` 1 bài
-(hai route nói cùng một câu cho lỗi engine lạ), `M-4` 1 bài (auto-forward ghim
-`glossary_version`), `M-12` 3 bài (`audio_path` phải chứng minh containment +
-`is_file()`). `829/13` → `828/13`: cùng đợt P2, `M-13` **gỡ** một bài —
+Sáu lần bump gần nhất, theo ĐÚNG thứ tự thời gian của commit. `819/13` → `821/13`:
+đợt dọn nợ thêm `tests/test_schema_llm_calls_index.py` (2 bài chọn được, cả 2
+chạy thật). `821/13` → `829/13`: đợt dọn nợ P2 (Giai đoạn 2) thêm **8** bài chọn
+được — `M-11` 3 bài (`safe_basename` trần độ dài + route upload thật), `M-14` 1
+bài (hai route nói cùng một câu cho lỗi engine lạ), `M-4` 1 bài (auto-forward
+ghim `glossary_version`), `M-12` 3 bài (`audio_path` phải chứng minh containment
++ `is_file()`). `829/13` → `828/13`: cùng đợt P2, `M-13` **gỡ** một bài —
 `test_app_exposes_the_same_mt_engines_object`, bài duy nhất ghim thuộc tính
 `app.state.mt_engines` mà KHÔNG mã sản xuất nào đọc; bất biến thật của nó
 ("handler và composition root dùng CÙNG một dict engine") vẫn được ghim bằng
 `tests/test_mt_wiring.py::test_translate_handler_is_registered_with_the_same_
 engines_dict`. `828/13` → `829/13`: `M-10` thêm 1 bài ghim rằng **ba** đường
 Ollama (`/api/status`, phép dò availability, `base_url` của engine) cùng đi qua
-`app.config.resolve_ollama_base_url`, tức cùng tôn trọng `OLLAMA_HOST`. Vì
-`ffmpeg` có mặt, không bài nào skip ở đây — nên nếu con số này "nhảy" mà không có
-bài nào được thêm hay gỡ, đó đúng là TRÔI cần điều tra.)
+`app.config.resolve_ollama_base_url`, tức cùng tôn trọng `OLLAMA_HOST`.
 `829/13` → `827/13`: cùng đợt P2, `M-3` **gỡ HAI** bài vì tiền đề của chúng là
 lần GHI trên đĩa của route spec (`routes_translations._materialise` gọi
-`domain.paths.resolve_within`), thứ `M-3` xoá hẳn: `test_the_spec_route_proves_containment_before_writing` và
-`test_the_spec_route_still_serves_the_body_when_containment_fails`. Hai vế của chúng KHÔNG mất — xem
-khối thay thế ở cuối `tests/test_api_export_by_translation.py`. `test_the_spec_route_materialises_the_same_artifact_name` được ĐỔI TÊN thành
+`domain.paths.resolve_within`), thứ `M-3` xoá hẳn:
+`test_the_spec_route_proves_containment_before_writing` và
+`test_the_spec_route_still_serves_the_body_when_containment_fails`. Hai vế của
+chúng KHÔNG mất — xem khối thay thế ở cuối
+`tests/test_api_export_by_translation.py`;
+`test_the_spec_route_materialises_the_same_artifact_name` được ĐỔI TÊN thành
 `test_the_spec_route_writes_no_artifact_to_disk` (không đổi số lượng).
+`827/13` → `828/13` (bước CUỐI của đợt P2): `P1-1` thêm 1 bài vào
+`tests/test_schema_llm_calls_index.py` — một ca dựng DB **v2** (schema của
+`4a747e6`: đã có `translations.status` và `version='2'`, chỉ thiếu
+`idx_llm_calls_job`) để ghim rằng gate `executescript(SCHEMA_SQL)` sau
+`version < SCHEMA_VERSION` là HỒI QUY: nó giữ ca v1 xanh trong khi mọi DB v2
+đang tồn tại vĩnh viễn không nhận index.
 
 Số này chỉ để phát hiện TRÔI: một thay đổi làm nó **giảm** là một bài đã bị gỡ
 hoặc bị bỏ quên, không phải "suite nhanh hơn".
