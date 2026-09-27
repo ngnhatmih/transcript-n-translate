@@ -1,5 +1,11 @@
-// Test ghim phep kiem CJS con sot. Mutation da do: bo `Object.defineProperty(exports, ...)` khoi
-// fixture thi bai 1 DO (khong bat duoc gi) — tuc bai khong rong. Xem bao cao I-4.
+// Test ghim phep kiem CJS con sot.
+//
+// Mutation DA DO de chung minh test khong rong: xoa mau "exports tran" khoi CJS_LEFTOVER_PATTERNS
+// trong build/cjs-leftovers.mjs => bai 1 DO (`pass 4 fail 1`, exit 1); khoi phuc => XANH (`pass 5`).
+// Phai pha THU NO BAO VE, khong phai pha fixture: bo dong `Object.defineProperty(exports, ...)`
+// khoi fixture KHONG lam bai 1 do, vi dong `exports.probeValue = 41;` con lai van khop mau
+// (lookahead chi loai `[\w$:]`, ma o day `exports` theo sau la `.`) — da do, dung khai mot mutation
+// khong that.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
@@ -24,6 +30,13 @@ test("bat duoc mau Object.defineProperty(exports, \"__esModule\", ...) — thu b
 test("bat duoc require() tran va module.exports tran", () => {
   assert.equal(findCjsLeftovers('var a = require("./x");').length, 1);
   assert.equal(findCjsLeftovers("module.exports = { a: 1 };").length, 1);
+});
+
+test("sample KHONG duoc rong khi `exports` dung dau dong (thong bao loi phai co bang chung)", () => {
+  const hits = findCjsLeftovers('"use strict";\nexports.probeValue = 41;');
+  assert.equal(hits.length, 1);
+  assert.ok(hits[0].sample.length > 0, `sample rong: ${JSON.stringify(hits[0])}`);
+  assert.ok(hits[0].sample.includes("exports"), `sample phai chua dinh danh: ${JSON.stringify(hits[0])}`);
 });
 
 test("KHONG bao dong gia voi bundle da shim dung (do tren bundle that 665144 ky tu)", () => {

@@ -34,7 +34,11 @@ export function findCjsLeftovers(code) {
   for (const { name, re } of CJS_LEFTOVER_PATTERNS) {
     const match = re.exec(code);
     if (match === null) continue;
-    const sample = code.slice(match.index, match.index + 64).split("\n")[0].trim();
+    // Cat tu VI TRI DINH DANH, khong phai tu match.index: mau co the khop ky tu dung truoc
+    // (`(?:^|[^.\w$])`, ke ca `\n`), nen match.index tro vao `\n` va sample ra chuoi RONG —
+    // guard bao loi ma khong dua duoc bang chung nao.
+    const start = match.index + match[0].search(/[\w$]/);
+    const sample = code.slice(start, start + 64).split("\n")[0].trim();
     hits.push({ name, sample });
   }
   return hits;
