@@ -77,6 +77,22 @@ npm i -D vite@^6 @vitejs/plugin-react typescript @types/react @types/react-dom
 
 Không cài gì khác. Nếu một bước nào đó thôi thúc bạn thêm `tailwindcss`, `@tanstack/*`, `zustand`, `@mui/*` — đó là thứ spec §2 đã cố ý loại; dừng lại.
 
+Rồi **ghi `scripts` vào `package.json`** — `npm init -y` **không** tạo chúng, và plan này dạy `npm run dev` / `npm test` / `npm run e2e` ở nhiều task sau:
+
+```json
+{
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "test": "vitest run",
+    "e2e": "playwright test"
+  }
+}
+```
+
+Giữ nguyên các trường khác mà `npm init -y` đã tạo.
+
 - [ ] **Step 2: `vite.config.ts` — cổng và proxy**
 
 ```ts
@@ -172,18 +188,32 @@ git commit -m "feat(fe): khung Vite + React 19 o cong 3100, proxy /api sang 8620
 **Vì sao không sinh type:** spec §2 chốt rằng thứ **nhỏ nhất** sập khi shape trôi là một contract test, và nó sập **ồn ào**; codegen thêm một dev-dependency **và** một bước phải nhớ chạy lại.
 
 **Files:**
-- Create: `frontend/src/api/types.ts`, `frontend/src/api/client.ts`, `frontend/src/api/endpoints.ts`, `frontend/src/api/contract.test.ts`, `frontend/vitest.config.ts`
+- Create: `frontend/src/api/types.ts`, `frontend/src/api/client.ts`, `frontend/src/api/endpoints.ts`, `frontend/src/api/contract.test.ts`
+- Modify: `frontend/vite.config.ts` (**KHÔNG** tạo `vitest.config.ts` riêng — xem Step 1)
 
 **Interfaces:**
 - Consumes: cổng 3100/proxy của Task 1
 - Produces: `type Job`, `Source`, `Transcript`, `Segment`, `Translation`, `Term`, `EngineSpec`, `Status` · `api.get/post/patch` ném `ApiError` có `status` và `detail` · các hàm trong `endpoints.ts` · suite Vitest chạy được bằng `npm test`
 
-- [ ] **Step 1: Cài Vitest**
+- [ ] **Step 1: Cài Vitest và khai `test:` NGAY TRONG `vite.config.ts`**
 
 ```bash
 cd frontend
-npm i -D vitest @vitest/ui
+npm i -D vitest
 ```
+
+**Không** tạo `vitest.config.ts`. Vitest đọc `vite.config.ts`, nên một tệp cấu hình thứ hai là **nguồn sự thật thứ hai cho cùng một cấu hình** — đúng loại lỗi mà Giai đoạn 2 phải đi vá (hai builder JSON cho một hàng). Thêm vào `vite.config.ts`:
+
+```ts
+/// <reference types="vitest" />
+// ... trong defineConfig:
+  test: {
+    environment: "jsdom",       // cac test Testing Library can DOM
+    include: ["src/**/*.test.{ts,tsx}"],
+  },
+```
+
+(`jsdom` sẽ được cài cùng `@testing-library/react` ở task nào cần — task này chỉ cần môi trường `node` cho contract test; nếu `jsdom` chưa có thì để `environment: "node"` và đổi ở Task 6.)
 
 - [ ] **Step 2: Viết contract test ĐỎ trước — và nó phải chạy trên BACKEND THẬT**
 
@@ -658,10 +688,43 @@ it("ghim ban B thi hien them cot so sanh", async () => {
 **Files:**
 - Create: `frontend/src/screens/GlossaryScreen.tsx`, `frontend/src/screens/GlossaryScreen.test.tsx`
 - Modify: `frontend/src/shell/App.tsx`
+- Modify (**backend, xem Step 0**): `backend/app/api/routes_glossary.py`, `backend/tests/test_api_glossary.py`
 
 **Interfaces:**
-- Consumes: `endpoints.listTerms`, `createTerm`, `patchTerm`
-- Produces: bảng thuật ngữ + form; trước khi lưu hiện **số bản dịch bị ảnh hưởng** lấy từ `affected`; và nói rõ đổi thuật ngữ **chưa duyệt** thì không ảnh hưởng gì
+- Consumes: `endpoints.listTerms`, `createTerm`, `patchTerm`, **`affectedPreview`**
+- Produces: bảng thuật ngữ + form; trước khi lưu hiện **số bản dịch bị ảnh hưởng**; và nói rõ đổi thuật ngữ **chưa duyệt** thì không ảnh hưởng gì
+
+- [ ] **Step 0: BACKEND — thêm MỘT endpoint chỉ-đọc, vì §12.3 đòi thứ API chưa phục vụ được**
+
+Spec UI §12.3: *"Sửa một thuật ngữ → thấy ngay bao nhiêu bản dịch bị ảnh hưởng **trước khi bấm lưu**"*. Backend hiện chỉ trả `affected` **sau** khi ghi (`POST`/`PATCH`). Tính lại ở client **bị cấm** bởi spec frontend §2 — nó tạo nguồn sự thật thứ hai cho đúng đại lượng Giai đoạn 2 vừa phải đi vá.
+
+Thêm vào `routes_glossary.py`:
+
+```python
+@router.get("/affected")
+def affected_preview(lang: str, term: str, translation: str, approved: bool = False,
+                     repos=Depends(get_repos)):
+    """Chỉ-đọc: con số mà `POST`/`PATCH` SẼ trả. Gọi LẠI chính `affected_segments`.
+
+    Cố ý không tính lại: hai chỗ tính cùng một đại lượng là đúng lớp lỗi mà
+    Giai đoạn 2 phải đi vá hai lần.
+    """
+    old = [t for t in repos.list_terms(lang=lang) if t.term != term]
+    neue = [t for t in repos.list_terms(lang=lang) if t.term != term]
+    neue.append(Term(id=None, lang=lang, term=term, translation=translation,
+                     approved=approved))
+    out = []
+    for t in repos.list_transcripts():
+        if t.lang != lang:
+            continue
+        if affected_segments(t.segments, old, neue):
+            out.append(t.id)
+    return {"affected": out}
+```
+
+Đường dẫn phải đứng **trước** `/{term_id}` nếu không FastAPI sẽ khớp `affected` thành một `term_id` — kiểm bằng cách gọi thật.
+
+Test đỏ trước: tạo một term chưa có trong DB, gọi `GET /api/glossary/affected?lang=zh&term=mới&translation=x` ⇒ phải trả `{"affected": []}`; rồi gieo một transcript chứa `mới` ⇒ phải trả đúng id đó. Chạy `python -B -m pytest tests/test_api_glossary.py` từ `backend/`.
 
 - [ ] **Step 1: Test ĐỎ**
 
