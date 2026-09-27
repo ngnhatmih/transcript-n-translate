@@ -127,6 +127,19 @@ Vòng sửa Task 2 (`166c2a9` + `f5a625b`) đóng 2 Critical + I-1, và **đổi
 6. **Nợ `N-6` (backend, ngoài phạm vi giai đoạn này):** một hàng `transcripts` có payload hỏng trong cột `segments`
    làm **sập CẢ** `GET /api/transcripts` bằng 500, không chỉ hàng đó (`list_transcripts` gọi `_row_to_transcript`
    cho mọi hàng). Đo được với `words` = chuỗi / số / mảng số. **Một hàng hỏng giết cả danh sách.**
+7. **LUẬT MẠNH HƠN MỤC 1 — ĐỪNG VIẾT CON SỐ VÀO COMMENT. HÃY VIẾT LỆNH.**
+   Mục 1 nói "mỗi con số phải kèm lệnh sinh ra nó". Task 2 đã chứng minh **như thế vẫn chưa đủ**: khối header
+   `types.ts` tốn **BỐN vòng sửa** và có **BỐN lần liên tiếp một con số nói dối** —
+   (1) `9 type` (thật 10, **nguồn là brief của người điều phối**); (2) `c65090b` xếp `OllamaState` vào nhóm
+   "không có bài kiểm" (thật 2 hit); (3) `3a7d84f` viết "**Ba** nhóm" trong khi có **bốn**; (4) bản nháp vòng #4
+   **đếm `JobSlim` hai lần**. **Không lần nào bắt được bằng cách ĐỌC** — cả bốn đều cần một lệnh.
+   ⇒ **Quy tắc cho Tasks 3–13: nêu LỆNH (kèm `cwd`), để người đọc tự đếm.** Chỉ khi buộc phải có số thì số đó
+   phải do lệnh in ra và **dán ngay cạnh**. Một khối comment liệt kê/đếm là **nghĩa vụ bảo trì không ai canh**.
+8. **Lời khai trong TIN NHẮN cũng phải bị đo.** Vòng kiểm chứng #2 bác bỏ một con số **không tái lập được bằng
+   bất kỳ bộ lọc nào**: implementer khai "chỉ bỏ comment thì ra **200** dòng", nhưng đo thật là 366 dòng,
+   167 dòng comment ⇒ `366 − 167 = 199`; bỏ comment + dòng rỗng ⇒ **170**; giữ dòng rỗng ⇒ 337/367.
+   ⇒ **Khi chuyển tiếp một con số từ báo cáo agent sang brief/tài liệu, phải tự đo trước** — người điều phối
+   đã lặp lại con số đó mà không đo. **Một con số nằm trong lời khai cũng là một con số có thể nói dối.**
 
 ## Quy ước thẩm mỹ — spec UI thắng, skill chỉ là checklist
 
