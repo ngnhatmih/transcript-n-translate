@@ -13,6 +13,8 @@ import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { transformSync } from "@swc/core";
 
+import { findCjsLeftovers } from "./build/cjs-leftovers.mjs";
+
 const ROOT = dirname(fileURLToPath(import.meta.url));
 
 // React 19 chi phat CJS (`exports.X = ...`), khong co entry ESM. Thay vi keo ca cay shim
@@ -175,6 +177,35 @@ function htmlPlugin() {
 // => Bao ve that den tu `onwarn` duoi day (UNRESOLVED_IMPORT + MISSING_EXPORT), khong phai tu guard.
 // Giu lai mot cai ten noi doi thi lan sau nguoi sua se tin nham cho. Xem them guard CJS o duoi.
 
+/**
+ * Guard CJS (I-4): bat bundle con tham chieu TRAN toi `exports` / `require(` / `module.exports`.
+ *
+ * Khac guard `assert-no-bare-imports` da bi xoa o I-3: cai nay NAM O `generateBundle` va THUC SU
+ * CHAY — `generateBundle` chay o moi lan build (cssPlugin/htmlPlugin da dung no), va da duoc chung
+ * minh DO bang mot fixture CJS that (xem commit I-4).
+ *
+ * Vi sao can: shim `cjs-inproc` chi doi duoc `exports.X = ...`. Goi CJS dung
+ * `Object.defineProperty(exports, "__esModule", { value: true })` (370+ tep trong node_modules may
+ * nay) di qua build XANH roi nem `ReferenceError: exports is not defined` trong trinh duyet.
+ */
+function cjsLeftoverPlugin() {
+  return {
+    name: "assert-no-cjs-leftovers",
+    generateBundle(_options, bundle) {
+      for (const file of Object.values(bundle)) {
+        if (file.type !== "chunk") continue;
+        const hits = findCjsLeftovers(file.code);
+        if (hits.length === 0) continue;
+        this.error(
+          "bundle con ma CJS chua duoc shim (trinh duyet se nem ReferenceError): " +
+            hits.map((hit) => `${hit.name} -> ${hit.sample}`).join(" | ") +
+            ". Shim cjs-inproc chi doi duoc `exports.X =`; dang CJS khac thi phai shim them hoac doi goi.",
+        );
+      }
+    },
+  };
+}
+
 rmSync(join(ROOT, "dist"), { recursive: true, force: true });
 
 export default {
@@ -187,7 +218,7 @@ export default {
     assetFileNames: "assets/[name][extname]",
     sourcemap: true,
   },
-  plugins: [resolvePlugin(), cjsPlugin(), swcPlugin(), cssPlugin(), htmlPlugin()],
+  plugins: [resolvePlugin(), cjsPlugin(), swcPlugin(), cssPlugin(), htmlPlugin(), cjsLeftoverPlugin()],
   onwarn(warning, warn) {
     if (warning.code === "UNRESOLVED_IMPORT" || warning.code === "MISSING_EXPORT") throw new Error(warning.message);
     warn(warning);
