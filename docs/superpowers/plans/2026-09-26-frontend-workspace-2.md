@@ -6,7 +6,7 @@
 
 **Architecture:** SPA React 19 thuần client, **không router** — một shell với `mode ∈ {edit, compare, glossary}`. Trạng thái server nằm ở một tầng `fetch` mỏng cộng **đúng một** subscription SSE tới `/api/jobs/stream`; trạng thái client nằm trong một reducer. Không ghi kiểu đoán trước cho bản dịch.
 
-**Tech Stack:** React 19 · TypeScript · **Rollup** + `dev-server.mjs` (Vite **bị loại** — xem ERRATA) · **`node --test --test-isolation=none`** + loader `@swc/core` trong tiến trình (Vitest **và** Testing Library **bị loại** — xem `Q-1`) · Playwright · CSS thuần + custom property · font self-host woff2.
+**Tech Stack:** React 19 · TypeScript · **Rollup** + `dev-server.mjs` (Vite **bị loại** — xem ERRATA) · **`node --test --test-isolation=none`** + loader `@swc/core` trong tiến trình (Vitest **bị loại** — nó cần Vite/esbuild, mà esbuild **spawn**; **Testing Library thì DÙNG ĐƯỢC** — ERRATA #5 mục 2) · CSS thuần + custom property · font self-host woff2.
 
 **Spec:** `docs/superpowers/specs/2026-09-26-frontend-workspace-2-design.md`
 
@@ -22,7 +22,10 @@
 - **Không tính lại ở client thứ backend đã tính:** CPS lấy từ backend, `available` lấy từ `/api/registry`, số bản dịch bị ảnh hưởng lấy từ `affected`. Hai nơi tính cùng một đại lượng là đúng thứ Giai đoạn 2 vừa phải đi vá.
 - **API cần nhớ:** trên endpoint transcript, mục `translations[]` dùng khoá **`transcript_version`** (không phải `translated_from_version`) và **có** `status` + `transcript_id`.
 - Baseline tham chiếu: backend **821 passed, 13 deselected** (`python -B -m pytest` từ `backend/`). Giai đoạn này **không** được làm giảm số đó.
-- **Cài đặt ra ngoài workspace cần người dùng duyệt** — `npx playwright install` tải trình duyệt và sẽ bị sandbox từ chối. Dừng và hỏi, đừng tự vượt.
+- **`npx playwright install` là VÔ NGHĨA ở đây — đừng thử lại, đừng xin duyệt.** Không chỉ bị từ chối khi tải:
+  **Chromium không thể khởi động** (`FATAL:mojo…platform_channel.cc:187 … Access is denied (0x5)`), bản tải về **và**
+  Edge/Chrome có sẵn đều vậy (ERRATA #5 mục 3). Cần thêm gói npm thì dùng công thức ERRATA #5 mục 1 —
+  việc đó ghi trong workspace nên **không cần duyệt**.
 
 ## ⚠️ ERRATA — công cụ đã đổi sau khi ĐO, đọc trước khi làm bất cứ task nào
 
@@ -37,11 +40,11 @@ và Vite 6 **không có** đường pre-bundle dependency nào ngoài esbuild �
 | `npm run dev` (Vite) | `npm run dev` → **`node dev-server.mjs`** (đã có; phục vụ `dist/` + proxy `/api` → 8620) |
 | (không có) | `npm run build` → **`rollup -c`**; `npm run typecheck` → `tsc --noEmit` |
 | `npm i -D vitest` | **KHÔNG cài Vitest** — nó dựng trên Vite nên cũng chết. Dùng **`node --test --test-isolation=none`** (có sẵn trong Node 24) |
-| Testing Library | **KHÔNG dùng được** — `jsdom`/`@testing-library/react`/`happy-dom` đều **không có** và `npm i` bị chặn. Test component dùng `react-dom/server.renderToStaticMarkup`; xem `Q-1` |
+| Testing Library | ⚠️ **ĐÃ LẬT Ở ERRATA #5 — DÙNG ĐƯỢC.** Kết luận cũ (*"đều không có và `npm i` bị chặn"*) **SAI**: chỉ cần `--cache` trong workspace. `jsdom` + `@testing-library/react` **cài được VÀ chạy thật** dưới `node --test --test-isolation=none` (đã đo click thật `bam 0 → bam 1`, EXITCODE=0). ⇒ Dùng cho **TƯƠNG TÁC** ở T5–T11; `react-dom/server.renderToStaticMarkup` vẫn tốt cho render thuần. **Chi phí:** jsdom cộng ~12 s mỗi tiến trình test |
 | `npm test -- contract` | `npm test` (đã đổi trong `package.json`) — nếu gọi tay thì **`node --import ./test/swc-loader.mjs --test --test-isolation=none <tệp>`**. **`--test-isolation=none` là BẮT BUỘC**: thiếu nó runner spawn con và chết `EPERM` trên máy này |
 | `import { describe, expect, it } from "vitest"` | `import { describe, it } from "node:test"` + `import assert from "node:assert/strict"` — `expect(x).toBe(y)` → `assert.equal(x, y)`, `toBeInTheDocument()` → `assert.ok(el)` |
-| `frontend/package-lock.json` | **ĐÃ CŨ** (mô tả cây Vite cũ) vì `npm i` không ghi được cache trong sandbox. Phải `npm install` lại ở môi trường bình thường trước khi ai đó tin `npm ci` — implementer **không** được sửa tay tệp này |
-| `npm i` bất kỳ | **CÓ THỂ CHẾT `EPERM`** ở `AppData\Local\npm-cache`. Nếu chết: báo lại, **đừng** xin vượt sandbox; tìm gói đã có trong `node_modules` hoặc viết tay |
+| `frontend/package-lock.json` | **ĐÃ CŨ** (mô tả cây Vite cũ) — nhưng nay **CẬP NHẬT ĐƯỢC TẠI CHỖ** bằng công thức ERRATA #5, nên vế *"phải làm ở môi trường bình thường"* **không còn đúng**. Implementer **vẫn KHÔNG** được sửa tay tệp này: chỉ `npm` được ghi nó. `npm ci` (`G-2`) chỉ đúng **sau khi** lockfile được `npm install` lại |
+| `npm i` bất kỳ | ⚠️ **ĐÃ SỬA Ở ERRATA #5.** Chết `EPERM` vì **cache nằm NGOÀI workspace** (`open '…\AppData\Local\npm-cache\_cacache\tmp\***'`), **KHÔNG** phải named pipe. Cách đúng: `npm i [-D] <gói> --cache C:\Users\Admin\Desktop\ngn\deepseek\.npm-cache --ignore-scripts` ⇒ **đã đo chạy được** (`added 56 packages in 5s`, EXITCODE=0). Sau MỖI lần thêm gói: chạy lại `npm test`, phải vẫn `tests 16 / pass 14 / fail 2` EXIT=1 |
 
 **Bảng này áp cho MỌI khối mã mẫu ở MỌI task bên dưới.** Các khối đó vẫn còn viết theo Vitest / Testing Library / Vite —
 đó là **chưa được vá**, không phải "đã đối chiếu". Khi làm một task, chuyển khối mã của nó theo bảng này và theo `Q-1`.
@@ -141,6 +144,86 @@ Vòng sửa Task 2 (`166c2a9` + `f5a625b`) đóng 2 Critical + I-1, và **đổi
    ⇒ **Khi chuyển tiếp một con số từ báo cáo agent sang brief/tài liệu, phải tự đo trước** — người điều phối
    đã lặp lại con số đó mà không đo. **Một con số nằm trong lời khai cũng là một con số có thể nói dối.**
 
+## ⚠️ ERRATA #5 — BA KẾT LUẬN "BẤT KHẢ" CỦA PLAN ĐÃ BỊ BÁC BỎ BẰNG ĐO (đọc trước MỌI task còn lại)
+
+Vòng điều tra bắt đầu từ một câu hỏi hẹp ("Task 12 có chạy được không?") và kết thúc bằng việc **lật ba kết luận**
+mà cả giai đoạn đang dựa vào. Mọi phép đo làm ở scratch **ngoài repo**; mỗi dòng dưới đây có errno/syscall/đường dẫn.
+
+### 1. `npm i` **KHÔNG** bị chặn — chỉ cần đặt cache TRONG workspace
+
+Chính ERRATA này (dòng 44) đã ghi *"`npm i` bất kỳ **CÓ THỂ CHẾT `EPERM`** ở `AppData\Local\npm-cache`"* —
+**nửa sau của câu đó là manh mối, và chưa ai thử hệ quả của nó.** Đo:
+
+| Lệnh | Kết quả |
+|---|---|
+| `npm i -D @playwright/test` (cache mặc định) | ❌ `FetchError … EPERM: operation not permitted, open 'C:\Users\Admin\AppData\Local\npm-cache\_cacache\tmp\***'` |
+| `npm i -D @playwright/test --cache C:\Users\Admin\Desktop\ngn\deepseek\.npm-cache` | ✅ `added 3 packages in 2s`, **EXITCODE=0** |
+| `npm i -D jsdom @testing-library/react --cache <ws>` | ✅ `added 56 packages in 5s`, **EXITCODE=0** |
+| `npm i @swc/core` (có postinstall) | ❌ `EXITCODE=-4048` (postinstall **spawn**) |
+| `npm i @swc/core --ignore-scripts` | ✅ `added 4 packages`, **EXITCODE=0** — và `transformSync` **chạy đúng** (`SWC_OK`) |
+
+⇒ **Lỗi KHÔNG phải named pipe.** Nó là `open` bị từ chối trên **đường dẫn cache NGOÀI workspace**.
+⇒ **Công thức BẮT BUỘC cho mọi lệnh cài trong giai đoạn này:**
+`npm i [-D] <gói> --cache C:\Users\Admin\Desktop\ngn\deepseek\.npm-cache --ignore-scripts`
+(`--ignore-scripts` để postinstall không spawn — đã đo `@swc/core` **vẫn chạy đúng** sau đó).
+Và **sau MỌI lần thêm dependency vào `frontend/`**: chạy lại `npm test` ngay, phải vẫn
+`tests 16 / pass 14 / fail 2 / cancelled 0` EXIT=1; nếu harness chết thì **hoàn tác ngay**.
+
+### 2. jsdom + Testing Library **DÙNG ĐƯỢC** — kết luận cũ ở `Q-1` SAI
+
+`Q-1` dòng 220 chốt: *"`jsdom`, `@testing-library/react`, `@testing-library/dom`, `happy-dom` — đều **không có**,
+và **`npm i` bị chặn**"*. Vế thứ hai sai (mục 1) ⇒ **cả kết luận sai**. Không chỉ cài được — nó **chạy THẬT**
+dưới `node --test --test-isolation=none`:
+
+```
+BEFORE_CLICK bam 0
+AFTER_CLICK bam 1
+✔ jsdom + RTL: render that va click that (93.361ms)
+ℹ tests 1 / pass 1 / fail 0 / cancelled 0      EXITCODE=0
+```
+
+⇒ **`Q-1` mục 3 ("Không có DOM ⇒ không jsdom, không Testing Library") BỊ BÁC BỎ.**
+⇒ **`Q-1` mục 4** ("test đơn vị KHÔNG mô phỏng được tương tác") **không còn đúng**: click/focus/bàn phím
+**mô phỏng được**, chạy **trong tiến trình**, **không spawn**.
+⇒ **Dòng 40, dòng 416 và Step 3 của Task 6 (dòng 895) phải đọc theo ERRATA này.**
+**Chi phí phải biết:** jsdom làm mỗi tiến trình test chậm thêm **~12 s** (đo `duration_ms 12974`, phần lớn là import jsdom).
+
+### 3. Playwright / trình duyệt thật **BẤT KHẢ** — và ĐÂY mới là named pipe thật
+
+| Bước | Kết quả |
+|---|---|
+| Cài `@playwright/test` | ✅ (mục 1) |
+| `playwright install chromium` | ❌ `Failed to download … caused by **spawn EPERM**`; stack `Object.fork` → `downloadBrowserWithProgressBarOutOfProcess` |
+| `chromium.launch({executablePath: msedge.exe})` — Edge **CÓ SẴN** trên máy | ❌ `spawn EPERM`; call log có cờ **`--remote-debugging-pipe`** |
+| Tự spawn Edge `stdio:'ignore'` + `--remote-debugging-port=9222` (để `connectOverCDP`, tránh pipe) | ⚠️ spawn **được**, nhưng `cdp_up: false` |
+| Bắt stderr của chính Edge | ❌ **`FATAL:mojo\public\cpp\platform_channel.cc:187] Check failed: . : Access is denied. (0x5)`**; exit `2147483651` |
+
+**NGUYÊN NHÂN GỐC: Chromium tự dùng NAMED PIPE cho IPC (Mojo) của chính nó.** Không phải chuyện tải về,
+không phải chuyện Playwright, không phải chuyện quyền chạy tệp.
+⇒ **Trình duyệt KHÔNG THỂ khởi động trong sandbox này** — bản tải về **hay** Edge/Chrome **có sẵn** đều vậy.
+⇒ **Task 12 theo đúng hình dạng plan (`playwright test` trên trình duyệt thật) là BẤT KHẢ.** Xem mục 4.
+
+### 4. Hệ quả bắt buộc — đổi Task 12 và T11, và KHÔNG được hứa thứ không đo được
+
+1. `"e2e": "playwright test"` trong `frontend/package.json` là **script KHÔNG BAO GIỜ chạy được** —
+   cùng lớp lỗi với `C-1` (`"test": "vitest run"`). Phải **sửa hoặc bỏ**, và **nói ra**.
+2. **Task 12 đổi hình dạng:** thay "trình duyệt thật" bằng **(a)** test **tương tác** bằng jsdom + Testing Library
+   chạy trên **backend THẬT**, và **(b)** render bốn màn hình bằng **dữ liệu thật**. Vẫn phải gieo **đủ hai thứ**
+   vào `data/app.db` (ERRATA #3 mục 3) — lý do đó **không đổi**.
+3. **T11 (bàn phím) nay CHỨNG MINH ĐƯỢC** bằng jsdom (`fireEvent.keyDown`/`userEvent`, khẳng định trên DOM thật).
+   Plan cũ nói §12.5 *"chỉ chứng minh được bằng Playwright"* — **nay chứng minh được mà không cần trình duyệt.**
+4. **Điều KHÔNG đo được, phải nói thẳng với người dùng:** **chưa ai từng thấy giao diện này chạy trong một
+   trình duyệt thật.** jsdom **không phải** trình duyệt: **không layout, không CSS thật, không audio, không `Range`.**
+   ⇒ Các tiêu chí nghiệm thu **thuộc hình thức/thị giác** (spec UI §12) và **phát audio** (`Range`, T7)
+   vẫn **CHƯA ĐƯỢC CHỨNG MINH** — không được ghi là "đạt".
+
+### 5. Luật mới: mọi câu "bất khả" phải kèm errno + syscall + đường dẫn
+
+Cả ba kết luận sai ở trên cùng một dạng: **một nguyên nhân được SUY RA rồi được truyền đi như sự thật.**
+`npm i` bị gán cho named pipe (sai — là cache path); Testing Library bị gán cho "`npm i` bị chặn" (sai theo hệ quả).
+⇒ Bất kỳ câu "X bất khả trong môi trường này" viết vào plan/ledger **phải kèm errno + syscall + đường dẫn** của lần đo,
+**ngày đo**, và **lệnh tái lập**. Không có ba thứ đó thì đó là **giả thuyết**, không phải **ràng buộc**.
+
 ## Quy ước thẩm mỹ — spec UI thắng, skill chỉ là checklist
 
 Spec `2026-09-25-phu-de-lab-ui-design.md` là **nguồn có thẩm quyền về hình thức** (bạn đã duyệt). Skill
@@ -217,14 +300,14 @@ Bốn task (T4 Step 6, T6, T7 Step 4, T10 Step 4) ra lệnh "tự kiểm bằng 
   | `node --test --test-isolation=none src/__probe.test.ts` | `✔ … pass 1 fail 0`, **exit 0** — và **TypeScript chạy nguyên bản**, `interface` không cần build |
   | `.tsx` **không** loader | `TypeError [ERR_UNKNOWN_FILE_EXTENSION]: Unknown file extension ".tsx"` |
   | `.tsx` + `--import ./__swc_loader.mjs` (dùng `module.registerHooks` + `@swc/core`) | `✔ JSX + renderToStaticMarkup khong can DOM … pass 1 fail 0`, **exit 0** |
-  | `jsdom`, `@testing-library/react`, `@testing-library/dom`, `happy-dom` | **`False`** — đều không có, và `npm i` bị chặn |
+  | `jsdom`, `@testing-library/react`, `@testing-library/dom`, `happy-dom` | **`False`** — đều không có, và `npm i` bị chặn — ⚠️ **PHÉP ĐO NÀY ĐÃ BỊ BÁC BỎ Ở ERRATA #5 MỤC 2.** Cài được bằng `--cache` trong workspace, và **chạy thật** (click thật đã đo, EXITCODE=0). Dòng này giữ lại làm **dấu vết của một kết luận sai** — đừng đọc nó như ràng buộc |
 
   **Ruling:**
   1. Runner là **`node --test --test-isolation=none`**. `--test-isolation=none` là **bắt buộc**, không phải tuỳ chọn — thiếu nó thì mọi test chết `EPERM`.
   2. Test `.tsx` chạy qua một **loader `@swc/core` trong tiến trình** (`module.registerHooks`, `transformSync` — napi, **không spawn**). Loader là ~20 dòng; **phải có test ghim chính nó**, vì nó là hạ tầng của mọi test UI.
-  3. **Không có DOM ⇒ không `jsdom`, không Testing Library.** Test cấu trúc component dùng **`react-dom/server.renderToStaticMarkup`** — render React **thật**, không cần DOM. Đây không phải giả lập.
-  4. **Hệ quả phải nói thẳng:** test đơn vị **không mô phỏng được tương tác** (click, focus, bàn phím, effect, state update). Mọi thứ thuộc loại đó — đặc biệt **§12.5 "toàn bộ luồng biên tập không cần chuột"** của T11 — **chỉ** chứng minh được bằng Playwright trên backend thật. Trong T6/T8/T9/T10, test Testing Library mà plan mô tả phải viết lại thành: (a) khẳng định **mã HTML render ra**, và (b) khẳng định **hàm thuần** (reducer, parser, formatter) — không mô phỏng sự kiện.
-  5. Vì thế `T11` (bàn phím) **không được** tuyên bố "xong" chỉ bằng test đơn vị. Không có bước Playwright thì chưa chứng minh được gì cho §12.5.
+  3. ~~**Không có DOM ⇒ không `jsdom`, không Testing Library.**~~ ⚠️ **BỊ BÁC BỎ Ở ERRATA #5 MỤC 2** — `jsdom` + `@testing-library/react` **cài được VÀ chạy thật**. `renderToStaticMarkup` **vẫn giữ** cho render thuần (rẻ hơn ~12 s, không cần DOM) nhưng **không còn là cách DUY NHẤT**, và **không đủ** cho tương tác.
+  4. ~~**Hệ quả phải nói thẳng:** test đơn vị **không mô phỏng được tương tác** (click, focus, bàn phím, effect, state update).~~ ⚠️ **BỊ BÁC BỎ Ở ERRATA #5 MỤC 2.** Tương tác **mô phỏng được** bằng jsdom + Testing Library, **trong tiến trình, không spawn**. Và lý do "chỉ Playwright làm được" **cũng không còn**, vì **Playwright bất khả** (ERRATA #5 mục 3: Chromium chết ở Mojo named pipe). ⇒ T6/T8/T9/T10/T11 phải có test **tương tác THẬT**, không chỉ (a) mã HTML render ra và (b) hàm thuần.
+  5. Vì thế `T11` (bàn phím) **không được** tuyên bố "xong" chỉ bằng test đơn vị — nhưng **nay có đường**: jsdom + `fireEvent.keyDown`/`userEvent`, khẳng định **trên DOM thật**, cho §12.5. ⚠️ Vẫn **KHÔNG** chứng minh được: **layout, CSS thật, audio/`Range`** — jsdom không phải trình duyệt (ERRATA #5 mục 4.4). Đừng ghi "đạt" cho những tiêu chí đó.
 
 ### Minor + ghi nhận
 
@@ -263,7 +346,7 @@ Bốn task (T4 Step 6, T6, T7 Step 4, T10 Step 4) ra lệnh "tự kiểm bằng 
 | `src/screens/OllamaDown.tsx` | trạng thái §4.8 |
 | `src/keys/shortcuts.ts` | bảng phím tắt + bộ xử lý (thuần, test được) |
 | `src/api/contract.test.ts` | contract test chạy trên **backend thật** |
-| `e2e/seed.ts` · `e2e/*.spec.ts` | gieo DB + Playwright bốn màn hình |
+| `e2e/seed.py` · `e2e/*.test.tsx` | gieo DB + **jsdom/Testing Library** bốn màn hình trên backend THẬT (Playwright **bất khả** — ERRATA #5 mục 3) |
 
 **Sửa:** `README.md` (mục chạy frontend), `.gitignore` (`frontend/node_modules`, `frontend/dist`, `test-results/`).
 
@@ -413,7 +496,7 @@ git commit -m "feat(fe): khung Vite + React 19 o cong 3100, proxy /api sang 8620
 
 - [ ] **Step 1: Dựng runner `node --test` — KHÔNG cài gì**
 
-**Không cài Vitest, không cài jsdom, không cài Testing Library.** Cả ba đều không dùng được ở môi trường này (đo rồi — xem `Q-1`).
+**Vitest: KHÔNG cài** — nó dựng trên Vite, mà Vite cần `esbuild`, và `esbuild` **spawn** nên vẫn chết `EPERM`. ⚠️ **Nhưng jsdom và Testing Library thì CÀI ĐƯỢC VÀ CHẠY ĐƯỢC** — câu cũ *"Cả ba đều không dùng được ở môi trường này"* **đã bị bác bỏ ở ERRATA #5 mục 2** (đo được cả cài đặt lẫn click thật). Dùng chúng cho **TƯƠNG TÁC** ở T5–T11, với công thức cài ở ERRATA #5 mục 1.
 Task này **không có bước `npm install` nào**.
 
 Tạo `frontend/test/swc-loader.mjs` — loader duy nhất khiến `.tsx` chạy được, dùng `module.registerHooks` (hook **đồng bộ**, chạy trong tiến trình) cộng `@swc/core` (`transformSync`, napi — **không spawn**):
@@ -892,7 +975,7 @@ export function withPinned(range: { start: number; end: number }, pinned: number
 
 - [ ] **Step 2: Viết `timecode.ts`** — `ponytail:` cố ý bỏ giờ (`h:mm:ss`); phụ đề dài nhất trong phạm vi này dưới một giờ, thêm khi có tệp dài hơn.
 
-- [ ] **Step 3: Test ĐỎ cho màn Biên tập** (**KHÔNG Testing Library — không có DOM**; xem `Q-1`. Khẳng định **mã HTML** qua `renderToStaticMarkup` + khẳng định **hàm thuần**; `fetch` **giả** ở tầng `endpoints` — không phải tầng `window`):
+- [ ] **Step 3: Test ĐỎ cho màn Biên tập** (**Testing Library + jsdom — ĐÃ DÙNG ĐƯỢC**, xem ERRATA #5 mục 2: khẳng định **tương tác THẬT** trên DOM thật, cộng khẳng định **hàm thuần**; `fetch` **giả** ở tầng `endpoints` — không phải tầng `window`):
 
 ```tsx
 // frontend/src/screens/EditScreen.test.tsx
@@ -1174,18 +1257,36 @@ describe("bang phim tat", () => {
 
 ---
 
-### Task 12: Playwright trên backend THẬT — dữ liệu gieo vào DB, engine thật
+### Task 12: Bốn màn hình trên backend THẬT — jsdom + Testing Library (**Playwright BẤT KHẢ**, xem ERRATA #5 mục 3)
 
-**⚠️ Task này cần người dùng duyệt trước khi chạy:** `npx playwright install` tải trình duyệt **ra ngoài workspace** và sẽ **bị sandbox từ chối**. Dừng và hỏi; **đừng** tự vượt sandbox.
+**⚠️ TÊN TASK ĐÃ ĐỔI.** Bản cũ là *"Playwright trên backend THẬT"*. Playwright **không chạy được** ở đây:
+Chromium chết ở `FATAL:mojo\public\cpp\platform_channel.cc:187 … Access is denied (0x5)` — **chính trình duyệt**
+dùng named pipe cho IPC của nó, nên bản tải về **và** Edge/Chrome có sẵn trên máy **đều không khởi động được**
+(đo đủ 5 bước ở ERRATA #5 mục 3). **Đừng thử lại `npx playwright install`.**
 
-**Vì sao gieo DB thay vì dựng engine giả:** backend **không có** cơ chế plugin stub — fake engine của nó được tiêm **trong tiến trình pytest**, còn Playwright điều khiển một **tiến trình server thật**. Dựng thêm endpoint/registry giả chỉ để test là thêm bộ phận chạy trong sản phẩm mà chỉ test dùng (spec §6).
+**Cái KHÔNG đổi — và là lý do task này tồn tại:** phải chạy trên **backend THẬT với DB đã gieo đủ hai thứ**
+(ERRATA #3 mục 3: một transcript **có segment** **và** ≥1 hàng `translations`), vì guard của `contract.test.ts`
+vẫn đỏ nếu thiếu. Và **không** được dựng engine/endpoint giả chỉ để test (spec §6).
+
+**Cái ĐỔI:** thay `page.click(...)` của Playwright bằng **`fireEvent`/`userEvent` của Testing Library trên jsdom**,
+gọi vào **cùng những component thật** và **cùng backend thật qua HTTP thật**. Đây **không** phải test giả lập:
+nó render React thật, chạy effect thật, gửi request thật, đọc response thật.
+
+**⚠️ GIỚI HẠN PHẢI GHI VÀO BÁO CÁO, KHÔNG ĐƯỢC GIẤU:** jsdom **không phải trình duyệt** — không layout,
+không CSS thật, không audio/`Range`, không `getBoundingClientRect` có nghĩa. ⇒ **"Giao diện chạy được trong
+trình duyệt thật" vẫn là điều CHƯA AI CHỨNG MINH.** Task này **không** được tuyên bố điều đó.
 
 **Files:**
-- Create: `frontend/playwright.config.ts`, `frontend/e2e/fixtures.ts`, `frontend/e2e/seed.py`, `frontend/e2e/edit.spec.ts`, `frontend/e2e/compare.spec.ts`, `frontend/e2e/glossary.spec.ts`, `frontend/e2e/ollama-down.spec.ts`
+- Create: `frontend/test/dom.ts` (setup jsdom dùng chung), `frontend/e2e/seed.py`, `frontend/e2e/harness.ts`,
+  `frontend/e2e/edit.test.tsx`, `frontend/e2e/compare.test.tsx`, `frontend/e2e/glossary.test.tsx`,
+  `frontend/e2e/ollama-down.test.tsx`
+- Modify: `frontend/package.json` (thêm `jsdom` + `@testing-library/react` **bằng công thức ERRATA #5 mục 1**;
+  **sửa hoặc bỏ** script `"e2e": "playwright test"` — nó là script không bao giờ chạy được)
 
 **Interfaces:**
 - Consumes: toàn bộ app đã dựng
-- Produces: `npm run e2e` khởi động backend + frontend, gieo dữ liệu, chạy bốn spec, tắt cả hai
+- Produces: `npm test` bao gồm bốn tệp `e2e/*.test.tsx` — tự khởi động backend trên DB gieo, chạy bốn màn hình,
+  tự tắt; và **một dòng trung thực** về việc gì chưa đo được
 
 - [ ] **Step 1: `e2e/seed.py` — gieo thẳng DB, không cần model**
 
@@ -1194,7 +1295,7 @@ Dùng chính `SqliteRepos` của backend (đừng viết SQL tay: `add_transcrip
 ```python
 """Gieo mot DB day du de UI doc. KHONG can model, KHONG can GPU.
 
-Vi sao: Playwright dieu khien tien trinh server THAT, nen khong tiem duoc engine
+Vi sao: test (jsdom + Testing Library) dieu khien tien trinh server THAT, nen khong tiem duoc engine
 gia nhu pytest. Phan lon man hinh chi DOC, nen gieo du lieu la du — va no chay
 nhanh, tat dinh, khong phu thuoc mang.
 """
@@ -1232,33 +1333,59 @@ def seed(db_path: str, media_dir: str) -> None:
     print(f"seeded source={sid} transcript={tid}")
 ```
 
-- [ ] **Step 2: `fixtures.ts` — backend + frontend do test tự dựng**
+- [ ] **Step 2: `harness.ts` + `test/dom.ts` — backend do test tự dựng, và một jsdom thật**
 
-`webServer` của Playwright cho frontend; backend thì khởi bằng `spawn` với `PHUDE_DB`/`PHUDE_DATA` trỏ vào **thư mục tạm trong workspace, ngoài repo** (`$env:TEMP` bị từ chối), gọi `seed.py` trước, và **tắt trong teardown**. Cổng 8620 và 11434 hiện đều tắt — test phải chịu được cả hai trạng thái.
+`test/dom.ts` dựng `JSDOM` + gán global (`window`, `document`, `navigator`, `HTMLElement`, …) và bật
+`IS_REACT_ACT_ENVIRONMENT`. **Đã đo cách này chạy** (ERRATA #5 mục 2).
 
-- [ ] **Step 3: Bốn spec, mỗi spec một tiêu chí ở spec §8**
+`harness.ts`: khởi backend bằng `spawn` với `PHUDE_DB`/`PHUDE_DATA` trỏ vào **thư mục tạm trong workspace,
+ngoài repo** (`$env:TEMP` bị từ chối), chạy `seed.py` trước, poll `/api/status`, và **tắt trong teardown**
+(chỉ tắt pid của chính nó — bắt chước `contract.test.ts`, kể cả `child.unref()` để một lần kill hỏng không
+treo `node --test` mãi).
 
-```ts
-// e2e/glossary.spec.ts
-test("doi mot thuat ngu thi thay SO BAN DICH BI ANH HUONG truoc khi luu", async ({ page }) => {
-  await page.goto("/");
-  await page.getByRole("radio", { name: /thuật ngữ/i }).click();
-  await page.getByLabel(/thuật ngữ/i).fill("câu 1");
-  await page.getByLabel(/bản dịch/i).fill("cau mot");
-  await expect(page.getByTestId("affected-preview")).toHaveText(/1/);   // tieu chi §12.3
+⚠️ **Bẫy URL tương đối — phải xử lý, đừng để implementer tự phát hiện:** `client.ts` gọi `fetch("/api/…")`
+và **`fetch` của Node KHÔNG resolve URL tương đối**. `jsdom` cũng không đổi được điều đó (jsdom không cấp
+`fetch`). ⇒ Trong `test/dom.ts`, bọc `globalThis.fetch` bằng một hàm **resolve URL tương đối theo origin của
+backend thật** (ví dụ `http://127.0.0.1:8620`), và ghi rõ trong comment rằng đây là **cầu nối URL**, không phải
+giả lập mạng — request vẫn đi HTTP thật. **Không** được thay `fetch` bằng stub dữ liệu.
+
+- [ ] **Step 3: Bốn màn hình, mỗi cái một tiêu chí ở spec §8 — viết bằng Testing Library**
+
+```tsx
+// e2e/glossary.test.tsx
+test("doi mot thuat ngu thi thay SO BAN DICH BI ANH HUONG truoc khi luu", async () => {
+  render(createElement(App));                      // component THAT, khong phai ban sao
+  fireEvent.click(await screen.findByRole("radio", { name: /thuật ngữ/i }));
+  fireEvent.change(screen.getByLabelText(/thuật ngữ/i), { target: { value: "câu 1" } });
+  fireEvent.change(screen.getByLabelText(/bản dịch/i), { target: { value: "cau mot" } });
+  // tieu chi §12.3: so ban dich bi anh huong hien TRUOC khi bam luu
+  await waitFor(() => assert.match(screen.getByTestId("affected-preview").textContent ?? "", /1/));
 });
 ```
 
-`ollama-down.spec.ts` chạy khi Ollama **tắt** (trạng thái hiện tại của máy) và khẳng định panel nói rõ cái gì còn chạy được (§12.6). `edit.spec.ts` phủ sửa dòng + đoạn `suspect` có nhãn lý do. `compare.spec.ts` phủ segmented control + cột CPS.
+- `ollama-down.test.tsx` khẳng định panel nói rõ **cái gì còn chạy được** khi Ollama tắt (§12.6).
+  ⚠️ Trạng thái Ollama trên máy này **đổi theo lúc** (`up` đã đo được, `unknown` đã đo được, `down` **chưa từng** đo được)
+  ⇒ test phải chịu được **cả ba**, và **không** được giả định `down`.
+- `edit.test.tsx` phủ sửa dòng + đoạn `suspect` có nhãn lý do.
+- `compare.test.tsx` phủ segmented control + cột CPS.
+
+**Bắt buộc:** mỗi test phải đi qua **`fetch` thật tới 8620** — **cấm** stub tầng `client.ts`/`endpoints.ts`
+trong bốn tệp này (đó chính là thứ task này tồn tại để tránh). Nếu một màn hình không render được vì thiếu
+dữ liệu, **sửa `seed.py`**, đừng stub.
 
 - [ ] **Step 4: Chạy và ghi số**
 
 ```bash
-cd frontend && npm run e2e
+cd frontend && npm test
 ```
-Kỳ vọng: bốn spec xanh, và dán **dòng tổng kết nguyên văn** vào báo cáo. Rồi mutation: đổi `data-over-cps` ở `CompareScreen` thành luôn `"false"` ⇒ spec Đối chiếu phải đỏ.
+Kỳ vọng: bốn test mới **xanh trên DB gieo**, `cancelled 0`, và dán **dòng tổng kết nguyên văn** vào báo cáo.
+Trên `data/app.db` **rỗng** thì hai guard `EMPTY_DB_MSG` **vẫn đỏ** — đó là trạng thái đúng (ERRATA #3 mục 2).
+Rồi mutation: đổi `data-over-cps` ở `CompareScreen` thành luôn `"false"` ⇒ test Đối chiếu phải đỏ.
 
-- [ ] **Step 5: Commit** — `test(fe): bon spec Playwright tren backend that voi du lieu gieo`.
+- [ ] **Step 5: Commit** — `test(fe): bon man hinh tren backend that voi du lieu gieo (jsdom + RTL, Playwright bat kha)`
+
+⚠️ **Và phải viết vào báo cáo đúng một câu trung thực:** *chưa có bằng chứng nào cho việc giao diện chạy trong
+một trình duyệt thật; jsdom không có layout/CSS/audio.* Nếu implementer bỏ câu đó, coi như task **chưa xong**.
 
 ---
 
@@ -1269,7 +1396,7 @@ Kỳ vọng: bốn spec xanh, và dán **dòng tổng kết nguyên văn** vào 
 - Create: `.superpowers/sdd/<plan>/ponytail-debt.md` (ngoài repo)
 
 - [ ] **Step 1: Gom mọi dấu `ponytail:` trong `frontend/`** bằng `grep -rn "ponytail:" frontend/src` và chép vào một bảng: **tệp · trần · đường nâng cấp**. Dấu nào thiếu trần thì **sửa ngay** — một dấu không nêu trần là nợ không đòi được.
-- [ ] **Step 2: README** — mục "Chạy frontend": hai lệnh, hai cổng, và **cách chạy contract test** (phải có backend đang chạy) cùng `npm run e2e`.
+- [ ] **Step 2: README** — mục "Chạy frontend": hai lệnh, hai cổng, và **cách chạy contract test** (phải có backend đang chạy). ⚠️ **`npm run e2e` KHÔNG còn** — Playwright bất khả (ERRATA #5 mục 3); bốn màn hình nay chạy trong `npm test`.
 - [ ] **Step 3: Ghi vào README phần CHƯA làm của giai đoạn này** (bốn màn hình đã làm; eval §4.6/§4.7, Chimera §4.5, layout điện thoại, đổi theme **chưa làm**), và **nợ Giai đoạn 2 vẫn mở** (route export ghi tệp trên `GET`; `DEFAULT_MAX_CHARS` chưa đo; chất lượng dịch chưa đánh giá).
 - [ ] **Step 4: Commit** — `docs(fe): cach chay frontend + gom no ponytail`.
 
@@ -1289,7 +1416,7 @@ Kỳ vọng: bốn spec xanh, và dán **dòng tổng kết nguyên văn** vào 
 | §4 Transport/player `Range` + ba nút xuất | **T7** |
 | §4 bàn phím toàn luồng | **T11** |
 | §5 tokens, font self-host, MỘT lớp grain | **T1** |
-| §6 `node --test` + Playwright trên backend thật + luật dự án | **T2**, **T12** |
+| §6 `node --test` + **jsdom/Testing Library** trên backend thật (Playwright bất khả) + luật dự án | **T2**, **T12** |
 | §7 dấu `ponytail:` nêu trần + vòng thu hoạch nợ | **T5**, **T13** |
 | §8 chín tiêu chí nghiệm thu | **T6/T7/T8/T9/T10** (1–5), **T12** (1, 3, 4, 6), **T2** (7), **T5** (8), **T13** (9) |
 
@@ -1299,7 +1426,7 @@ Kỳ vọng: bốn spec xanh, và dán **dòng tổng kết nguyên văn** vào 
 2. **Mâu thuẫn nội bộ:** không. `available` chỉ đọc từ backend (T10) và T8 cũng nói CPS chỉ đọc từ backend — cùng một luật, hai chỗ.
 3. **Nhất quán kiểu:** `Segment`/`Job`/`Translation` định nghĩa **một lần** ở `src/api/types.ts` (T2) và mọi task sau tiêu thụ từ đó; `formatTimecode`/`parseTimecode` chỉ ở `src/lib/timecode.ts` (T6); `visibleRange`/`withPinned` chỉ ở `src/lib/window.ts` (T5).
 4. **Phạm vi:** 13 task, mỗi task một deliverable kiểm được độc lập. Không task nào phụ thuộc task **sau** nó.
-5. **Rủi ro đã biết:** `npx playwright install` cần duyệt (T12); `tokens.css` phụ thuộc việc đọc spec UI §2 (T1 Step 3); giá trị CPS/`available` đến từ backend nên **backend phải chạy** cho contract test và e2e — plan nói rõ ở T2 Step 3 và T12 Step 2.
+5. **Rủi ro đã biết:** `npx playwright install` **vô nghĩa** (T12 — Chromium bất khả, ERRATA #5 mục 3); `tokens.css` phụ thuộc việc đọc spec UI §2 (T1 Step 3); giá trị CPS/`available` đến từ backend nên **backend phải chạy** cho contract test và e2e — plan nói rõ ở T2 Step 3 và T12 Step 2.
 
 ## Những gì plan này KHÔNG làm (hoãn có chủ ý)
 
