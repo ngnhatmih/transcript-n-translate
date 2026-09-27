@@ -64,10 +64,15 @@ số bài thì không:
 
 Hai con số đó là SỐ BÀI ĐƯỢC CHỌN, và chúng khớp với số mà `--collect-only` báo
 (`tests/test_backend_readme.py::test_readme_baseline_matches_the_tests_actually_
-collected` đối chiếu mỗi lần chạy). Trên máy **không có `ffmpeg`/`ffprobe`** thì
-`tests/test_ingest.py` bị `skipif` ở cấp module, nên dòng tổng kết là
-`818 passed, 13 deselected, 1 skipped` — vẫn ĐÚNG 819 bài được chọn. Đừng "sửa"
-số nền theo `818` nếu chỉ thiếu ffmpeg.
+collected` đối chiếu mỗi lần chạy).
+
+Máy này **CÓ** `ffmpeg 8.1.1` + `ffprobe` trên PATH (đã đo), nên `819/13` ở trên
+là số THẬT của nó. Máy **không có** `ffmpeg`/`ffprobe` cho một kết quả KHÁC: cả
+`tests/test_ingest.py` bị `skipif` ở cấp module — **9** bài cùng skip một lượt —
+nên dòng tổng kết của máy đó là **`810 passed, 9 skipped, 13 deselected`**. Đó là
+con số của máy thiếu ffmpeg, **không phải** con số máy này từng in ra; đừng chép
+nó vào khối `819/13` ở trên, và đừng "sửa" số nền xuống `810` chỉ vì thiếu
+ffmpeg.
 
 (Con số này từng bị ghi là `798`: bài `test_a_failed_translation_leaves_the_
 transcript_reviewed` được thêm ở `a428334` — **cùng commit đã sửa tệp này** — mà

@@ -76,7 +76,8 @@ def _summary(row, *, stale: bool) -> dict:
     ngay trước đó (`_require_transcript`) và biết version hiện tại; hai lần đọc
     cùng một hàng trong một request là hai chỗ để trôi. Giá trị đó được truyền
     thẳng vào builder chung nên hai endpoint không thể phát hai hình dạng khác
-    nhau — xem `tests/test_translation_summary_shape.py`.
+    nhau — xem
+    `tests/test_api_translations.py::test_the_two_endpoints_describe_a_translation_identically`.
     """
     return translation_summary_json(row, stale=stale)
 

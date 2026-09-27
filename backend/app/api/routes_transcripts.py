@@ -46,8 +46,9 @@ def _translation_json(row, current_version: int) -> dict:
     Trước bản này route ở đây tự ghép khoá và phát `translated_from_version`
     (không `status`), nên cùng một hàng đọc ở `/api/translations` và ở đây cho
     hai hình dạng khác nhau. Một builder trong `domain/staleness.py` — chỗ đã sở
-    hữu `is_stale` — là nguồn duy nhất; xem
-    `tests/test_translation_summary_shape.py`.
+    hữu `is_stale` — là nguồn duy nhất; hai endpoint được ghim bằng nhau ở
+    `tests/test_api_translations.py::test_the_two_endpoints_describe_a_translation_identically`
+    (và bài kế tiếp đo lại sau khi transcript đổi version).
     """
     return translation_summary_json(row, current_version)
 
