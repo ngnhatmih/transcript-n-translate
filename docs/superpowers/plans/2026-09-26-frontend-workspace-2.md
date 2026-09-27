@@ -491,10 +491,48 @@ CHỈ mục tiêu sinh ra được** — một khẳng định xanh nhờ dữ l
 
 `lyDoCho` cho các nhánh `interrupted`/`cancelled`/`done`/`failed` **không bài nào ghim**; `abort()` của `useApi` là dòng
 đúng nhưng **CHƯA QUAN SÁT ĐƯỢC** (endpoints không nhận `signal`) — khai ra, **không** gán test giả;
-**"trạng thái từng bước" cho vùng KÊNH không có đường nối**: `GET /api/sources` chỉ có **tám** khoá và **không có khoá bước nào**,
-`Job` chỉ mang `workspace` ⇒ **không có đường job↔source** (hiện đúng thứ backend nói + `ponytail:` TRẦN);
-lưới ba vùng `214px/1fr/286px` **chưa được nhìn thấy** (chỉ khẳng định "không chạm `app.css`");
+lưới ba vùng `214px/1fr/286px` **chưa được nhìn thấy** (chỉ khẳng định "không chạm `app.css`/`tokens.css`");
 nợ harness `R1`/`R3`/`H5` **chưa trả** (Task 4 chỉ được giao `I1`/`M1`/`X1`).
+
+### 7. ⚠️ ĐÍNH CHÍNH LẦN THỨ MƯỜI — tôi lại chép một lời khai SAI vào plan
+
+**Câu tôi viết ở mục 6 bản trước — *"`Job` chỉ mang `workspace` ⇒ **không có đường job↔source**"* — là SAI.**
+Review Task 4 (`CONDITIONAL PASS`, 1 Important = chính điều này) bác bỏ nó **bằng mã backend thật**:
+
+- `backend/app/api/routes_jobs.py:68-76` — `_job_json` trả **`"payload": job.payload`** (đủ **15** khoá);
+  `:155-157` — `GET /api/jobs` = `[_job_json(j) for j in repos.list_jobs()]`.
+- `routes_jobs.py:26-36` — `IngestPayload.source_id` / `AsrPayload.source_id` là **hợp đồng BẮT BUỘC**.
+- `pipeline/ingest.py:244-246` — tạo job `asr` với `payload={"source_id": …, "lang": …}`;
+  `transcribe.py:75` — **đọc** `job.payload["source_id"]`.
+- `domain/models.py:238-256` (`translation_id_of`) tự ghi: *"Suy ra từ payload là cách duy nhất đúng"*.
+- Client **đã có chỗ chứa**: `types.ts` `Job.payload: Record<string, unknown>`, và `useJobStream` **giữ nguyên**
+  `Job` từ ảnh chụp.
+
+⇒ **Đường nối job↔source CHO `ingest`/`asr` LÀ CÓ** (qua `payload.source_id`). Vế **đúng** của lời khai:
+`GET /api/sources` đúng **tám** khoá và **không có khoá bước nào** (đã đối chiếu `_source_json`), và bước **DỊCH** chỉ có
+`translation_id` (đường dài) ⇒ **đèn hai bước đầy đủ** vẫn chưa dựng được.
+⇒ **`ChannelZone.tsx:6-12`'s `ponytail:` TRẦN đang biện hộ bằng một điều SAI** — cùng lớp lỗi với docstring
+`jobEvents.ts:26` ở Task 3. **Phải sửa ở vòng sửa của Task 4.**
+⇒ **Và đây là lần thứ MƯỜI một con số/lời khai của tôi bị đo là sai.** Luật ERRATA #9 mục 4 (đo trước khi chép từ
+báo cáo **reviewer**) nay mở rộng: **đo trước khi chép từ báo cáo IMPLEMENTER nữa** — tôi đã chép nguyên si.
+
+### 8. `npm run typecheck` KHÔNG kiểm tệp test/harness nào — đo chính xác (M6 của review Task 4)
+
+`tsc --listFiles` = **78** tệp, **không có** `*.test.ts(x)` nào và **không có** `test/dom.ts`.
+⇒ **"typecheck xanh" KHÔNG bao hàm "test/harness sạch kiểu"** — nợ `N-2` nay có số đo cụ thể.
+Đối chứng dương của reviewer: cố tình tạo lỗi kiểu ⇒ `typecheck` EXIT=1 (nên phép đo **sống**, không phải vacuous).
+**Hệ quả cho T5–T11:** một lỗi kiểu trong tệp test chỉ lộ ra **lúc chạy**, không lộ ở `typecheck`; và
+**một khẳng định sai kiểu trong test có thể không bao giờ bị `tsc` bắt**.
+
+### 9. Lỗ hổng độ phủ NGUY HIỂM NHẤT của Task 4 — nhãn ĐẢO mà 50 bài vẫn xanh
+
+Mutation `S2` của reviewer: **đảo nhãn `đã tách tiếng` ↔ `chưa tách tiếng`** ⇒ **cả 50 bài vẫn xanh**.
+Đây là chữ **người dùng đọc**, và nó nói ngược sự thật mà **không gì bắt được**. Các mutation sống sót khác:
+`S1` (thứ tự hàng đợi), `S3` (định dạng duration), `APILOAD` (`useApi` reset `loading`/`error`), `REMOVEWAIT`
+(bỏ khối chờ stream mở), `H1B` (0 bài — **xác nhận comment `M1` đã commit nói ĐÚNG**).
+⇒ `S2` **phải được ghim** ở vòng sửa Task 4; phần còn lại ghi vào sổ nợ độ phủ.
+⇒ **Và một điều reviewer nói thẳng:** nó **không chứng minh được** rằng bản vá FLAKY của implementer là **cần thiết**
+(bỏ khối chờ stream vẫn `8/8` lượt xanh) ⇒ lời khai "test tôi từng FLAKY" là **chưa kiểm chứng**, không phải sai.
 
 ## Quy ước thẩm mỹ — spec UI thắng, skill chỉ là checklist
 
