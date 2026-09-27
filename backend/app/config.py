@@ -62,8 +62,9 @@ def resolve_ollama_base_url(host: str | None = None) -> str:
       `probe_ollama` đã có: `OLLAMA_HOST` là cấu hình của CÁI MÁY ("Ollama chạy ở
       đâu trên box này"), còn tham số là giá trị mặc định của người gọi. Đổi thứ
       tự này là đổi hợp đồng đang chạy, và nó sẽ đổi IM LẶNG — không bài nào
-      trong `tests/` khẳng định thứ tự đó (đã kiểm: `grep setenv("OLLAMA_HOST"`
-      rỗng), nên chỉ có ghi chú này giữ nó.
+      trong `tests/` khẳng định thứ tự đó: bài duy nhất `setenv("OLLAMA_HOST")`
+      (`test_ollama_probe.py`) gọi `probe_ollama()` KHÔNG tham số, nên nó không
+      nói gì về env-vs-tham-số. Chỉ có ghi chú này giữ hợp đồng.
     """
     raw = os.environ.get("OLLAMA_HOST")
     if raw is None:
