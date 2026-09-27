@@ -296,6 +296,57 @@ nâng tổng số recipe/số liệu sai của người điều phối trong gia
    hoàn chỉnh được nữa. Implementer thêm dòng đó nhưng **không** có test ghim và **không** khai "đã kiểm".
    ⇒ **Đó là cách đúng để ghi một dòng không đo được.** Tasks 4–13 phải làm y vậy thay vì gán cho nó một bài test giả.
 
+## ⚠️ ERRATA #8 — re-review Task 3 (`bc0dcae`, **PASS**): **`git diff` KHÔNG chứng minh phục hồi byte-exact**
+
+Task 3 **ĐÓNG** (`PASS`, 0 Critical / 0 Important / 8 Minor). Re-review tái lập độc lập trạng thái ĐỎ trên mã chưa
+sửa (đúng ERRATA #7 mục 1), và 4/4 mutation bắt buộc giết **đúng** bài chỉ định (`splice(0,1)` cho
+`actual: 3, expected: 2`; xoá `retryAttempt = 0;` cho `2008ms` thay vì `503ms`). Nó cũng để lại **hai phát hiện
+lớn hơn chính task**:
+
+### 1. QUY TRÌNH CHỨNG MINH PHỤC HỒI CỦA DỰ ÁN ĐANG THIẾU — `git diff --quiet` KHÔNG ĐỦ
+
+Repo này có **`core.autocrlf`**. Đo được: **mỗi lần phục hồi sau mutation in
+`warning: … LF will be replaced by CRLF …` nhưng `git diff --quiet` VẪN `EXIT=0`**.
+⇒ **`git diff` MỘT MÌNH không chứng minh được tệp đã trở về byte-exact.**
+
+**Quy trình ĐÚNG, thay thế mọi câu "chứng minh `git diff --quiet HEAD` EXIT=0" trong các brief trước:**
+1. Giữ **bản gốc trong bộ nhớ** trước khi mutate;
+2. so **`Buffer.equals(orig) === true`** (hoặc hash tự tính trên byte thật);
+3. **và** blob hash == `git hash-object <f>` == `git rev-parse HEAD:<f>`;
+4. **và** in **witness** `PRESENT`/`ABSENT` để chứng minh *cái đã đổi là cái định đổi* (ERRATA #6 mục 5).
+`git diff --quiet` chỉ còn là **kiểm phụ**, không bao giờ là bằng chứng duy nhất.
+
+### 2. HARNESS DOM CÓ MỘT LỖ HỔNG PHẢI VÁ TRƯỚC T5 — và nó thuộc loại "xanh giả"
+
+`frontend/test/dom.ts`: `teardownDom()` **chỉ** trả `globalThis.fetch` và xoá `IS_REACT_ACT_ENVIRONMENT`;
+**8 global khác** (`window`, `document`, `navigator`, `HTMLElement`, `Node`, `Event`, `MouseEvent`,
+`getComputedStyle`) **vẫn trỏ vào jsdom đã `close()`** (đo được `window.closed=false`).
+Và `setupDom()` có `if (dom !== null) return;` ⇒ **lần gọi thứ hai với origin KHÁC bị bỏ qua IM LẶNG.**
+Với `--test-isolation=none` (**mọi tệp test chung MỘT tiến trình**, ERRATA #7 mục 3), T5–T11 sẽ dựng nhiều suite
+DOM ⇒ lần gọi thứ hai trỏ nhầm server mà **không có gì báo**. ⇒ **Phải vá trước T5** (đang làm ở Task 3b).
+
+### 3. Bốn lỗ hổng ĐỘ PHỦ (không phải lời khai sai — ghi nhận là nợ)
+
+Reviewer tự nghĩ và tìm được **4 mutation sống sót**, mỗi cái chỉ ra một đường **không bài nào ghim**:
+`X1` đường "id **ĐÃ BIẾT** → áp thẳng" (xoá `publish(applyJobEvent(current, event))` vẫn 4/4 xanh);
+`X2` lý do đặt `retryAttempt = 0;` ở **byte đầu tiên** thay vì ngay sau `response.ok`;
+`X3` đường **drain** cho sự kiện lạ tới **trong lúc** request ảnh chụp đang bay;
+`X4` `slice(5)`→`slice(6)` vẫn là **đột biến tương đương** (hai bài parser mới không đóng lỗ này).
+⇒ Nợ độ phủ, **không** được coi là "đã kiểm".
+
+### 4. Hai câu SAI còn nằm trong tệp sản phẩm (phải sửa, rẻ)
+
+- `frontend/test/swc-loader.test.tsx:9` vẫn viết *"khong co DOM … npm i bi chan"* — **SAI** từ ERRATA #5
+  (`jsdom` + Testing Library **đã cài và đang chạy**). Sửa ở Task 3b.
+- `frontend/package.json` còn `"e2e": "playwright test"` trong khi **`@playwright/test` đã bị prune** khỏi
+  `node_modules` ⇒ script **chết vì thiếu binary**. Task 12 đã được giao việc bỏ/sửa.
+
+### 5. Một đính chính về phương pháp của CHÍNH tôi
+
+Brief của tôi nhiều lần yêu cầu *"chứng minh `git diff --quiet HEAD` EXIT=0"* như **bằng chứng phục hồi**.
+Với `core.autocrlf`, câu đó **không chứng minh được** điều nó tuyên bố. Đây là lần thứ **sáu** một thủ tục của
+tôi bị một reviewer/implementer đo ra là **chưa đủ chặt**. Giữ nguyên tinh thần: **người điều phối cũng phải bị đo.**
+
 ## Quy ước thẩm mỹ — spec UI thắng, skill chỉ là checklist
 
 Spec `2026-09-25-phu-de-lab-ui-design.md` là **nguồn có thẩm quyền về hình thức** (bạn đã duyệt). Skill
