@@ -24,6 +24,54 @@
 - Baseline tham chiếu: backend **821 passed, 13 deselected** (`python -B -m pytest` từ `backend/`). Giai đoạn này **không** được làm giảm số đó.
 - **Cài đặt ra ngoài workspace cần người dùng duyệt** — `npx playwright install` tải trình duyệt và sẽ bị sandbox từ chối. Dừng và hỏi, đừng tự vượt.
 
+## ⚠️ ERRATA — công cụ đã đổi sau khi ĐO, đọc trước khi làm bất cứ task nào
+
+Sandbox của phiên này **cấm named pipe** ⇒ mọi tiến trình spawn bằng `stdio:'pipe'` chết `EPERM`.
+Đo được: `esbuild` không chạy được; Vite còn gọi `exec("net use")` (không bọc try) nên cũng chết;
+và Vite 6 **không có** đường pre-bundle dependency nào ngoài esbuild ⇒ React 504, trang không vẽ.
+⇒ **Vite bị loại.** Đã đo và chốt: **Rollup** (thuần JS, chạy trong tiến trình, không spawn) +
+`dev-server.mjs` viết tay (chỉ `node:http`/`node:fs`). Commit `fa51e10` + `a2df315`.
+
+| Plan viết | Đọc thành |
+|---|---|
+| `npm run dev` (Vite) | `npm run dev` → **`node dev-server.mjs`** (đã có; phục vụ `dist/` + proxy `/api` → 8620) |
+| (không có) | `npm run build` → **`rollup -c`**; `npm run typecheck` → `tsc --noEmit` |
+| `npm i -D vitest` | **KHÔNG cài Vitest** — nó dựng trên Vite nên cũng chết. Dùng **`node --test`** (có sẵn trong Node 24) |
+| `npm test -- contract` | `node --test src/api/contract.test.ts` (sau `npm run typecheck`; hoặc trỏ vào bản đã biên dịch) |
+| `import { describe, expect, it } from "vitest"` | `import { describe, it } from "node:test"` + `import assert from "node:assert/strict"` — `expect(x).toBe(y)` → `assert.equal(x, y)`, `toBeInTheDocument()` → `assert.ok(el)` |
+| Testing Library | `@testing-library/react` vẫn dùng được (thuần JS), nhưng cần **jsdom**; nếu `npm i` chặn thì báo lại, đừng tự vượt sandbox |
+| `frontend/package-lock.json` | **ĐÃ CŨ** (mô tả cây Vite cũ) vì `npm i` không ghi được cache trong sandbox. Phải `npm install` lại ở môi trường bình thường trước khi ai đó tin `npm ci` — implementer **không** được sửa tay tệp này |
+| `npm i` bất kỳ | **CÓ THỂ CHẾT `EPERM`** ở `AppData\Local\npm-cache`. Nếu chết: báo lại, **đừng** xin vượt sandbox; tìm gói đã có trong `node_modules` hoặc viết tay |
+
+**Rollup config là 202 dòng 5 plugin** (`resolve-nospawn`, `cjs-inproc`, `swc-nospawn`, `css-inproc`,
+`html-inproc`) cộng một guard `assert-no-bare-imports` **làm đỏ build** nếu còn bare import sót — guard đó là
+thứ khiến "bundle chạy được" không phải là lời hứa suông. React 19 chỉ có CJS, nên có shim CJS→ESM viết tay;
+đừng "dọn" nó đi.
+
+## Quy ước thẩm mỹ — spec UI thắng, skill chỉ là checklist
+
+Spec `2026-09-25-phu-de-lab-ui-design.md` là **nguồn có thẩm quyền về hình thức** (bạn đã duyệt). Skill
+`design-taste-frontend-v1` được dùng như **checklist**, không phải thẩm quyền thứ hai. Cụ thể:
+
+**LẤY từ skill (đã đối chiếu, không mâu thuẫn spec UI):**
+- **Grain/noise CHỈ trên một lớp `fixed` + `pointer-events:none`, KHÔNG bao giờ trên container cuộn** — tránh GPU repaint liên tục khi cuộn 2000 dòng. (Khớp §8.6 và **củng cố** nó bằng lý do.)
+- **Chỉ animate `transform` và `opacity`**; không animate `top`/`left`/`width`/`height`.
+- **Tiết chế `z-index`**: chỉ dùng cho tầng hệ thống (header dính, overlay), không rải `z-50` tuỳ tiện.
+- **Trạng thái tương tác đầy đủ**: loading **dạng skeleton khớp kích thước bố cục** (không spinner tròn), trạng thái rỗng, trạng thái lỗi inline; phản hồi chạm bằng `translate`/`scale` nhẹ.
+- **Form: nhãn TRÊN input, lỗi DƯỚI input**, khoảng cách nhất quán (dùng cho form Thuật ngữ, Task 9).
+- **Kiểm tra `package.json` trước khi import bất kỳ thư viện nào** — không giả định gói tồn tại.
+- **Không emoji** trong code/nhãn/alt.
+- **Không `#000000`** — dùng off-black/charcoal; **tối đa MỘT màu nhấn, độ bão hoà < 80%**; không glow neon, không gradient text cho tiêu đề lớn.
+
+**KHÔNG lấy (và vì sao):**
+- **Tailwind** (skill đòi cho 90% styling) — spec frontend §2 đã loại; và thêm một bước build nữa vào đúng chỗ vừa hỏng.
+- **Framer Motion / GSAP / ThreeJS / thư viện icon (`@phosphor-icons`, `@radix-ui/react-icons`)** — dependency mới cho thứ chưa đo được nhu cầu, trong môi trường mà `npm i` **đang chết vì cache**. Ponytail rung 5.
+- **`DESIGN_VARIANCE: 8`** (bất đối xứng, masonry, `padding-left: 20vw`) — spec UI §3 chốt **lưới ba vùng cố định 214px/286px**; bàn làm việc mật độ cao **không phải** landing page.
+- **`MOTION_INTENSITY: 6`** (vi animation vĩnh viễn, magnetic button, parallax) — skill tự nói mức 4–7 dùng transition CSS; mức 6 của nó kéo theo Framer Motion. Spec UI §2.6 mới là nguồn.
+- **`VISUAL_DENSITY: 4`** — sai hướng: bàn làm việc này gần "cockpit" hơn, và ở mức 8–10 thì chính skill nói **bỏ hộp card, dùng đường 1px** — đúng thứ spec UI §2.5/§4.1 đã yêu cầu.
+- **Server Components (RSC)** — dự án là **SPA client-only, không router, không Next.js**.
+- **Cấm `Inter`** — spec UI §2.1 đã chốt bộ chữ của nó (Archivo Expanded ở §4.2); spec thắng.
+
 ## File Structure
 
 **Tạo mới** (tất cả dưới `frontend/`)
