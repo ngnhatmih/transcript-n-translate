@@ -320,7 +320,7 @@ Repo này có **`core.autocrlf`**. Đo được: **mỗi lần phục hồi sau 
 
 `frontend/test/dom.ts`: `teardownDom()` **chỉ** trả `globalThis.fetch` và xoá `IS_REACT_ACT_ENVIRONMENT`;
 **8 global khác** (`window`, `document`, `navigator`, `HTMLElement`, `Node`, `Event`, `MouseEvent`,
-`getComputedStyle`) **vẫn trỏ vào jsdom đã `close()`** (đo được `window.closed=false`).
+`getComputedStyle`) **vẫn trỏ vào jsdom đã `close()`** (⚠️ **câu `(đo được window.closed=false)` ở đây là SAI — xem ERRATA #9 mục 4; jsdom 30.1.1 KHÔNG phơi `closed`. Kết luận thì đúng và đã được ghim bằng một bài test ĐỎ trước khi sửa ở `494ddfb`, chỉ con số dẫn chứng là sai**).
 Và `setupDom()` có `if (dom !== null) return;` ⇒ **lần gọi thứ hai với origin KHÁC bị bỏ qua IM LẶNG.**
 Với `--test-isolation=none` (**mọi tệp test chung MỘT tiến trình**, ERRATA #7 mục 3), T5–T11 sẽ dựng nhiều suite
 DOM ⇒ lần gọi thứ hai trỏ nhầm server mà **không có gì báo**. ⇒ **Phải vá trước T5** (đang làm ở Task 3b).
@@ -346,6 +346,57 @@ Reviewer tự nghĩ và tìm được **4 mutation sống sót**, mỗi cái ch�
 Brief của tôi nhiều lần yêu cầu *"chứng minh `git diff --quiet HEAD` EXIT=0"* như **bằng chứng phục hồi**.
 Với `core.autocrlf`, câu đó **không chứng minh được** điều nó tuyên bố. Đây là lần thứ **sáu** một thủ tục của
 tôi bị một reviewer/implementer đo ra là **chưa đủ chặt**. Giữ nguyên tinh thần: **người điều phối cũng phải bị đo.**
+
+## ⚠️ ERRATA #9 — Task 3b (`494ddfb`): **HOOK CẤP TỆP BỊ KÉO LÊN GỐC** — luật bắt buộc cho T5–T11
+
+Task 3b vá xong hai lỗi **xanh giả** của harness (`setupDom` im lặng bỏ qua origin thứ hai; `teardownDom` chỉ trả
+`fetch` trong khi 8 global khác vẫn trỏ vào jsdom đã chết). Nó kèm **bằng chứng ĐỎ trước khi sửa**
+(`ℹ tests 2 / pass 0 / fail 2`, in ra `window: truoc=undefined / sau=[object Window]` …) và 4 mutation giết
+**đúng** bài (`H1` chỉ giết bài "hai origin"; `H2`/`H3`/`H4` chỉ giết bài "trả hết global"). `H5` **sống sót** và
+được khai thẳng là **nợ độ phủ**, không ghim bằng khẳng định giả. Nhưng nó tìm ra **một điều lớn hơn cả task**:
+
+### 1. Dưới `--test-isolation=none`, **MỌI `before` chạy trước MỌI bài test, MỌI `after` chạy sau MỌI bài test**
+
+Đo bằng probe 3 tệp + trace trên suite thật (log tạm rồi phục hồi byte-exact). Nghĩa là **hook ở CẤP TỆP bị kéo lên GỐC**:
+`useJobStream.test.ts`'s `before` (gọi `setupDom`) chạy **trước bài đầu tiên của CẢ LƯỢT** — kể cả trước
+`contract.test.ts` — và `after` (`teardownDom`) chạy **sau bài cuối cùng của CẢ LƯỢT**.
+⇒ **Bề mặt nhiễm chéo RỘNG HƠN HẲN so với giả định trong brief của tôi** (brief giả định hook là theo tệp).
+
+**LUẬT BẮT BUỘC CHO T5–T11:**
+- **Bọc hook trong `describe()`** (`describe`-scoped hooks) cho **mọi** thứ đặt/trả global — **không** để `before`/`after`
+  ở cấp tệp khi chúng sửa global. Hook theo suite mới thật sự theo suite.
+- **Mỗi bài test DOM phải mở đầu bằng một `teardownDom()` "chuẩn hoá"** (hoặc tương đương) để không phụ thuộc thứ tự.
+  Task 3b **đo cả hai cách** rồi mới chọn: thiếu lời gọi chuẩn hoá thì dưới `H1` **CẢ HAI** bài cùng đỏ
+  ⇒ mutation **giết NHẦM bài** ⇒ bằng chứng rác. Nó **không** nới kỳ vọng của bài test để cho khớp.
+- Vẫn chạy **TOÀN BỘ** `npm test` (không chạy lẻ tệp) — suy giảm do nhiễm chéo **chỉ** lộ ra ở lượt đầy đủ.
+
+### 2. Một lời gọi `setupDom` = MỘT lần cài đặt
+
+Ảnh chụp global chỉ lấy khi chưa có ⇒ `teardownDom()` trả về trạng thái **trước lần cài đặt ĐẦU TIÊN**, nhờ đó sau
+bài "hai origin" tiến trình về **nguyên trạng** thay vì kẹt ở jsdom trung gian đã `close()`. Task 3b chọn
+**"dựng lại"** thay vì **"ném lỗi"** ở `setupDom` lần hai — lý do: nhiều suite DOM trong một tiến trình là **bình thường**,
+và chính bài test mà brief yêu cầu chỉ viết được với phương án này.
+
+### 3. Chỗ Task 3b tự khai là CÒN CHƯA CHÍNH XÁC (sửa kèm task kế tiếp chạm tệp đó)
+
+`frontend/test/dom.test.ts` dòng 19–21 vẫn viết "thứ tự bài là cố ý để ảnh chụp là trạng thái nguyên bản" —
+**đúng khi chạy lẻ tệp, KHÔNG đúng trong lượt đầy đủ** (mục 1). Thứ bảo đảm hiện nay là **lời gọi chuẩn hoá ở dòng 69**.
+Task 3b **không** sửa vì luật "một commit" và nó đã commit — đã ghi vào báo cáo.
+
+### 4. Luật mới: **một con số trong BÁO CÁO REVIEW cũng là lời khai chưa kiểm**
+
+ERRATA #4 mục 8 nói "một con số nằm trong LỜI KHAI cũng có thể nói dối" (về báo cáo implementer). Vòng này mở rộng:
+tôi **chép** `window.closed === false` từ **báo cáo của reviewer** vào ERRATA #8 **mà không tự đo**, và Task 3b
+đo ra **không tái lập được** (`jsdom` không phơi `closed`). ⇒ **Khi chuyển một con số từ BẤT KỲ báo cáo agent nào
+(reviewer hay implementer) vào plan/ledger, phải TỰ ĐO trước.** Đây là lần thứ **BẢY** một con số/thủ tục của tôi
+bị đo là sai trong giai đoạn này.
+
+### 5. Một đính chính nhỏ về namespace của bằng chứng Task 3b
+
+Số đếm của nó cho bài "hai origin": ĐỎ `server1=2, server2=0` (`request thu hai phai toi server2, body do duoc "server1"`),
+XANH `server1=1, server2=1`. Và nó **tái lập được bẫy ERRATA #8 mục 1**:
+`CRLF count: 162 | bytes: 6561 | Buffer.equals(baseline): false` rồi `git diff --quiet HEAD -- frontend EXIT=0`
+— **byte đã khác mà git vẫn sạch**. Đây là bằng chứng độc lập thứ hai rằng quy trình cũ của tôi **không đủ chặt**.
 
 ## Quy ước thẩm mỹ — spec UI thắng, skill chỉ là checklist
 
