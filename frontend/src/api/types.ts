@@ -11,10 +11,15 @@
  * Vì sao viết tay thay vì sinh từ `/openapi.json`: spec §2 chốt rằng thứ nhỏ nhất
  * sập khi shape trôi là một contract test, và nó sập ỒN ÀO. Xem `contract.test.ts`.
  *
- * MỨC KIỂM THẬT của từng KIỂU đã export (23 `interface` + 9 `type`, không phải
- * chỉ interface) — đọc ra từ `contract.test.ts`, KHÔNG phải lời hứa:
+ * MỨC KIỂM THẬT của MỌI KIỂU đã export — 33 kiểu (23 `interface` + 10 `type`),
+ * đọc ra từ `contract.test.ts`, KHÔNG phải lời hứa. Bốn nhóm dưới đây chia ĐỦ 33
+ * (10 + 8 + 5 + 10), không thiếu kiểu nào:
+ *   đếm lại: Select-String -Path src/api/types.ts -Pattern '^export (interface|type) '
+ *   đếm `type` riêng: Select-String -Path src/api/types.ts -Pattern '^export type '
+ *   kiểu nào test chạm: Get-ChildItem src -Recurse -Filter *.test.ts | Select-String '\bOllamaState\b'
  *
- *   CÓ bài kiểm khoá (route được GỌI THẬT, response được soi từng khoá):
+ *   CÓ bài kiểm khoá (route được GỌI THẬT, response được soi từng khoá) — 10
+ *   `interface`:
  *     `Status` (`GET /api/status`) · `Registry`, `EngineSpec`, `EngineCapabilities`
  *     (`GET /api/registry`) · `TranscriptSummary`, `Translation`
  *     (`GET /api/transcripts`) · `Transcript`, `Segment` (`GET /api/transcripts/{id}`)
@@ -23,7 +28,7 @@
  *     và khoá đó có thể là mảng RỖNG, xem `Segment` bên dưới.
  *
  *   CHỈ được đối chiếu MÃ NGUỒN (đọc `routes_*.py`/`models.py`); một lần trôi khoá
- *   ở nhóm này KHÔNG làm tệp test đỏ. Nhóm này là 8 `interface` + 1 `type`:
+ *   ở nhóm này KHÔNG làm tệp test đỏ — 8 `interface` + 1 `type` = 9:
  *     - `SourceCreated`, `TranslationCreated`: chỉ có trong body của
  *       `POST /api/sources/*` và `POST /api/translations`. Gọi thật cần upload thật
  *       và một engine MT thật — Ollama đang tắt, nên không endpoint nào được gọi.
@@ -33,9 +38,23 @@
  *     - `Source`, `Job`, `Term`, `TermWithAffected`: route `GET` CÓ thật, nhưng bài
  *       hiện tại chỉ khẳng định "là một mảng" — chưa soi khoá nào.
  *
- *   `*Create`/`*Patch` là BODY gửi LÊN (không phải response): đối chiếu với
- *   `routes_*.py` bằng cách đọc mã, cộng hai bài 422 đo TÊN trường (`transcript_id`,
- *   `lang`).
+ *   `*Create`/`*Patch` là BODY gửi LÊN (không phải response) — 5 `interface`:
+ *   `TranscriptPatch`, `TranslationSegmentPatch`, `TranslationCreate`, `TermCreate`,
+ *   `TermPatch`. Đối chiếu với `routes_*.py` bằng cách đọc mã, cộng hai bài 422 đo
+ *   TÊN trường (`transcript_id`, `lang`). Đừng nhóm theo HẬU TỐ: `TranslationCreated`
+ *   và `SourceCreated` cũng kết thúc bằng "Created" nhưng là RESPONSE, đã ở nhóm 2;
+ *   theo hậu tố `*Create|*Created|*Patch` thì đếm ra 7 `interface`, không phải 5.
+ *
+ *   9 `type` dưới đây KHÔNG có bài kiểm nào: `JobType`, `JobState`, `SourceLang`,
+ *   `SourceKind`, `TranscriptStatus`, `TranslationStatus`, `EngineKind`,
+ *   `EngineRuntime`, `OllamaState`. Không `*.test.ts` nào import chúng — đây là 9
+ *   trong 10 `type`; `JobSlim` đã ở nhóm 2, và không `type` nào ở nhóm 1.
+ *   Cả 9 là union GIÁ TRỊ và đều là KIỂU CỦA MỘT TRƯỜNG của một interface ở nhóm
+ *   1 hoặc nhóm 2: `JobType`, `JobState` của `Job`; `SourceLang`, `SourceKind` của
+ *   `Source`; `TranscriptStatus` của `Transcript`; `TranslationStatus` của
+ *   `Translation`; `EngineKind`, `EngineRuntime` của `EngineSpec`; `OllamaState`
+ *   của `Status`. Nên tập giá trị của chúng chỉ được đối chiếu MÃ NGUỒN qua
+ *   interface cha — KHÔNG qua một bài test ép tập giá trị.
  */
 
 /** Một từ có mốc thời gian. Chỉ có khi engine thật sự sinh word timestamp. */
