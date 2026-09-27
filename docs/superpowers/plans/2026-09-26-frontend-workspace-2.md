@@ -592,6 +592,54 @@ số dòng nào**. Nội dung TRẦN **đúng** (không mệnh đề sai nào), 
   (không khớp glob test, không trong `tsconfig.include`, không phải entry rollup), và **đã khai ở đầu báo cáo**.
   ⇒ **Luật: backup của mutation để NGOÀI cây repo, hoặc dùng tên chắc chắn không khớp glob/`tsconfig`.**
 
+## ⚠️ ERRATA #12 — Task 5 (`1ea45e5`): `git diff` **MÙ HOÀN TOÀN** với tệp chưa track; và mutation của tôi lại sai
+
+Task 5 xong (`59`→`65` bài; `npm test` = `tests 65 / pass 63 / fail 2 / cancelled 0` EXIT=1; `typecheck` 0; `build` 0).
+Nó sửa **lỗi thật** của plan (`withPinned` chỉ ghim đúng chiều TRÊN) — nhưng nó bác **ba** chỗ nữa của brief tôi.
+
+### 1. ⚠️ `git diff --quiet HEAD -- frontend` in **EXIT=0** trong khi tệp **ĐANG LÀ MUTANT**
+
+Đo được **8/8 lượt**: `window.ts` là tệp **MỚI chưa track**, mà `git diff` **không nhìn thấy tệp chưa track** —
+nó không "thiếu chặt", nó **MÙ HOÀN TOÀN**. ⇒ Quy trình bốn phần của ERRATA #8/#10 nay có lý do thứ ba, mạnh nhất:
+**với tệp mới, `git diff` không chứng minh được gì cả** — kể cả sau commit nó cũng chỉ nói về index.
+**Bằng chứng phục hồi THẬT chỉ có: `Buffer.equals(baseline)` + hash tự tính (`bytes` + `sha256`).**
+
+### 2. Mutation `W1` của TÔI SAI — lần thứ MƯỜI HAI
+
+Brief tôi viết: *"`W1` điều kiện `withPinned` → `false` ⇒ bài 'GHIM ngoài khoảng' PHẢI đỏ"*.
+**Đo được: bài đó XANH.** Lý do: với `pinned < range.start`, **nhánh `else` VỐN ĐÃ trả đúng** `{7, 120, true}`
+⇒ bỏ điều kiện là **ĐỘT BIẾN TƯƠNG ĐƯƠNG** trên lớp đầu vào đó. `W1` **vẫn bị giết**, nhưng bởi bài *"trong khoảng"*
+và bài *`pinned === null`* (đúng như dự đoán (d) trong brief).
+Và **bài "ngoài khoảng" KHÔNG rỗng**: `W5` (bỏ phần mở rộng `start`) **giết nó**.
+⇒ **Luật: khi một mutation không giết được bài mình nhắm, TRƯỚC KHI kết luận "bài rỗng", hãy hỏi mutation đó có phải
+ĐỘT BIẾN TƯƠNG ĐƯƠNG không.** Với `withPinned`, chiều `pinned < start` và `pinned >= end` **không đối xứng**:
+chiều dưới cần code mới để đúng, chiều trên thì **không** — nên chỉ có một mutation phân biệt được.
+
+### 3. `tsc --listFiles` = **79**, không phải 78
+
+`window.ts` là tệp **mới** và **được** `typecheck` (+1). Vế còn lại của ERRATA #10 mục 8 **vẫn đúng**:
+**0** tệp `.test.` trong `listFiles` ⇒ `typecheck` không kiểm test/harness.
+
+### 4. `git diff` mù (mục 1) + driver mutation CRASH để lại tệp ở trạng thái MUTANT
+
+Driver lượt đầu **crash** (thiếu `mkdirSync(logs)`) và **để `window.ts` ở trạng thái MUTANT**; implementer phát hiện,
+phục hồi **ngay**, chứng minh byte-exact bằng hash (`bytes = 2835`, `sha256 = 10f2f0ae…c665cf5` — **khớp baseline nó in
+TRƯỚC khi mutate**), rồi **vá driver hai lớp**: `finally` + **`process.on("exit")` làm lưới an toàn**.
+⇒ **Luật cho mọi driver mutation ở T6–T13: (a) `finally` PHẢI khôi phục; (b) thêm lưới `process.on("exit")`;
+(c) in `bytes` + `sha256` của baseline TRƯỚC khi mutate, để phục hồi có cái mà đối chiếu.**
+Đây là **lần thứ ba** một agent để lại tệp ở trạng thái mutant (2 lần trước: một re-reviewer 7,4 giờ; một re-reviewer khác).
+
+### 5. Vi phạm luật "không `npx`" — tự khai, không ảnh hưởng sản phẩm
+
+Implementer dùng **`npx --no-install tsc --listFiles` MỘT lần** (luật cấm `npx`), rồi **đo lại** bằng
+`node ./node_modules/typescript/bin/tsc` ⇒ **cùng kết quả**, và **tự khai** trong báo cáo.
+⇒ Không cần hành động (không chạm sản phẩm), nhưng **giữ luật**: dùng `node node_modules/...` trực tiếp, đừng `npx`.
+
+### 6. `rowH <= 0`: quyết định đã chốt và ghim
+
+Nó chọn **ném `RangeError`** với guard `!Number.isFinite(rowH) || rowH <= 0`, ghim **0 / −20 / NaN / Infinity**.
+Nó khai thẳng: **không đo được** rằng ca này từng xảy ra trong sản phẩm. ⇒ Đây là **quyết định có ghi**, không phải sơ suất — đúng yêu cầu.
+
 ## Quy ước thẩm mỹ — spec UI thắng, skill chỉ là checklist
 
 Spec `2026-09-25-phu-de-lab-ui-design.md` là **nguồn có thẩm quyền về hình thức** (bạn đã duyệt). Skill
