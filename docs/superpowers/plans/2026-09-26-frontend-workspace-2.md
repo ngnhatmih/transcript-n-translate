@@ -640,6 +640,55 @@ Implementer dùng **`npx --no-install tsc --listFiles` MỘT lần** (luật c�
 Nó chọn **ném `RangeError`** với guard `!Number.isFinite(rowH) || rowH <= 0`, ghim **0 / −20 / NaN / Infinity**.
 Nó khai thẳng: **không đo được** rằng ca này từng xảy ra trong sản phẩm. ⇒ Đây là **quyết định có ghi**, không phải sơ suất — đúng yêu cầu.
 
+## ⚠️ ERRATA #13 — Task 5 ĐÓNG (`PASS`) + hai đính chính + nợ chuyển sang Task 6
+
+Task 5 **ĐÓNG**: review độc lập cho **`PASS`, 0 Critical / 0 Important / 5 Minor**, và nó **chạy 13 mutation**,
+tái lập **8/8** bảng của implementer. Ba điều nó đo được mà phải nhớ:
+
+### 1. ⚠️ ĐÍNH CHÍNH ERRATA #12 mục 1 (lỗi thứ MƯỜI BA của tôi): `git diff` mù với tệp **CHƯA TRACK**, không phải "tệp mới"
+
+Tôi viết *"`git diff` MÙ HOÀN TOÀN … kể cả sau commit nó cũng chỉ nói về index"*. **Vế sau KHÔNG chính xác.**
+Đo ba ca:
+| Ca | Kết quả |
+|---|---|
+| tệp **chưa track**, MỚI TẠO | `EXIT=0` ⇒ mù |
+| tệp **chưa track**, ĐÃ SỬA | `EXIT=0` ⇒ mù |
+| **`window.ts` ĐÃ TRACK** và ĐANG LÀ MUTANT | **`EXIT=1`** · `1 file changed, 1 insertion(+), 1 deletion(-)` ⇒ **THẤY** |
+
+⇒ Câu đúng: **`git diff` mù trong lúc tệp còn CHƯA TRACK.** Sau `git add`/commit thì nó **thấy**.
+Và **bằng chứng phục hồi THẬT** vẫn là: `Buffer.equals(baseline)` + **`bytes` + `sha256`** tự tính;
+với tệp **đã ở `HEAD`** thì cộng `git hash-object == git rev-parse HEAD:<f>`.
+⇒ **Hệ quả cho T6–T13: NGAY SAU khi tạo tệp mới, `git diff` không bảo vệ bạn — hãy tự in `bytes`+`sha256` trước khi mutate.**
+
+### 2. `assert.throws(fn, /regex/)` khớp **MESSAGE**, KHÔNG khớp **TYPE**
+
+Mutation `MINE-E` (`RangeError` → `Error`) **SỐNG SÓT** (`65/63/2`): bài test dùng `assert.throws(fn, /rowH/)`, mà
+**regex chỉ khớp thông điệp** — một `TypeError` **cùng thông điệp** lọt qua. ⇒ **Luật cho T6–T13:** muốn ghim **LOẠI**
+lỗi thì phải khẳng định **`instanceof`** (hoặc truyền **constructor** cho `assert.throws`), **đừng** chỉ đưa regex.
+
+### 3. Nợ Task 5 (5 Minor, ghi nhận) — và **`M4` PHẢI vào brief Task 6**
+
+- **`M4` (nguy cơ TÍCH HỢP THẬT):** `withPinned` có thể trả **`end > count`** — `withPinned({100,120}, 500)` ⇒ `end = 501`.
+  `visibleRange` **kẹp theo `count`**, còn `withPinned` thì **không**, và **doc-comment KHÔNG nói**.
+  ⇒ **Task 6 PHẢI TỰ KẸP `end` theo số đoạn** (hoặc gọi `withPinned` rồi kẹp), và **ghi lý do**.
+- `M1`: cờ `pinned` tại **biên** `pinned === range.start` **không bài nào ghim** (mutation `MINE-B`: `>=` → `>` sống sót trên **CẢ HAI** bộ).
+- `M2`: **kiểu** `RangeError` không được ghim (chính là `MINE-E` ở mục 2).
+- `M3`: `withPinned` trả **`start` ÂM** khi `pinned` âm (`{0,20}, -1 → {-1,20}`).
+- `M5`: câu chữ ERRATA #12 mục 1 hẹp hơn thực tế — đã sửa ở mục 1 trên.
+
+### 4. Review chứng minh hai điều mà implementer KHÔNG khai (đáng chép vào cách làm brief)
+
+- **`W2` — CHÍNH lỗi (c) của plan — SỐNG SÓT trên bộ bảy bài CŨ** (`tests 7 / pass 7 / fail 0`): phép đo cũ **MÙ HOÀN TOÀN**
+  với lỗi ghim chiều DƯỚI. Đây là bằng chứng mạnh nhất rằng **brief phải sửa lỗi (c)** thay vì chép plan.
+- **`MINE-C` (`ceil` → `floor`) sống sót bộ CŨ 7/7 VÀ bị giết bởi ĐÚNG MỘT bài MỚI** ⇒ đúng chuẩn **hai vế** của
+  ERRATA #11 mục 2 (mutation sống sót trên bộ CŨ **+** giết đúng một bài trên bộ MỚI).
+
+### 5. Ranh giới của bằng chứng Task 5 — phải nói đúng, đừng nói quá
+
+Review chỉ chứng minh được `start <= pinned < end` là **ĐIỀU KIỆN CẦN** để dòng đang sửa nằm trong DOM,
+**KHÔNG** phải điều kiện **ĐỦ** (vì `M4`). Và **hành vi thật** — ảo hoá tháo dòng đang gõ ⇒ **mất focus** (spec UI §8.3/U6) —
+**CHƯA đo được**: chưa có caller (Task 6 mới dùng) và **không có trình duyệt**. ⇒ **Đừng ghi "đã kiểm U6".**
+
 ## Quy ước thẩm mỹ — spec UI thắng, skill chỉ là checklist
 
 Spec `2026-09-25-phu-de-lab-ui-design.md` là **nguồn có thẩm quyền về hình thức** (bạn đã duyệt). Skill
