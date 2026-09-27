@@ -377,19 +377,34 @@ Ba điều **bắt buộc**, không phải tuỳ chọn — mỗi điều đã �
 
 Ghim chính loader bằng test của nó — nó là hạ tầng của **mọi** test UI, một loader hỏng làm 12 task sau đỏ giả:
 
-```ts
-// frontend/test/swc-loader.test.ts
+⚠️ **Tên tệp phải là `.tsx`, KHÔNG phải `.ts`** (plan từng ghi `.ts` — đó là lỗi của plan, implementer bắt được).
+Loader đặt `tsx: url.endsWith(".tsx")`, nên một tệp `.ts` **không được phép chứa JSX**: để bài dùng JSX trong `.ts` thì SWC ném
+`Syntax Error` **ngay lúc load** và **cả hai** bài không chạy được. Quy tắc cho mọi task sau: **tệp test nào chứa JSX thì đuôi phải là `.tsx`.**
+
+```tsx
+// frontend/test/swc-loader.test.tsx
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { renderToStaticMarkup } from "react-dom/server";
 import { Probe } from "./fixtures/Probe.tsx";
 
-test("loader bóc được TSX và React render thật, KHÔNG cần DOM", () => {
-  assert.equal(renderToStaticMarkup(Probe({ label: "xin-chao" })),
-               '<p class="probe">xin-chao</p>');
+// (a) chỉ chứng minh tệp .tsx chạy được qua đường GỌI HÀM
+test("a) .tsx chạy được: gọi hàm component rồi render thật ra HTML", () => {
+  assert.equal(renderToStaticMarkup(Probe({ label: "xin chao" })),
+               '<span class="probe">xin chao</span>');
 });
-// + một bài dùng JSX thật để chứng minh đường JSX (không chỉ đường gọi hàm)
+
+// (b) dùng JSX THẬT — đây mới là bài ghim đường JSX
+test("b) đường JSX thật qua loader SWC", () => {
+  assert.equal(renderToStaticMarkup(<Probe label="xin chao" />),
+               '<span class="probe">xin chao</span>');
+});
 ```
+
+**Hai bài, không phải một** — và đó không phải hình thức: mutation đã đo cho thấy chúng **khác nhau về sức mạnh**.
+Bỏ `transform: { react: { runtime: "automatic" } }` khỏi loader ⇒ **(b) ĐỎ** (`React is not defined`) còn **(a) vẫn XANH**.
+Tức chỉ (b) ghim được runtime JSX; một mình (a) sẽ để loader hỏng đi qua.
+(`Probe` render ra `<span class="probe">`, không phải `<p>`.)
 
 `frontend/test/fixtures/Probe.tsx` là một component 3 dòng có một prop. **Mutation để chứng minh test không rỗng:**
 xoá `transform: { react: { runtime: "automatic" } }` khỏi loader ⇒ tệp dùng JSX phải đỏ; khôi phục ⇒ xanh.
