@@ -134,6 +134,12 @@ class TranscribeHandler:
         repo), không phải "version hiện tại" tại thời điểm job chạy — job có thể
         chạy sau khi người dùng sửa transcript, và khi đó bản dịch này phải được
         coi là lệch thời (`is_stale`).
+
+        `glossary_version` đi qua ĐÚNG nguồn mà đường API dùng
+        (`routes_translations.create_translation` gọi `repos.glossary_version()`).
+        Thiếu nó thì `add_translation` nhận `None` và cột thành NULL, tức cùng
+        một trạng thái (hàng `queued`, 0 segment, job chưa chạy) có hai nghĩa
+        khác nhau tuỳ đường tạo hàng — M-4 của review cuối.
         """
         engine_id = self._default_mt_engine()
         transcript = self._repos.get_transcript(transcript_id)
@@ -144,6 +150,7 @@ class TranscribeHandler:
             target_lang=DEFAULT_TARGET_LANG,
             segments=[],
             prompt_version=self._prompt_versions.get(engine_id or "", "unknown"),
+            glossary_version=self._repos.glossary_version(),
             status="queued",
         )
         self._repos.add_job(Job(
