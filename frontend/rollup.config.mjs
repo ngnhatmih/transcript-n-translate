@@ -134,6 +134,11 @@ function cssPlugin() {
   const sheets = [];
   return {
     name: "css-inproc",
+    // dev-server.mjs build lai trong CUNG tien trinh (rollup.watch), nen plugin song lau hon mot
+    // lan build: khong xoa `sheets` thi moi lan build lai noi them mot ban CSS nua.
+    buildStart() {
+      sheets.length = 0;
+    },
     load(id) {
       if (!id.endsWith(".css")) return null;
       sheets.push(readFileSync(id, "utf8"));
