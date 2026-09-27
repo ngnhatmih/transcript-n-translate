@@ -398,6 +398,44 @@ XANH `server1=1, server2=1`. Và nó **tái lập được bẫy ERRATA #8 mục
 `CRLF count: 162 | bytes: 6561 | Buffer.equals(baseline): false` rồi `git diff --quiet HEAD -- frontend EXIT=0`
 — **byte đã khác mà git vẫn sạch**. Đây là bằng chứng độc lập thứ hai rằng quy trình cũ của tôi **không đủ chặt**.
 
+### 6. Review Task 3b (`PASS`) — luật `describe()` ĐÚNG nhưng **CHƯA ĐỦ**: mỗi file DOM phải **TỰ CHỨA**
+
+Review độc lập xác nhận hoisting bằng **BA phép đo khác nhau**: (a) 4 tệp trong cùng một lượt với **đồng hồ chung** —
+`#01 t+0.47 A FILE-BEFORE` … `#03 t+3.55 D FILE-BEFORE` … `#04 t+4.32 A1 BODY` … `#21 t+7.21 D FILE-AFTER`
+(mọi `before` cấp tệp **trước** bài test đầu tiên của cả lượt; mọi `after` **sau** bài cuối cùng);
+(b) probe cho thấy **global do hook của tệp A cài thì NHÌN THẤY ĐƯỢC từ bài test của tệp B**;
+(c) trace trên suite thật ghi ra tệp có mốc thời gian, không qua stdout. Và hook trong `describe()` **đúng là theo suite**.
+
+**Nhưng nó đo thêm một điều tôi chưa nghĩ tới:** các **TỆP** chạy **tuần tự**, còn **hook thì hoist** ⇒ global do một file
+cài **sống tới cuối CẢ LƯỢT**, và `teardownDom()` của file **SAU** **đóng luôn jsdom còn sống của file TRƯỚC**
+(trace: `teardownDom dom=true` ở **4012 ms** đóng jsdom được cài ở **7 ms**; hiện **vô hại** chỉ vì bài cuối của file
+trước đã xong ở **4003 ms** — tức đúng **9 ms** trước đó). Đây là loại "đúng nhờ may", không phải đúng nhờ thiết kế.
+
+⇒ **LUẬT BỔ SUNG CHO T5–T11: mỗi file test DOM phải TỰ CHỨA.** Không được giả định jsdom/bắc cầu của mình **còn sống**
+khi file khác đang chạy. Hệ quả thực dụng: đừng để state sống qua nhiều bài; đừng dựa vào thứ tự file; mọi thứ cần thiết
+phải được cài trong hook **của chính file đó**.
+
+### 7. Nợ độ phủ của harness — KHAI RA, và TRẢ Ở T5
+
+- **`I1` (Important):** bất biến `if (daLuu.length === 0) luuGlobal();` (*"một `setupDom` = một lần cài đặt"*)
+  **không bài test nào ghim**. Mutation `R4` (luôn chụp lại ảnh chụp global) làm **RÒ RỈ 10/10 global** mà
+  `npm test` **vẫn `pass 35 / fail 2`** — chỉ một probe ở **`process exit`** mới bắt được.
+  ⇒ **T5 PHẢI ghim bất biến này** (hoặc ghi vào sổ nợ **kèm cách đo**). Đây là loại lỗi mà test trong lượt
+  **không** thấy được — nhớ khi viết test cho T5–T11 rằng **có thứ chỉ lộ ra ở `process exit`**.
+- `R1` (`teardownDom` không xoá `bridgeOrigin`) và `R3` (bỏ idempotent cùng origin) **sống sót** ⇒ hai đường chưa ghim.
+- `H5` (đường dựng lại không `close()` jsdom cũ) sống sót; reviewer **không** đo được nó có thật sự rò rỉ jsdom sống
+  hay không (chỉ đo được "không bài nào bắt").
+- **`M1`:** comment `frontend/test/dom.test.ts:19-21` nói *"thứ tự bài là cố ý"* — đúng khi **chạy lẻ tệp**,
+  **KHÔNG** đúng trong **lượt đầy đủ**; thứ bảo đảm là lời gọi ở **dòng 69** (chứng minh bằng mutation `H1b`:
+  bỏ dòng 69 ⇒ **CẢ HAI** bài cùng đỏ ⇒ mutation giết nhầm bài). **Sửa ở task kế tiếp chạm tệp đó.**
+- **`M2`:** một trích đoạn trace trong báo cáo Task 3b **không còn tái lập trên mã đã commit**
+  (nó lấy trước khi thêm lời gọi chuẩn hoá; kết luận đúng, bằng chứng cũ).
+  ⇒ **Bài học: dán bằng chứng NGAY CẠNH trạng thái mã sinh ra nó** — bằng chứng tách khỏi mã là bằng chứng sẽ trôi.
+- Reviewer **tự khai một sự cố của chính nó**: driver mutation sửa **hai điểm trên cùng một tệp** nhưng chụp backup
+  riêng cho từng edit ⇒ lượt đầu để lại `dom.ts` ở **trạng thái mutant** khi lệnh kết thúc; nó phát hiện **trong chính
+  lệnh đó**, khôi phục byte-exact, sửa driver (một backup mỗi **tệp**) rồi chạy lại.
+  ⇒ **Luật cho mọi driver mutation: MỘT bản backup cho MỘT TỆP, không phải một backup cho một edit.**
+
 ## Quy ước thẩm mỹ — spec UI thắng, skill chỉ là checklist
 
 Spec `2026-09-25-phu-de-lab-ui-design.md` là **nguồn có thẩm quyền về hình thức** (bạn đã duyệt). Skill
