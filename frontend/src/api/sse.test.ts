@@ -66,6 +66,37 @@ describe("parser SSE", () => {
     assert.deepEqual(p.push('data: {"id":3}\n\n'), [{ id: 3 }]);
   });
 
+  it("bo loc tien to `data:` moi la thu loai dong comment", () => {
+    // Bai nay GHIM BO LOC TIEN TO, khong phai `try/catch`. `: 111{"a":1}` co nam
+    // ky tu dau (`:`, ` `, `1`, `1`, `1`) bi `slice(5)` cat di, phan con lai LA
+    // JSON HOP LE. Vay neu chi dua vao `try/catch` thi `JSON.parse` thanh cong va
+    // su kien rac lot ra; chi bo loc `startsWith("data:")` moi loai duoc no.
+    // (Do la ca DUY NHAT phan biet duoc hai co che — do: bo bo loc thi bai nay do,
+    // con `: connected` / `: heartbeat` / `: ping` thi KHONG do, vi `JSON.parse`
+    // cua chung nem va `try/catch` nuot.)
+    const p = createSseParser();
+    assert.deepEqual(p.push(': 111{"a":1}\n\n'), []);
+    // Va su kien that ngay sau do van phai qua.
+    assert.deepEqual(p.push('data: {"id":8}\n\n'), [{ id: 8 }]);
+  });
+
+  it("chi phat OBJECT khong-null: JSON hop le nhung sai hinh dang bi bo qua", () => {
+    // `JSON.parse("null")` tra `null`, va `null` lot vao tang tieu thu thi
+    // `event.id` nem `TypeError` TRONG vong lap doc ⇒ mot dong rac giet CA stream.
+    // Cung lop: so, chuoi, `true`, va mang (`typeof [] === "object"` nhung no
+    // khong phai mot su kien job).
+    const p = createSseParser();
+    assert.deepEqual(p.push("data: null\n\n"), []);
+    assert.deepEqual(p.push("data: 5\n\n"), []);
+    assert.deepEqual(p.push('data: "chuoi"\n\n'), []);
+    assert.deepEqual(p.push("data: true\n\n"), []);
+    assert.deepEqual(p.push("data: [1,2]\n\n"), []);
+    // Object RONG van duoc phat: no dung hinh dang, chi thieu khoa — do la
+    // chuyen cua tang tieu thu, parser khong duoc biet `JobEvent` la gi.
+    assert.deepEqual(p.push("data: {}\n\n"), [{}]);
+    assert.deepEqual(p.push('data: {"id":9}\n\n'), [{ id: 9 }]);
+  });
+
   it("su kien bi cat DUNG o ranh gioi xuong dong", () => {
     // Khac bai "ghep lai manh bi cat": o day manh dau ket thuc bang DUNG mot
     // xuong dong, nen cap `\n\n` chi hien ra khi manh sau toi. `indexOf("\n\n")`

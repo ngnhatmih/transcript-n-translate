@@ -4,8 +4,9 @@
  * Vi sao no la mot ham rieng: hai loi cua tang nay khong the thay bang mat
  * thuong. Mot manh `data:` bi cat giua hai lan doc phai duoc ghep lai, va mot
  * dong rac khong duoc giet ca stream (mat ket noi vi mot su kien hong la mat
- * luon tien do cua moi job khac). O day no la ham thuan nen `node --test` ghim
- * duoc — xem `sse.test.ts`.
+ * luon tien do cua moi job khac) — du dong rac do la JSON hong, hay la JSON
+ * HOP LE nhung sai hinh dang (`null`, so, chuoi, mang). O day no la ham thuan
+ * nen `node --test` ghim duoc — xem `sse.test.ts`.
  *
  * Parser nay KHONG biet `JobEvent` la gi, va do la co y: no la parser SSE, khong
  * phai parser job. Cho ep kieu duy nhat nam o phia nguoi goi
@@ -34,8 +35,11 @@ export function createSseParser() {
         // Giu phan DU cho lan doc sau: mot su kien bi cat giua hai manh chi duoc
         // chot khi cap xuong dong thu hai toi, va no co the nam trong manh sau.
         buf = buf.slice(i + 2);
-        // Dong comment (`: connected`, `: heartbeat`) khong co tien to `data:`
-        // nen no bi loc sach o day — no giu ket noi song, khong phai su kien.
+        // Dong comment (`: connected`, `: heartbeat`) bi loai boi BO LOC TIEN TO
+        // ngay tren: no khong bat dau bang `data:` nen `data` rong va bi bo qua.
+        // `try/catch` ben duoi la LUOI AN TOAN RIENG cho du lieu JSON hong — no
+        // CUNG se nuot mot dong comment neu bo loc bi go, nen chinh bo loc moi la
+        // thu ma bai test mang hinh dang `: 111{"a":1}` ghim (xem `sse.test.ts`).
         const data = raw
           .split("\n")
           .filter((l) => l.startsWith("data:"))
@@ -43,7 +47,16 @@ export function createSseParser() {
           .join("");
         if (!data) continue;
         try {
-          out.push(JSON.parse(data));
+          // Du lieu JSON HOP LE nhung SAI HINH DANG cung bi bo qua: `null`, so,
+          // chuoi, `true`, va ca mang. Chup mot su kien sai hinh dang vao tang
+          // tieu thu thi `event.id` nem `TypeError` TRONG vong lap doc, va mot
+          // dong rac nhu vay giet CA stream — dung thu ma `try/catch` kia sinh ra
+          // de chan. Quy tac: chi phat OBJECT khong-null (ke ca object rong —
+          // thieu khoa la chuyen cua tang tieu thu, khong phai cua parser).
+          const value: unknown = JSON.parse(data);
+          if (typeof value === "object" && value !== null && !Array.isArray(value)) {
+            out.push(value);
+          }
         } catch {
           // Bo qua su kien hong, giu stream song. Nem o day la dot luon ket noi
           // vi mot dong rac cua MOT job.
