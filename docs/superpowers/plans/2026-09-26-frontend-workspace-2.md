@@ -44,7 +44,7 @@ và Vite 6 **không có** đường pre-bundle dependency nào ngoài esbuild �
 | `npm test -- contract` | `npm test` (đã đổi trong `package.json`) — nếu gọi tay thì **`node --import ./test/swc-loader.mjs --test --test-isolation=none <tệp>`**. **`--test-isolation=none` là BẮT BUỘC**: thiếu nó runner spawn con và chết `EPERM` trên máy này |
 | `import { describe, expect, it } from "vitest"` | `import { describe, it } from "node:test"` + `import assert from "node:assert/strict"` — `expect(x).toBe(y)` → `assert.equal(x, y)`, `toBeInTheDocument()` → `assert.ok(el)` |
 | `frontend/package-lock.json` | **ĐÃ CŨ** (mô tả cây Vite cũ) — nhưng nay **CẬP NHẬT ĐƯỢC TẠI CHỖ** bằng công thức ERRATA #5, nên vế *"phải làm ở môi trường bình thường"* **không còn đúng**. Implementer **vẫn KHÔNG** được sửa tay tệp này: chỉ `npm` được ghi nó. `npm ci` (`G-2`) chỉ đúng **sau khi** lockfile được `npm install` lại |
-| `npm i` bất kỳ | ⚠️ **ĐÃ SỬA Ở ERRATA #5.** Chết `EPERM` vì **cache nằm NGOÀI workspace** (`open '…\AppData\Local\npm-cache\_cacache\tmp\***'`), **KHÔNG** phải named pipe. Cách đúng: `npm i [-D] <gói> --cache C:\Users\Admin\Desktop\ngn\deepseek\.npm-cache --ignore-scripts` ⇒ **đã đo chạy được** (`added 56 packages in 5s`, EXITCODE=0). Sau MỖI lần thêm gói: chạy lại `npm test`, phải vẫn `tests 16 / pass 14 / fail 2` EXIT=1 |
+| `npm i` bất kỳ | ⚠️ **ĐÃ SỬA Ở ERRATA #5.** Chết `EPERM` vì **cache nằm NGOÀI workspace** (`open '…\AppData\Local\npm-cache\_cacache\tmp\***'`), **KHÔNG** phải named pipe. Cách đúng: `npm i [-D] <gói> --cache C:\Users\Admin\Desktop\ngn\deepseek\.npm-cache --ignore-scripts` ⇒ **đã đo chạy được** (`added 56 packages in 5s`, EXITCODE=0). Sau MỖI lần thêm gói: chạy lại `npm test` **ngay** — nhưng **đừng so một con số tuyệt đối** (chính dòng này từng ghi `16/14/2` và nó cũ ngay sau Task 3). Điều phải đúng: **đỏ đúng hai bài `EMPTY_DB_MSG`, không có bài đỏ thứ ba, `cancelled 0`** |
 
 **Bảng này áp cho MỌI khối mã mẫu ở MỌI task bên dưới.** Các khối đó vẫn còn viết theo Vitest / Testing Library / Vite —
 đó là **chưa được vá**, không phải "đã đối chiếu". Khi làm một task, chuyển khối mã của nó theo bảng này và theo `Q-1`.
@@ -260,6 +260,41 @@ Task 3 (`2d21cb2`) xong và tự nó bác bỏ **bốn** điều brief của ng�
    "job chưa có trong map"; nó vẫn phải giữ vì `Map<number, Job>.get` cần `number`. ⇒ Hệ quả: bài test `id: null`
    và bài "job lạ" **kiểm cùng một đường**. Docstring phải nói đúng điều đó (không được bán nó như hai bất biến
    độc lập), và Tasks 4–13 **không** được lặp lại kiểu "hai bài này độc lập" khi chúng không độc lập.
+
+## ⚠️ ERRATA #7 — hệ quả của vòng sửa #1 Task 3 (`bc0dcae`): **RECIPE PHẢI ĐỎ TRƯỚC KHI SỬA**
+
+Vòng sửa #1 Task 3 dựng được **harness DOM thật** (jsdom + Testing Library + server `node:http` trong tiến trình)
+và nhờ đó **hai rủi ro đọc mã trở thành lỗi đo được**. Nó cũng bác **bốn** điểm nữa của brief người điều phối —
+nâng tổng số recipe/số liệu sai của người điều phối trong giai đoạn này lên **sáu**. Bốn luật mới:
+
+1. **MỘT RECIPE ĐO LỖI CHỈ LÀ BẰNG CHỨNG KHI NÓ ĐỎ TRÊN MÃ CHƯA SỬA.** Recipe `I-3` của brief —
+   *"kết nối thành công rồi server đóng stream"* — **không đo được** lỗi nó tuyên bố đo: nếu **chưa hề có lần đứt nào**
+   thì `attempt` đang bằng `0`, nên "delay nhỏ nhất" là **đúng ngay cả khi bug còn nguyên**. Phải **ép backoff leo thang
+   TRƯỚC** rồi mới cho kết nối thành công. Implementer làm đúng và ghi lại **trạng thái ĐỎ trước khi sửa**:
+   `ℹ tests 4 / pass 2 / fail 2` EXIT=1, với `AssertionError: … do duoc 2014ms ⇒ backoff da leo thang don dieu`.
+   ⇒ **Luật: mọi recipe/vòng sửa phải kèm BẰNG CHỨNG ĐỎ trên mã chưa sửa.** Không có nó thì không biết phép đo
+   có phân biệt được gì hay không. (Đây là TDD áp cho chính *phép đo*, không chỉ cho test.)
+2. **`AbortSignal.timeout` KHÔNG phải lưới chống treo** khi mọi thứ chạy trong **cùng một tiến trình**: nó huỷ một
+   `fetch`, **không** làm một promise không bao giờ về tự kết thúc. Thứ chặn treo là **hạn của vòng CHỜ** —
+   dùng `waitFor` của Testing Library (có timeout) cho mọi chỗ chờ. Brief gợi ý sai cơ chế này.
+3. **`--test-isolation=none` nghĩa là MỌI tệp test dùng CHUNG MỘT TIẾN TRÌNH.** ⇒ Bất kỳ thay đổi **global** nào
+   (`globalThis.fetch`, `window`, `document`, `IS_REACT_ACT_ENVIRONMENT`) **PHẢI được trả lại nguyên trạng trong teardown**,
+   nếu không các suite sau sẽ chạy trên một môi trường đã bị sửa và hỏng theo cách **rất khó lần**.
+   Implementer đã làm đúng (`teardownDom()` trả `globalThis.fetch` về nguyên bản) và nêu rõ lý do.
+   ⇒ **Áp cho T5–T11**: mọi harness DOM phải có `teardownDom` tương ứng, và phải chạy **toàn bộ** `npm test`
+   (không chạy lẻ tệp) để chứng minh không có nhiễm chéo.
+4. **`npm i` với `package-lock.json` CŨ sẽ PRUNE gói thừa** — đo được: `added 50 packages, removed 55 packages`
+   (dọn sạch tàn dư cây Vite/Vitest cũ; `vite`, `vitest`, `@playwright` nay **đều vắng**, còn `react`, `react-dom`,
+   `rollup`, `@swc/core`, `typescript`, `jsdom`, `@testing-library/react` **đều có**). Và **`package-lock.json` được
+   viết lại** (1619 dòng) ⇒ nợ `G-2`/dòng 43 ("lockfile cũ, `npm ci` phải fail") **đã được hoà giải một phần**.
+   ⇒ Sau **mọi** lệnh cài: chạy lại **cả ba** cổng (`npm test`, `typecheck`, `build`), và **kiểm `node_modules`
+   còn những gói đang dùng** — một lần prune có thể lấy đi thứ bạn cần.
+
+5. **Một dòng "đúng nhưng không quan sát được" phải được khai là không quan sát được.** `decoder.decode()` xả cuối
+   (`useJobStream.ts`) **không thể tạo thêm sự kiện nào**: parser chỉ phát khi thấy `\n\n` (ASCII, luôn nằm **sau**
+   JSON), còn `decode(stream: true)` chỉ giữ **chuỗi byte cuối chưa hoàn chỉnh** — ở cuối stream nó không bao giờ
+   hoàn chỉnh được nữa. Implementer thêm dòng đó nhưng **không** có test ghim và **không** khai "đã kiểm".
+   ⇒ **Đó là cách đúng để ghi một dòng không đo được.** Tasks 4–13 phải làm y vậy thay vì gán cho nó một bài test giả.
 
 ## Quy ước thẩm mỹ — spec UI thắng, skill chỉ là checklist
 
