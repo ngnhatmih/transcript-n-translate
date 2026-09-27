@@ -5,9 +5,9 @@
   "main": "index.js",
   "scripts": {
     "dev": "node dev-server.mjs",
-    "build": "rollup -c",
+    "build": "tsc --noEmit && rollup -c",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run",
+    "test": "node --import ./test/swc-loader.mjs --test --test-isolation=none \"**/*.test.{ts,tsx,mjs,js}\"",
     "e2e": "playwright test"
   },
   "keywords": [],
