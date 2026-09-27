@@ -14,7 +14,10 @@
 
 - **Node v24.16.0, npm 11.13.0** (đã đo; `pnpm` có nhưng dùng **npm** cho ít bộ phận hơn). Frontend ở `frontend/` **trong repo** `phu-de-lab`.
 - Dev server **cổng 3100** (khớp `FRONTEND_DEV_ORIGINS` ở `backend/app/api/app.py:19`), proxy `/api` → `http://127.0.0.1:8620`.
-- Backend **không** chạy sẵn: mọi test đầu-cuối phải **tự khởi động** nó và **tự tắt**. Cổng 8620 và 11434 (Ollama) hiện đều **tắt** — đừng giả định chúng sống.
+- Backend **không** chạy sẵn: mọi test đầu-cuối phải **tự khởi động** nó và **tự tắt**. Cổng 8620 **tắt** — đừng giả định nó sống.
+  ⚠️ **ĐÍNH CHÍNH (Task 4, `00535e1`):** câu *"và 11434 (Ollama) hiện đều **tắt**"* **SAI khi đo lại** —
+  `netstat` cho `TCP 127.0.0.1:11434 … LISTENING` (PID 3408). **Đừng hard-code trạng thái Ollama**: nó **đổi theo lúc**
+  (`up` đo được, `unknown` đo được, `down` **chưa từng** đo được). Mọi thứ chạm Ollama phải chịu được **cả ba**.
 - **CỐ Ý KHÔNG dùng:** Tailwind · thư viện quản lý trạng thái · sinh type từ `/openapi.json` · `@tanstack/react-virtual` · thư viện component. Lý do ở spec §2 — đổi ý thì phải nói ra, không lặng lẽ thêm.
 - **ponytail mức `full`** áp cho *thứ được dựng*. Mọi chỗ cắt góc có trần đã biết phải có comment `ponytail:` nêu **trần** + **đường nâng cấp**.
 - **Kỷ luật của dự án KHÔNG bị ponytail nới:** không amend/rebase; scratch **ngoài** repo; `$env:TEMP` **bị từ chối** nên scratch để trong workspace nhưng ngoài cây repo rồi xoá; mọi tuyên bố "xong" kèm **lệnh chính xác + dòng cuối nguyên văn**; mọi test mới phải chứng minh **không rỗng** bằng mutation (đổi mã → thấy đỏ → phục hồi → verify `git hash-object` == `git rev-parse HEAD:<path>` **và** byte trong không gian chuẩn hoá của git, vì `core.autocrlf=true` làm hash khớp trên CRLF).
@@ -435,6 +438,63 @@ phải được cài trong hook **của chính file đó**.
   riêng cho từng edit ⇒ lượt đầu để lại `dom.ts` ở **trạng thái mutant** khi lệnh kết thúc; nó phát hiện **trong chính
   lệnh đó**, khôi phục byte-exact, sửa driver (một backup mỗi **tệp**) rồi chạy lại.
   ⇒ **Luật cho mọi driver mutation: MỘT bản backup cho MỘT TỆP, không phải một backup cho một edit.**
+
+## ⚠️ ERRATA #10 — Task 4 (`00535e1`): luật của tôi GÂY RA hỏng thật, và **bằng chứng phục hồi bất khả TRƯỚC commit**
+
+Task 4 xong: `tests 50 / pass 48 / fail 2 / cancelled 0` EXIT=1, `typecheck` 0, `build` 0. Nó bác **bốn** chỗ nữa của
+brief tôi (nâng tổng số sai của người điều phối lên **chín**), và **hai trong số đó là hệ quả trực tiếp của chính các
+luật tôi vừa đặt ra** — đọc kỹ:
+
+### 1. Luật "bọc hook trong `describe()`" (ERRATA #9) **gây ra hỏng thật** — và đó là bằng chứng nó cần thiết
+
+`useJobStream.test.ts` (Task 3b) để `before/after` ở **cấp TỆP** ⇒ jsdom của nó sống **suốt lượt**.
+`src/shell/App.test.tsx` đứng **TRƯỚC** theo thứ tự đường dẫn (`src/api` < `src/shell` < `src/state`) ⇒ lời gọi chuẩn hoá
+của tệp mới **ĐÓNG jsdom đó**, và **ĐÚNG NĂM bài** chết `ReferenceError: document is not defined`
+(đo ở lượt ĐỎ đầu: `tests 41 / pass 31 / fail 10`). Task 4 phải **bọc hook đó vào `describe()`** để sửa.
+⇒ **Luật ERRATA #9 mục 1 không phải phòng xa: nó vừa cứu/ngăn một hỏng thật.** Giữ nguyên, và nhớ **thứ tự đường dẫn
+quyết định tệp nào chạy trước** (`src/api` → `src/shell` → `src/state`).
+
+### 2. HỆ QUẢ: căn cứ của `M1` (ERRATA #9 mục 7) **ĐÃ HẾT HIỆU LỰC** — đừng viết lại câu cũ
+
+Brief tôi viết: *"thứ bảo đảm thật là lời gọi chuẩn hoá ở dòng ~69, chứng minh bằng `H1b`: bỏ dòng đó ⇒ cả hai bài cùng đỏ"*.
+Điều đó **đúng trong bố cục CŨ**. Sau khi chuyển hook vào `describe()`, Task 4 **ĐO LẠI `H1b`** ⇒ `pass 48 / fail 2`,
+**không giết bài nào**. Comment đã commit nói **sự thật đã đo**: thứ tự bài **KHÔNG** phải thứ bảo đảm; lời gọi chuẩn hoá
+từ nay là **PHÒNG THỦ**, và `H1b` được ghi kèm **bố cục mà nó có hiệu lực**.
+⇒ **Nếu Task 4 viết y brief thì comment mới sẽ là một câu SAI.** **Bài học: một kết luận đo được có THỜI HẠN — đổi bố cục
+thì phải ĐO LẠI, và ghi kèm bố cục.** Đừng chép lại kết luận cũ vào tài liệu mới.
+
+### 3. Quy trình "bốn phần" của ERRATA #8 **bất khả TRƯỚC commit** — và bất khả cho tệp MỚI
+
+- `git diff --quiet HEAD -- frontend` **luôn EXIT=1 khi đang làm** (mọi thay đổi còn chưa commit). Nó chỉ đọc được **SAU commit**.
+- Với **tệp MỚI**, `git rev-parse HEAD:<f>` **không thể tồn tại**:
+  `fatal: path '…reducer.ts' exists on disk, but not in 'HEAD'` (đo với **bảy** tệp mới của Task 4).
+
+⇒ **Quy trình ĐÚNG, thay cho câu cũ:** chụp một **baseline byte-exact NGAY TRƯỚC khi mutate** và chứng minh phục hồi bằng
+**`Buffer.equals(baseline)` + hash của baseline**; chỉ những tệp **đã ở `HEAD`** mới so thêm được với `HEAD:<f>`;
+`git diff --quiet` **chỉ đọc sau commit** (hoặc bỏ hẳn, vì `core.autocrlf` làm nó sạch dù byte đã khác).
+
+### 4. Hai điều khác brief tôi nói sai
+
+- **`Header.tsx`/`ChannelZone.tsx`/`QueueZone.tsx` chưa từng tồn tại** ⇒ **CREATE**, không phải Modify (đã vá ở Task 4 Files).
+- **Cổng 11434 (Ollama) KHÔNG tắt** khi Task 4 đo (`LISTENING`, PID 3408) ⇒ đã vá ở `Global Constraints`.
+
+### 5. Mutation tự bắt lỗi của chính implementer — ghi làm luật cho test SSE
+
+Bài test stream của nó ban đầu **FLAKY** (phát sự kiện **trước khi** SSE mở ⇒ byte vào hư không) và có một **khẳng định
+RỖNG** (`đang chạy` đã xanh sẵn nhờ job 7 trong ảnh chụp, không phải nhờ job 8). Mutation `MINE-4` bắt được; nó sửa:
+**chờ `streams.size >= 1` trước khi phát**, và **khẳng định một chuỗi mà CHỈ job mục tiêu sinh ra được** (+ `10%`).
+Sau đó 5 lượt `npm test` liên tiếp đều `pass 48 / fail 2`.
+⇒ **Luật cho test SSE ở T5–T11:** (a) **chờ stream MỞ** rồi mới phát sự kiện; (b) mọi khẳng định phải dùng **dữ liệu mà
+CHỈ mục tiêu sinh ra được** — một khẳng định xanh nhờ dữ liệu có sẵn trong ảnh chụp là **khẳng định rỗng**.
+
+### 6. Nợ Task 4 khai ra (ghi nhận, chưa trả)
+
+`lyDoCho` cho các nhánh `interrupted`/`cancelled`/`done`/`failed` **không bài nào ghim**; `abort()` của `useApi` là dòng
+đúng nhưng **CHƯA QUAN SÁT ĐƯỢC** (endpoints không nhận `signal`) — khai ra, **không** gán test giả;
+**"trạng thái từng bước" cho vùng KÊNH không có đường nối**: `GET /api/sources` chỉ có **tám** khoá và **không có khoá bước nào**,
+`Job` chỉ mang `workspace` ⇒ **không có đường job↔source** (hiện đúng thứ backend nói + `ponytail:` TRẦN);
+lưới ba vùng `214px/1fr/286px` **chưa được nhìn thấy** (chỉ khẳng định "không chạm `app.css`");
+nợ harness `R1`/`R3`/`H5` **chưa trả** (Task 4 chỉ được giao `I1`/`M1`/`X1`).
 
 ## Quy ước thẩm mỹ — spec UI thắng, skill chỉ là checklist
 
@@ -1032,7 +1092,10 @@ git commit -m "feat(fe): parser SSE thuan + mot subscription job cho ca app"
 
 **Files:**
 - Create: `frontend/src/state/reducer.ts`, `frontend/src/state/reducer.test.ts`, `frontend/src/state/useApi.ts`
-- Modify: `frontend/src/shell/App.tsx`, `frontend/src/shell/Header.tsx`, `frontend/src/shell/ChannelZone.tsx`, `frontend/src/shell/QueueZone.tsx`
+- Modify: `frontend/src/shell/App.tsx`
+- ⚠️ **ĐÍNH CHÍNH (Task 4, `00535e1`):** `Header.tsx`, `ChannelZone.tsx`, `QueueZone.tsx` **CHƯA BAO GIỜ TỒN TẠI**
+  (`git log --all --name-only -- frontend/src/shell` chỉ có `App.tsx` từ `a2fffe1`) ⇒ chúng là **CREATE**, không phải Modify.
+  Bản cũ của dòng này ghi "Modify" cả ba — **sai**, và brief của người điều phối đã chép lại nguyên si.
 
 **Interfaces:**
 - Consumes: `endpoints`, `useJobStream` (Task 2–3)
