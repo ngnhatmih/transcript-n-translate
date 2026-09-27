@@ -25,7 +25,16 @@ export function App() {
       <Header />
       <div className="shell__mid">
         <aside className="shell__channels">
-          <ChannelZone sources={sources.data} loading={sources.loading} error={sources.error} />
+          {/* KÊNH nhận `jobs` để suy TRẠNG THÁI TỪNG BƯỚC qua `payload.source_id`
+              (hợp đồng: `routes_jobs._job_json` trả `payload`; `IngestPayload`/
+              `AsrPayload` buộc có `source_id`). Cùng MỘT bản đồ với HÀNG ĐỢI — không
+              request thứ hai, không bản sao thứ hai. */}
+          <ChannelZone
+            sources={sources.data}
+            jobs={jobs}
+            loading={sources.loading}
+            error={sources.error}
+          />
         </aside>
         {/* BÀN LÀM VIỆC: màn hình Biên tập là Task 5–T11; Task 4 chỉ giữ đúng ô lưới. */}
         <main className="shell__work" />

@@ -51,18 +51,25 @@ const SOURCES: Source[] = [
   },
 ];
 
-/** `phase` theo dung dinh dang `job_state.phase_of` = "<type>:<engine|->". */
+/**
+ * `phase` theo dung dinh dang `job_state.phase_of` = "<type>:<engine|->", va `payload`
+ * theo dung hop dong `routes_jobs.PAYLOAD_SCHEMA`: `ingest`/`asr` mang `source_id`,
+ * `translate` mang `translation_id` (KHONG mang `source_id`).
+ */
 function makeJob(
   id: number,
+  type: Job["type"],
   state: Job["state"],
   phase: string,
   progress: number,
+  payload: Record<string, unknown> = {},
 ): Job {
+  const engine = phase.split(":")[1];
   return {
     id,
     workspace: 1,
-    type: id === 7 ? "asr" : "translate",
-    engine: id === 7 ? "faster-whisper-large" : "qwen2.5-7b",
+    type,
+    engine: engine === undefined || engine === "-" ? null : engine,
     phase,
     state,
     cancel_requested: false,
@@ -70,7 +77,7 @@ function makeJob(
     progress,
     log_tail: "",
     error: null,
-    payload: {},
+    payload,
     created_at: "2026-01-01T00:00:00Z",
     started_at: null,
     finished_at: null,
@@ -78,8 +85,17 @@ function makeJob(
 }
 
 const JOBS: Job[] = [
-  makeJob(7, "running", "asr:faster-whisper-large", 0.35),
-  makeJob(8, "queued", "translate:qwen2.5-7b", 0),
+  // KENH 1 — ingest XONG, mot job asr CU da xong, roi mot job asr MOI dang chay.
+  // Hai job asr tren CUNG mot kenh la chuyen THAT (chay lai), nen cap nay ghim luon
+  // QUY UOC "job co id LON NHAT cua moi buoc la trang thai HIEN TAI".
+  makeJob(3, "asr", "done", "asr:faster-whisper-large", 1, { source_id: 1, lang: "zh" }),
+  makeJob(5, "ingest", "done", "ingest:-", 1, { source_id: 1, lang: "zh" }),
+  makeJob(7, "asr", "running", "asr:faster-whisper-large", 0.35, { source_id: 1, lang: "zh" }),
+  // KENH 2 — ingest dang CHO, va CHUA co job phien am nao.
+  makeJob(6, "ingest", "queued", "ingest:-", 0, { source_id: 2, lang: "en" }),
+  // Job DICH: payload mang `translation_id`, KHONG mang `source_id` ⇒ khong duoc tinh
+  // cho kenh nao (duong dai translation -> transcript -> source, xem TRAN o ChannelZone).
+  makeJob(8, "translate", "queued", "translate:qwen2.5-7b", 0, { translation_id: 42 }),
 ];
 
 const dem = { sources: 0, jobs: 0, stream: 0, loiSources: false };
@@ -190,6 +206,40 @@ async function choChu(container: HTMLElement, chuoi: string): Promise<void> {
   );
 }
 
+/**
+ * Text cua TUNG phan tu khop `chon` — can cho cac khang dinh phai GAN DUNG doi tuong.
+ *
+ * Vi sao khong duoc dung `container.textContent.includes(...)`: review vong #1 do duoc
+ * rang dao hai nhan "đã tách tiếng"/"chưa tách tiếng" trong `ChannelZone` lam CA NAM
+ * MUOI bai van xanh — vi kiem ca DOM chi hoi "hai chuoi nay co xuat hien o dau do
+ * khong", ma sau khi dao thi ca hai VAN xuat hien, chi la gan sai kenh.
+ */
+function textCua(container: HTMLElement, chon: string): string[] {
+  return [...container.querySelectorAll(chon)].map((el) => el.textContent ?? "");
+}
+
+/** Cho toi khi MOT phan tu khop `chon` thoa `dieuKien`; nem loi doc duoc kem DOM that. */
+async function choPhanTu(
+  container: HTMLElement,
+  chon: string,
+  dieuKien: (text: string) => boolean,
+  moTa: string,
+): Promise<string> {
+  let cuoi = "";
+  await waitFor(
+    () => {
+      const khop = textCua(container, chon).find(dieuKien);
+      assert.ok(
+        khop !== undefined,
+        `${moTa}; do duoc: ${JSON.stringify(textCua(container, chon))}`,
+      );
+      cuoi = khop;
+    },
+    { timeout: 5000, interval: 20 },
+  );
+  return cuoi;
+}
+
 describe("App: KENH THAT + HANG DOI THAT tu server node:http trong tien trinh", () => {
   before(async () => {
     await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()));
@@ -272,15 +322,23 @@ describe("App: KENH THAT + HANG DOI THAT tu server node:http trong tien trinh", 
   it("stream sut su kien cho id DA BIET: hang doi doi theo, khong doc lai anh chup", async () => {
     const { container, unmount } = render(taoPhanTu(App));
 
-    // Trang thai tu ANH CHUP truoc: job 8 dang CHO.
-    await choChu(container, "chờ gom lô");
+    // Trang thai tu ANH CHUP truoc: RIENG job 8 dang cho. Khong the hoi ca DOM "co chu
+    // chờ gom lô khong": job 6 (ingest cua kenh 2) CUNG dang cho ⇒ phep do se RONG.
+    await choPhanTu(
+      container,
+      ".q__item",
+      (t) => t.includes("#8 ") && t.includes("chờ gom lô"),
+      "job 8 chua hien la dang cho",
+    );
     const jobsSauAnhChup = dem.jobs;
 
-    // ⚠️ CHO STREAM THAT SU MO truoc khi ghi su kien. DO DUOC (khong phai gia thuyet):
-    // anh chup duoc publish TRUOC khi hook mo stream, nen ghi ngay sau khi thay chu
-    // "chờ gom lô" thi byte di vao `streams` RONG ⇒ su kien bi MAT, va bai test do vi
-    // mot ly do khong lien quan gi toi thu no dinh do. Lan do that: mutation MINE-4 lam
-    // bai nay do o dung cho nay.
+    // ⚠️ Cho stream THAT SU mo truoc khi ghi su kien.
+    // DO DUOC: mot lan chay mutation (MINE-4, vong truoc) bai nay do voi DOM cho thay
+    // job 8 VAN o trang thai anh chup sau khi `emit` ⇒ su kien khong tới DOM.
+    // SUY RA (chua chung minh duoc): nguyen nhan la `emit` roi vao luc `streams` con
+    // RONG, vi hook publish anh chup TRUOC roi moi mo stream. Reviewer vong #1 do
+    // mutation REMOVEWAIT (bo khoi cho nay) va no **KHONG** giết bài nào ⇒ nguyen nhan
+    // do KHONG tái lập được, nên đây là phòng thủ, không phải bất biến đã chứng minh.
     await waitFor(
       () => {
         assert.ok(streams.size >= 1, "hook chua mo /api/jobs/stream");
@@ -294,17 +352,18 @@ describe("App: KENH THAT + HANG DOI THAT tu server node:http trong tien trinh", 
     // Chuoi nay CHI job 8 moi sinh ra duoc: job 7 dang chay voi phase "asr:…". Neu chi
     // cho chu "đang chạy" thi job 7 (dang chay san trong anh chup) da lam bai test XANH
     // ngay ca khi su kien khong he tới — mot phep do rong.
-    await choChu(container, "đang chạy · translate:qwen2.5-7b");
-    await choChu(container, "10%");
-    await waitFor(
-      () => {
-        const text = container.textContent ?? "";
-        assert.ok(
-          !text.includes("chờ gom lô"),
-          `job 8 da chay thi khong duoc con hien "chờ gom lô"; do duoc: ${JSON.stringify(text.slice(0, 400))}`,
-        );
-      },
-      { timeout: 5000, interval: 20 },
+    const item8 = await choPhanTu(
+      container,
+      ".q__item",
+      (t) =>
+        t.includes("#8 ")
+        && t.includes("đang chạy · translate:qwen2.5-7b")
+        && t.includes("10%"),
+      "job 8 khong duoc cap nhat tu su kien stream",
+    );
+    assert.ok(
+      !item8.includes("chờ gom lô"),
+      `job 8 da chay thi khong duoc con hien "chờ gom lô"; do duoc: ${JSON.stringify(item8)}`,
     );
     assert.equal(
       dem.jobs,
@@ -329,6 +388,56 @@ describe("App: KENH THAT + HANG DOI THAT tu server node:http trong tien trinh", 
     await choChu(container, "nguồn dữ liệu hỏng (cố ý)");
 
     assert.deepEqual(tiengOn, [], "mot loi HTTP phai di ra DOM, khong duoc chi ghi console");
+    unmount();
+  });
+
+  it("S2: hai nhan 'đã tách tiếng' / 'chưa tách tiếng' phai GAN DUNG kenh (ca hai chieu)", async () => {
+    // Lo hong do review vong #1 DO DUOC: dao hai nhan nay trong `ChannelZone` thi
+    // `npm test` van `pass 48 / fail 2` — CA NAM MUOI bai xanh. Ly do: bai cu chi hoi
+    // "hai chuoi nay co xuat hien dau do trong DOM khong", ma sau khi dao thi CA HAI
+    // van xuat hien, chi la gan SAI KENH. Day la chu NGUOI DUNG DOC, noi nguoc su that.
+    const { container, unmount } = render(taoPhanTu(App));
+
+    const kenh1 = await choPhanTu(
+      container, ".ch__item", (t) => t.includes("kenh-mot.wav"), "khong thay kenh 1 trong DOM",
+    );
+    const kenh2 = await choPhanTu(
+      container, ".ch__item", (t) => t.includes("vid.example/kenh-hai"), "khong thay kenh 2 trong DOM",
+    );
+
+    // `audio_path` cua kenh 1 la mot duong dan THAT ⇒ "đã tách tiếng"; cua kenh 2 la
+    // `null` ⇒ "chưa tách tiếng". Khang dinh CA HAI CHIEU tren TUNG kenh.
+    assert.ok(kenh1.includes("đã tách tiếng"), `kenh 1 phai "đã tách tiếng"; do duoc ${JSON.stringify(kenh1)}`);
+    assert.ok(!kenh1.includes("chưa tách tiếng"), `kenh 1 KHONG duoc hien "chưa tách tiếng"; do duoc ${JSON.stringify(kenh1)}`);
+    assert.ok(kenh2.includes("chưa tách tiếng"), `kenh 2 phai "chưa tách tiếng"; do duoc ${JSON.stringify(kenh2)}`);
+    assert.ok(!kenh2.includes("đã tách tiếng"), `kenh 2 KHONG duoc hien "đã tách tiếng"; do duoc ${JSON.stringify(kenh2)}`);
+
+    assert.deepEqual(tiengOn, [], "hien trang thai kenh khong duoc sinh tieng on console");
+    unmount();
+  });
+
+  it("I1: trang thai TUNG BUOC cua kenh suy tu payload.source_id cua job (job moi nhat thang)", async () => {
+    const { container, unmount } = render(taoPhanTu(App));
+
+    const kenh1 = await choPhanTu(
+      container, ".ch__item", (t) => t.includes("kenh-mot.wav"), "khong thay kenh 1 trong DOM",
+    );
+    const kenh2 = await choPhanTu(
+      container, ".ch__item", (t) => t.includes("vid.example/kenh-hai"), "khong thay kenh 2 trong DOM",
+    );
+
+    // KENH 1: `ingest` #5 xong; `asr` co HAI job — #3 (done) va #7 (running).
+    // QUY UOC dang ghim: job co id LON NHAT cua moi buoc la trang thai HIEN TAI, nen
+    // ket qua phai la "đang chạy" chu KHONG phai "xong" (job #3 la LICH SU).
+    assert.ok(kenh1.includes("nạp: xong"), `kenh 1 phai "nạp: xong"; do duoc ${JSON.stringify(kenh1)}`);
+    assert.ok(kenh1.includes("phiên âm: đang chạy"), `kenh 1 phai "phiên âm: đang chạy"; do duoc ${JSON.stringify(kenh1)}`);
+    assert.ok(!kenh1.includes("phiên âm: xong"), `job asr #3 la lich su, khong duoc hien; do duoc ${JSON.stringify(kenh1)}`);
+
+    // KENH 2: `ingest` #6 dang cho, va CHUA co job phien am nao.
+    assert.ok(kenh2.includes("nạp: đang chờ"), `kenh 2 phai "nạp: đang chờ"; do duoc ${JSON.stringify(kenh2)}`);
+    assert.ok(kenh2.includes("phiên âm: chưa có job"), `kenh 2 phai "phiên âm: chưa có job"; do duoc ${JSON.stringify(kenh2)}`);
+
+    assert.deepEqual(tiengOn, [], "hien trang thai buoc khong duoc sinh tieng on console");
     unmount();
   });
 });
