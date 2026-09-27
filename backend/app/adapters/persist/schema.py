@@ -77,6 +77,12 @@ CREATE TABLE IF NOT EXISTS llm_calls (
   error TEXT,
   created_at TEXT NOT NULL
 );
+-- Handler dịch gom token/thời gian của MỘT job bằng `WHERE job_id = ?`; không
+-- index thì mỗi bản dịch quét cả bảng `llm_calls`, mà bảng đó dài thêm một hàng
+-- mỗi lần gọi engine. Index là ĐỐI TƯỢNG MỚI (không phải cột), nên câu lệnh này
+-- tự chạy trên DB đã tồn tại — KHÔNG cần migration và `SCHEMA_VERSION` giữ
+-- nguyên.
+CREATE INDEX IF NOT EXISTS idx_llm_calls_job ON llm_calls(job_id);
 
 CREATE TABLE IF NOT EXISTS glossary (
   id INTEGER PRIMARY KEY,

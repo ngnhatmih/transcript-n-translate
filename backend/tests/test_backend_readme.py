@@ -76,11 +76,11 @@ def _readme_baseline(text: str | None = None) -> tuple[int, int]:
 
 
 #: Dòng tổng kết của `--collect-only` khi `addopts = -q` đang bật (xem
-#: `pytest.ini`), nay là `819/832 tests collected (13 deselected) in 1,07s`. Đọc
-#: CẢ HAI vế của phân số chứ không chỉ một con số: lần chạy mặc định CHỌN `819`
-#: bài nhưng chỉ `819` bài đó mới `passed` khi `ffmpeg`/`ffprobe` có mặt — thiếu
+#: `pytest.ini`), nay là `821/834 tests collected (13 deselected) in 1,07s`. Đọc
+#: CẢ HAI vế của phân số chứ không chỉ một con số: lần chạy mặc định CHỌN `821`
+#: bài nhưng chỉ `821` bài đó mới `passed` khi `ffmpeg`/`ffprobe` có mặt — thiếu
 #: chúng thì `tests/test_ingest.py` skip cả module và số `passed` tụt xuống
-#: `810`. Vì vậy "số bài chọn được" không bằng "số bài passed", và tệp này chỉ
+#: `812`. Vì vậy "số bài chọn được" không bằng "số bài passed", và tệp này chỉ
 #: được phép khẳng định thứ nó đo được.
 _COLLECTED = re.compile(r"(\d+)/(\d+) tests? collected \((\d+) deselected\)")
 
