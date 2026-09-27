@@ -66,6 +66,7 @@ Task 2 đo trên backend thật và tìm ra chín chỗ plan sai. **Không chỗ
 7. **Task 9 tiêu thụ `endpoints.affectedPreview` nhưng danh sách Files của Task 9 KHÔNG có `endpoints.ts`.** Nếu Task 2 không tạo thì Task 9 phải sửa một tệp dùng chung (hai người ghi). Task 2 đã tạo sẵn `affectedPreview` + `glossaryVersion` và ghi rõ trong comment rằng route `GET /api/glossary/affected` **ra đời ở Task 9** ⇒ **wrapper đó chưa chạy được cho tới Task 9**; đừng "sửa" nó thành chạy được bằng cách bịa route.
 8. **`tsconfig.json` đã phải sửa ở Task 2, và có ĐÁNH ĐỔI phải nói thẳng.** `npm run typecheck` đỏ vì `TS2591` (không có `@types/node`, `npm i` bị chặn), `TS5097` (Node ESM bắt buộc đuôi `.ts` tường minh) và `TS18046`. Cách sửa đã dùng: `"allowImportingTsExtensions": true` + **`"exclude": ["src/**/*.test.ts","src/**/*.test.tsx"]`**.
    ⇒ **Hệ quả bắc cầu: `contract.test.ts` KHÔNG được `tsc` kiểm kiểu** — nợ `N-2` lan từ `frontend/test/` sang `src/`. Và **mọi test `.test.tsx` của T6/T8/T9/T10 cũng sẽ bị loại khỏi `tsc`**. Nghĩa là **"build xanh" KHÔNG bao hàm "test không có lỗi kiểu"** — test vẫn chạy nên lỗi kiểu sẽ lộ ở lúc chạy, nhưng đừng đọc "build xanh" là "type sạch cho cả test".
+   **Và đây là một ĐÁNH ĐỔI, không phải "hết đường"** (review Task 2 bổ sung): 9 lỗi kia chỉ đến từ **MỘT** nguyên nhân — `@types/node` vắng (TS2591 cho `node:test`/`node:assert/strict`, và TS18046 là hệ quả của `assert.ok` mất assertion-signature). Một **khai báo ambient viết tay (~15 dòng)** cho `node:test`+`node:assert/strict` là đủ để đưa tệp test trở lại tầm `tsc`; giá của nó là một stub **có thể trôi** khỏi API thật. Task 2 **từ chối** stub đó vì nó **bịa API** — quyết định hợp lý — nhưng phải ghi là **quyết định có đánh đổi**, và nếu về sau ai muốn "build xanh bao hàm type sạch cho test" thì đây là đường.
 9. **Bài `translations[]` của contract test hiện RỖNG VỀ DỮ LIỆU** trên DB repo (`0 hàng`), nên nó chỉ được chứng minh không-rỗng nhờ một DB scratch gieo riêng. Muốn ghim thật thì **Task 12 phải gieo dữ liệu vào DB thật** trước khi chạy e2e — đó là lý do Task 12 tồn tại.
 
 ## Quy ước thẩm mỹ — spec UI thắng, skill chỉ là checklist
@@ -934,7 +935,16 @@ def affected_preview(lang: str, term: str, translation: str, approved: bool = Fa
     Cố ý không tính lại: hai chỗ tính cùng một đại lượng là đúng lớp lỗi mà
     Giai đoạn 2 phải đi vá hai lần.
     """
-    old = [t for t in repos.list_terms(lang=lang) if t.term != term]
+    # ⚠️ ĐÍNH CHÍNH (review Task 2 bắt, M-3). Bản đầu của plan viết
+    #   old = [t for t in repos.list_terms(lang=lang) if t.term != term]
+    # tức LOẠI TRỪ hàng đang sửa khỏi trạng thái cũ. CÁCH ĐÓ SAI, và chính
+    # backend này đã đo: docstring `_recompute_affected` (routes_glossary.py:92-98)
+    # nói thẳng nó mất giá trị `approved` CŨ nên ca BỎ DUYỆT không bao giờ báo ảnh
+    # hưởng — "Đo được: ... test_unapproving_a_term_also_affects_the_translations_
+    # that_use_it đỏ với `[] == [1]`". Bài đó TỒN TẠI và đang xanh với mã hiện tại.
+    # Trạng thái cũ là trạng thái THẬT trước khi ghi ⇒ KHÔNG lọc gì cả.
+    old = repos.list_terms(lang=lang)
+    # `neue` thì lọc đúng như backend làm: thay hàng cùng `term` bằng hàng mới.
     neue = [t for t in repos.list_terms(lang=lang) if t.term != term]
     neue.append(Term(id=None, lang=lang, term=term, translation=translation,
                      approved=approved))
