@@ -109,6 +109,22 @@ function lop(container: HTMLElement, chon: string): string {
   return (el as HTMLElement).className;
 }
 
+/**
+ * Khang dinh KHONG co phan tu nao khop `chon` — DEM, khong so sanh NODE.
+ *
+ * ⚠️ DO DUOC (vong mutation cua chinh task nay, mutation `E9`): `assert.equal(<node DOM>,
+ * null)` roi vao nhanh DO lam `npm test` chay **qua 90 s** (bi tran 90 s cat ngang, log
+ * dung giua suite) trong khi luot SACH la **~6 s**. Ly do: `assert.equal` in `actual` bang
+ * `util.inspect`, va mot node do React render mang theo thuoc tinh noi bo (`__reactFiber$…`)
+ * tro vao CA cay fiber — mot do thi khong lo, co vong. Do la **phep do hong**, khong phai
+ * "bai test khong giet duoc mutation": voi tran 300 s cung mutation do ket thuc binh thuong
+ * (`tests 86 / pass 83 / fail 3 / cancelled 0`) va giet DUNG bai "CUON".
+ * ⇒ Moi khang dinh "khong co phan tu" o tep nay dem SO LUONG (mot con so), khong so sanh node.
+ */
+function khongCo(container: HTMLElement, chon: string, msg: string): void {
+  assert.equal(container.querySelectorAll(chon).length, 0, msg);
+}
+
 describe("EditScreen: §4.1 danh sach doan ao hoa + GHIM dong dang sua + suspect co VAN va LY DO", () => {
   before(async () => {
     // Chuan hoa TRUOC khi cai: khong dua vao viec tep khac da tra global hay chua.
@@ -161,8 +177,8 @@ describe("EditScreen: §4.1 danh sach doan ao hoa + GHIM dong dang sua + suspect
       "cua so 480/44 phai la 11 hang (neu render het thi la 200)",
     );
     assert.ok(container.querySelector('[data-i="0"]') !== null, "hang dau phai nam trong DOM");
-    assert.equal(container.querySelector('[data-i="11"]'), null, "hang ngoai cua so khong duoc render");
-    assert.equal(container.querySelector('[data-i="199"]'), null, "hang cuoi khong duoc render");
+    khongCo(container, '[data-i="11"]', "hang ngoai cua so khong duoc render");
+    khongCo(container, '[data-i="199"]', "hang cuoi khong duoc render");
 
     // DEM: khong co dem thi chieu cao cuon chi bang cua so ⇒ khong cuon duoc qua 200 doan.
     const dau = container.querySelector(".ed__dem-dau") as HTMLElement;
@@ -313,7 +329,7 @@ describe("EditScreen: §4.1 danh sach doan ao hoa + GHIM dong dang sua + suspect
     khung.scrollTop = 44 * 100;
     fireEvent.scroll(khung);
 
-    assert.equal(container.querySelector('[data-i="0"]'), null, "hang 0 phai ra khoi cua so");
+    khongCo(container, '[data-i="0"]', "hang 0 phai ra khoi cua so");
     assert.ok(container.querySelector('[data-i="100"]') !== null, "hang 100 phai vao cua so");
 
     assert.deepEqual(tiengOn, [], "cuon khong duoc sinh tieng on console");
