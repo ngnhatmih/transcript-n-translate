@@ -99,9 +99,23 @@ Vòng sửa Task 2 (`166c2a9` + `f5a625b`) đóng 2 Critical + I-1, và **đổi
    hoặc chèn khoảng trắng `* /`. **Áp cho mọi doc-comment của Tasks 3–13.**
    Cùng họ: ký tự Unicode ngoài ASCII (`⊂` U+2282) làm `tsc` đỏ `TS1127` — viết bằng chữ.
    Và **đừng ghi số dòng cứng** (`(dòng 326)`) vào comment: nó lệch ngay khi tệp đổi (đã đo: 326 → 349).
-3. **Số dòng mà `node --test` báo KHÔNG khớp nguồn** (implementer khai `:222:5` / `:226:16` trong khi nguồn ở đó là
-   `"string",` và `assert.equal(`; nghi source-map của `test/swc-loader.mjs`). ⇒ **Định danh bài đỏ bằng TIÊU ĐỀ**,
-   không bằng số dòng runner. **Trạng thái: chưa kiểm chứng độc lập** — vòng kiểm chứng `verify-task-2-fix-round-3` đang đo.
+   ⚠️ **ĐỪNG CHÉP mẫu `src` + `**` + `/*.test.ts` ở trên vào bất kỳ doc-comment nào** — vòng kiểm chứng bắt được
+   rằng chính ERRATA này và báo cáo của implementer **đã chép lại mẫu đó**, nên ai copy nguyên văn sẽ **tái hiện
+   `TS1127`**. Khi cần nói về mẫu nguy hiểm, hãy **mô tả nó bằng chữ** ("glob hai-sao có chứa dấu sao-rồi-gạch-chéo"),
+   và chỉ dán **dạng an toàn**.
+3. **Số dòng mà `node --test` báo là số dòng của JS ĐÃ SINH, không phải của `.ts`** — nhưng nó vẫn in dưới nhãn `.ts`.
+   **NGUYÊN NHÂN ĐÃ TRUY ĐƯỢC** (vòng kiểm chứng `verify-task-2-fix-round-3`, mạnh hơn giả thuyết ban đầu):
+   `test/swc-loader.mjs:26` trả `{format, source, shortCircuit}` — **KHÔNG có `sourceMap`, `out.map = undefined`** —
+   và script test **không** bật `--enable-source-maps`. Khớp tuyệt đối: `gen:222` là `it("GET /api/transcripts: …")`,
+   `gen:226` là `assert.notEqual(rows.length, 0, EMPTY_DB_MSG);`. Độ lệch **KHÔNG ĐỀU**: đo 10 mẫu, delta **12…34**,
+   `all equal? false`.
+   ⇒ **Định danh bài đỏ bằng TIÊU ĐỀ, không bằng số dòng runner.** Hai đường nâng cấp nếu ai cần số dòng đúng:
+   (a) cho loader trả `sourceMap` (swc có `sourceMaps: true`) **và** chạy node với `--enable-source-maps`;
+   (b) chấp nhận và luôn dùng tiêu đề. **Đừng** "sửa" bằng cách tin số dòng.
+   ⚠️ **Và một đính chính cho chính ERRATA này:** con số `+25/+66` tôi từng dẫn là **ghép chéo hai bài** (292 là
+   assertion của bài #2, không phải của bài #1) — xem `verify-task-2-fix-round-3-report.md`. Ghép đúng trong cùng
+   bài: bài #1 `it` +20, assertion +21; bài #2 +22, +22. **Bài học lặp lại lần thứ ba: một con số không kèm lệnh
+   sinh ra nó thì tôi sẽ đọc sai nó.**
 4. **Một khoảng `A..B` KHÔNG phải "những gì commit B làm".** Brief của người điều phối khai phạm vi
    `4a1e33c..c8180f1` là "2 tệp"; thật ra là **3**, vì chính người điều phối commit `5dd0616` (sửa plan này)
    **nằm giữa hai mốc**. Muốn nói về một commit thì dùng `git show --stat B`.
