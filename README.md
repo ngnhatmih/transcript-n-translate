@@ -43,10 +43,17 @@ chạm named pipe. `vite.config.ts` **không còn** trong repo và đừng thêm
 | `npm run build` | `tsc --noEmit && rollup -c` → `frontend/dist/` |
 | `npm run typecheck` | `tsc --noEmit`, không sinh tệp |
 | `npm test` | `node --test --test-isolation=none` + loader SWC trong tiến trình |
-| `npm run e2e` | `playwright test` — cần `npx playwright install` một lần |
+| `npm run e2e` | `playwright test` — **CHƯA CHẠY ĐƯỢC** ở môi trường này, xem ghi chú ngay dưới |
 
 `npm run build` chạy `tsc --noEmit` **trước** `rollup -c`, vì `rollup -c` một mình không kiểm kiểu:
 thiếu bước đó thì một "build xanh" vẫn có thể kèm type sai.
+
+**`npm run e2e` cần HAI bước cài, không một** (vòng re-review Task 1 bắt được câu cũ ở đây nói
+chỉ cần `npx playwright install`): (1) cài **gói** `@playwright/test` như một devDependency —
+`package.json` hiện **không** khai nó; (2) `npx playwright install` để tải trình duyệt.
+Ở môi trường hiện tại **cả hai đều bị chặn** (`npm i` chết `EPERM` vì cache npm, và tải trình duyệt
+là side effect mạng), nên lệnh này báo `'playwright' is not recognized`. Đây là **nợ có kế hoạch
+của Task 12** (script Playwright trên backend thật), không phải hồi quy.
 
 ### Test chạy bằng gì
 
