@@ -33,6 +33,14 @@ _INVALID = frozenset({"", ".", ".."})
 #: dấu — người dùng đổi tên là xong, còn máy chủ thì không đoán.
 _SAFE_CHARS = re.compile(r"\A[A-Za-z0-9._-]+\Z")
 
+#: Trần độ dài của MỘT thành phần đường dẫn trên hệ tệp phổ biến (NTFS: 255 ký
+#: tự). Không phải chuyện thẩm mỹ: một tên 302 ký tự toàn ký tự an toàn đi lọt
+#: qua cả ba phép kiểm kia rồi làm `open()` ném `OSError`, tức route upload trả
+#: **500** cho một lỗi ĐẦU VÀO — đúng lớp lỗi mà `a*b.mp4` và `CON` đã trả giá
+#: (C-1/API-01). `len()` là phép kiểm thứ tư, cùng lớp `InvalidBasename` để route
+#: map thành 422 như ba phép kia.
+_MAX_NAME_LENGTH = 255
+
 #: Thiết bị của Windows: `open()` trên tên này KHÔNG mở tệp mà mở thiết bị
 #: (console, cổng nối tiếp). `open("CON", "rb")` chặn VÔ HẠN, nên chỉ một
 #: request cũng đủ giữ event loop của server. Windows so khớp KHÔNG phân biệt
@@ -49,12 +57,20 @@ class InvalidBasename(ValueError):
     """Tên tệp do bên ngoài gửi vào không dùng được trên hệ tệp này.
 
     Gồm: rỗng/`.`/`..`, ký tự ngoài bộ an toàn, tên thiết bị dành riêng của
-    Windows, và tên kết thúc bằng dấu chấm hoặc khoảng trắng.
+    Windows, tên kết thúc bằng dấu chấm hoặc khoảng trắng, và tên dài quá trần
+    của một thành phần đường dẫn (`_MAX_NAME_LENGTH`).
     """
 
 
 def _reject_unsafe_name(plain: str, original: str) -> None:
     """Ném `InvalidBasename` nếu `plain` không mở được thành tệp trên Windows."""
+    if len(plain) > _MAX_NAME_LENGTH:
+        # Dài quá trần thì `open()` ném `OSError` — một lỗi ĐẦU VÀO của client
+        # đội lốt lỗi máy chủ (500). `_SAFE_CHARS` không bắt được ca này: 302
+        # chữ `a` khớp bộ ký tự an toàn hoàn hảo.
+        raise InvalidBasename(
+            f"tên tệp dài quá {_MAX_NAME_LENGTH} ký tự "
+            f"({len(plain)} ký tự): {original!r}")
     if plain[-1] in " .":
         # Windows cắt khoảng trắng/dấu chấm cuối tên: `x.mp4.` mở ra `x.mp4`,
         # tức tên client gửi lên và tên trên đĩa không còn là một.
@@ -77,8 +93,9 @@ def safe_basename(name: str | None, fallback: str = "upload.bin") -> str:
     Cắt đường dẫn là CHƯA ĐỦ: `CON` là tên trần hợp lệ với `pathlib` nhưng mở ra
     thiết bị console, còn `a*b.mp4` làm `open()` ném `OSError`. Tên như vậy là
     lỗi ĐẦU VÀO của client, nên bị từ chối ngay ở đây — trước khi bất kỳ ai
-    chạm vào đĩa. Bộ ký tự cho phép và các tên bị cấm: xem `_SAFE_CHARS` và
-    `_RESERVED_DEVICE_NAMES`.
+    chạm vào đĩa. Cùng lý do với tên DÀI quá `_MAX_NAME_LENGTH`: nó cũng chỉ nổ
+    ở `open()`, tức 500 thay vì 422. Bộ ký tự cho phép, các tên bị cấm và trần
+    độ dài: xem `_SAFE_CHARS`, `_RESERVED_DEVICE_NAMES`, `_MAX_NAME_LENGTH`.
 
     `name is None` (không có tên) dùng `fallback`. Mọi tên KHÔNG hợp lệ đều ném
     `InvalidBasename`, không âm thầm đổi thành `fallback`: nuốt lỗi ở đây thì

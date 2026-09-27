@@ -1491,6 +1491,38 @@ def test_safe_basename_treats_a_leading_colon_prefix_as_a_drive():
     assert safe_basename("x:y.mp4") == "y.mp4"
 
 
+#: Trần của MỘT thành phần đường dẫn trên NTFS là 255 ký tự. Tên 302 ký tự toàn
+#: ký tự an toàn đi lọt qua cả ba phép kiểm cũ (không kết thúc bằng dấu chấm,
+#: không phải thiết bị, khớp `_SAFE_CHARS`) rồi làm `open()` ném `OSError` ở tận
+#: `_copy_upload` ⇒ route upload trả **500** cho một lỗi ĐẦU VÀO. Cùng lớp lỗi mà
+#: `a*b.mp4` và `CON` đã trả giá (C-1/API-01): hỏng ở `open()` thay vì 422.
+_OVERLONG_FILENAME = "a" * 302
+
+#: Tên ĐÚNG BẰNG trần: phải đi qua. Không có vế này thì một trần đặt lệch
+#: (`>= 255`, hay `> 200`) vẫn làm bài trên xanh.
+_MAX_LENGTH_FILENAME = "a" * 255
+
+
+def test_safe_basename_rejects_a_name_longer_than_the_filesystem_limit():
+    """Tên dài quá trần của hệ tệp là lỗi ĐẦU VÀO, không phải lỗi máy chủ.
+
+    Đo được trước bản vá: route upload trả 500 (xem
+    `test_upload_answers_422_for_an_overlong_filename` ngay dưới).
+    """
+    from app.domain.paths import InvalidBasename, safe_basename
+
+    with pytest.raises(InvalidBasename) as excinfo:
+        safe_basename(_OVERLONG_FILENAME)
+    assert "tên tệp" in str(excinfo.value)
+
+
+def test_safe_basename_keeps_a_name_exactly_at_the_filesystem_limit():
+    """Vế đối chứng của trần: 255 ký tự là tên HỢP LỆ, không được từ chối."""
+    from app.domain.paths import safe_basename
+
+    assert safe_basename(_MAX_LENGTH_FILENAME) == _MAX_LENGTH_FILENAME
+
+
 async def _post_upload(media_root: pathlib.Path, filename: str,
                        payload: bytes = b"x") -> int:
     """Upload qua ĐÚNG app ASGI, trong tiến trình; trả về mã trạng thái.
@@ -1555,6 +1587,17 @@ def test_upload_answers_422_promptly_for_a_reserved_device_name(tmp_path, name):
     """Ca nặng nhất của C-1, đo riêng: `CON` từng không bao giờ trả về."""
     status = _upload_status_within(tmp_path, name, timeout=5.0)
     assert status == 422, f"filename={name!r} -> {status}, phải là 422"
+
+
+def test_upload_answers_422_for_an_overlong_filename(tmp_path):
+    """Trần độ dài qua ĐƯỜNG THẬT: 302 ký tự an toàn ⇒ 422, không phải 500.
+
+    Đi qua `_post_upload` (app ASGI thật, `raise_app_exceptions=False`) chứ không
+    gọi `safe_basename` trần: thứ hỏng trước bản vá là mã TRẠNG THÁI của route —
+    `open()` ném `OSError` trong `_copy_upload` và FastAPI biến nó thành 500.
+    """
+    status = _upload_status_within(tmp_path, _OVERLONG_FILENAME)
+    assert status == 422, f"filename dài {len(_OVERLONG_FILENAME)} -> {status}, phải là 422"
 
 
 def test_upload_still_accepts_a_normal_filename(client):
