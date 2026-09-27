@@ -754,6 +754,73 @@ Implementer hiện **trạng thái rỗng NÓI THẬT** thay vì một lời h�
 Và vẫn đúng như mọi task trước: **chưa ai nhìn thấy màn hình này trong trình duyệt thật** — jsdom **không có layout/CSS**,
 nên **vân chéo, chiều cao hàng, lề amber, cuộn mượt 2000 dòng, giữ focus khi cuộn** đều **CHƯA được chứng minh**.
 
+## ⚠️ ERRATA #15 — Task 6 ĐÓNG (`PASS`): con số THẬT của bẫy `assert`, và **một lời giải thích cơ chế cũng là một lời khai**
+
+Task 6 **ĐÓNG**: review độc lập cho **`PASS`, 0 Critical / 0 Important / 4 Minor**. Nó **tái lập** cái bẫy, đo **10/10**
+mutation (0 sống sót), và **bác một lời giải thích cơ chế** trong báo cáo.
+
+### 1. ⚠️ Bẫy `assert` trên DOM node — SỐ ĐO THẬT (đắt nhất vòng này)
+
+| Phép đo | Kết quả |
+|---|---|
+| `assert.equal(<DOM node React sống>, null)` ở **nhánh ĐỎ** | **218 697 ms** rồi **OOM**; lượt riêng khác **187 236 ms** |
+| thông điệp lỗi | `head_message = "Array buffer allocation failed"`, `do_dai_message = 30` |
+| `npm test` TOÀN BỘ lượt **SẠCH** | **5 398 ms** (5 lượt: 5 320–6 197 ms) |
+| **đối chứng**: helper đếm | **1 ms** |
+| **cơ chế**: `util.inspect` **có giới hạn depth** / **KHÔNG giới hạn** (đường `assert` đi) | **1 ms** / **187–219 s rồi OOM** |
+
+⇒ **Cơ chế được XÁC NHẬN, không còn là suy đoán:** `assert` **định dạng không giới hạn độ sâu** giá trị trong thông điệp
+lỗi, và một DOM node React là một đồ thị khổng lồ (có vòng) ⇒ **cấp phát bộ đệm khổng lồ ⇒ OOM**.
+⇒ **LUẬT (giữ nguyên, nay có số):** **đừng đưa một DOM node sống vào phép so sánh/khẳng định.** Dùng **boolean**
+(`assert.ok(el === null)`) hoặc `textContent`/`className`/`getAttribute`.
+**Hệ quả thật:** nếu không, **đường ĐỎ của chính test sẽ treo/OOM runner của mọi người sau**, và họ sẽ tưởng đó là lỗi của họ.
+
+⚠️ **Và một con số của implementer KHÔNG được kiểm chứng:** nó khai *"cùng mutant với trần **300 s** thì xong bình thường
+(`86/83/3`)"*. Reviewer đo **một** khẳng định đã **218 s + OOM** ⇒ **300 s khó đủ**; nó **không chạy lại nguyên xi** nên
+**con số đó CHƯA ĐO ĐƯỢC**. ⇒ Hàng `E9` trong bảng của Task 6 (`86/83/3/0`, trông như 18 mutation khác) **phải được đánh
+dấu riêng** vì lượt đó dùng trần **300 s**. (Khớp ERRATA #14 mục 5: *một mutation bị CẮT thì không được tính là "đã chạy"*.)
+
+### 2. ⚠️ MỘT LỜI GIẢI THÍCH CƠ CHẾ CŨNG LÀ MỘT LỜI KHAI — và lời này SAI
+
+Báo cáo Task 6 viết *"jsdom **kẹp** `height` âm về `0px`"*. **SAI.** Đo được: **jsdom 30.1.1 BỎ khai báo âm**
+(`style.height = ""`, computed `auto`) — nó **không** kẹp về `0px`.
+May mắn: câu sai đó **chỉ nằm trong BÁO CÁO** (`task-6-report.md:106-107`, `:275`), **KHÔNG vào mã**
+(grep `0px` trong `src` = **1** hit duy nhất, `EditScreen.test.tsx:186`, giá trị **đúng**).
+**Kết luận mà nó bảo vệ vẫn ĐÚNG** (`E3` ghim `M4` ở tầng **`windowFor`**, không phải tầng DOM) — **chỉ cơ chế được kể sai**.
+⇒ **Luật: khi giải thích VÌ SAO một phép đo cho kết quả đó, lời giải thích là một lời khai phải đo — không phải phần thưởng
+cho một kết luận đúng.** Đây là lần thứ ba trong giai đoạn một **cơ chế** (không phải con số) bị kể sai:
+`npm i`↔named pipe (ERRATA #5), "nguồn của `9 type`" (ERRATA #6), và giờ là jsdom↔`0px`.
+
+### 3. ⚠️ Test chỉ ghim **`className`**, KHÔNG ghim **LUẬT CSS** — trần đã biết cho MỌI tính năng hình thức
+
+Reviewer chứng minh **hai chiều**:
+- gỡ **class** `is-suspect` ⇒ **đỏ đúng 1 bài**;
+- **giữ class + XOÁ LUẬT CSS** ⇒ **vẫn XANH**.
+
+⇒ Với **mọi** tính năng được mô tả bằng **hình thức** (vân, lề, nhịp, chiều cao), **một test xanh KHÔNG bao hàm CSS tồn tại**.
+**Luật cho T7–T13: khi thêm một tính năng HÌNH THỨC, hãy ghim thêm một điều gì đó về CHÍNH LUẬT CSS** (rẻ nhất: một bài test
+**đọc `app.css`** và khẳng định luật/token cần thiết **có mặt**), hoặc **khai rõ** đó là trần đã biết.
+`app.css` của Task 6 có luật thật (dán ở báo cáo): `.ed__item.is-suspect { background-image: repeating-linear-gradient(…) }`
++ `.ed__item { border-left: var(--suspect-hatch-w) solid transparent }`; **3/3** token `--suspect-hatch-*` **có** người dùng;
+**CRLF giữ** (baseline 2420 B / CR=85 → nay 5335 B / CR=189).
+
+### 4. **13 TOKEN MỒ CÔI** còn lại — nợ cho T7–T13 (mỗi cái là một tính năng CHƯA tồn tại)
+
+`--panel-1`, `--panel-3`, `--ok`, `--surface-step`, `--fs-note`, `--fs-line`, `--fs-read`, `--lh-tight`, `--row-1`,
+`--sp-5`, `--sp-6`, `--dur-1`, `--ease-1`.
+⇒ **Khi một task dùng tới một trong số này, phải thêm LUẬT thật** (không chỉ class), và **xoá cái không dùng** ở Task 13.
+
+### 5. Hai khai báo phương pháp của reviewer (đáng chép thành luật)
+
+1. Nó để **2 tệp scratch tạm trong `frontend/node_modules/_rev_task6/`** (đã gitignore, `git check-ignore` xác nhận) —
+   **đã xoá**, `Test-Path` False, `git status` rỗng **trước và sau**. ⇒ Chấp nhận được **vì** nằm trong thư mục đã gitignore
+   và **đã tự khai**; nhưng **mặc định vẫn là để scratch NGOÀI cây repo**.
+2. **Nó VÔ TÌNH chạm INDEX của git:** `git --work-tree=<ngoài> checkout <rev>^ -- frontend/src/styles/app.css`
+   **cập nhật cả index** ⇒ `MM frontend/src/styles/app.css`. Nó **không** commit/amend/rebase và đã khôi phục **không phá huỷ**
+   bằng `git update-index --refresh` ⇒ `:file == HEAD:file == e8900ba2…`, status rỗng; worktree **chưa bao giờ** đổi byte.
+   ⇒ **LUẬT: để ĐỌC nội dung cũ của một tệp, dùng `git show <rev>:<path>` — TUYỆT ĐỐI không dùng `git checkout <rev> -- <path>`,
+   vì nó ghi cả index lẫn worktree.**
+
 ## Quy ước thẩm mỹ — spec UI thắng, skill chỉ là checklist
 
 Spec `2026-09-25-phu-de-lab-ui-design.md` là **nguồn có thẩm quyền về hình thức** (bạn đã duyệt). Skill
