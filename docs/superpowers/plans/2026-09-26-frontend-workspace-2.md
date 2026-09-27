@@ -881,6 +881,55 @@ Task 6 và Task 7 **đều** phải sửa `app.css` mà **không** task nào đ�
 - **`T4` giết 3 bài, không phải 1** (cả ba đều lấy vị trí phát từ chính listener) — **đúng**, không phải "giết nhầm":
   điều bắt buộc là **bài ĐỊNH giết phải đỏ**, và phải **nói rõ** nếu giết thêm.
 
+## ⚠️ ERRATA #17 — Task 7 ĐÓNG (`PASS`) + HAI BẪY PHƯƠNG PHÁP mới cho mọi vòng sau
+
+Task 7 **ĐÓNG**: review độc lập cho **`PASS`, 0 Critical / 0 Important / 5 Minor**. Nó **tự dựng lại** backend thật
+(**cổng 8622**, DB scratch riêng, WAV thật 64 044 B — **sha256 trùng khít** tệp của implementer, `8731812716b414517…`),
+tái lập **cả ba** ca `Range` + **`sha256(thân 206) == sha256(100 byte đầu)`**, và **`git diff --quiet HEAD -- frontend` EXIT=0
+sau TỪNG mutation**.
+
+**Hai phép đo của review đáng chép vào cách làm:**
+- **V2 hai chiều:** xoá khai báo `background: var(--signal)` của `.tp__readhead` ⇒ `pass 103 / fail 3`, **ĐỎ đúng 1 bài**
+  (bài `HINH THUC: LUAT CSS`), **8 bài chỉ ghim `className` VẪN XANH** ⇒ phép đo cũ **MÙ**. Gỡ `className="tp__readhead"`
+  ⇒ ĐỎ **2** bài (`DAU DOC` + `TIMECODE`, vì `TIMECODE` cũng truy vấn selector đó ở `:417`).
+- **V5 đi XA HƠN brief:** nó kiểm route xuất ở **mức HTTP** chứ không chỉ so với hàm —
+  `?format=srt&bilingual=0` ⇒ 404, **`?format=pdf` ⇒ 422** (⇒ **tên tham số `format` được backend phân tích THẬT**),
+  `bilingual=1` ⇒ 404; route thật `prefix="/api/export"`, `/{translation_id}`, `format: str="srt", bilingual: int=0`.
+  ⇒ **Luật: so `href` với chính hàm `exportUrl` là CHƯA ĐỦ** — hàm có thể sai; phải chạm **route thật**.
+
+### 1. ⚠️ BẪY PHƯƠNG PHÁP #1 — `spawnSync` với `stdio:'pipe'` chết **EPERM** trong sandbox
+
+Mọi lệnh `git`/`npm` gọi từ Node phải đi qua **`cmd /c "<lệnh> > <tệp> 2>&1"`** với **`stdio:'inherit'`** và
+**`windowsVerbatimArguments: true`**. Không làm thế thì **EPERM** (đúng ranh giới named-pipe đã ghi ở ERRATA #1).
+⇒ Trong vòng này **hai lượt driver đầu đã TỪ CHỐI mutate** (không ghi tệp nào) **vì lý do đó** — tức luật
+*"witness khớp ≠1 lần ⇒ TỪ CHỐI mutate"* đã hoạt động đúng. **Nhưng nếu bạn không biết bẫy này, bạn sẽ đọc nó là
+"mutation sống sót" GIẢ.** ⇒ Ghi vào brief của T8–T13.
+
+### 2. ⚠️ BẪY PHƯƠNG PHÁP #2 — `git show HEAD:<path>` trả **LF**, còn worktree là **CRLF**
+
+⇒ `Buffer.equals(<worktree>, <"git show" output>)` cho **`false` HỢP LỆ** — **không phải** dấu hiệu tệp bị hỏng.
+**Bằng chứng byte-exact ĐÚNG là:** `git hash-object <worktree> == git rev-parse HEAD:<path>`.
+⇒ Đây là **chi tiết thứ ba** của cùng một cái bẫy `core.autocrlf` (ERRATA #8 mục 1, #13 mục 1):
+**`git diff` sạch dù byte khác; `git diff` mù với tệp chưa track; và `git show` không so byte được với worktree.**
+
+### 3. Nợ Task 7 (5 Minor — ghi nhận, chưa sửa)
+
+- **`M5` (quan trọng nhất cho tương lai):** `viTriPhat` **cục bộ** trong `Transport` **KHÔNG reset khi đổi kênh**.
+  Hôm nay **không với tới được** (chưa có đường chọn kênh), nhưng **sẽ thành lỗi thật** khi **đường CHỌN KÊNH** được làm.
+  ⇒ **Nhớ khi giao task "chọn kênh".**
+- **`M3`:** bài `GIOI HAN CUA JSDOM` chỉ đo **`play()`**, **không** đo `pause()`; và việc **hoàn nguyên spy là THỦ CÔNG** —
+  lưới `guardGlobalLucThoat` **không phủ** `HTMLMediaElement.prototype`. Hôm nay **0 suite khác** chạm `play`/`pause`,
+  nên không nhiễm chéo; **nhưng** suite nào sau này chạm thì sẽ nhiễm. ⇒ Cân nhắc **mở rộng lưới guard** cho prototype.
+- **`M4`:** `<a>` không `href` + `aria-disabled` ⇒ trạng thái "vô hiệu" hiện **chỉ bằng thị giác** (quan sát a11y).
+- **`M1`:** báo cáo §4 ghi *"7 bài"* nhưng **liệt kê 8 tên** (đo được: **8** vẫn xanh — nội dung đúng, **số lệch 1**).
+  Lại là **một con số không kèm lệnh sinh ra nó** (ERRATA #4 mục 7).
+
+### 4. Vẫn CHƯA chứng minh — đừng ghi "đã kiểm"
+
+**seek/phát trong trình duyệt THẬT** (bất khả ở môi trường này); **layout/CSS/vị trí vẽ ra** của đầu đọc, màu amber,
+chiều cao thanh (jsdom không có layout/CSS); **đường THÀNH CÔNG `200` của `/api/export` kèm thân phụ đề**
+(DB scratch **không có bản dịch**); **nội dung bundle/trang chạy thật** (`build` chỉ xác nhận EXIT=0 + dòng `created dist`).
+
 ## Quy ước thẩm mỹ — spec UI thắng, skill chỉ là checklist
 
 Spec `2026-09-25-phu-de-lab-ui-design.md` là **nguồn có thẩm quyền về hình thức** (bạn đã duyệt). Skill
