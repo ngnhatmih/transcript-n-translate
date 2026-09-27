@@ -166,8 +166,10 @@ Chính ERRATA này (dòng 44) đã ghi *"`npm i` bất kỳ **CÓ THỂ CHẾT `
 ⇒ **Công thức BẮT BUỘC cho mọi lệnh cài trong giai đoạn này:**
 `npm i [-D] <gói> --cache C:\Users\Admin\Desktop\ngn\deepseek\.npm-cache --ignore-scripts`
 (`--ignore-scripts` để postinstall không spawn — đã đo `@swc/core` **vẫn chạy đúng** sau đó).
-Và **sau MỌI lần thêm dependency vào `frontend/`**: chạy lại `npm test` ngay, phải vẫn
-`tests 16 / pass 14 / fail 2 / cancelled 0` EXIT=1; nếu harness chết thì **hoàn tác ngay**.
+Và **sau MỌI lần thêm dependency vào `frontend/`**: chạy lại `npm test` ngay — và **đừng so một con số tuyệt đối**
+(con số đó sẽ trôi theo từng task; chính dòng này từng ghi `16/14/2` và nó **cũ ngay** sau Task 3, xem ERRATA #6 mục 3).
+Điều phải đúng là: **số bài đỏ vẫn ĐÚNG hai guard `EMPTY_DB_MSG`** và **không có bài đỏ thứ ba**, `cancelled 0`.
+Nếu harness chết (hoặc có bài đỏ khác) thì **hoàn tác ngay**.
 
 ### 2. jsdom + Testing Library **DÙNG ĐƯỢC** — kết luận cũ ở `Q-1` SAI
 
@@ -223,6 +225,41 @@ Cả ba kết luận sai ở trên cùng một dạng: **một nguyên nhân đ�
 `npm i` bị gán cho named pipe (sai — là cache path); Testing Library bị gán cho "`npm i` bị chặn" (sai theo hệ quả).
 ⇒ Bất kỳ câu "X bất khả trong môi trường này" viết vào plan/ledger **phải kèm errno + syscall + đường dẫn** của lần đo,
 **ngày đo**, và **lệnh tái lập**. Không có ba thứ đó thì đó là **giả thuyết**, không phải **ràng buộc**.
+
+## ⚠️ ERRATA #6 — hệ quả của Task 3 (áp cho Tasks 4–13): **MUTATION PHẢI ĐƯỢC KIỂM, KHÔNG ĐƯỢC TIN**
+
+Task 3 (`2d21cb2`) xong và tự nó bác bỏ **bốn** điều brief của người điều phối khẳng định. Cả bốn đều thuộc
+**cùng một dạng: một lời khai chưa được đo đã được viết như sự thật** — đúng thứ ERRATA #4 mục 8 đã cảnh báo.
+
+1. **Con số của brief lại sai:** brief ghi `Job` có **14** khoá; đo thật **`Job keys = 15`** (`JobEvent keys = 6`).
+   Đây là lần thứ **năm** trong giai đoạn này một con số do người điều phối đưa ra là sai.
+   ⇒ **Implementer PHẢI đo lại mọi con số nhận từ brief, và báo lại nếu lệch.**
+2. **MỘT MUTATION CHỈ LÀ BẰNG CHỨNG KHI NÓ (a) BIÊN DỊCH ĐƯỢC, (b) THỰC SỰ ĐỔI HÀNH VI, (c) GIẾT ĐÚNG BÀI.**
+   Brief đưa 5 mutation; **hai trong số đó không dùng được nguyên văn**:
+   - **`M1` (`while` → `if`) không biên dịch được:** để lại `continue` nằm ngoài vòng lặp ⇒ SWC
+     `Syntax Error: A 'continue' statement can only jump to a label of an enclosing iteration statement`
+     ⇒ **cả tệp test không nạp được** ⇒ mọi bài "đỏ" vì **lý do sai** — bằng chứng rác. Phải bỏ kèm nhánh `continue`.
+   - **`M4` (bỏ `if (event.id === null) return jobs;`) là ĐỘT BIẾN TƯƠNG ĐƯƠNG:** `Map.get(null)` trả `undefined`,
+     nên chính nhánh "job chưa có trong map" **đã nuốt `null`** ⇒ mutation này **KHÔNG** giết được bài `id: null`
+     (đo: `tests 4 / pass 4 / fail 0`, EXIT=0). Brief khẳng định nó "phải đỏ" là **SAI với chính thiết kế brief quy định**.
+     Implementer đã **không nới test cho khớp kỳ vọng sai**; nó thêm `M8` (bỏ **cả hai** nhánh no-op + bịa `Job`)
+     và `M8` giết **cả** bài `id: null` **lẫn** bài "job lạ" (`tests 4 / pass 2 / fail 2`, EXIT=1).
+3. **`npm test` khi có tệp KHÔNG NẠP ĐƯỢC thì số `tests` TĂNG, không giảm** — Node tính tệp không nạp được là
+   **một mục**. Brief khai "khi ĐỎ phải in `tests 16`", thực tế in **17**. ⇒ **ĐỪNG dùng một con số tuyệt đối
+   làm dấu hiệu "glob còn nguyên".** Dấu hiệu ĐÚNG: **tệp mới CÓ được thu thập** (nó xuất hiện như một bài),
+   và số bài đỏ **đúng bằng hai guard `EMPTY_DB_MSG`**. (Sửa luôn câu ở ERRATA #5 mục 1 nói `16/14/2`.)
+4. **Mutation giết NHẦM bài cũng là bằng chứng rác:** `M3` (`buf = ""`) với bài *"ghép lại mảnh bị cắt"* viết
+   y như brief lại làm đỏ **bài khác** (`trả NHIỀU sự kiện từ một lần đọc`) — vì dạng cắt trong brief xảy ra
+   **trước khi có sự kiện nào hoàn chỉnh**, nên `buf = ""` chưa từng chạy. Cách sửa **đúng**: **thêm ca**
+   *"một sự kiện XONG rồi một sự kiện bị cắt"* cho bài đó, **không** nới bài test. Sau đó `M3` giết đúng bài.
+5. **BẪY `\r\n` IM LẶNG (đáng nhớ cho mọi mutation từ đây):** hai tệp mới là **LF thuần**; một phép thay thế
+   literal có `\r\n` **không khớp và không báo lỗi**, trong khi phép kiểm "tệp có đổi không" **vẫn báo `True`**
+   ⇒ hai lần chạy `M4`/`M8` đầu tiên là **bằng chứng rác**. ⇒ **Sau mỗi mutation, phải kiểm "cái đã đổi là cái
+   mình ĐỊNH đổi"** (ví dụ `nhánh guard còn trong mutant? False`) — **không** chỉ "tệp có khác không".
+6. **`id === null` là GUARD HẸP KIỂU, không phải nhánh hành vi riêng.** Hiệu ứng runtime của nó **trùng** với nhánh
+   "job chưa có trong map"; nó vẫn phải giữ vì `Map<number, Job>.get` cần `number`. ⇒ Hệ quả: bài test `id: null`
+   và bài "job lạ" **kiểm cùng một đường**. Docstring phải nói đúng điều đó (không được bán nó như hai bất biến
+   độc lập), và Tasks 4–13 **không** được lặp lại kiểu "hai bài này độc lập" khi chúng không độc lập.
 
 ## Quy ước thẩm mỹ — spec UI thắng, skill chỉ là checklist
 
