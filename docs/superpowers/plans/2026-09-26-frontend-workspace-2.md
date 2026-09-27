@@ -6,7 +6,7 @@
 
 **Architecture:** SPA React 19 thuần client, **không router** — một shell với `mode ∈ {edit, compare, glossary}`. Trạng thái server nằm ở một tầng `fetch` mỏng cộng **đúng một** subscription SSE tới `/api/jobs/stream`; trạng thái client nằm trong một reducer. Không ghi kiểu đoán trước cho bản dịch.
 
-**Tech Stack:** React 19 · TypeScript · Vite · Vitest + Testing Library · Playwright · CSS thuần + custom property · font self-host woff2.
+**Tech Stack:** React 19 · TypeScript · **Rollup** + `dev-server.mjs` (Vite **bị loại** — xem ERRATA) · **`node --test --test-isolation=none`** + loader `@swc/core` trong tiến trình (Vitest **và** Testing Library **bị loại** — xem `Q-1`) · Playwright · CSS thuần + custom property · font self-host woff2.
 
 **Spec:** `docs/superpowers/specs/2026-09-26-frontend-workspace-2-design.md`
 
@@ -36,12 +36,16 @@ và Vite 6 **không có** đường pre-bundle dependency nào ngoài esbuild �
 |---|---|
 | `npm run dev` (Vite) | `npm run dev` → **`node dev-server.mjs`** (đã có; phục vụ `dist/` + proxy `/api` → 8620) |
 | (không có) | `npm run build` → **`rollup -c`**; `npm run typecheck` → `tsc --noEmit` |
-| `npm i -D vitest` | **KHÔNG cài Vitest** — nó dựng trên Vite nên cũng chết. Dùng **`node --test`** (có sẵn trong Node 24) |
-| `npm test -- contract` | `node --test src/api/contract.test.ts` (sau `npm run typecheck`; hoặc trỏ vào bản đã biên dịch) |
+| `npm i -D vitest` | **KHÔNG cài Vitest** — nó dựng trên Vite nên cũng chết. Dùng **`node --test --test-isolation=none`** (có sẵn trong Node 24) |
+| Testing Library | **KHÔNG dùng được** — `jsdom`/`@testing-library/react`/`happy-dom` đều **không có** và `npm i` bị chặn. Test component dùng `react-dom/server.renderToStaticMarkup`; xem `Q-1` |
+| `npm test -- contract` | `npm test` (đã đổi trong `package.json`) — nếu gọi tay thì **`node --import ./test/swc-loader.mjs --test --test-isolation=none <tệp>`**. **`--test-isolation=none` là BẮT BUỘC**: thiếu nó runner spawn con và chết `EPERM` trên máy này |
 | `import { describe, expect, it } from "vitest"` | `import { describe, it } from "node:test"` + `import assert from "node:assert/strict"` — `expect(x).toBe(y)` → `assert.equal(x, y)`, `toBeInTheDocument()` → `assert.ok(el)` |
-| Testing Library | `@testing-library/react` vẫn dùng được (thuần JS), nhưng cần **jsdom**; nếu `npm i` chặn thì báo lại, đừng tự vượt sandbox |
 | `frontend/package-lock.json` | **ĐÃ CŨ** (mô tả cây Vite cũ) vì `npm i` không ghi được cache trong sandbox. Phải `npm install` lại ở môi trường bình thường trước khi ai đó tin `npm ci` — implementer **không** được sửa tay tệp này |
 | `npm i` bất kỳ | **CÓ THỂ CHẾT `EPERM`** ở `AppData\Local\npm-cache`. Nếu chết: báo lại, **đừng** xin vượt sandbox; tìm gói đã có trong `node_modules` hoặc viết tay |
+
+**Bảng này áp cho MỌI khối mã mẫu ở MỌI task bên dưới.** Các khối đó vẫn còn viết theo Vitest / Testing Library / Vite —
+đó là **chưa được vá**, không phải "đã đối chiếu". Khi làm một task, chuyển khối mã của nó theo bảng này và theo `Q-1`.
+Đừng đọc một khối `import { describe, expect, it } from "vitest"` ở dưới rồi làm theo nó.
 
 **Rollup config là 202 dòng 5 plugin** (`resolve-nospawn`, `cjs-inproc`, `swc-nospawn`, `css-inproc`,
 `html-inproc`) cộng một guard `assert-no-bare-imports` **làm đỏ build** nếu còn bare import sót — guard đó là
@@ -115,10 +119,23 @@ Bốn task (T4 Step 6, T6, T7 Step 4, T10 Step 4) ra lệnh "tự kiểm bằng 
   Bảng phủ sóng gán §2.1 cho Task 1 nhưng danh sách tệp của Task 1 không có nó, và **cả 13 task không task nào** tạo font.
   **Ruling:** giao lại cho **Task 1 (bổ sung)**, và phải là **variable font** vì `--font-label` cần trục `wdth` (Archivo Expanded) — không có trục đó thì "nhãn khắc" bất khả.
   Chưa có font thì **mọi ảnh chụp dùng làm bằng chứng nghiệm thu ở T4/T6/T8/T10 đều là `system-ui`**, tức không phán được "đúng bản sắc".
-- **`Q-1` (mở, phải quyết trước bước 1 của Task 2) — test chạy bằng lệnh nào?** `npm test` đang chết; `node --test` có sẵn, nhưng
-  `jsdom` + `@testing-library/react` **không cài được ở môi trường này**, trong khi test của T6/T8/T9/T10 viết theo Testing Library.
-  ERRATA hiện chỉ nói "nếu `npm i` chặn thì báo lại" — **chưa đủ**. Hai đường: (a) mọi test là **hàm thuần, không DOM**; hoặc (b) có người xin được jsdom + TL.
-  Đây là bằng chứng nghiệm thu **đầu tiên** của giai đoạn nên phải chốt trước, không chốt giữa chừng.
+- **`Q-1` — ĐÃ CHỐT BẰNG ĐO (không còn mở): test chạy bằng `node --test --test-isolation=none` + một loader SWC trong tiến trình.**
+  Đo trên máy này, trên nhánh này:
+
+  | Phép thử | Kết quả |
+  |---|---|
+  | `node --test src/__probe.test.ts` (mặc định) | **`EPERM` (`errno -4048`, `syscall: spawn`)** — runner spawn tiến trình con cho mỗi tệp test, cùng bẫy named-pipe đã giết Vite |
+  | `node --test --test-isolation=none src/__probe.test.ts` | `✔ … pass 1 fail 0`, **exit 0** — và **TypeScript chạy nguyên bản**, `interface` không cần build |
+  | `.tsx` **không** loader | `TypeError [ERR_UNKNOWN_FILE_EXTENSION]: Unknown file extension ".tsx"` |
+  | `.tsx` + `--import ./__swc_loader.mjs` (dùng `module.registerHooks` + `@swc/core`) | `✔ JSX + renderToStaticMarkup khong can DOM … pass 1 fail 0`, **exit 0** |
+  | `jsdom`, `@testing-library/react`, `@testing-library/dom`, `happy-dom` | **`False`** — đều không có, và `npm i` bị chặn |
+
+  **Ruling:**
+  1. Runner là **`node --test --test-isolation=none`**. `--test-isolation=none` là **bắt buộc**, không phải tuỳ chọn — thiếu nó thì mọi test chết `EPERM`.
+  2. Test `.tsx` chạy qua một **loader `@swc/core` trong tiến trình** (`module.registerHooks`, `transformSync` — napi, **không spawn**). Loader là ~20 dòng; **phải có test ghim chính nó**, vì nó là hạ tầng của mọi test UI.
+  3. **Không có DOM ⇒ không `jsdom`, không Testing Library.** Test cấu trúc component dùng **`react-dom/server.renderToStaticMarkup`** — render React **thật**, không cần DOM. Đây không phải giả lập.
+  4. **Hệ quả phải nói thẳng:** test đơn vị **không mô phỏng được tương tác** (click, focus, bàn phím, effect, state update). Mọi thứ thuộc loại đó — đặc biệt **§12.5 "toàn bộ luồng biên tập không cần chuột"** của T11 — **chỉ** chứng minh được bằng Playwright trên backend thật. Trong T6/T8/T9/T10, test Testing Library mà plan mô tả phải viết lại thành: (a) khẳng định **mã HTML render ra**, và (b) khẳng định **hàm thuần** (reducer, parser, formatter) — không mô phỏng sự kiện.
+  5. Vì thế `T11` (bàn phím) **không được** tuyên bố "xong" chỉ bằng test đơn vị. Không có bước Playwright thì chưa chứng minh được gì cho §12.5.
 
 ### Minor + ghi nhận
 
@@ -137,7 +154,7 @@ Bốn task (T4 Step 6, T6, T7 Step 4, T10 Step 4) ra lệnh "tự kiểm bằng 
 
 | Tệp | Trách nhiệm |
 |---|---|
-| `package.json` · `tsconfig.json` · `vite.config.ts` | cấu hình: cổng 3100, proxy `/api`, plugin React, Vitest |
+| `package.json` · `tsconfig.json` · `rollup.config.mjs` · `dev-server.mjs` · `test/swc-loader.mjs` | cấu hình: cổng 3100, proxy `/api`, build Rollup, runner `node --test --test-isolation=none` + loader SWC |
 | `index.html` | một trang, không route |
 | `src/main.tsx` | gắn React vào `#root` |
 | `src/styles/tokens.css` | custom property lấy từ spec UI §2 |
@@ -164,6 +181,9 @@ Bốn task (T4 Step 6, T6, T7 Step 4, T10 Step 4) ra lệnh "tự kiểm bằng 
 ---
 
 ### Task 1: Khung dựng được — Vite + React 19 + TS ở cổng 3100
+
+> **✅ ĐÃ XONG — và các bước dưới đây là bản GỐC THỜI VITE, đã bị ERRATA đè.** Thực tế đã giao: `rollup.config.mjs` + `dev-server.mjs` (không Vite), commit `a2fffe1`·`ffe8613`·`fa51e10`·`a2df315`.
+> **Đừng chạy lại các bước này.** Chúng giữ ở đây làm hồ sơ. Ba việc còn nợ của Task 1 nằm ở mục `## Ruling sau review Task 1`: `C-1` (script `test`), `I-1` (README), `I-2` (vòng lặp dev), `I-5` (font).
 
 **Files:**
 - Create: `frontend/package.json`, `frontend/tsconfig.json`, `frontend/vite.config.ts`, `frontend/index.html`, `frontend/src/main.tsx`, `frontend/src/shell/App.tsx`, `frontend/src/styles/tokens.css`, `frontend/src/styles/app.css`
@@ -296,31 +316,86 @@ git commit -m "feat(fe): khung Vite + React 19 o cong 3100, proxy /api sang 8620
 
 **Files:**
 - Create: `frontend/src/api/types.ts`, `frontend/src/api/client.ts`, `frontend/src/api/endpoints.ts`, `frontend/src/api/contract.test.ts`
-- Modify: `frontend/vite.config.ts` (**KHÔNG** tạo `vitest.config.ts` riêng — xem Step 1)
+- Modify: `frontend/package.json` (**`test` → `node --test`**, xem `C-1`), `frontend/test/swc-loader.mjs` (nếu Task 1 chưa tạo)
 
 **Interfaces:**
 - Consumes: cổng 3100/proxy của Task 1
-- Produces: `type Job`, `Source`, `Transcript`, `Segment`, `Translation`, `Term`, `EngineSpec`, `Status` · `api.get/post/patch` ném `ApiError` có `status` và `detail` · các hàm trong `endpoints.ts` · suite Vitest chạy được bằng `npm test`
+- Produces: `type Job`, `Source`, `Transcript`, `Segment`, `Translation`, `Term`, `EngineSpec`, `Status` · `api.get/post/patch` ném `ApiError` có `status` và `detail` · các hàm trong `endpoints.ts` · suite `node --test` chạy được bằng `npm test`
 
-- [ ] **Step 1: Cài Vitest và khai `test:` NGAY TRONG `vite.config.ts`**
+- [ ] **Step 1: Dựng runner `node --test` — KHÔNG cài gì**
 
-```bash
-cd frontend
-npm i -D vitest
+**Không cài Vitest, không cài jsdom, không cài Testing Library.** Cả ba đều không dùng được ở môi trường này (đo rồi — xem `Q-1`).
+Task này **không có bước `npm install` nào**.
+
+Tạo `frontend/test/swc-loader.mjs` — loader duy nhất khiến `.tsx` chạy được, dùng `module.registerHooks` (hook **đồng bộ**, chạy trong tiến trình) cộng `@swc/core` (`transformSync`, napi — **không spawn**):
+
+```js
+import { registerHooks } from "node:module";
+import { readFileSync } from "node:fs";
+import { transformSync } from "@swc/core";
+
+registerHooks({
+  load(url, context, nextLoad) {
+    if (url.startsWith("file:") && (url.endsWith(".tsx") || url.endsWith(".ts"))) {
+      const tsx = url.endsWith(".tsx");
+      const out = transformSync(readFileSync(new URL(url), "utf8"), {
+        filename: new URL(url).pathname,
+        jsc: { parser: { syntax: "typescript", tsx }, target: "es2022",
+               transform: { react: { runtime: "automatic" } } },
+        module: { type: "es6" },
+      });
+      return { format: "module", source: out.code, shortCircuit: true };
+    }
+    return nextLoad(url, context);
+  },
+});
 ```
 
-**Không** tạo `vitest.config.ts`. Vitest đọc `vite.config.ts`, nên một tệp cấu hình thứ hai là **nguồn sự thật thứ hai cho cùng một cấu hình** — đúng loại lỗi mà Giai đoạn 2 phải đi vá (hai builder JSON cho một hàng). Thêm vào `vite.config.ts`:
+Khai `scripts` (đây là bản **đã áp ERRATA**; `package.json` hiện tại còn `vitest run` — sửa luôn):
+
+```json
+{
+  "type": "module",
+  "scripts": {
+    "dev": "node dev-server.mjs",
+    "build": "tsc --noEmit && rollup -c",
+    "typecheck": "tsc --noEmit",
+    "test": "node --import ./test/swc-loader.mjs --test --test-isolation=none",
+    "e2e": "playwright test"
+  }
+}
+```
+
+Ba điều **bắt buộc**, không phải tuỳ chọn — mỗi điều đã được đo là nguyên nhân gây chết:
+
+1. **`--test-isolation=none`**: thiếu nó, runner `node --test` spawn tiến trình con cho mỗi tệp test và chết
+   `EPERM (errno -4048, syscall: spawn)` — đúng cái bẫy named-pipe đã giết Vite.
+2. **`--import ./test/swc-loader.mjs`**: thiếu nó, mọi tệp `.tsx` chết `ERR_UNKNOWN_FILE_EXTENSION`.
+   (Tệp `.ts` **không** cần loader — Node 24 tự bóc kiểu; nhưng cứ để loader lo cả hai cho nhất quán.)
+3. **`build` phải gồm `tsc --noEmit`**: `rollup -c` **không** kiểm kiểu, nên nếu tách rời thì một task có thể báo
+   "build xanh" trong khi type sai. Bốn task sau (T4 Step 6, T6, T7 Step 4, T10 Step 4) ra lệnh "tự kiểm bằng mắt trên trình duyệt thật".
+
+Ghim chính loader bằng test của nó — nó là hạ tầng của **mọi** test UI, một loader hỏng làm 12 task sau đỏ giả:
 
 ```ts
-/// <reference types="vitest" />
-// ... trong defineConfig:
-  test: {
-    environment: "jsdom",       // cac test Testing Library can DOM
-    include: ["src/**/*.test.{ts,tsx}"],
-  },
+// frontend/test/swc-loader.test.ts
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { renderToStaticMarkup } from "react-dom/server";
+import { Probe } from "./fixtures/Probe.tsx";
+
+test("loader bóc được TSX và React render thật, KHÔNG cần DOM", () => {
+  assert.equal(renderToStaticMarkup(Probe({ label: "xin-chao" })),
+               '<p class="probe">xin-chao</p>');
+});
+// + một bài dùng JSX thật để chứng minh đường JSX (không chỉ đường gọi hàm)
 ```
 
-(`jsdom` sẽ được cài cùng `@testing-library/react` ở task nào cần — task này chỉ cần môi trường `node` cho contract test; nếu `jsdom` chưa có thì để `environment: "node"` và đổi ở Task 6.)
+`frontend/test/fixtures/Probe.tsx` là một component 3 dòng có một prop. **Mutation để chứng minh test không rỗng:**
+xoá `transform: { react: { runtime: "automatic" } }` khỏi loader ⇒ tệp dùng JSX phải đỏ; khôi phục ⇒ xanh.
+Nếu nó **không** đỏ, mutation của bạn sai, không phải test đúng.
+
+**Không** tạo `vitest.config.ts`, **không** tạo `vite.config.ts`. Cấu hình test nằm ở `scripts` — một nguồn sự thật.
 
 - [ ] **Step 2: Viết contract test ĐỎ trước — và nó phải chạy trên BACKEND THẬT**
 
@@ -380,7 +455,7 @@ Kỳ vọng: đỏ vì **backend chưa chạy** (`backend 8620 khong chay`). Đ�
 
 ```ts
 // client.ts
-export const BASE = "/api";        // proxy cua Vite lo phan con lai
+export const BASE = "/api";        // proxy cua dev-server.mjs lo phan con lai
 
 export class ApiError extends Error {
   constructor(readonly status: number, readonly detail: string) {
@@ -435,7 +510,7 @@ git commit -m "feat(fe): tang API + contract test chay tren backend that"
 
 ### Task 3: Parser SSE + một subscription duy nhất
 
-**Vì sao parser là hàm thuần:** nó là chỗ dễ sai nhất (mảnh `data:` bị cắt giữa hai lần đọc, ảnh chụp rồi mới tới sự kiện) và nó **test được không cần DOM**. Tách nó ra thì test được bằng Vitest thuần, không cần trình duyệt.
+**Vì sao parser là hàm thuần:** nó là chỗ dễ sai nhất (mảnh `data:` bị cắt giữa hai lần đọc, ảnh chụp rồi mới tới sự kiện) và nó **test được không cần DOM**. Tách nó ra thì test được bằng **`node --test` thuần**, không cần trình duyệt.
 
 **Files:**
 - Create: `frontend/src/api/sse.ts`, `frontend/src/api/sse.test.ts`, `frontend/src/state/useJobStream.ts`
@@ -701,7 +776,7 @@ export function withPinned(range: { start: number; end: number }, pinned: number
 
 - [ ] **Step 2: Viết `timecode.ts`** — `ponytail:` cố ý bỏ giờ (`h:mm:ss`); phụ đề dài nhất trong phạm vi này dưới một giờ, thêm khi có tệp dài hơn.
 
-- [ ] **Step 3: Test ĐỎ cho màn Biên tập** (Testing Library, `fetch` **giả** ở tầng `endpoints` — không phải tầng `window`):
+- [ ] **Step 3: Test ĐỎ cho màn Biên tập** (**KHÔNG Testing Library — không có DOM**; xem `Q-1`. Khẳng định **mã HTML** qua `renderToStaticMarkup` + khẳng định **hàm thuần**; `fetch` **giả** ở tầng `endpoints` — không phải tầng `window`):
 
 ```tsx
 // frontend/src/screens/EditScreen.test.tsx
@@ -1083,7 +1158,7 @@ Kỳ vọng: bốn spec xanh, và dán **dòng tổng kết nguyên văn** vào 
 | §4 Transport/player `Range` + ba nút xuất | **T7** |
 | §4 bàn phím toàn luồng | **T11** |
 | §5 tokens, font self-host, MỘT lớp grain | **T1** |
-| §6 Vitest + Playwright trên backend thật + luật dự án | **T2**, **T12** |
+| §6 `node --test` + Playwright trên backend thật + luật dự án | **T2**, **T12** |
 | §7 dấu `ponytail:` nêu trần + vòng thu hoạch nợ | **T5**, **T13** |
 | §8 chín tiêu chí nghiệm thu | **T6/T7/T8/T9/T10** (1–5), **T12** (1, 3, 4, 6), **T2** (7), **T5** (8), **T13** (9) |
 
