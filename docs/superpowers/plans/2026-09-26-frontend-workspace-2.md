@@ -995,6 +995,76 @@ cách Task 9 đã được xử lý, nên **không phải mở rộng phạm vi 
 của **bản GỐC** — không phải thứ tiêu chí yêu cầu. **Phương án C** (hoãn) cũng **không giải quyết gì**: hoãn Task 8
 **không** tạo ra nguồn dữ liệu.
 
+## ⚠️ ERRATA #19 — Task 8 ĐÓNG (`PASS`) + RULING về glyph `⚠` + bốn lỗi nhỏ phải vá
+
+Task 8 **ĐÓNG**: review độc lập **`PASS`, 0 Critical / 3 Important / 10 Minor**, V1/V2/V5 đạt bằng phép đo của chính nó.
+
+### 1. ✅ Cửa sổ đo là cửa sổ **NGUỒN** — chứng minh được **CẢ HAI CHIỀU**
+
+Nó seed **đoạn NGUỒN `2.0→5.0` (3,0 s)** và **đoạn DỊCH `10.0→11.0` (1,0 s)**, backend thật ở cổng **8631**:
+`{"i":1,"chars":40,"window":3.0,"cps":13.3,"max_cps":21.0,"over":false}` ⇒ **`window = 3.0` = độ dài NGUỒN**;
+dùng cửa sổ **DỊCH** sẽ ra **`40.0`** và **lật `over` sang `true`**. Và chiều ngược lại được chứng minh bằng mutation
+`BM3w` (đo trên cửa sổ bản dịch) ⇒ **2 bài đỏ**. Ca cả-hai-cửa-sổ-0 ⇒ `cps: null` (**không** `Infinity`, **không** bịa `0.0`).
+
+### 2. ✅ `C2b`: cả hai vế được tái lập **đúng con số**
+
+Reviewer **dựng lại bộ test CŨ (116 bài)** bằng cách ẩn `CompareScreen.test.tsx` khỏi glob + bản sao đã cắt đúng khối
+`it("… dung bien")` (phục hồi byte-exact): bộ CŨ + `C2b` = `116/114/2` **y hệt lượt sạch** ⇒ **phép đo cũ MÙ**;
+bộ CUỐI = `117/114/3` với **đúng một** bài đỏ `co 'over' cua backend thang phep so cua client o dung bien`.
+`M5` (xoá **LUẬT CSS** giữ class `is-over`) giết **đúng** bài ghim luật trong khi **10 bài chỉ ghim class vẫn xanh**.
+
+### 3. ⚠️ HAI ĐỊNH NGHĨA CPS **NGƯỢC NHAU TRÊN CÙNG DỮ LIỆU** — nợ THẬT, phải có task sở hữu
+
+`readability.reading_cps` (**không** đếm khoảng trắng, `CPS_WARN=20.0`, đoạn **GỐC**) vs `mt_qa.cps_row`
+(**có** đếm khoảng trắng, `max_cps=21.0`, đoạn **DỊCH**, cửa sổ **NGUỒN**):
+cùng một chuỗi **82 ký tự / cửa sổ 4,0 s** ⇒ **`20.50 over=True`** vs **`20.50 over=False`**.
+Con số của cùng một dòng có thể lệch **90,9 %** (**11,0** vs **21,0**).
+Hôm nay chưa lộ vì **`/readability` có 0 caller ở frontend**; **ngay khi EditScreen nối nó, hai màn sẽ nói NGƯỢC NHAU
+về cùng một dòng.** ⇒ **Phải giao tường minh** (task CHỌN KÊNH, hoặc task riêng) — chọn **MỘT** định nghĩa, hoặc nếu
+hai định nghĩa là **cố ý** (nguồn vs dịch) thì **ngưỡng và cách đếm khoảng trắng phải thống nhất** và **phải ghi ra**.
+
+### 4. ❌ HAI LỜI KHAI SAI TRONG MÃ SẢN PHẨM (phải sửa)
+
+- **`routes_translations.py:188-190` khẳng định TUYỆT ĐỐI** *"… KHÔNG THỂ lệch nhau"*, nhưng đo được nó **chỉ đúng với
+  `QaLimits()` MẶC ĐỊNH**: `schema.py:30-45` **không lưu ngưỡng**, `main.py:214` **không truyền `limits=`**.
+  ⇒ Nếu ai truyền limits tuỳ biến thì docstring **sai**. (ERRATA #15 mục 2: lời giải thích cơ chế cũng là lời khai.)
+- **Docstring kể SAI cơ chế lỗi 500:** `json.dumps({'cps': inf})` trả **`{"cps": Infinity}`** và **KHÔNG ném**;
+  `ValueError` đến từ **`allow_nan=False` của `starlette.responses.JSONResponse.render`**.
+
+### 5. ⚠️ Hợp đồng route MỚI **không được ghim ở phía client**
+
+`contract.test.ts` có **0 hit** cho `/translations/{id}`, `TranslationDetail`, `TranslationCps`, `cps`, `max_cps`.
+Ba interface mới **viết tay**, chỉ **backend** ghim ⇒ một lần **trôi shape** sẽ để **cả pytest lẫn `npm test` XANH**.
+⇒ **Phải thêm ca contract**, và mốc tự nhiên là task **CHỌN KÊNH** (nơi `getTranslation` có người gọi) — **hoặc ngay bây giờ**.
+
+### 6. Bốn Minor phải vá (đã giao vòng sửa)
+
+- **`types.ts:14` trôi số:** khai **33/23**, **đo nay 36/26** (3 interface mới không cập nhật) — **đúng thứ ERRATA #4 mục 7 cấm**.
+  ⇒ Sửa **bằng LỆNH**, hoặc bỏ số tuyệt đối.
+- **`test_backend_readme.py:78-84`** còn ghi **`821/834`** sau khi bump **830/843** ⇒ **số cũ trong chính tệp ghim số**.
+- **M3:** hai khoá cùng tên **`chars`** mang **hai nghĩa** (**21** vs **11** cho cùng một dòng) ⇒ đổi tên hoặc ghi rõ.
+- **M4 — LỖ HỔNG ĐỘ PHỦ MỚI (reviewer tự tìm):** bỏ `is-pinned` ở **HÀNG ĐẦU CỘT** ⇒ `117/115/2` **SỐNG SÓT**
+  (luật `grid-template-columns` 4 cột **không áp** cho đầu cột) ⇒ phải có bài ghim.
+
+### 7. ⚠️ RULING: **DÙNG glyph `⚠`** — và PLAN này đã tự mâu thuẫn
+
+Reviewer đo được: **spec UI §4.3 nguyên văn** = *"Dòng vượt ngưỡng đọc có `⚠` màu amber."*;
+**`grep -i emoji` trên SPEC = 0** ⇒ **spec KHÔNG cấm emoji ở đâu cả**;
+lệnh cấm nằm ở **PLAN** (`2026-09-26-frontend-workspace-2.md:1010` — *"- **Không emoji** trong code/nhãn/alt."*),
+và chính plan khai luật đó *"không mâu thuẫn spec UI"*.
+⇒ **PLAN tự mâu thuẫn**, và implementer đã **gán sai tài liệu** khi nói *"cùng tài liệu cấm emoji"*.
+**RULING: spec UI là nguồn có thẩm quyền về HÌNH THỨC** (chính plan đã chốt thế, và §4.3 **đòi** glyph) ⇒ **phải render
+glyph `⚠` trong dòng vượt ngưỡng**, **giữ thêm** mốc amber ở lề + `data-over-cps` (chúng phục vụ **tiếp cận**, §7).
+Luật "không emoji" của plan **vẫn hiệu lực cho mọi thứ KHÁC** (không trang trí, không icon cảm xúc); nó **nhường** cho
+một glyph **được spec chỉ định làm dấu hiệu nội dung**. ⇒ Đã vá dòng 1010 để ghi rõ **ngoại lệ này**.
+
+### 8. Review KHÔNG tái lập được một phần lời khai (ghi đúng mức)
+
+**5 lượt mutation backend đầu** chạy khi guard README còn đỏ. Reviewer **tái lập được CƠ CHẾ**
+(mutation README `830→821` cho **đúng nguyên văn** `E assert (830, 13) == (821, 13)` + `1 failed, 4 passed`)
+và **tái lập được HAI LƯỢT SẠCH** (`BM4r`/`BM7r`: `1 failed, 829 passed`, đúng 1 bài, **không** có guard trong danh sách đỏ) —
+nhưng **KHÔNG** tái lập được **con số tổng của chính 5 lượt đó** (trạng thái trung gian **không có trong git**) ⇒ ghi là **chưa đo được**.
+
 ## Quy ước thẩm mỹ — spec UI thắng, skill chỉ là checklist
 
 Spec `2026-09-25-phu-de-lab-ui-design.md` là **nguồn có thẩm quyền về hình thức** (bạn đã duyệt). Skill
@@ -1008,6 +1078,12 @@ Spec `2026-09-25-phu-de-lab-ui-design.md` là **nguồn có thẩm quyền về 
 - **Form: nhãn TRÊN input, lỗi DƯỚI input**, khoảng cách nhất quán (dùng cho form Thuật ngữ, Task 9).
 - **Kiểm tra `package.json` trước khi import bất kỳ thư viện nào** — không giả định gói tồn tại.
 - **Không emoji** trong code/nhãn/alt.
+  ⚠️ **NGOẠI LỆ (ERRATA #19 mục 7):** một glyph **được SPEC UI CHỈ ĐỊNH làm dấu hiệu NỘI DUNG** thì **phải render**.
+  Spec UI §4.3 nguyên văn: *"Dòng vượt ngưỡng đọc có `⚠` màu amber."* — và **`grep -i emoji` trên SPEC = 0**,
+  tức **spec KHÔNG cấm emoji**; lệnh cấm này là **của PLAN**, và plan từng khai nó *"không mâu thuẫn spec UI"* ⇒ **plan tự mâu thuẫn**.
+  **Spec UI là nguồn có thẩm quyền về HÌNH THỨC** ⇒ glyph `⚠` **phải có** ở dòng vượt ngưỡng, **kèm** mốc amber ở lề
+  + `data-over-cps` (hai thứ đó phục vụ **tiếp cận**). Luật này **vẫn hiệu lực cho mọi thứ khác**: không trang trí,
+  không icon cảm xúc, không emoji trong alt/nhãn tuỳ tiện.
 - **Không `#000000`** — dùng off-black/charcoal; **tối đa MỘT màu nhấn**; không glow neon, không gradient text cho tiêu đề lớn.
   ⚠️ **ĐÍNH CHÍNH (review Task 1 bắt được):** tôi từng viết ở đây "độ bão hoà < 80% … đã đối chiếu, không mâu thuẫn". **Sai.**
   Spec §2.2 chốt `--signal:#FFB020` với HSL S = **100%**, và đó là **HIỆU ỨNG DUY NHẤT** của bảng màu. Spec thắng skill.
