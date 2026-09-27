@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import json
-import os
 import socket
 import urllib.error
 import urllib.request
@@ -11,10 +10,10 @@ from dataclasses import asdict
 from fastapi import APIRouter, Depends
 
 from app.api.deps import get_repos, get_specs, get_worker
+from app.config import resolve_ollama_base_url
 
 router = APIRouter(prefix="/api", tags=["registry"])
 
-_OLLAMA_HOST = os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434")
 _OLLAMA_PROBE_SECONDS = 0.3
 
 
@@ -62,7 +61,7 @@ def get_status(repos=Depends(get_repos), worker=Depends(get_worker)):
     }
 
 
-def probe_ollama(host: str = _OLLAMA_HOST,
+def probe_ollama(host: str | None = None,
                  timeout: float = _OLLAMA_PROBE_SECONDS) -> str:
     """'up' | 'down' | 'unknown'.
 
@@ -84,11 +83,13 @@ def probe_ollama(host: str = _OLLAMA_HOST,
       chưa hỏi được ai cả thì không được kết luận `down`. Cùng loại: `reason` là
       một CHUỖI (`'no host given'`, `'unknown url type'`) — URL/host không dựng
       nổi, tức lỗi cấu hình chứ không phải câu trả lời của ai.
+
+    M-10: địa chỉ KHÔNG còn được đọc ở đây. `resolve_ollama_base_url` là nguồn
+    duy nhất (đọc `OLLAMA_HOST` lúc GỌI, chuẩn hoá `://` và `/` cuối), dùng
+    chung với `registry.ollama_available` và với `base_url` của engine mà
+    `app/main.py` dựng — ba đường, một địa chỉ.
     """
-    host = os.environ.get("OLLAMA_HOST", host)
-    if "://" not in host:
-        host = "http://" + host
-    url = host.rstrip("/") + "/api/tags"
+    url = resolve_ollama_base_url(host) + "/api/tags"
     try:
         with urllib.request.urlopen(url, timeout=timeout) as resp:
             json.loads(resp.read().decode("utf-8"))

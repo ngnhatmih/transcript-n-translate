@@ -52,7 +52,8 @@ class _RecordingMtEngine:
     trường bằng cách dựng tay).
     """
 
-    def __init__(self, model_ref: str, *, supports_glossary: bool = False,
+    def __init__(self, model_ref: str, *, base_url: str | None = None,
+                 supports_glossary: bool = False,
                  engine_id: str | None = None) -> None:
         self.model_ref = model_ref
         self._supports_glossary = supports_glossary
@@ -63,6 +64,12 @@ class _RecordingMtEngine:
         #: `None` = "không truyền gì", nên `main.py` bỏ tham số là bài ghim dây
         #: nối đỏ ngay, chứ không âm thầm rơi về điểm rơi suy từ tag.
         self.received_engine_id = engine_id
+        #: M-10: `OllamaMtEngine` THẬT đã có tham số `base_url` từ trước; bản giả
+        #: này chỉ chép thiếu nó, nên khi `_build_mt_engines` bắt đầu TRUYỀN
+        #: `base_url=` thì cả suite đỏ bằng `TypeError`. Ghi lại giá trị để dây
+        #: nối "engine phải trỏ cùng chỗ với phép dò" được ghim ngay ở đây, trên
+        #: `build_components()` THẬT.
+        self.received_base_url = base_url
 
     @property
     def engine_id(self) -> str:
@@ -246,6 +253,19 @@ def test_mt_engines_are_keyed_by_registry_spec_id_not_engine_id(harness):
                 f"`spec.model_ref` vào OllamaMtEngine(...), nhận được "
                 f"{engine.model_ref!r} thay vì {spec.model_ref!r} — tag đó đi "
                 f"thẳng vào `POST /api/chat` (`ollama_mt.py:139`)"
+            )
+            # M-10: vế thứ ba của CÙNG dây nối. Engine thật gọi HTTP tới
+            # `base_url`, nên nếu composition root không truyền địa chỉ đã phân
+            # giải thì `available` tính theo `OLLAMA_HOST` còn lời gọi dịch đi
+            # `127.0.0.1` — engine được khai sẵn sàng rồi chết ở tận worker.
+            # Kỳ vọng TÍNH bằng chính resolver, nên bài này đúng cả khi máy đang
+            # chạy có đặt `OLLAMA_HOST` hay không.
+            from app.config import resolve_ollama_base_url
+
+            assert engine.received_base_url == resolve_ollama_base_url(), (
+                f"{engine_id}: engine phải được dựng với `base_url` của CÙNG "
+                f"resolver (`app.config.resolve_ollama_base_url`), nhận được "
+                f"{engine.received_base_url!r}"
             )
 
 

@@ -137,9 +137,14 @@ class FakeMtEngine:
     """
 
     def __init__(self, model_ref: str, *, supports_glossary: bool = False,
-                 engine_id: str | None = None) -> None:
+                 engine_id: str | None = None,
+                 base_url: str | None = None) -> None:
         self.model_ref = model_ref
         self._supports_glossary = supports_glossary
+        #: M-10: `OllamaMtEngine` THẬT nhận `base_url` (địa chỉ do composition
+        #: root phân giải từ `OLLAMA_HOST`); bản giả phải nuốt được đúng cách gọi
+        #: đó, nếu không `_build_mt_engines` nổ `TypeError` ngay ở fixture.
+        self.base_url = base_url
         #: Fix round 1 (I-2): `_build_mt_engines` truyền `spec.id` TƯỜNG MINH vào
         #: adapter Ollama, nên engine giả phải nhận tham số đó (giống chữ ký của
         #: `OllamaMtEngine`) — và ghi lại để bài ghim dây nối đọc được.

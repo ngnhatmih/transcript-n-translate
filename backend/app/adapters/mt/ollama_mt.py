@@ -27,13 +27,21 @@ import httpx
 
 from app.adapters.mt.prompts import (PROMPT_VERSION, parse_batch_response,
                                      system_prompt, user_prompt)
+from app.config import OLLAMA_DEFAULT_BASE_URL
 from app.domain.models import CallStats, Segment, Term
 from app.domain.mt import MtOpts
 
 #: Khớp `model_ref` của engine `qwen2.5-3b` trong `backend/registry.json`. Task 12
 #: truyền `spec.model_ref` vào; mặc định này chỉ để dựng được engine trong test.
 DEFAULT_MODEL = "qwen2.5:3b-instruct-q4_K_M"
-DEFAULT_BASE_URL = "http://127.0.0.1:11434"
+#: M-10: ĐIỂM RƠI cho người gọi không truyền `base_url` (test, script) — KHÔNG
+#: phải địa chỉ của production. Địa chỉ thật do `app/main.py` truyền vào từ
+#: `app.config.resolve_ollama_base_url` (nguồn duy nhất đọc `OLLAMA_HOST`), nên
+#: adapter cố ý KHÔNG đọc env ở đây: đọc env trong lúc dựng engine sẽ làm mọi
+#: test dựng engine trực tiếp phụ thuộc môi trường của máy đang chạy.
+#: Hằng số này trỏ về `app.config` thay vì chép lại chuỗi (bản cũ chép, và đó là
+#: chỗ mã hoá endpoint thứ tư của M-10).
+DEFAULT_BASE_URL = OLLAMA_DEFAULT_BASE_URL
 DEFAULT_KEEP_ALIVE = "30m"
 
 #: Rộng rãi: đo được 1,80 s cho một lô 13 token, nhưng phần lớn thời gian đó là NẠP

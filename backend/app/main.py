@@ -22,7 +22,8 @@ from app.adapters.registry_file import load_default_asr, load_default_mt, load_r
 from app.api.app import create_app
 from app.api.sse import JobEventBroker
 from app.config import (API_HOST, API_PORT, DB_PATH, HF_HOME, LOG_DIR, MEDIA_DIR,
-                        OUTPUT_DIR, OLLAMA_MODELS, ensure_dirs)
+                        OUTPUT_DIR, OLLAMA_MODELS, ensure_dirs,
+                        resolve_ollama_base_url)
 from app.pipeline.export import ExportHandler
 from app.pipeline.ingest import IngestHandler
 from app.pipeline.transcribe import AUTO_FORWARD_SETTING, TranscribeHandler
@@ -99,6 +100,12 @@ def _build_mt_engines(specs) -> dict[str, object]:
                 spec.model_ref,
                 engine_id=spec.id,
                 supports_glossary=bool(spec.capabilities.get("glossary_prompt", False)),
+                # M-10: CÙNG địa chỉ với phép dò availability và `/api/status`.
+                # Thiếu dây này thì `available` được tính theo `OLLAMA_HOST` còn
+                # mọi lời gọi dịch thật đi `127.0.0.1` — engine được khai sẵn sàng
+                # rồi chết ở tận worker. Phân giải LÚC DỰNG (một lần, ở composition
+                # root) là đủ: đổi `OLLAMA_HOST` là đổi cấu hình khởi động.
+                base_url=resolve_ollama_base_url(),
             )
         else:
             engines[spec.id] = OpusMtEngine(spec.model_ref)
