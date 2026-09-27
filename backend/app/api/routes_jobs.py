@@ -128,7 +128,11 @@ def create_job(payload: JobIn, request: Request, repos=Depends(get_repos),
         try:
             by_id(specs, payload.engine)
         except KeyError as exc:
-            raise HTTPException(422, str(exc)) from exc
+            # M-14: cùng lỗi, cùng lớp xử lý như `routes_translations.create_translation`
+            # — `exc.args[0]` là ĐỐI SỐ TRẦN của `by_id`, còn `str(exc)` repr nó
+            # (`str(KeyError("x")) == "'x'"`), tức client nhận thêm một cặp nháy
+            # kép và cùng một lỗi có hai hình dạng ở hai route.
+            raise HTTPException(422, exc.args[0]) from exc
 
     job = Job(id=None, workspace=payload.workspace, type=payload.type,
               engine=payload.engine,
