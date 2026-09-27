@@ -518,7 +518,7 @@ báo cáo **reviewer**) nay mở rộng: **đo trước khi chép từ báo cáo
 
 ### 8. `npm run typecheck` KHÔNG kiểm tệp test/harness nào — đo chính xác (M6 của review Task 4)
 
-`tsc --listFiles` = **78** tệp, **không có** `*.test.ts(x)` nào và **không có** `test/dom.ts`.
+`tsc --listFiles` = **78** tệp *[⚠️ SỐ NÀY ĐÃ TRÔI: 78 → 79 → **81**. Đọc ERRATA #14 mục 1 — bất biến là **0 tệp `.test.`**, đừng dùng số tuyệt đối]*, **không có** `*.test.ts(x)` nào và **không có** `test/dom.ts`.
 ⇒ **"typecheck xanh" KHÔNG bao hàm "test/harness sạch kiểu"** — nợ `N-2` nay có số đo cụ thể.
 Đối chứng dương của reviewer: cố tình tạo lỗi kiểu ⇒ `typecheck` EXIT=1 (nên phép đo **sống**, không phải vacuous).
 **Hệ quả cho T5–T11:** một lỗi kiểu trong tệp test chỉ lộ ra **lúc chạy**, không lộ ở `typecheck`; và
@@ -615,7 +615,7 @@ Và **bài "ngoài khoảng" KHÔNG rỗng**: `W5` (bỏ phần mở rộng `sta
 ĐỘT BIẾN TƯƠNG ĐƯƠNG không.** Với `withPinned`, chiều `pinned < start` và `pinned >= end` **không đối xứng**:
 chiều dưới cần code mới để đúng, chiều trên thì **không** — nên chỉ có một mutation phân biệt được.
 
-### 3. `tsc --listFiles` = **79**, không phải 78
+### 3. `tsc --listFiles` = **79** *[⚠️ đã trôi tiếp thành **81** — xem ERRATA #14 mục 1]*, không phải 78
 
 `window.ts` là tệp **mới** và **được** `typecheck` (+1). Vế còn lại của ERRATA #10 mục 8 **vẫn đúng**:
 **0** tệp `.test.` trong `listFiles` ⇒ `typecheck` không kiểm test/harness.
@@ -688,6 +688,71 @@ lỗi thì phải khẳng định **`instanceof`** (hoặc truyền **constructo
 Review chỉ chứng minh được `start <= pinned < end` là **ĐIỀU KIỆN CẦN** để dòng đang sửa nằm trong DOM,
 **KHÔNG** phải điều kiện **ĐỦ** (vì `M4`). Và **hành vi thật** — ảo hoá tháo dòng đang gõ ⇒ **mất focus** (spec UI §8.3/U6) —
 **CHƯA đo được**: chưa có caller (Task 6 mới dùng) và **không có trình duyệt**. ⇒ **Đừng ghi "đã kiểm U6".**
+
+## ⚠️ ERRATA #14 — Task 6 (màn BIÊN TẬP): **token chưa có người dùng = tính năng chưa tồn tại**, và một DOM node trong `assert` là bom hẹn giờ
+
+Task 6 xong (`d0b69bb` + `a0950cd`, **hai** commit): `npm test` = `tests 86 / suites 11 / pass 84 / fail 2 / cancelled 0`
+EXIT=1, `typecheck` 0, `build` 0, **21 bài mới** (65 → 86), **19/19 mutation bị giết, 0 sống sót**.
+
+### 1. Số `tsc --listFiles` **TRÔI** — 78 → 79 → **81**
+
+Nó **tăng theo mỗi tệp nguồn mới** (`window.ts` +1, rồi `timecode.ts` + `EditScreen.tsx` +2).
+⇒ **Luật (đúng tinh thần ERRATA #4 mục 7):** **đừng ghi số tuyệt đối** cho thứ trôi theo số tệp.
+Ghi **LỆNH** + **BẤT BIẾN**:
+```
+node frontend/node_modules/typescript/bin/tsc --noEmit --listFiles -p frontend | Select-String "\.test\." | Measure-Object
+```
+**Bất biến: 0.** (Đã đo lại sau Task 6: tổng **81**, `\.test\.` = **0**.)
+
+### 2. ⚠️ `app.css` PHẢI sửa — File list của plan (và brief tôi chép lại) **THIẾU**
+
+`tokens.css` có `--suspect-hatch-*` **từ Task 1**, nhưng **chưa luật CSS nào dùng chúng**. Nghĩa là nếu chỉ thêm class
+`is-suspect` mà không thêm luật vẽ vân thì:
+- **test vẫn XANH** (nó khẳng định *class*),
+- còn **sản phẩm KHÔNG có vân** — spec UI §2.5 ("nghi ngờ là **vân**, không phải màu") **không được thoả**.
+
+⇒ **Bài học lớn: một token chưa có NGƯỜI TIÊU THỤ là một tính năng CHƯA TỒN TẠI**, và **một test khẳng định tên class
+có thể xanh trong khi CSS không vẽ gì**. Đây là loại **xanh giả** mà **không test nào bắt được** trừ khi có người
+**đọc `app.css`**. Task 6 đã sửa (+104 dòng, giữ CRLF) và **tự khai là lệch File list**.
+⇒ **Cho T7–T13: khi một tính năng được mô tả bằng HÌNH THỨC (vân, lề, nhịp), hãy kiểm xem có LUẬT CSS nào thực sự
+được thêm không, chứ đừng chỉ thêm class.** Và **brief phải liệt kê `app.css` khi task chạm hình thức.**
+
+### 3. ⚠️ `assert.equal(<DOM node do React render>, null)` là **BOM HẸN GIỜ**
+
+Đo được: nhánh **ĐỎ** của một bài test như thế làm `npm test` chạy **> 90 s** (lượt sạch **~6 s**).
+Cùng mutant đó với trần **300 s** thì **xong bình thường và giết đúng bài** ⇒ không phải treo, mà là **chậm kinh khiếp**
+khi `assert` phải **định dạng** một DOM node React khổng lồ trong **thông điệp lỗi**.
+⇒ **LUẬT CHO T7–T13:** **đừng đưa một DOM node sống vào phép so sánh/khẳng định.**
+Khẳng định trên **boolean** (`assert.ok(el === null)`), hoặc trên `textContent`/`className`/`getAttribute`.
+Nếu không, **đường ĐỎ của chính test sẽ treo runner của mọi người sau** — và người sau sẽ tưởng đó là lỗi của họ.
+Task 6 phát hiện điều này **trong vòng mutation của chính nó**, sửa bằng helper đếm, và **không `--amend`** (luật cấm)
+⇒ **hai commit**; **không squash** khi hợp nhất (squash là viết lại lịch sử, đúng thứ luật cấm).
+
+### 4. §4.2 **KHÔNG AI LÀM** — nợ tường minh, có lý do đo được
+
+Plan **gán** "§4.1 (+ rỗng)" cho T6, nhưng brief **không giao** §4.2 (khung nét đứt `KÉO TỆP VÀO ĐÂY`), và Task 6 **không có
+đường nạp tệp**: `uploadSource` **chưa được gọi ở đâu**, và backend upload **không có whitelist định dạng**
+⇒ *"dòng mono liệt kê định dạng"* **không có nguồn trong mã**.
+Implementer hiện **trạng thái rỗng NÓI THẬT** thay vì một lời hứa kéo-thả **không làm gì** — quyết định **đúng**.
+⇒ **NỢ: §4.2 chưa được làm ở bất kỳ task nào. Phải giao tường minh, kèm quyết định về whitelist định dạng.**
+
+### 5. Bốn nợ khác của Task 6
+
+- **`App` gắn `<EditScreen transcript={null} />`** ⇒ **màn này CHƯA TỪNG render dữ liệu thật trong app** (chưa có đường
+  **chọn kênh**). Mọi khẳng định về màn Biên tập hiện chỉ đến từ test truyền prop.
+- **`viewportH` là prop mặc định `480`**, **không** đo `clientHeight` (đường đo không kiểm được ở đây nên implementer
+  **không viết** — đúng).
+- **`soDong` là ƯỚC LƯỢNG theo độ dài chuỗi**, **không** phải ngắt dòng thật ⇒ chiều cao cuộn có thể sai.
+- **`parseTimecode` chưa có người gọi trong sản phẩm** (Task 7 mới dùng).
+- **`E9` bị trần `90 s` CẮT NGANG** ⇒ bằng chứng của mutation đó **không đầy đủ** (`tests ? / pass ? / fail ?`, `log bytes=961`).
+  Nó **tự khai**. ⇒ **Luật: một mutation bị CẮT thì KHÔNG được tính là "đã chạy"** — chạy lại với trần lớn hơn, hoặc ghi là chưa đo.
+
+### 6. Một ranh giới tầng bằng chứng (đừng nói quá)
+
+**jsdom kẹp `height` âm về `0px`** ⇒ mutation `E3` ghim `M4` ở tầng **`windowFor`** (hàm thuần), **KHÔNG** ở tầng **DOM**.
+⇒ Nói đúng: *"`M4` được ghim ở tầng tính toán"*, **không** phải *"đệm âm không xảy ra trong DOM"*.
+Và vẫn đúng như mọi task trước: **chưa ai nhìn thấy màn hình này trong trình duyệt thật** — jsdom **không có layout/CSS**,
+nên **vân chéo, chiều cao hàng, lề amber, cuộn mượt 2000 dòng, giữ focus khi cuộn** đều **CHƯA được chứng minh**.
 
 ## Quy ước thẩm mỹ — spec UI thắng, skill chỉ là checklist
 
