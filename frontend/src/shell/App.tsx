@@ -8,6 +8,7 @@
  * `aria-hidden` trên `.grain`: lớp nhiễu là trang trí, không phải nội dung.
  */
 import { endpoints } from "../api/endpoints.ts";
+import { EditScreen } from "../screens/EditScreen.tsx";
 import { useApi } from "../state/useApi.ts";
 import { useJobStream } from "../state/useJobStream.ts";
 import { ChannelZone } from "./ChannelZone.tsx";
@@ -36,8 +37,14 @@ export function App() {
             error={sources.error}
           />
         </aside>
-        {/* BÀN LÀM VIỆC: màn hình Biên tập là Task 5–T11; Task 4 chỉ giữ đúng ô lưới. */}
-        <main className="shell__work" />
+        {/* BÀN LÀM VIỆC: màn Biên tập (§4.1) là màn ĐẦU TIÊN — Task 6.
+            `transcript` là PROP (brief Task 6 §1): chưa có đường CHỌN KÊNH (vùng KÊNH
+            của Task 4 mới chỉ hiện), nên chưa có bản ghi THẬT nào để đưa vào và `null`
+            là sự thật của lượt này — TRẦN đã khai trong báo cáo task. Màn KHÔNG tự
+            `fetch`: một chỗ gọi API cho mỗi màn là hai nguồn sự thật. */}
+        <main className="shell__work">
+          <EditScreen transcript={null} />
+        </main>
         <aside className="shell__queue">
           <QueueZone jobs={jobs} />
         </aside>

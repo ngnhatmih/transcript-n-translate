@@ -83,3 +83,107 @@ body {
     display: none;
   }
 }
+
+/* ── §4.1 Màn BIÊN TẬP (Task 6) — danh sách đoạn ảo hoá + vân "nghi ngờ" ───────── */
+
+.ed {
+  display: grid;
+  grid-template-rows: 1fr;
+  height: 100%;
+  min-height: 0;
+}
+
+.ed__rong {
+  margin: 0;
+  padding: var(--sp-4);
+  color: var(--ink-1);
+}
+
+/* Khung cuộn: ảo hoá chỉ có nghĩa khi chính khung này cuộn được. */
+.ed__khung {
+  height: 100%;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.ed__danh-sach {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* Một hàng: rail mono 72px (§2.3, cố định) + chữ + nhãn lý do.
+   Lề trái 6px là chỗ dành cho VÂN (§2.5) hoặc cho đèn amber của đoạn đang phát (§4.1). */
+.ed__item {
+  display: grid;
+  grid-template-columns: var(--rail) 1fr auto;
+  gap: var(--sp-3);
+  align-items: start;
+  min-height: var(--row-2);
+  padding: var(--sp-2) var(--sp-3) var(--sp-2) 0;
+  border-bottom: var(--rule-w) solid var(--rule);
+  border-left: var(--suspect-hatch-w) solid transparent;
+}
+
+.ed__rail {
+  padding-left: var(--sp-2);
+  font-family: var(--font-mono);
+  font-size: var(--fs-num);
+  color: var(--ink-2);
+  text-align: right;
+}
+
+.ed__chu {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--ink-0);
+  font: inherit;
+  text-align: left;
+  cursor: text;
+}
+
+.ed__sua {
+  width: 100%;
+  padding: var(--sp-1) var(--sp-2);
+  border: var(--rule-w) solid var(--rule);
+  border-radius: var(--radius);
+  background: var(--panel-2);
+  color: var(--ink-0);
+  font: inherit;
+  resize: none;
+}
+
+.ed__ly-do {
+  padding-top: var(--sp-1);
+  font-family: var(--font-label);
+  font-size: var(--fs-label);
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  color: var(--ink-1);
+  white-space: nowrap;
+}
+
+/* §2.5 — "nghi ngờ" là VÂN, không phải MÀU: vân chéo 45° ở lề trái, rộng 6px.
+   `--fault` CHỈ xuất hiện trong vân này (spec §2.2 quy tắc 3), không tô nền đỏ.
+   `background-size` rộng đúng 6px + `no-repeat` ⇒ vân chỉ nằm ở lề, không tràn hàng.
+   Đây là lớp CSS của một cái TÊN (`is-suspect`); hình dạng vân lấy từ tokens.css §2.5. */
+.ed__item.is-suspect {
+  background-image: repeating-linear-gradient(var(--suspect-hatch-angle), var(--fault) 0, var(--fault) var(--rule-w), transparent var(--rule-w), transparent var(--suspect-hatch-step));
+  background-size: var(--suspect-hatch-w) 100%;
+  background-repeat: no-repeat;
+}
+
+/* §4.1 — đoạn đang phát: lề trái amber. Amber chỉ có MỘT nghĩa: đang hoạt động. */
+.ed__item.is-current {
+  border-left-color: var(--signal);
+}
+
+/* §2.6 — hover: đường kẻ lề dày lên, KHÔNG đổi nền. */
+.ed__item:hover {
+  border-left-color: var(--ink-2);
+}
+
+.ed__item.is-current:hover {
+  border-left-color: var(--signal);
+}
