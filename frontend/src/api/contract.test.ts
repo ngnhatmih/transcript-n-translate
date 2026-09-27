@@ -134,6 +134,12 @@ describe("hop dong API that (backend 8620)", () => {
     child.on("error", (error: Error) => {
       spawnError = error.message;
     });
+    // `unref()`: handle của tiến trình con KHÔNG được giữ cho event loop sống.
+    // Không có dòng này thì một lần `kill` thất bại biến "test đỏ" thành "runner
+    // TREO VÔ HẠN" (đo được: `node --test` in xong tổng kết nhưng không thoát, vì
+    // ChildProcess còn sống giữ handle). Muốn đỏ thì `after` bên dưới đã lo — nó
+    // poll cổng và `assert.fail` nếu backend còn sống.
+    child.unref();
     spawnedPid = typeof child.pid === "number" ? child.pid : null;
 
     if (await waitForBackend(START_TIMEOUT_MS)) return;
