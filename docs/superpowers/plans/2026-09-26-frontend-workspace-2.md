@@ -534,6 +534,64 @@ Mutation `S2` của reviewer: **đảo nhãn `đã tách tiếng` ↔ `chưa tá
 ⇒ **Và một điều reviewer nói thẳng:** nó **không chứng minh được** rằng bản vá FLAKY của implementer là **cần thiết**
 (bỏ khối chờ stream vẫn `8/8` lượt xanh) ⇒ lời khai "test tôi từng FLAKY" là **chưa kiểm chứng**, không phải sai.
 
+## ⚠️ ERRATA #11 — Task 4 ĐÓNG (`PASS`): **trong lượt ĐẦY ĐỦ, tín hiệu DUY NHẤT của guard là DÒNG STDERR**
+
+Task 4 **ĐÓNG** sau vòng sửa `a90fc58`: re-review cho **`PASS`, 0 Critical / 0 Important / 5 Minor**.
+Re-review tái lập độc lập cả hai vế của `S2` (**mutation sống sót trên bộ test CŨ** + **mutation giết đúng bài MỚI**),
+và chứng minh witness guard **từ chối mutate** khi literal sai (`[TU CHOI MUTATE] … KHONG ghi tep nao. Tep nguyen trang: true`,
+driver `EXIT=3`). Bốn điều nó đo được, phải nhớ:
+
+### 1. ⚠️ SỬA ĐIỀU TÔI ĐÃ GHI SAI: EXIT **KHÔNG** phải kênh thông tin của guard trong lượt đầy đủ
+
+Tôi ghi ở ERRATA #10 (và trong brief) rằng guard `process exit` cho tín hiệu bằng **`EXIT 0 → 1`**.
+**Đo lại thì điều đó CHỈ đúng ở lượt chạy RIÊNG tệp DOM.** Trong **lượt ĐẦY ĐỦ** của dự án, `npm test` **vốn đã `EXIT=1`**
+(hai bài `EMPTY_DB_MSG` đỏ chủ ý) ⇒ mutant `R4` để nguyên `EXIT=1`, **EXIT KHÔNG đổi**:
+`ℹ tests 52 / pass 50 / fail 2 / cancelled 0` **EXIT=1** + dòng `[guard thoat] HARNESS DOM RO RI: 10/10 global CHUA ve nguyen trang`.
+⇒ **Trong lượt đầy đủ, tín hiệu DUY NHẤT là DÒNG STDERR.**
+
+**LUẬT CHO T5–T11:**
+- Muốn biết guard có kêu hay không thì **phải grep dòng `[guard thoat]`** (hoặc chạy **riêng** các tệp DOM),
+  **không** được đọc `EXIT` của lượt đầy đủ.
+- **KHÔNG đăng ký guard trùng ở tệp khác** — hai guard cùng khẳng định một điều là hai nguồn sự thật.
+- Và tổng quát hơn: **một tín hiệu chỉ nhìn thấy được bằng mắt trên stderr là một tín hiệu sẽ bị bỏ qua.**
+  Khi dựa vào nó, hãy **viết ra cách kiểm** (lệnh grep cụ thể) ở nơi người sau đọc.
+
+### 2. `ERRATA #7` mục 1 cần một nhánh cho lớp "LỖ HỔNG ĐỘ PHỦ" (không phải lỗi)
+
+`ERRATA #7` mục 1 nói *"recipe chỉ là bằng chứng khi nó ĐỎ trên mã chưa sửa"*. Với **lỗ hổng độ phủ** (`S2`) thì
+**không có mã sai để làm đỏ**: nhãn trong mã **vốn ĐÚNG**, thứ sai là **PHÉP ĐO**. Cách làm **trung thực** (và reviewer
+xác nhận là đúng, không phải lách luật) là **chứng minh cả hai vế**:
+1. **mutation SỐNG SÓT trên bộ test CŨ** (`pass 48 / fail 2` — y hệt lúc sạch) ⇒ chứng minh phép đo cũ **MÙ**;
+2. **cùng mutation đó GIẾT ĐÚNG MỘT bài trên bộ test MỚI** ⇒ chứng minh bài mới **không rỗng**.
+Và reviewer còn đo **vế mạnh nhất**: trên cùng mutant, bài `<App/>` kiểu **cả-DOM** (`container.textContent`) **VẪN XANH**
+⇒ chứng minh **trực tiếp** rằng phép đo cả-DOM chính là thứ mù. ⇒ **Khi thêm bài ghim một lỗ hổng độ phủ, phải chứng minh
+CẢ HAI vế, và nếu được thì chỉ ra phép đo CŨ mù ở đâu.**
+
+### 3. "kèm `file:line`" là **NÓI QUÁ** — và đó là một mệnh đề SAI về bằng chứng
+
+Báo cáo vòng sửa khai TRẦN mới viết *"kèm `file:line`"*. Reviewer mở từng nguồn: TRẦN dẫn **tệp + TÊN HÀM**, **không có
+số dòng nào**. Nội dung TRẦN **đúng** (không mệnh đề sai nào), nhưng **cách mô tả bằng chứng của nó thì sai**.
+⇒ **Một lời khai VỀ bằng chứng cũng là một lời khai có thể trôi.** Khi mô tả mình đã dẫn gì, hãy nói **đúng thứ mình dẫn**.
+
+### 4. Ba nợ mới Task 4 khai ra (ghi nhận)
+
+- **`jobs.id` là rowid KHÔNG `AUTOINCREMENT`** (`schema.py:48`, `sqlite_repos.py:364-375` INSERT không kèm id + `lastrowid`,
+  hiện **0** `DELETE FROM jobs`). Quy ước *"id lớn nhất = hiện tại"* **an toàn HIỆN TẠI**, nhưng **phải ghi kèm** nếu sau này
+  có đường **xoá** job (rowid có thể được **tái dùng**).
+- **`ch__buoc` chỉ nói HAI bước đầu:** kênh đang **dịch** vẫn hiện `nạp: xong · phiên âm: xong` mà **không có tín hiệu**
+  còn bước sau. Reviewer xác nhận đây là **nợ UX đã khai trong TRẦN**, **không** phải UI nói dối.
+- **So sánh `===` với `payload.source_id`:** hợp đồng là **int**, nhưng nếu giá trị là **chuỗi số** thì nó **im lặng**
+  thành "chưa có job" và **không bài nào ghim**. (Cùng họ với lớp "so sánh lỏng" — nhớ khi làm T5–T11.)
+- Minor khác: hàng `NOJOBS` của báo cáo khai witness khớp **1 lần** nhưng literal đó khớp **2 lần** trong `App.tsx`
+  (`git grep -c` = 2) — hiệu ứng thì tái lập được bằng literal scoped; và một **vết trôi** ở `task-4-report.md:72`
+  (nói bốn hash còn lại "khớp HEAD", nhưng `App.tsx 587bf7e6…` là `00535e1:App.tsx`, còn HEAD nay `a89ba21d…`
+  vì **chính vòng sửa đã viết lại `App.tsx`**).
+- Reviewer **tự khai** một lỗi quy trình của nó: driver ghi backup **cạnh tệp đích** ⇒ **3 tệp `*.rev-baseline` lỡ nằm
+  TRONG repo** (`frontend/src/shell/App.tsx.rev-baseline`, `ChannelZone.tsx.rev-baseline`, `frontend/test/dom.ts.rev-baseline`),
+  phát hiện bằng `git status --porcelain`, **đã xoá cả ba** (count = 0), ảnh hưởng phép đo = **không**
+  (không khớp glob test, không trong `tsconfig.include`, không phải entry rollup), và **đã khai ở đầu báo cáo**.
+  ⇒ **Luật: backup của mutation để NGOÀI cây repo, hoặc dùng tên chắc chắn không khớp glob/`tsconfig`.**
+
 ## Quy ước thẩm mỹ — spec UI thắng, skill chỉ là checklist
 
 Spec `2026-09-25-phu-de-lab-ui-design.md` là **nguồn có thẩm quyền về hình thức** (bạn đã duyệt). Skill
