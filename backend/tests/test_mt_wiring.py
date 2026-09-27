@@ -504,12 +504,6 @@ def test_real_mt_engines_are_constructible_from_the_shipped_registry(tmp_path, m
         assert isinstance(engine.supports_glossary(), bool)
 
 
-def test_app_exposes_the_same_mt_engines_object(harness):
-    repos, specs, worker, broker, mt_engines = harness.build()
-    app = harness.main.build_app(repos, specs, worker, broker, mt_engines)
-    assert app.state.mt_engines is mt_engines
-
-
 # ---------------------------------------------------------------------------
 # Hành vi mà review sẽ thử nặng nhất: bóc băng xong THẬT SỰ đẻ ra một job dịch
 # với payload mà handler ăn được — đi qua `PhaseQueueWorker` + `SqliteRepos`

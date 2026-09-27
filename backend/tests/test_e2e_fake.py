@@ -11,7 +11,7 @@ upload -> ingest -> asr -> export -> tải về.
 `PhaseQueueWorker`/`create_app`. Nhờ vậy mọi dây của production đều được chạy
 thật và test không thể trôi khỏi nó: vòng `governor.register()` cho từng spec ASR
 và từng engine dịch (main.py), `auto_forward="1"` mặc định, `publish=broker.publish`
-ở worker, và `broker=`/`mt_engines=` ở app. Chỉ DUY NHẤT hai adapter model bị thay
+ở worker, và `broker=` ở app. Chỉ DUY NHẤT hai adapter model bị thay
 (`StubIngest` cho khúc ffmpeg của `IngestHandler`, `FakeMtEngine` cho khúc HTTP
 tới Ollama).
 
@@ -219,7 +219,7 @@ def wired(tmp_path, monkeypatch):
     repos, specs, worker, broker, mt_engines = main.build_components()
     # ingest thật cần ffmpeg; đó là khúc duy nhất còn giả.
     worker.handlers["ingest"] = StubIngest(repos, specs)
-    app = main.build_app(repos, specs, worker, broker, mt_engines)
+    app = main.build_app(repos, specs, worker, broker)
 
     with TestClient(app) as c:
         c.repos = repos

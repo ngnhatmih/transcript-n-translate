@@ -244,15 +244,20 @@ def build_components():
     return repos, specs, worker, broker, mt_engines
 
 
-def build_app(repos, specs, worker, broker, mt_engines) -> FastAPI:
+def build_app(repos, specs, worker, broker) -> FastAPI:
     """Ráp app HTTP từ ĐÚNG những thành phần `build_components()` trả về.
 
     Tách khỏi `main()` để test gọi được đường dây thật, không phải bản sao của
     nó: bỏ `broker=broker` ở đây là app tự dựng broker riêng và stream câm.
+
+    M-13: KHÔNG nhận `mt_engines`. App HTTP không có chỗ nào đọc dict engine, và
+    người dùng thật của nó là `TranslateHandler` — đã nhận nó trong
+    `build_components()`. Truyền thêm vào đây chỉ để gán một thuộc tính `app.state`
+    không ai đọc, kèm một comment khẳng định tầng HTTP cần nó.
     """
     return create_app(repos=repos, specs=specs, media_dir=MEDIA_DIR,
                       out_dir=OUTPUT_DIR, worker=worker, log_dir=LOG_DIR,
-                      broker=broker, mt_engines=mt_engines)
+                      broker=broker)
 
 
 def _prepare_local_model_caches() -> None:
@@ -284,9 +289,13 @@ def _engine_factory(spec):
 def main() -> None:
     import uvicorn
 
-    repos, specs, worker, broker, mt_engines = build_components()
+    # M-13: `mt_engines` KHÔNG đi vào app HTTP nữa (nó chỉ thuộc về
+    # `TranslateHandler`, đã nhận ở `build_components()`), nhưng nó vẫn là phần
+    # tử CUỐI của tuple trả về — đó là hợp đồng đã được ghim, và `main()` vẫn
+    # phải giải nén đủ năm phần tử.
+    repos, specs, worker, broker, _mt_engines = build_components()
     worker.recover()
-    app = build_app(repos, specs, worker, broker, mt_engines)
+    app = build_app(repos, specs, worker, broker)
     thread = threading.Thread(target=worker.run_forever, name="phase-queue", daemon=True)
     thread.start()
     uvicorn.run(app, host=API_HOST, port=API_PORT, log_level="info")

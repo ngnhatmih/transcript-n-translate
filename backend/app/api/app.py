@@ -20,16 +20,17 @@ FRONTEND_DEV_ORIGINS = ["http://localhost:3100", "http://127.0.0.1:3100"]
 
 
 def create_app(*, repos, specs: list[EngineSpec], media_dir, out_dir,
-               worker=None, log_dir=None, broker=None, mt_engines=None) -> FastAPI:
+               worker=None, log_dir=None, broker=None) -> FastAPI:
     app = FastAPI(title="phu-de-lab", version="0.1.0")
     app.state.repos = repos
     app.state.specs = specs
     app.state.worker = worker
-    # `mt_engines` là dict `{spec.id: engine}` do `app/main.py` dựng và trao cho
-    # CÙNG một `TranslateHandler`. Mặc định `None` để test chỉ đọc vẫn dựng được
-    # app; production luôn truyền ĐÚNG object đó, không phải bản sao — một dict
-    # chép lại sẽ khiến tầng HTTP nói về engine khác với engine đang chạy.
-    app.state.mt_engines = mt_engines
+    # M-13: KHÔNG có `app.state.mt_engines`. Bản cũ ghi thuộc tính đó kèm một
+    # comment khẳng định "tầng HTTP cần object đó", nhưng KHÔNG route, KHÔNG
+    # dependency nào đọc nó — code chết cộng một comment nói dối. Bất biến thật
+    # ("handler và composition root dùng CÙNG một dict engine") được ghim ở
+    # `tests/test_mt_wiring.py` bằng `assert handler._engines is mt_engines`,
+    # tức ở ĐÚNG chỗ nó có nghĩa: chỗ handler được dựng.
     # `broker` là tham số tuỳ chọn để `app/main.py` truyền CÙNG một broker cho
     # worker: worker publish, route `/api/jobs/stream` đọc. Bỏ trống thì app vẫn
     # dựng được (test chỉ đọc) và route stream trả về một stream rỗng.

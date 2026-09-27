@@ -126,7 +126,7 @@ def wired(tmp_path, monkeypatch):
     built = main.build_components()
     _assert_repo_data_dirs_untouched(before)
     repos, specs, worker, broker, mt_engines = built
-    app = main.build_app(repos, specs, worker, broker, mt_engines)
+    app = main.build_app(repos, specs, worker, broker)
 
     with TestClient(app) as client:
         client.repos = repos            # type: ignore[attr-defined]
@@ -353,7 +353,7 @@ def test_create_translation_rejects_an_unavailable_engine_with_409(tmp_path, mon
 
     repos, specs, worker, broker, mt_engines = main.build_components()
     _assert_repo_data_dirs_untouched(before)
-    app = main.build_app(repos, specs, worker, broker, mt_engines)
+    app = main.build_app(repos, specs, worker, broker)
 
     spec = by_id(specs, victim)
     assert spec.capabilities["available"] is False, (

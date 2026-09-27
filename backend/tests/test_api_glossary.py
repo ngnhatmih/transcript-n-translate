@@ -102,7 +102,7 @@ def wired(tmp_path, monkeypatch):
 
     repos, specs, worker, broker, mt_engines = main.build_components()
     _assert_repo_data_dirs_untouched(before)
-    app = main.build_app(repos, specs, worker, broker, mt_engines)
+    app = main.build_app(repos, specs, worker, broker)
     with TestClient(app) as client:
         yield client, repos, worker, mt_engines
 

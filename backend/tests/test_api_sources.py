@@ -1129,11 +1129,8 @@ def test_the_worker_and_the_stream_share_the_broker_of_the_assembled_app(built):
     """
     main, repos, specs, worker, engine, broker, mt_engines = built
     worker.handlers["asr"] = RecordingHandler(job_type="asr")
-    app = main.build_app(repos, specs, worker, broker, mt_engines)
+    app = main.build_app(repos, specs, worker, broker)
     assert app.state.broker is broker, "app phải đọc đúng broker của build_components()"
-    assert app.state.mt_engines is mt_engines, (
-        "app phải đọc ĐÚNG dict mt_engines của build_components(), không phải bản sao"
-    )
     repos.add_job(a_job(None, job_type="asr", engine="fw-large-v3-turbo"))
 
     async def run_a_job():
