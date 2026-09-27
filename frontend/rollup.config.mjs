@@ -167,25 +167,13 @@ function htmlPlugin() {
   };
 }
 
-/** Cua chan cuoi: bundle phai la ESM khép kín, khong con specifier "tran" nao. */
-function guardPlugin() {
-  const BARE = /(?:^|[^\w$.])(?:import|export)\s*(?:[^"'();]*?\bfrom\s*)?["'](?!\.|\/)[^"']+["']/gm;
-  return {
-    name: "assert-no-bare-imports",
-    generateBundle(_options, bundle) {
-      for (const file of Object.values(bundle)) {
-        if (file.type !== "chunk") continue;
-        for (const imported of file.imports) {
-          if (!imported.startsWith(".") && !imported.startsWith("/")) {
-            this.error(`bundle con import "tran" chua phan giai: ${imported}`);
-          }
-        }
-        const leftover = file.code.match(BARE);
-        if (leftover) this.error(`bundle con specifier "tran": ${leftover.join(", ")}`);
-      }
-    },
-  };
-}
+// `assert-no-bare-imports` da bi XOA o day (I-3). No la code chet: `onwarn` ben duoi nem loi o pha
+// BUILD, truoc `generateBundle`, nen guard khong bao gio toi duoc dung ca no sinh ra de bat. Do lai:
+//   chen `import "node:fs";` vao src/main.tsx -> rollup -c chet
+//   `[!] Error: "node:fs" is imported by "src/main.tsx", but could not be resolved` at onwarn
+//   (rollup.config.mjs:204), BUILD EXIT=1, khong mot dong nao cua guard.
+// => Bao ve that den tu `onwarn` duoi day (UNRESOLVED_IMPORT + MISSING_EXPORT), khong phai tu guard.
+// Giu lai mot cai ten noi doi thi lan sau nguoi sua se tin nham cho. Xem them guard CJS o duoi.
 
 rmSync(join(ROOT, "dist"), { recursive: true, force: true });
 
@@ -199,7 +187,7 @@ export default {
     assetFileNames: "assets/[name][extname]",
     sourcemap: true,
   },
-  plugins: [resolvePlugin(), cjsPlugin(), swcPlugin(), cssPlugin(), htmlPlugin(), guardPlugin()],
+  plugins: [resolvePlugin(), cjsPlugin(), swcPlugin(), cssPlugin(), htmlPlugin()],
   onwarn(warning, warn) {
     if (warning.code === "UNRESOLVED_IMPORT" || warning.code === "MISSING_EXPORT") throw new Error(warning.message);
     warn(warning);
