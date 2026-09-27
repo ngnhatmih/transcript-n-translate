@@ -288,3 +288,183 @@ body {
   border-color: var(--panel-3);
   pointer-events: none;
 }
+
+/* ── §4.3 Màn ĐỐI CHIẾU (Task 8) — hai cột + CỘT CPS, segmented control, GHIM bản B ──
+   Mọi giá trị lấy từ tokens.css; tokens.css là nguồn duy nhất của giá trị.
+   Vì sao LUẬT ở đây quan trọng hơn tên lớp: ERRATA #15 mục 3 đo được HAI CHIỀU rằng
+   một test chỉ khẳng định `className` vẫn XANH khi luật CSS bị xoá ⇒ khối này được
+   ghim bằng một bài ĐỌC CHÍNH TỆP NÀY (xem `CompareScreen.test.tsx`). */
+
+.cmp {
+  display: grid;
+  /* Hàng: thanh chọn bản dịch · dòng ngưỡng · đầu cột · danh sách cuộn được. */
+  grid-template-rows: auto auto auto 1fr;
+  height: 100%;
+  min-height: 0;
+  background: var(--panel-0);
+}
+
+/* Trạng thái rỗng nói SỰ THẬT của lượt này, không hứa một thứ chưa có đường làm. */
+.cmp__rong {
+  margin: 0;
+  padding: var(--sp-4);
+  color: var(--ink-1);
+  font-size: var(--fs-note);
+}
+
+/* Segmented control (U7: N bản dịch là MỘT dải nút, không phải N tab). */
+.cmp__thanh {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  border-bottom: var(--rule-w) solid var(--rule);
+}
+
+.cmp__chon,
+.cmp__ghim {
+  padding: var(--sp-1) var(--sp-2);
+  border: var(--rule-w) solid var(--rule);
+  border-radius: var(--radius);
+  background: var(--panel-2);
+  color: var(--ink-1);
+  font-family: var(--font-label);
+  font-size: var(--fs-label);
+  letter-spacing: var(--track-label);
+  cursor: pointer;
+  transition: border-color var(--dur-1) var(--ease-1);
+}
+
+/* §2.2 quy tắc 1 — amber chỉ có MỘT nghĩa: đang hoạt động. Bản A đang chọn ⇒ viền amber. */
+.cmp__chon[aria-checked="true"] {
+  border-color: var(--signal);
+  color: var(--ink-0);
+}
+
+/* Bản dịch lệch thời: nói ra bằng CHỮ, không chỉ bằng màu (`--fault` chỉ dành cho lỗi
+   thật và vân "nghi ngờ" — spec §2.2 quy tắc 3). */
+.cmp__chon[data-stale="true"] {
+  color: var(--ink-2);
+  text-decoration: line-through;
+}
+
+.cmp__ghim {
+  margin-left: auto;
+}
+
+.cmp__ghim[aria-pressed="true"] {
+  border-color: var(--signal);
+  color: var(--signal);
+}
+
+/* Một bản dịch thì không có bản B nào để ghim: nút nói thẳng là không bấm được. */
+.cmp__ghim:disabled {
+  color: var(--ink-2);
+  cursor: default;
+}
+
+.cmp__nguong {
+  margin: 0;
+  padding: var(--sp-1) var(--sp-3);
+  border-bottom: var(--rule-w) solid var(--rule);
+  color: var(--ink-2);
+  font-family: var(--font-mono);
+  font-size: var(--fs-label);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Đầu cột và mỗi dòng dùng CÙNG một lưới cột, nên nhãn luôn đứng trên cột của nó.
+   Bề mặt đầu cột nhích lên đúng MỘT bậc bằng `--surface-step` (§2.3: phân tầng bằng
+   đường kẻ 1px + chênh lệch độ sáng nền, không bằng shadow mềm). */
+.cmp__dau,
+.cmp__dong {
+  display: grid;
+  grid-template-columns: 1fr 1fr 4.5rem;
+  gap: var(--sp-3);
+  padding-right: var(--sp-3);
+  padding-left: var(--sp-3);
+  /* Lề trái 4px là chỗ dành cho MỐC VƯỢT NGƯỠNG (§4.3). Khai ở CẢ đầu cột lẫn dòng
+     để hai lưới không lệch nhau 4px — cùng khuôn với `.ed__item`. */
+  border-left: var(--sp-1) solid transparent;
+}
+
+/* Ghim bản B thì lưới có thêm CỘT THỨ TƯ; không ghim thì cột đó không tồn tại. */
+.cmp__dau.is-pinned,
+.cmp__dong.is-pinned {
+  grid-template-columns: 1fr 1fr 4.5rem 1fr;
+}
+
+.cmp__dau {
+  background: color-mix(in srgb, var(--panel-1), var(--ink-0) var(--surface-step));
+  border-bottom: var(--rule-w) solid var(--rule);
+}
+
+.cmp__nhan {
+  padding: var(--sp-1) 0;
+  font-family: var(--font-label);
+  font-size: var(--fs-label);
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  color: var(--ink-2);
+}
+
+.cmp__danh-sach {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  overflow-y: auto;
+  min-height: 0;
+}
+
+/* Một dòng: gốc (mờ hơn) · dịch (sáng) · CPS (mono). Mật độ cao (§4.1) nên dùng
+   `--fs-line` + `--lh-tight`, không dùng cỡ chữ đọc. */
+.cmp__dong {
+  align-items: start;
+  padding-top: var(--sp-2);
+  padding-bottom: var(--sp-2);
+  border-bottom: var(--rule-w) solid var(--rule);
+  font-size: var(--fs-line);
+  line-height: var(--lh-tight);
+}
+
+/* §4.3 — cột gốc MỜ HƠN cột dịch: mắt đọc bản dịch trước, bản gốc là để đối chiếu. */
+.cmp__goc {
+  color: var(--ink-1);
+}
+
+.cmp__dich {
+  color: var(--ink-0);
+}
+
+.cmp__ghim-cot {
+  color: var(--ink-1);
+  border-left: var(--rule-w) solid var(--rule);
+  padding-left: var(--sp-3);
+}
+
+/* Cột CPS: SỐ, phải xếp thẳng cột dọc ⇒ mono + chữ số đều nhau (§2.1). */
+.cmp__cps {
+  font-family: var(--font-mono);
+  font-size: var(--fs-num);
+  color: var(--ink-1);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.cmp__don-vi {
+  margin-left: var(--sp-1);
+  color: var(--ink-2);
+  font-size: var(--fs-label);
+}
+
+/* §4.3 + §12.4 — DÒNG VƯỢT NGƯỠNG ĐỌC được đánh dấu bằng MỘT MỐC amber ở lề trái
+   (không tô nền, không đổi cỡ chữ: `--signal` chỉ có một nghĩa, và đổi cỡ chữ sẽ làm
+   lệch nhịp dọc của cả bảng). Cờ `over` là của BACKEND (`data-over-cps`). */
+.cmp__dong.is-over {
+  border-left-color: var(--signal);
+}
+
+.cmp__dong.is-over .cmp__cps {
+  color: var(--signal);
+}

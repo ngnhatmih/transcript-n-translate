@@ -198,6 +198,51 @@ export interface Translation {
 }
 
 /**
+ * CPS của MỘT đoạn dịch — SỐ, không phải một chuỗi hiển thị.
+ *
+ * Vì sao có mặt: `translations.qa_issues` giữ CPS dưới dạng CHUỖI (`"cps:3=45.2>21.0"`)
+ * và chuỗi đó **không tới được HTTP** (0/12 route GET — đo ở ERRATA #18). Client KHÔNG
+ * được parse một chuỗi hiển thị để lấy con số nó hiển thị, nên `GET /api/translations/{id}`
+ * phát ra SỐ, sinh từ CÙNG hàm `mt_qa.cps_row` đã sinh chuỗi kia.
+ */
+export interface TranslationCpsRow {
+  /** `Segment.i` — khoá để ghép một hàng CPS với dòng ở hai cột. */
+  i: number;
+  /** Số ký tự đã đếm (còn hiển thị được khi tốc độ không đo được). */
+  chars: number;
+  /** Cửa sổ thời gian đã dùng, giây — cửa sổ NGUỒN (dự phòng: cửa sổ bản dịch). */
+  window: number;
+  /** `null` = KHÔNG ĐO ĐƯỢC (cả hai cửa sổ đều không dương). KHÁC `0.0`. */
+  cps: number | null;
+  max_cps: number;
+  /**
+   * Cờ VƯỢT NGƯỠNG, tính ở server trên giá trị **CHƯA làm tròn**.
+   *
+   * Client PHẢI đọc cờ này thay vì tự so `cps > max_cps`: `cps` đã làm tròn để hiển
+   * thị, nên ở đúng biên (21,04 CPS ⇒ hiện 21,0) phép so của client sẽ nói SAI.
+   */
+  over: boolean;
+}
+
+/** Ngưỡng CPS + một hàng cho mỗi đoạn dịch. */
+export interface TranslationCps {
+  max_cps: number;
+  rows: TranslationCpsRow[];
+}
+
+/**
+ * Chi tiết MỘT bản dịch — `GET /api/translations/{id}`.
+ *
+ * Gồm ĐỦ 9 khoá tóm tắt của `Translation` (dùng CHUNG builder nên hai route không thể
+ * phát hai hình dạng cho một hàng) cộng hai thứ mà trước route này KHÔNG JSON nào có:
+ * `segments` của BẢN DỊCH (cột phải của §4.3) và `cps` dạng số (cột CPS).
+ */
+export interface TranslationDetail extends Translation {
+  segments: Segment[];
+  cps: TranslationCps;
+}
+
+/**
  * Transcript KHÔNG kèm `segments` — hình dạng của `GET /api/transcripts`
  * (route danh sách cố ý không kéo đoạn nào) và của `POST /api/transcripts/{id}/approve`.
  */

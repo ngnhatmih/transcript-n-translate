@@ -10,6 +10,7 @@
 import { useReducer } from "react";
 
 import { endpoints } from "../api/endpoints.ts";
+import { CompareScreen } from "../screens/CompareScreen.tsx";
 import { EditScreen } from "../screens/EditScreen.tsx";
 import { initialState, reduce } from "../state/reducer.ts";
 import { useApi } from "../state/useApi.ts";
@@ -55,7 +56,22 @@ export function App() {
             transport đang phát, nên lề amber của §4.1 và đầu đọc của §4.1 không thể
             nói hai chuyện khác nhau. */}
         <main className="shell__work">
-          <EditScreen transcript={null} currentSegment={ui.currentSegment} />
+          {/* Vùng giữa hiện theo `ui.mode` — BA chế độ của spec UI §3 (`Mode` ở
+              `state/reducer.ts`), không phải router.
+              ⚠️ TRẦN CỦA LƯỢT NÀY, hai lớp, và cả hai đều là trạng thái THẬT:
+              (1) KHÔNG có UI nào dispatch `setMode`, nên hôm nay `mode` luôn là
+                  `"edit"` và màn Đối chiếu CHƯA với tới được trong trình duyệt;
+              (2) chưa có đường CHỌN KÊNH (ERRATA #18 mục 4) nên khi tới được thì
+                  `CompareScreen` vẫn nhận `transcript={null}`/`translations={[]}` và
+                  chỉ render trạng thái rỗng nói thật.
+              Ngày có đường chọn kênh: `transcript` lấy từ bản ghi đang mở và
+              `translations` lấy từ `endpoints.getTranslation` cho từng hàng của
+              `endpoints.listTranslations` — không phải sửa gì trong `CompareScreen`. */}
+          {ui.mode === "compare" ? (
+            <CompareScreen transcript={null} translations={[]} />
+          ) : (
+            <EditScreen transcript={null} currentSegment={ui.currentSegment} />
+          )}
         </main>
         <aside className="shell__queue">
           <QueueZone jobs={jobs} />

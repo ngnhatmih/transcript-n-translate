@@ -30,6 +30,7 @@ import type {
   Translation,
   TranslationCreate,
   TranslationCreated,
+  TranslationDetail,
   TranslationSegmentPatch,
 } from "./types.ts";
 
@@ -130,6 +131,23 @@ export function createTranslation(body: TranslationCreate): Promise<TranslationC
 /** Bản dịch của MỘT transcript, mới nhất trước, kèm cờ `stale` tính ở server. */
 export function listTranslations(transcriptId: number): Promise<Translation[]> {
   return api.get<Translation[]>(`/translations${query({ transcript_id: transcriptId })}`);
+}
+
+/**
+ * Chi tiết MỘT bản dịch: đoạn ĐÃ DỊCH + CPS dạng SỐ — nguồn của §4.3 (màn Đối chiếu).
+ *
+ * Vì sao cần route riêng thay vì đọc từ danh sách: hình dạng của một phần tử trong
+ * `GET /api/translations` đã được KÝ thành hợp đồng (`contract.test.ts` ghim nó trên
+ * backend thật), và nó KHÔNG mang `segments` của bản dịch — trước route này không JSON
+ * nào có chúng, nên cột phải của màn Đối chiếu không có nguồn.
+ *
+ * ⚠️ Hàm này CHƯA được màn nào gọi: `CompareScreen` nhận dữ liệu qua PROP (cùng khuôn
+ * `EditScreen`/`Transport`), và người gọi nó là đường **CHỌN KÊNH** — đường đó CHƯA tồn
+ * tại (ERRATA #18 mục 4), nên `App` mới truyền `translations={[]}`. Wrapper ở đây là
+ * hợp đồng cho task CHỌN KÊNH, không phải một hàm đã chạy trong sản phẩm.
+ */
+export function getTranslation(translationId: number): Promise<TranslationDetail> {
+  return api.get<TranslationDetail>(`/translations/${translationId}`);
 }
 
 /** Sửa tay CHỈ đổi `text`; id lạ (không thuộc bản dịch) bị từ chối 422 trước khi ghi. */
@@ -266,6 +284,7 @@ export const endpoints = {
   approveTranscript,
   createTranslation,
   listTranslations,
+  getTranslation,
   patchTranslation,
   listTerms,
   createTerm,
