@@ -12,12 +12,16 @@
  * sập khi shape trôi là một contract test, và nó sập ỒN ÀO. Xem `contract.test.ts`.
  *
  * MỨC KIỂM THẬT của MỌI KIỂU đã export — 33 kiểu (23 `interface` + 10 `type`),
- * đọc ra từ `contract.test.ts`, KHÔNG phải lời hứa. Ba nhóm dưới đây và hai kiểu
- * nêu riêng cuối cùng chia ĐỦ 33 (10 + 8 + 5 + 8, cộng `JobSlim` + `OllamaState`),
- * không thiếu kiểu nào:
- *   đếm lại: Select-String -Path src/api/types.ts -Pattern '^export (interface|type) '
- *   đếm `type` riêng: Select-String -Path src/api/types.ts -Pattern '^export type '
- *   kiểu nào test chạm: Get-ChildItem src -Recurse -Filter *.test.ts | Select-String '\bOllamaState\b'
+ * đọc ra từ `contract.test.ts`, KHÔNG phải lời hứa. Dưới đây là BỐN nhóm, mỗi
+ * nhóm mở đầu bằng con số của nó; bốn con số đó là 10, 9, 5, 8 và cộng lại bằng
+ * 32; thêm `OllamaState` nêu riêng ở cuối là ĐỦ 33. Cũng đủ nếu cộng theo khoá
+ * khai báo: 23 `interface` + 9 `type` không có bài kiểm + `OllamaState` (cũng là
+ * `type`) = 33:
+ *   đếm lại từ `frontend/` — Select-String -Path src/api/types.ts -Pattern '^export (interface|type) '
+ *   đếm `type` riêng (cùng `frontend/`) — Select-String -Path src/api/types.ts -Pattern '^export type '
+ *   kiểu nào test chạm (cùng `frontend/`, quét CẢ `src/` lẫn `test/`) —
+ *     $f = Get-ChildItem src,test -Recurse -File | Where-Object { $_.Name -match '\.test\.(ts|tsx|mjs|js)$' }
+ *     $f | Select-String '\bOllamaState\b'
  *
  *   CÓ bài kiểm khoá (route được GỌI THẬT, response được soi từng khoá) — 10
  *   `interface`:
@@ -48,12 +52,15 @@
  *
  *   8 `type` dưới đây KHÔNG có bài kiểm nào: `JobType`, `JobState`, `SourceLang`,
  *   `SourceKind`, `TranscriptStatus`, `TranslationStatus`, `EngineKind`,
- *   `EngineRuntime`. Không `*.test.ts` nào import hay nhắc chúng. Cả 8 là union
- *   GIÁ TRỊ và đều là KIỂU CỦA MỘT TRƯỜNG của một interface ở nhóm 1 hoặc nhóm 2:
- *   `JobType`, `JobState` của `Job`; `SourceLang`, `SourceKind` của `Source`;
- *   `TranscriptStatus` của `Transcript`; `TranslationStatus` của `Translation`;
- *   `EngineKind`, `EngineRuntime` của `EngineSpec`. Nên tập giá trị của chúng chỉ
- *   được đối chiếu MÃ NGUỒN qua interface cha — KHÔNG qua một bài test ép tập giá trị.
+ *   `EngineRuntime`. Không tệp `*.test.*` nào import hay nhắc chúng. Cả 8 là union
+ *   GIÁ TRỊ và đều là KIỂU CỦA MỘT TRƯỜNG của interface ở nhóm 1 hoặc nhóm 2
+ *   (`JobState` còn ở `JobEvent`, `TranscriptStatus` còn ở `TranscriptPatch` nhóm
+ *   3): `JobType`, `JobState` của `Job`; `SourceLang`, `SourceKind` của `Source`;
+ *   `TranscriptStatus` của `TranscriptSummary` (KHÔNG phải trực tiếp của
+ *   `Transcript` — nó thừa kế qua `extends`); `TranslationStatus` của
+ *   `Translation`; `EngineKind`, `EngineRuntime` của `EngineSpec`. Nên tập giá trị
+ *   của chúng chỉ được đối chiếu MÃ NGUỒN qua interface cha — KHÔNG qua một bài
+ *   test ép tập giá trị.
  *
  *   `OllamaState` là `type` DUY NHẤT được test chạm: `contract.test.ts` import nó
  *   và ép `(["up","down","unknown"] as OllamaState[]).includes(body.ollama)` trong
