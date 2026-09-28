@@ -29,10 +29,32 @@
  * sẵn trong `state/reducer.ts` nhưng **thiếu action BỎ GHIM**, nên nối vào reducer là
  * việc của task CHỌN KÊNH (nó phải sở hữu cả `channelId` lẫn bản dịch đang chọn).
  * ĐƯỜNG NÂNG CẤP: truyền `pinnedB`/`onPinB` xuống và thêm một action bỏ ghim.
+ *
+ * ── CỬA VÀO "BẮT ĐẦU DỊCH" (Task W3) ────────────────────────────────────────────────
+ *
+ * Đo được TRƯỚC W3: `endpoints.createTranslation` **0 lượt gọi trong sản phẩm** ⇒ không có
+ * cách nào BẮT ĐẦU một bản dịch từ giao diện; `endpoints.listEngines` **0** và
+ * `<EngineSelect/>` (Task 10) **0 người gọi**. W3 là NGƯỜI GỌI ĐẦU TIÊN của cả hai, và cửa
+ * vào được đặt ở ĐÂY — Đối chiếu là nơi bản dịch sống, và segmented control của nó đã là nơi
+ * liệt kê bản dịch (một cửa vào, không phải ba).
+ *
+ * Nó hiện ở CẢ HAI trạng thái: khi chưa có bản dịch nào (khoảnh khắc người dùng cần nó nhất —
+ * trạng thái rỗng phải có CÒ, không phải một câu "chưa có gì") và khi đã có (lối gọn
+ * `+ bản dịch mới`).
+ *
+ * ⚠️ **CHỈ engine `kind === "mt"`** được đưa xuống `EngineSelect`. `App` làm phẳng
+ * `[...asr, ...mt]` cho panel §4.8; nếu màn này cũng truyền ASR xuống thì client gửi một id
+ * ASR và backend từ chối **422** — `routes_translations.py::create_translation`:
+ * *"engine không phải engine dịch: … (kind='asr')"*. Lọc ở ĐÂY (một chiều), không ở `App`:
+ * panel §4.8 CẦN cả ASR để nói cái gì còn chạy được.
+ *
+ * ⚠️ **KHÔNG tự áp `status === "done"` ở đây** (xem `macDinhId`), và **KHÔNG tự chọn bản
+ * `done` mới nhất**: quyết định đó là của `App` (một chỗ, truyền xuống).
  */
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
-import type { TranslationDetail, Transcript } from "../api/types.ts";
+import type { EngineSpec, JobState, TranslationDetail, Transcript } from "../api/types.ts";
+import { EngineSelect } from "../shell/EngineSelect.tsx";
 
 interface Props {
   /** Bản ghi đang mở; `null` = chưa chọn kênh (trạng thái THẬT của app hôm nay). */
@@ -58,12 +80,115 @@ interface Props {
    * đi theo, còn lựa chọn người dùng đã bấm thì được tôn trọng.
    */
   macDinhId?: number | null;
+  /**
+   * MỌI spec của `/api/registry` (đã gộp `asr` + `mt`) — màn LỌC `kind === "mt"` rồi đưa
+   * xuống `EngineSelect` (nó lọc tiếp `available === true`, luật của Task 10).
+   */
+  specs?: EngineSpec[];
+  /**
+   * Tạo một bản dịch cho bản ghi đang mở. **CỦA `App`** — màn này KHÔNG tự gọi API (cùng
+   * khuôn với mọi màn khác của giai đoạn: dữ liệu vào qua PROP, một chỗ gọi API cho mỗi màn).
+   */
+  onTaoBanDich?: (engine: string) => void;
+  /** Lời gọi tạo bản dịch đang bay ⇒ nút không cho bấm lần thứ hai. */
+  dangTao?: boolean;
+  /**
+   * Lỗi của lần tạo gần nhất — **NGUYÊN VĂN `ApiError.message`**.
+   *
+   * ⚠️ Backend TỪ CHỐI TRƯỚC KHI GHI (409 "engine chưa sẵn sàng", 422 "engine không phải
+   * engine dịch") và câu của nó đã là tiếng Việt ⇒ UI **không được đoán thay backend** và
+   * **không được thay bằng một chữ chung**: người dùng cần đúng câu nói vì sao.
+   */
+  loiTao?: string | null;
+  /**
+   * Trạng thái JOB `translate` của bản dịch VỪA tạo (`TranslationCreated.job.state`).
+   *
+   * Chỉ có sau khi tạo: nó là thứ duy nhất biết job đang `queued` hay `running`, và nó đến từ
+   * HTTP (`POST /api/translations` trả `{translation, job}`). ⚠️ KHÔNG dựng thanh tiến trình
+   * thứ hai: tiến trình THẬT nằm ở job/SSE và `useJobStream` đã hiện nó ở vùng HÀNG ĐỢI.
+   */
+  trangThaiJob?: JobState | null;
+}
+
+/**
+ * Trạng thái của MỘT bản dịch, nói ra bằng chữ — không suy từ `segments.length`.
+ *
+ * `TranslationStatus` là dữ liệu của backend (`routes_translations`), nên bản dịch `queued`
+ * mà danh sách trả về vẫn nói đúng nó đang xếp hàng; `status` KHÔNG phải thứ client tự đoán.
+ */
+function chuTrangThai(trangThai: TranslationDetail["status"]): string {
+  switch (trangThai) {
+    case "queued":
+      return "đang dịch…";
+    case "running":
+      return "đang dịch…";
+    case "failed":
+      return "dịch lỗi";
+    case "cancelled":
+      return "đã huỷ";
+    case "done":
+      // `done` mà đoạn này vẫn trống: bản dịch thiếu đoạn đó (lệch số đoạn) — nói SỰ THẬT,
+      // đừng im lặng để người đọc tưởng ô trống là "chưa tải xong".
+      return "chưa có đoạn này";
+  }
+}
+
+/** Trạng thái JOB, nói ra bằng chữ — đến từ `TranslationCreated.job.state`. */
+function chuTrangThaiJob(trangThai: JobState): string {
+  switch (trangThai) {
+    case "queued":
+      return "chờ gom lô";
+    case "running":
+      return "đang chạy";
+    case "done":
+      return "xong";
+    case "failed":
+      return "lỗi";
+    case "interrupted":
+      return "bị ngắt";
+    case "cancelled":
+      return "đã huỷ";
+  }
+}
+
+/** Cột phải của một đoạn CHƯA có chữ dịch: trạng thái của bản dịch + trạng thái JOB (nếu có). */
+function chuODichTrong(ban: TranslationDetail, trangThaiJob: JobState | null): string {
+  const job = trangThaiJob === null ? "" : ` · job: ${chuTrangThaiJob(trangThaiJob)}`;
+  return `${chuTrangThai(ban.status)}${job}`;
 }
 
 /** Cột nào đang được chọn làm bản A (bản dịch hiện ở cột phải). */
-export function CompareScreen({ transcript, translations, macDinhId = null }: Props) {
+export function CompareScreen({
+  transcript,
+  translations,
+  macDinhId = null,
+  specs = [],
+  onTaoBanDich,
+  dangTao = false,
+  loiTao = null,
+  trangThaiJob = null,
+}: Props) {
   const [chonId, datChonId] = useState<number | null>(null);
   const [ghim, datGhim] = useState(false);
+  // ENGINE ĐANG CHỌN là state CỤC BỘ của màn này: `App` không cần biết nó cho tới lúc bấm
+  // "dịch" (khi đó `onTaoBanDich(engine)` mang nó lên). Giữ nó ở đây là một chỗ, không hai.
+  const [engine, datEngine] = useState("");
+
+  // ⚠️ ENGINE DỊCH = `kind === "mt"`. Xem khối đầu tệp: backend trả **422** cho một engine
+  // ASR (`routes_translations.py`, nhánh `spec.kind != "mt"`), nên ASR KHÔNG được xuống đây.
+  const specsMt = specs.filter((s) => s.kind === "mt");
+  // `available === true` là luật CỦA `EngineSelect` (Task 10) — màn này KHÔNG đọc lại khoá đó
+  // để quyết định, nó chỉ cần biết có lựa chọn nào không (để chọn sẵn cái đầu tiên).
+  const dungDuoc = specsMt.filter((s) => s.capabilities.available === true);
+  const khoaDungDuoc = dungDuoc.map((s) => s.id).join(",");
+
+  // Chọn sẵn engine MT dùng được ĐẦU TIÊN (một `<select>` không có lựa chọn hợp lệ là một ô
+  // trống), và bỏ lựa chọn cũ khi nó không còn dùng được. Phụ thuộc là CHUỖI ID đã join, không
+  // phải mảng: mảng là đối tượng mới ở mỗi lần render ⇒ effect chạy lại vô ích.
+  useEffect(() => {
+    const dung = khoaDungDuoc === "" ? [] : khoaDungDuoc.split(",");
+    if (!dung.includes(engine)) datEngine(dung[0] ?? "");
+  }, [khoaDungDuoc, engine]);
 
   if (transcript === null) {
     // Trạng thái rỗng NÓI THẬT: không bịa một bản ghi nào để màn trông đầy đủ.
@@ -92,9 +217,30 @@ export function CompareScreen({ transcript, translations, macDinhId = null }: Pr
   const cpsTheoI = new Map((chon?.cps.rows ?? []).map((r) => [r.i, r]));
   const ghimTheoI = new Map((ghimBan?.segments ?? []).map((s) => [s.i, s]));
 
+  // CỬA VÀO "BẮT ĐẦU DỊCH" — MỘT nút, `disabled` khi không có engine MT nào dùng được HOẶC
+  // khi lời gọi trước còn đang bay. Nhãn đổi theo việc ĐÃ có bản dịch hay chưa (trạng thái
+  // rỗng phải có CÒ), nhưng vẫn là CÙNG một phần tử: một cửa vào, không phải hai.
+  const coBanDich = translations.length > 0;
+  const nutDich = (
+    <span className="cmp__tao">
+      <EngineSelect specs={specsMt} value={engine} onValueChange={datEngine} />
+      <button
+        type="button"
+        className="cmp__nut-dich"
+        data-testid="tao-ban-dich"
+        disabled={dungDuoc.length === 0 || dangTao}
+        onClick={() => {
+          if (onTaoBanDich !== undefined) onTaoBanDich(engine);
+        }}
+      >
+        {dangTao ? "đang xếp…" : coBanDich ? "+ bản dịch mới" : "dịch"}
+      </button>
+    </span>
+  );
+
   return (
     <section className="cmp">
-      {/* Segmented control (U7: KHÔNG phải N tab) + nút ghim. */}
+      {/* Segmented control (U7: KHÔNG phải N tab) + nút ghim + CỬA VÀO "bắt đầu dịch". */}
       <div className="cmp__thanh" role="radiogroup" aria-label="Bản dịch">
         {translations.map((tr, k) => (
           <button
@@ -111,6 +257,7 @@ export function CompareScreen({ transcript, translations, macDinhId = null }: Pr
             {tr.stale ? " · lỗi thời" : ""}
           </button>
         ))}
+        {coBanDich ? nutDich : null}
         <button
           type="button"
           className="cmp__ghim"
@@ -123,6 +270,41 @@ export function CompareScreen({ transcript, translations, macDinhId = null }: Pr
         >
           Ghim bản B
         </button>
+      </div>
+
+      {/* ⚠️ KHÔNG CÓ ENGINE MT NÀO DÙNG ĐƯỢC ⇒ nút VÔ HIỆU **và** một câu nói RÕ vì sao +
+          cách sửa. Bài học §4.8 / ERRATA #30: đổi màu là KHÔNG ĐỦ — người dùng không được
+          đoán. `available === true` là thuận tiện của client; **backend mới là thẩm quyền**
+          (nó trả 409 nếu engine chưa sẵn sàng), nên lỗi của backend ở dưới vẫn phải hiện.
+          ⚠️ Hai nhánh dưới đây nằm TRONG một `div` (một con của lưới `.cmp`) chứ không phải
+          hai con rời: `.cmp` khai `grid-template-rows: auto auto auto 1fr` cho BỐN con (thanh
+          chọn · dòng ngưỡng · đầu cột · danh sách) — hai con thêm ở đây sẽ là con thứ năm và
+          thứ sáu, và hàng `1fr` (chỗ cuộn của danh sách) rơi vào một trong hai nhánh đó. */}
+      <div className="cmp__tin">
+        {dungDuoc.length === 0 ? (
+          <p className="cmp__ly-do-khong-dich" data-testid="ly-do-khong-dich">
+            Không có engine dịch nào dùng được: mọi engine dịch trong registry đều có
+            <code> available: false</code> — model chưa được pull, hoặc Ollama chưa chạy. Cách sửa:
+            bật Ollama rồi <code>ollama pull</code> model của engine đó, sau đó tải lại trang.
+          </p>
+        ) : null}
+
+        {/* LỖI CỦA BACKEND, NGUYÊN VĂN (`ApiError.message` = "<status>: <detail>"): backend từ
+            chối TRƯỚC khi ghi, nên câu của nó là thứ duy nhất đúng — thay bằng "có lỗi xảy ra"
+            là bỏ mất đúng thông tin người dùng cần để sửa. */}
+        {loiTao === null ? null : (
+          <p className="cmp__loi-tao" data-testid="loi-tao">{loiTao}</p>
+        )}
+
+        {coBanDich ? null : (
+          <div className="cmp__cua" data-testid="cua-dich">
+            <p className="cmp__cua-nhan">Bản ghi này chưa có bản dịch nào.</p>
+            <p className="cmp__cua-phu">
+              Chọn engine dịch rồi bấm "dịch" để bắt đầu. Cột NGUỒN bên dưới là dữ liệu thật.
+            </p>
+            {nutDich}
+          </div>
+        )}
       </div>
 
       {chon === null ? (
@@ -146,6 +328,7 @@ export function CompareScreen({ transcript, translations, macDinhId = null }: Pr
         {transcript.segments.map((seg) => {
           const cps = cpsTheoI.get(seg.i);
           const over = cps?.over === true;
+          const chuDich = dichTheoI.get(seg.i)?.text;
           return (
             <li
               key={seg.i}
@@ -154,10 +337,13 @@ export function CompareScreen({ transcript, translations, macDinhId = null }: Pr
               data-over-cps={String(over)}
             >
               <span className="cmp__goc" data-testid="col-left">{seg.text}</span>
-              {/* Không có đoạn dịch tương ứng thì để TRỐNG: một chữ bịa ở đây là nói
-                  rằng bản dịch có nội dung mà nó không có. */}
+              {/* ⚠️ BẢN DỊCH `queued`/`running` CHƯA có đoạn nào ⇒ ô này KHÔNG được để RỖNG:
+                  người dùng vừa bấm "dịch", một cột phải trống nghĩa là "app hỏng". Nói ra
+                  TRẠNG THÁI của bản dịch + trạng thái JOB (dữ liệu thật), KHÔNG bịa % tiến
+                  trình: tiến trình thật nằm ở job/SSE và vùng HÀNG ĐỢI đã hiện nó.
+                  Đoạn ĐÃ dịch vẫn hiện CHỮ THẬT của nó — trạng thái không được nuốt chữ. */}
               <span className="cmp__dich" data-testid="col-right">
-                {dichTheoI.get(seg.i)?.text ?? ""}
+                {chuDich ?? (chon === null ? "" : chuODichTrong(chon, trangThaiJob))}
               </span>
               <span className="cmp__cps" data-testid="col-cps">
                 {cps === undefined || cps.cps === null ? "—" : cps.cps.toFixed(1)}

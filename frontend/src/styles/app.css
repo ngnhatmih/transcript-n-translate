@@ -303,6 +303,110 @@ body {
   pointer-events: none;
 }
 
+/* Khay TIN cua cua vao "bat dau dich": MOT con cua luoi `.cmp`, du trong no co 0, 1 hay 3
+   nhanh (ly do khong dich duoc · loi backend · cua vao khi chua co ban dich). `.cmp` khai
+   `grid-template-rows` cho BON con, nen hai nhanh roi se day hang `1fr` (cho cuon cua danh
+   sach) vao mot khay tin — loi giong het `Critical #1` cua ERRATA #31 muc 1. */
+.cmp__tin:empty {
+  display: none;
+}
+
+/* ── §4.3 CUA VAO "BAT DAU DICH" (Task W3) — o chon engine + nut "dich" ──────────────
+   Vi sao LUAT o day quan trong hon ten lop (ERRATA #15 muc 3, VA #34 muc 2): Task W3 THEM
+   HINH THUC MOI, va mot bai chi khang dinh `className`/`disabled` trong DOM van XANH khi
+   luat CSS bi xoa. Bai `HINH THUC (W3)` trong `CompareScreen.test.tsx` doc CHINH tep nay va
+   ghim QUAN HE: khong co engine MT nao dung duoc ⇒ CA nut lan o chon deu VO HIEU, va cai
+   vo hieu do phai co LUAT THAT (`:disabled`) chu khong chi mot thuoc tinh. */
+
+.cmp__tao {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+/* Nut "dich": cung ngon ngu voi `.cmp__chon`/`.cmp__ghim` (dai nut cua segmented control),
+   nhung la hanh dong TAO MOT BAN DICH MOI — nen no co vien amber khi bam duoc, va noi ro
+   rang no KHONG bam duoc khi thieu engine. `--signal` chi co MOT nghia: dang hoat dong. */
+.cmp__nut-dich {
+  padding: var(--sp-1) var(--sp-2);
+  border: var(--rule-w) solid var(--rule);
+  border-radius: var(--radius);
+  background: var(--panel-2);
+  color: var(--ink-1);
+  font-family: var(--font-label);
+  font-size: var(--fs-label);
+  letter-spacing: var(--track-label);
+  cursor: pointer;
+  transition: border-color var(--dur-1) var(--ease-1);
+}
+
+.cmp__nut-dich:hover {
+  border-color: var(--signal);
+  color: var(--ink-0);
+}
+
+/* ⚠️ LUAT CUA TRANG THAI VO HIEU — khong phai mot lop trang tri. Nut vo hieu phai DOI BE MAT
+   va con tro, va do la thu duy nhat phan biet "khong bam duoc" voi "bam duoc" khi mat nguoi
+   doc chua doc cau ly do ben duoi (cau do van PHAI co: ERRATA #30 — doi mau la khong du).
+   Xoa khoi luat nay ma GIU `disabled` trong DOM ⇒ bai ghim LUAT phai DO. */
+.cmp__nut-dich:disabled {
+  color: var(--ink-2);
+  background: var(--panel-1);
+  cursor: default;
+}
+
+/* Cau noi RO VI SAO nut vo hieu + CACH SUA (bai hoc §4.8 / ERRATA #30: doi mau la KHONG DU).
+   Khong to `--fault`: day khong phai loi cua nguoi dung, va `--fault` chi danh cho loi that. */
+.cmp__ly-do-khong-dich {
+  margin: 0;
+  padding: var(--sp-2) var(--sp-3);
+  border-bottom: var(--rule-w) solid var(--rule);
+  color: var(--ink-1);
+  font-size: var(--fs-note);
+}
+
+.cmp__ly-do-khong-dich code {
+  font-family: var(--font-mono);
+  font-size: var(--fs-num);
+  color: var(--ink-0);
+}
+
+/* LOI CUA BACKEND, NGUYEN VAN (409 engine chua san sang / 422 engine khong phai engine dich):
+   backend tu choi TRUOC khi ghi, nen cau cua no la thong tin DUY NHAT dung. */
+.cmp__loi-tao {
+  margin: 0;
+  padding: var(--sp-2) var(--sp-3);
+  border-bottom: var(--rule-w) solid var(--rule);
+  color: var(--fault);
+  font-family: var(--font-mono);
+  font-size: var(--fs-label);
+}
+
+/* CUA VAO khi CHUA co ban dich nao: khoi co CO o dau vung, khong phai mot dong chu trong
+   (brief §3: trang thai rong phai CO CO, khong phai cau "chua co gi"). */
+.cmp__cua {
+  display: grid;
+  gap: var(--sp-2);
+  justify-items: start;
+  padding: var(--sp-4) var(--sp-3);
+  border-bottom: var(--rule-w) solid var(--rule);
+}
+
+.cmp__cua-nhan {
+  margin: 0;
+  color: var(--ink-0);
+  font-family: var(--font-label);
+  font-size: var(--fs-label);
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+}
+
+.cmp__cua-phu {
+  margin: 0;
+  color: var(--ink-1);
+  font-size: var(--fs-note);
+}
+
 /* ── §4.3 Màn ĐỐI CHIẾU (Task 8) — hai cột + CỘT CPS, segmented control, GHIM bản B ──
    Mọi giá trị lấy từ tokens.css; tokens.css là nguồn duy nhất của giá trị.
    Vì sao LUẬT ở đây quan trọng hơn tên lớp: ERRATA #15 mục 3 đo được HAI CHIỀU rằng

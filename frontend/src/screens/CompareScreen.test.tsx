@@ -34,8 +34,41 @@ import { after, afterEach, before, beforeEach, describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
-import type { Segment, Transcript, TranslationDetail } from "../api/types.ts";
+import type { EngineSpec, Segment, Transcript, TranslationDetail } from "../api/types.ts";
 import { setupDom, teardownDom } from "../../test/dom.ts";
+
+/**
+ * Mot spec theo DUNG hinh dang `EngineSpec`. `available` CHI duoc ghi khi duoc truyen:
+ * `_mark_availability` cua backend chi ghi khoa do cho `kind == "mt"` ⇒ ASR **THIEU** khoa
+ * (ERRATA #2 muc 3), va "thieu khoa" KHONG phai la "dung duoc".
+ */
+function spec(
+  id: string,
+  label: string,
+  available?: boolean,
+  kind: "asr" | "mt" = "mt",
+): EngineSpec {
+  const capabilities: EngineSpec["capabilities"] = {};
+  if (available !== undefined) capabilities.available = available;
+  return {
+    id,
+    label,
+    kind,
+    runtime: "inprocess",
+    model_ref: `model/${id}`,
+    vram_mb: 0,
+    langs: ["zh"],
+    capabilities,
+    opts: {},
+  };
+}
+
+/** Ba spec theo DUNG hinh dang registry that: ASR (thieu `available`) + MT duoc + MT khong. */
+const SPECS: EngineSpec[] = [
+  spec("faster-whisper-large", "Faster Whisper Large", undefined, "asr"),
+  spec("opus-mt", "OPUS-MT", true),
+  spec("qwen2.5-3b", "Qwen 2.5 3B", false),
+];
 
 /** Mot doan theo dung 5 khoa LUON co cua `Segment` (`types.ts`). */
 function doan(i: number, text: string, start = i, end = i + 2, suspect = false): Segment {
@@ -67,7 +100,7 @@ function banDich(
   id: number,
   texts: string[],
   cps: { i: number; cps: number | null; over: boolean }[],
-  opts: { stale?: boolean; maxCps?: number; engine?: string } = {},
+  opts: { stale?: boolean; maxCps?: number; engine?: string; status?: TranslationDetail["status"] } = {},
 ): TranslationDetail {
   return {
     id,
@@ -76,7 +109,7 @@ function banDich(
     target_lang: "vi",
     prompt_version: "raw-p1",
     transcript_version: 1,
-    status: "done",
+    status: opts.status ?? "done",
     stale: opts.stale ?? false,
     created_at: "2026-01-01T00:00:00Z",
     segments: texts.map((t, k) => doan(k + 1, t)),
@@ -98,10 +131,11 @@ const consoleGoc = { error: console.error, warn: console.warn };
 const tiengOn: string[] = [];
 
 let render: (ui: unknown) => { container: HTMLElement; unmount: () => void };
-let fireEvent: { click: (el: Element) => void };
+let fireEvent: { click: (el: Element) => void; change: (el: Element, init: unknown) => void };
 let cleanup: () => void;
 let taoPhanTu: (type: unknown, props?: unknown) => unknown;
 let CompareScreen: (props: unknown) => unknown;
+let getByRole: (container: HTMLElement, role: string, options?: { name?: RegExp | string }) => Element;
 
 /** `textContent` cua phan tu DAU TIEN khop `chon` — khong hoi ca DOM. */
 function chu(goc: HTMLElement, chon: string): string {
@@ -128,6 +162,18 @@ function khongCo(goc: HTMLElement, chon: string, msg: string): void {
   assert.equal(goc.querySelectorAll(chon).length, 0, msg);
 }
 
+/**
+ * Phan tu DAU TIEN khop `chon` — tra ve NODE de doc `disabled`/`value`/bam.
+ *
+ * ⚠️ Khong bao gio dua node nay vao `assert` (ERRATA #14 muc 3: 218 697 ms roi OOM);
+ * moi khang dinh la BOOLEAN hoac tren `getAttribute`/`textContent`.
+ */
+function phanTuTu(goc: HTMLElement, chon: string): Element {
+  const el = goc.querySelector(chon);
+  assert.ok(el !== null, `khong thay phan tu "${chon}" trong DOM`);
+  return el;
+}
+
 describe("CompareScreen: §4.3 hai cot + cot CPS + segmented control + ghim ban B", () => {
   before(async () => {
     // Chuan hoa TRUOC khi cai: khong dua vao viec tep khac da tra global hay chua.
@@ -141,6 +187,7 @@ describe("CompareScreen: §4.3 hai cot + cot CPS + segmented control + ghim ban 
     render = api.render;
     fireEvent = api.fireEvent;
     cleanup = api.cleanup;
+    getByRole = api.getByRole;
     const reactModule: any = await import("react");
     const react = reactModule.createElement === undefined ? reactModule.default : reactModule;
     taoPhanTu = react.createElement;
@@ -401,8 +448,194 @@ describe("CompareScreen: §4.3 hai cot + cot CPS + segmented control + ghim ban 
   });
 
   // -------------------------------------------------------------------------
+  // TASK W3 — CUA VAO "BAT DAU DICH" (spec UI §4.3)
+  //
+  // Do duoc TRUOC W3: `endpoints.createTranslation` **0 luot goi trong san pham**,
+  // `endpoints.listEngines` **0**, va `<EngineSelect/>` **0 nguoi goi** ⇒ KHONG co cach nao
+  // BAT DAU mot ban dich tu giao dien. Bon bai duoi day ghim CUA DO.
+  // -------------------------------------------------------------------------
+
+  it("CUA DICH: chua co ban dich nao thi CUA vao PHAI hien (trang thai rong co CO, khong phai cau 'chua co gi')", () => {
+    const t = banGhi([doan(1, "你好")]);
+    const goi: string[] = [];
+
+    const { container } = render(taoPhanTu(CompareScreen, {
+      transcript: t,
+      translations: [],
+      specs: SPECS,
+      onTaoBanDich: (engine: string) => goi.push(engine),
+    }));
+
+    assert.ok((container.textContent ?? "").includes("chưa có bản dịch"),
+      "man phai noi that la chua co ban dich nao");
+
+    // o chon engine: CHI engine `kind === "mt"` VA `available === true` (loc nam o
+    // `EngineSelect`, Task 10 — W3 la NGUOI GOI DAU TIEN cua no).
+    const o = phanTuTu(container, "select");
+    assert.equal(o.getAttribute("disabled"), null,
+      "co engine dich dung duoc thi o chon KHONG duoc vo hieu");
+    assert.equal((o as HTMLSelectElement).value, "opus-mt", "engine MT dung duoc dau tien phai duoc chon san");
+
+    const loai = [...container.querySelectorAll("option")].map((x) => x.textContent ?? "");
+    assert.deepEqual(loai, ["OPUS-MT"],
+      `CHI engine kind==="mt" VA available===true duoc liet ke; do duoc ${JSON.stringify(loai)}`);
+    assert.ok(!loai.includes("Faster Whisper Large"),
+      "KHONG duoc truyen ASR xuong o chon engine dich: backend tra 422 (routes_translations.py:120)");
+
+    // Nut "dich" phai CO THAT, bam duoc, va phat ra engine DANG CHON.
+    const nut = phanTuTu(container, '[data-testid="tao-ban-dich"]') as HTMLButtonElement;
+    assert.equal(nut.disabled, false, "co engine MT dung duoc thi nut 'dich' phai bam duoc");
+    fireEvent.click(nut);
+    assert.deepEqual(goi, ["opus-mt"], "bam 'dich' phai phat ra id engine DANG CHON");
+
+    assert.deepEqual(tiengOn, [], "trang thai rong co cua vao khong duoc sinh tieng on console");
+  });
+
+  it("CUA DICH: DA co ban dich thi cua vao VAN hien (loi gon '+ bản dịch mới')", () => {
+    const t = banGhi([doan(1, "你好")]);
+    const a = banDich(7, ["Xin chao"], [{ i: 1, cps: 8, over: false }]);
+
+    const { container } = render(taoPhanTu(CompareScreen, {
+      transcript: t,
+      translations: [a],
+      specs: SPECS,
+      onTaoBanDich: () => {},
+    }));
+
+    const nut = phanTuTu(container, '[data-testid="tao-ban-dich"]') as HTMLButtonElement;
+    assert.equal(nut.disabled, false, "co engine MT dung duoc thi cua vao van bam duoc");
+    assert.match(nut.textContent ?? "", /bản dịch mới/,
+      "da co ban dich thi cua vao la LOI GON '+ ban dich moi', khong bien mat");
+
+    assert.deepEqual(tiengOn, [], "render lai cua vao khong duoc sinh tieng on console");
+  });
+
+  it("CUA DICH: KHONG co engine MT nao dung duoc ⇒ nut VO HIEU + noi RO vi sao va cach sua", () => {
+    const t = banGhi([doan(1, "你好")]);
+
+    // Bon hinh dang deu la "khong co engine dich dung duoc": thieu han `specs`, mang rong,
+    // MT `available === false`, va chi co ASR (thieu khoa `available` — ERRATA #2 muc 3).
+    for (const specs of [
+      undefined,
+      [],
+      [spec("qwen2.5-3b", "Qwen 2.5 3B", false)],
+      [spec("faster-whisper-large", "Faster Whisper Large", undefined, "asr")],
+    ] as (EngineSpec[] | undefined)[]) {
+      const goi: string[] = [];
+      const { container } = render(taoPhanTu(CompareScreen, {
+        transcript: t,
+        translations: [],
+        specs,
+        onTaoBanDich: (engine: string) => goi.push(engine),
+      }));
+
+      const nut = phanTuTu(container, '[data-testid="tao-ban-dich"]') as HTMLButtonElement;
+      assert.equal(nut.disabled, true,
+        `khong co engine MT dung duoc thi nut 'dich' phai VO HIEU; specs=${JSON.stringify(specs)}`);
+      // ⚠️ ERRATA #30 / bai hoc §4.8: doi mau la KHONG DU — phai noi RO VI SAO va CACH SUA.
+      const ly = chu(container, '[data-testid="ly-do-khong-dich"]');
+      assert.match(ly, /không có engine dịch nào dùng được/i,
+        `phai noi RO vi sao nut vo hieu; do duoc ${JSON.stringify(ly)}`);
+      assert.match(ly, /(ollama|pull|model)/i,
+        `phai noi RO CACH SUA (khong chi doi mau); do duoc ${JSON.stringify(ly)}`);
+
+      fireEvent.click(nut);
+      assert.deepEqual(goi, [], "nut VO HIEU thi bam KHONG duoc phat ra loi goi nao");
+    }
+
+    assert.deepEqual(tiengOn, [], "nhanh 'khong co engine' khong duoc sinh tieng on console");
+  });
+
+  it("BAN DICH `queued`: cot PHAI khong duoc RONG — phai noi ra 'dang dich…' kem trang thai job", () => {
+    // ⚠️ W3-6: ban dich VUA TAO la `queued` va CHUA co doan nao. Neu man de cot phai rong thi
+    // nguoi dung bam "dich" va khong thay gi xay ra ⇒ tuong app hong (brief §5).
+    // ⚠️ Khong bia % tien do: tien do THAT nam o vung HANG DOI (`useJobStream`), khong o day.
+    const t = banGhi([doan(1, "你好"), doan(2, "谢谢")]);
+    const moi = banDich(13, [], [], { status: "queued" });
+
+    const { container } = render(taoPhanTu(CompareScreen, {
+      transcript: t,
+      translations: [moi],
+      specs: SPECS,
+      onTaoBanDich: () => {},
+      trangThaiJob: "queued",
+    }));
+
+    for (const i of [1, 2]) {
+      const phai = chu(container, `[data-testid="row-${i}"] [data-testid="col-right"]`);
+      assert.match(phai, /đang dịch/,
+        `ban dich queued thi cot phai PHai noi ra trang thai; dong ${i} do duoc ${JSON.stringify(phai)}`);
+      assert.match(phai, /job/,
+        `phai kem trang thai JOB (that), khong chi mot chu chung; dong ${i} do duoc ${JSON.stringify(phai)}`);
+      assert.match(chu(container, `[data-testid="row-${i}"] [data-testid="col-left"]`), /你好|谢谢/,
+        "cot TRAI van la du lieu GOC that — khong bi trang thai cua ban dich thay the");
+    }
+    assert.equal(container.querySelectorAll('[data-testid="col-right"]').length, 2,
+      "moi dong van phai co o cot phai — khong duoc bo o di");
+
+    assert.deepEqual(tiengOn, [], "trang thai queued khong duoc sinh tieng on console");
+  });
+
+  it("BAN DICH `queued` co vai doan DA DICH: doan chua dich moi noi trang thai (khong nuot chu that)", () => {
+    const t = banGhi([doan(1, "你好"), doan(2, "谢谢")]);
+    const dangChay = banDich(13, ["Xin chao"], [{ i: 1, cps: 4, over: false }], { status: "running" });
+
+    const { container } = render(taoPhanTu(CompareScreen, {
+      transcript: t,
+      translations: [dangChay],
+      specs: SPECS,
+      onTaoBanDich: () => {},
+      trangThaiJob: "running",
+    }));
+
+    assert.match(chu(container, '[data-testid="row-1"] [data-testid="col-right"]'), /Xin chao/,
+      "doan DA dich phai hien CHU THAT, khong bi trang thai de len");
+    assert.match(chu(container, '[data-testid="row-2"] [data-testid="col-right"]'), /đang dịch/,
+      "doan CHUA dich phai noi ra trang thai, khong de rong");
+
+    assert.deepEqual(tiengOn, [], "ban dich dang chay khong duoc sinh tieng on console");
+  });
+
+  // -------------------------------------------------------------------------
   // HINH THUC: ghim LUAT CSS, khong chi ghim ten lop (ERRATA #15 muc 3)
   // -------------------------------------------------------------------------
+
+  it("HINH THUC (W3): nut 'dich' vo hieu phai co LUAT `[disabled]` THAT, va o chon bi khoa theo LUAT `:disabled`", () => {
+    // 🔴 ERRATA #15 muc 3 + ERRATA #34 muc 2: task W3 THEM HINH THUC MOI ⇒ phai co bai ghim
+    // **LUAT** trong `app.css`, khong chi `className`/`disabled` trong DOM. Task 10 de lai mot
+    // TRAN dung loai nay (`EngineSelect` chi duoc ghim bang `className`) — khong lap lai.
+    //
+    // ⚠️ VA GHIM **QUAN HE** (ERRATA #34 muc 1): khong chi "co khai bao X", ma "khi KHONG co
+    // engine MT dung duoc thi NUT `.cmp__nut-dich` va O CHON `.eng__chon` deu bi vo hieu —
+    // va CAI BI VO HIEU do co LUAT trong `app.css`". Bai nay doc CHINH VAN BAN CSS + doc
+    // trang thai THAT trong DOM, nen no DO neu thieu mot trong hai ve.
+    const appCss = readFileSync(new URL("../styles/app.css", import.meta.url), "utf8");
+
+    // (a) LUAT THAT: nut vo hieu phai co luat `:disabled` — xoa luat ma giu class ⇒ bai DO.
+    assert.match(appCss, /\.cmp__nut-dich:disabled \{[^}]*color: var\(--ink-2\)/,
+      "`.cmp__nut-dich:disabled` phai co LUAT THAT trong app.css (khong chi thuoc tinh `disabled` trong DOM)");
+    assert.match(appCss, /\.cmp__nut-dich \{[^}]*cursor: pointer/,
+      "`.cmp__nut-dich` phai la mot NUT bam duoc (co luat `cursor: pointer`), khong phai mot nhan");
+
+    // (b) o chon engine bi khoa: LUAT `:disabled` cua `.eng__chon` phai CON (Task 10 ghim no).
+    assert.match(appCss, /\.eng__chon:disabled \{[^}]*background: var\(--panel-1\)/,
+      "`.eng__chon:disabled` phai co LUAT THAT: o chon bi khoa phai doi BE MAT, khong chi doi thuoc tinh");
+
+    // (c) QUAN HE: dung luc KHONG co engine MT dung duoc thi ca hai deu VO HIEU trong DOM
+    //     (va ca hai deu co LUAT o tren ap cho chung) — quan he nay khong the xanh neu thieu
+    //     mot trong hai ve.
+    const t = banGhi([doan(1, "你好")]);
+    const { container } = render(taoPhanTu(CompareScreen, {
+      transcript: t,
+      translations: [],
+      specs: [spec("qwen2.5-3b", "Qwen 2.5 3B", false)],
+      onTaoBanDich: () => {},
+    }));
+    assert.equal((phanTuTu(container, '[data-testid="tao-ban-dich"]') as HTMLButtonElement).disabled, true,
+      "khong co engine MT dung duoc ⇒ nut 'dich' VO HIEU");
+    assert.equal((phanTuTu(container, "select") as HTMLSelectElement).disabled, true,
+      "cung luc do o chon engine cung VO HIEU — hai ve cua CUNG mot su that");
+  });
 
   it("HINH THUC: LUAT CSS cua man Doi chieu CO THAT trong `app.css`, va moi token deu co dinh nghia", () => {
     // ERRATA #15 muc 3 (do duoc HAI CHIEU o Task 6): mot test chi khang dinh

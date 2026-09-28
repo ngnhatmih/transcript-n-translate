@@ -10,9 +10,10 @@
  *
  * `aria-hidden` trên `.grain`: lớp nhiễu là trang trí, không phải nội dung.
  */
-import { useEffect, useReducer, useRef } from "react";
+import { useEffect, useReducer, useRef, useState } from "react";
 
 import { endpoints } from "../api/endpoints.ts";
+import type { JobState } from "../api/types.ts";
 import { CompareScreen } from "../screens/CompareScreen.tsx";
 import { EditScreen } from "../screens/EditScreen.tsx";
 import { GlossaryScreen } from "../screens/GlossaryScreen.tsx";
@@ -81,6 +82,111 @@ export function App() {
   // Bản dịch để XUẤT: `status === "done"` và mới nhất (chưa xong thì chưa có nội dung dịch).
   const banDichXuat = chonTranslation(translations.data ?? []);
 
+  // ---------------------------------------------------------------------------
+  // TASK W3 — BẮT ĐẦU DỊCH (cò của workspace 2)
+  //
+  // ĐO ĐƯỢC TRƯỚC W3: `endpoints.createTranslation` **0 lượt gọi trong sản phẩm** (grep
+  // ngoài `endpoints.ts`) ⇒ không có cách nào bắt đầu một bản dịch từ giao diện. Cùng lượt
+  // đo: `endpoints.listEngines` **0** và `<EngineSelect/>` **0 người gọi**.
+  //
+  // ⚠️ **MỘT điểm quyết định "bản dịch đang xem"** (vòng sửa W1 đã lập, `macDinhId`): `App`
+  // là nơi DUY NHẤT đọc `/api/translations`, nên nó trả lời câu đó MỘT lần cho CẢ hai vùng
+  // (`Transport.translationId` VÀ `CompareScreen.macDinhId`). W3 chỉ mở rộng câu trả lời đó
+  // thêm một ưu tiên — bản VỪA TẠO — chứ **KHÔNG** dựng điểm quyết định thứ hai.
+  // ---------------------------------------------------------------------------
+  const [banMoiTao, datBanMoiTao] = useState<{ id: number; kenh: number } | null>(null);
+  const [dangTao, datDangTao] = useState(false);
+  /**
+   * Trạng thái JOB `translate` của bản VỪA tạo, đọc từ `POST /api/translations`
+   * (`TranslationCreated = { translation, job }`).
+   *
+   * ⚠️ Đây KHÔNG phải thanh tiến trình thứ hai: nó chỉ là TRẠNG THÁI, để cột phải nói ra
+   * "đang dịch… · job: chờ gom lô" thay vì để RỖNG. Tiến trình THẬT (%) nằm ở job/SSE và
+   * `useJobStream` đã hiện nó ở vùng HÀNG ĐỢI.
+   */
+  const [trangThaiJobMoi, datTrangThaiJobMoi] = useState<JobState | null>(null);
+  /**
+   * LỖI CỦA LẦN TẠO GẦN NHẤT — **NGUYÊN VĂN `ApiError.message`** (`"<status>: <detail>"`).
+   *
+   * ⚠️ Backend TỪ CHỐI TRƯỚC KHI GHI (`routes_translations.create_translation`: 422 engine
+   * không có trong registry / không phải `kind == "mt"`; 409 engine chưa sẵn sàng), nên câu
+   * tiếng Việt của nó là thứ DUY NHẤT đúng. Thay bằng "có lỗi xảy ra" là bỏ mất đúng thông
+   * tin người dùng cần để sửa, và là UI tự đoán thay backend.
+   */
+  const [loiTao, datLoiTao] = useState<string | null>(null);
+
+  /**
+   * Tạo một bản dịch cho bản ghi đang mở — **MỘT** hàm, gọi từ `CompareScreen`.
+   *
+   * ⚠️ Body là `{ transcript_id, engine }`: **KHÔNG gửi `target_lang`**. Backend đã mặc định
+   * `"vi"` (`CreateIn.target_lang: str = "vi"`); gửi cứng `"vi"` ở client là một **nguồn sự
+   * thật thứ hai** cho cùng một giá trị (Global Constraints dòng 25).
+   *
+   * ⚠️ Sau khi tạo: **làm mới** danh sách (`translations.reload`) chứ **KHÔNG** tự chèn hàng
+   * vào state — bản sao dữ liệu máy chủ cũng là nguồn sự thật thứ hai. Và bản vừa tạo PHẢI
+   * trở thành bản đang xem (ưu tiên `banMoiTao` bên dưới), vì nó `queued` nên nếu không thì
+   * người dùng bấm "dịch" và **không thấy gì xảy ra**.
+   */
+  async function taoBanDich(engine: string): Promise<void> {
+    if (tid === null || ui.channelId === null) return;
+    datDangTao(true);
+    datLoiTao(null);
+    try {
+      const tao = await endpoints.createTranslation({ transcript_id: tid, engine });
+      // ⚠️ Ghi KÈM kênh: ưu tiên này chỉ có nghĩa cho kênh đã tạo ra nó (xem `banDangXemId`).
+      datBanMoiTao({ id: tao.translation.id, kenh: ui.channelId });
+      // Trạng thái JOB của bản vừa tạo — cũng từ HTTP, không phải màn tự đoán.
+      datTrangThaiJobMoi(tao.job.state);
+      // Làm mới danh sách: hàng mới do MÁY CHỦ trả về ở lần đọc sau, không phải hàng ta tự chèn.
+      translations.reload();
+    } catch (loi: unknown) {
+      // `useApi.messageOf` cũng đọc `Error.message`; ở đây đọc thẳng vì lời gọi này không đi
+      // qua `useApi`. `ApiError.message` = `"<status>: <detail>"`.
+      datLoiTao(loi instanceof Error ? loi.message : String(loi));
+    } finally {
+      datDangTao(false);
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // NGÒI NỔ ĐỌC LẠI `/api/translations` — BẢO HIỂM THỨ TỰ (W3)
+  //
+  // `taoBanDich` ĐÃ gọi `translations.reload()`; ngòi này KHÔNG thay nó mà bù cho một khe
+  // THẬT: `reload` chỉ tăng một con số, và nếu lần đọc lại đó kết thúc TRƯỚC khi React kịp
+  // render với `banMoiTao` mới thì hai cập nhật nằm ở hai nhịp khác nhau. Điều kiện ở đây là
+  // một TÍN HIỆU (hàng đã có trong ảnh chụp của máy chủ) — không phải một phép chờ theo đồng
+  // hồ (ERRATA #35 mục 1/2), và nó chỉ chạy khi hàng vừa tạo CHƯA có trong danh sách.
+  // ---------------------------------------------------------------------------
+  const banMoiCoTrongDanhSach =
+    banMoiTao !== null
+    && (translations.data ?? []).some((row) => row.id === banMoiTao.id);
+
+  useEffect(() => {
+    if (translations.loading) return;
+    if (banMoiTao === null) return;
+    if (banMoiTao.kenh !== ui.channelId) return;
+    if (banMoiCoTrongDanhSach) return;
+    translations.reload();
+    // `translations` là object MỚI mỗi lần render ⇒ đưa nó vào deps là vòng lặp vô hạn. Ba
+    // tín hiệu dưới đây mới là thứ quyết định: hàng đã có chưa, đang đọc không, kênh nào.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [banMoiCoTrongDanhSach, translations.loading, banMoiTao, ui.channelId]);
+
+  /**
+   * Bản dịch ĐANG XEM — câu trả lời DUY NHẤT của `App`, truyền xuống cả `CompareScreen`
+   * (`macDinhId`) lẫn `Transport` (`translationId`).
+   *
+   * Ưu tiên: bản VỪA TẠO (nếu còn thuộc kênh này và còn trong danh sách) → bản `done` mới
+   * nhất. ⚠️ `banMoiTao.kenh !== ui.channelId` KHÔNG phải một quyết định thứ hai: đó là điều
+   * kiện để ưu tiên này KHÔNG áp cho một kênh khác — `moiTao` là một id trần, và id trần của
+   * kênh cũ trỏ vào hư không ở kênh mới.
+   */
+  const banDangXemId =
+    banMoiTao !== null && banMoiTao.kenh === ui.channelId && banMoiCoTrongDanhSach
+      ? banMoiTao.id
+      : banDichXuat === null ? null : banDichXuat.id;
+
+  /** Trạng thái JOB của bản vừa tạo (đến từ `POST /api/translations`, không phải màn tự đoán). */
   // ---------------------------------------------------------------------------
   // NGÒI NỔ ĐỌC LẠI `/api/transcripts` (vòng sửa W1 #1 — `Minor #3`, LỖI CHỨC NĂNG)
   //
@@ -199,17 +305,28 @@ export function App() {
               CỤC BỘ của chính nó, vì `reducer` chưa có action BỎ GHIM (`pinnedB` chỉ ghi
               được). Nâng cấp: truyền `pinnedB`/`onPinB` xuống + thêm action bỏ ghim. */}
           {ui.mode === "compare" ? (
-            /* ⚠️ `macDinhId` là QUYẾT ĐỊNH CỦA CHÍNH `App` (`banDichXuat` — bản `done` mới
-               nhất), truyền xuống thay vì để màn tự đoán lần thứ hai: `Transport` xuất đúng
-               bản đó, và vùng Đối chiếu hiện đúng bản đó ⇒ hai vùng KHÔNG THỂ nói khác nhau.
+            /* ⚠️ `macDinhId` là QUYẾT ĐỊNH CỦA CHÍNH `App`, truyền xuống thay vì để màn tự đoán
+               lần thứ hai: `Transport` xuất đúng bản đó, và vùng Đối chiếu hiện đúng bản đó ⇒
+               hai vùng KHÔNG THỂ nói khác nhau.
                Trước vòng sửa này, màn lấy `translations[0]` theo VỊ TRÍ MẢNG (route thật trả
                MỚI NHẤT TRƯỚC ⇒ hàng `queued`), nên người dùng đang ĐỌC một bản rỗng trong
                khi ba nút xuất trỏ vào bản `done` khác — đo được `SAME = false`
-               (review W1 §B(8)). */
+               (review W1 §B(8)).
+               Task W3 mở rộng ĐÚNG một câu trả lời đó thêm một ưu tiên: bản VỪA TẠO đứng
+               trước bản `done` mới nhất (`banDangXemId`), để bấm "dịch" xong là THẤY ngay bản
+               mới (nó `queued`, nên nếu không ưu tiên thì người dùng không thấy gì xảy ra). */
             <CompareScreen
               transcript={transcript.data}
               translations={translations.data ?? []}
-              macDinhId={banDichXuat === null ? null : banDichXuat.id}
+              macDinhId={banDangXemId}
+              /* MỌI spec của registry: MÀN lọc `kind === "mt"` rồi đưa `EngineSelect` xuống
+                 (backend trả 422 cho engine ASR — `routes_translations.py`), còn vùng §4.8 ở
+                 trên vẫn cần CẢ ASR để nói cái gì còn chạy được. */
+              specs={specs}
+              onTaoBanDich={taoBanDich}
+              dangTao={dangTao}
+              loiTao={loiTao}
+              trangThaiJob={trangThaiJobMoi}
             />
           ) : ui.mode === "glossary" ? (
             /* §4.4 tab THUẬT NGỮ (Task 9). Màn này KHÔNG nhận prop: nó độc lập với

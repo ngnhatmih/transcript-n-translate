@@ -26,12 +26,15 @@ import type { Server, ServerResponse } from "node:http";
 import type { AddressInfo, Socket } from "node:net";
 
 import type {
+  EngineSpec,
   Job,
+  Registry,
   Segment,
   Source,
   Transcript,
   TranscriptSummary,
   Translation,
+  TranslationCreated,
   TranslationDetail,
 } from "../api/types.ts";
 import { setupDom, teardownDom } from "../../test/dom.ts";
@@ -189,8 +192,13 @@ function banDich(
  *
  * Ban ghi 5 co HAI ban dich: id 11 `done` va id 12 `queued`. `chonTranslation` phai chon
  * 11 (`status === "done"`, moi nhat) ⇒ `translationId` cua thanh transport la 11.
+ *
+ * ⚠️ `let` chu khong `const`: bai W3 "ban vua tao tro thanh ban dang xem" THEM mot hang vao
+ * chinh mang nay qua duong THAT (`POST /api/translations` o server), roi lan doc lai
+ * `/api/translations` phai thay no. Do la cach duy nhat phan biet "CO lam moi danh sach" voi
+ * "tu chen hang vao state" bang DOM.
  */
-const TRANSLATIONS: Translation[] = [
+let TRANSLATIONS: Translation[] = [
   banDich(12, 5, "queued"),
   banDich(11, 5, "done"),
   banDich(7, 2, "done"),
@@ -219,11 +227,84 @@ const TRANSLATION_CHI_TIET: Record<number, TranslationDetail> = {
   7: { ...banDich(7, 2, "done"), segments: [], cps: { max_cps: 21, rows: [] } },
 };
 
+/**
+ * `GET /api/registry` THAT (hinh dang `Registry`: `{asr:[], mt:[]}`, KHONG phai mang phang —
+ * ERRATA #2 muc 2). `available` CHI co tren `kind == "mt"`; spec ASR duoi day **THIEU** khoa do.
+ *
+ * ⚠️ VI SAO FIXTURE PHAI CO CA ASR LAN MT: neu mot ban sua nao day truyen `[...asr, ...mt]`
+ * xuong o chon engine dich thi client se gui id ASR, va backend tra **422**
+ * (`routes_translations.py::create_translation`, nhanh `spec.kind != "mt"`). Fixture CHI co MT
+ * thi loi do KHONG THE lo ra (ERRATA #31 muc 3: fixture phai dung hinh dang THAT).
+ */
+function spec(
+  id: string,
+  label: string,
+  runtime: EngineSpec["runtime"],
+  available: boolean | undefined,
+  kind: EngineSpec["kind"] = "mt",
+): EngineSpec {
+  const capabilities: EngineSpec["capabilities"] = {};
+  if (available !== undefined) capabilities.available = available;
+  return {
+    id,
+    label,
+    kind,
+    runtime,
+    model_ref: `model/${id}`,
+    vram_mb: 0,
+    langs: ["zh", "en"],
+    capabilities,
+    opts: {},
+  };
+}
+
+const REGISTRY_HTTP: Registry = {
+  asr: [spec("faster-whisper-large", "Faster Whisper Large", "inprocess", undefined, "asr")],
+  mt: [
+    spec("opus-mt", "OPUS-MT", "inprocess", true),
+    // Ollama dang chay nhung model chua pull ⇒ `available === false` ⇒ KHONG duoc liet ke.
+    spec("qwen2.5-7b", "Qwen 2.5 7B", "ollama", false),
+  ],
+};
+
+/**
+ * `let` chu khong `const`: bai "khong co engine MT nao dung duoc" doi fixture sang mot registry
+ * ma MOI MT deu `available === false` — va `beforeEach` tra ve dung anh luc nap module.
+ */
+let REGISTRY: Registry = REGISTRY_HTTP;
+
+/** `GET /api/status` — Ollama `up` ⇒ panel §4.8 tra `null` (khong co gi de canh bao). */
+const STATUS_HTTP = {
+  queue_depth: 1,
+  running: [7],
+  current_phase: "asr:faster-whisper-large",
+  phase_switches: 3,
+  vram: null,
+  ollama: "up" as const,
+};
+
 const dem = {
   sources: 0,
   jobs: 0,
   stream: 0,
   loiSources: false,
+  registry: 0,
+  /**
+   * So lan `POST /api/translations` toi noi nhan — BANG CHUNG DUONG THAT cho cua vao "bat dau
+   * dich": khong dem duoc o PHIA SERVER thi "bam nut ⇒ co ban dich moi" co the xanh vi mot ly
+   * do khac (du lieu den tu dau do khong phai HTTP).
+   */
+  postTranslations: 0,
+  /** Body JSON THAT cua lan POST gan nhat, va header `content-type` cua no. */
+  bodyTao: null as Record<string, unknown> | null,
+  contentTypeTao: "",
+  /** Bat de `POST /api/translations` tra 409 kem cau tieng Viet cua backend (ca loi THAT). */
+  loiTao: false,
+  /**
+   * Trang thai JOB `translate` ma server tra trong body 201 — de bai "queued phai noi ra trang
+   * thai kem trang thai JOB" khong phai BIA mot chuoi trong test.
+   */
+  jobTao: "queued" as "queued" | "running",
   /**
    * Bon bo dem cho duong SUY DU LIEU cua W1. Chung la BANG CHUNG DUONG THAT: neu khong
    * dem duoc thi "man hien du lieu that" co the xanh vi mot ly do khac (du lieu den tu
@@ -263,9 +344,45 @@ function themBanGhiMoi(id: number, sourceId: number, text: string): void {
   };
 }
 
+/**
+ * XU LY THAT mot `POST /api/translations`: ghi hang vao ca hai route GIONG backend
+ * (`routes_translations.create_translation` ghi hang `queued` voi 0 doan, roi xep DUNG MOT job
+ * `translate`) va tra `201` kem `TranslationCreated = { translation, job }`.
+ *
+ * Tra ve CHINH body da tra, de bai test doc duoc trang thai JOB THAT thay vi bia mot chuoi.
+ */
+function taoBanDichTheoYeuCau(body: Record<string, unknown>): TranslationCreated {
+  const transcriptId = Number(body["transcript_id"]);
+  const engine = String(body["engine"]);
+  const id = Math.max(...TRANSLATIONS.map((t) => t.id)) + 1;
+  const moi: Translation = {
+    id,
+    transcript_id: transcriptId,
+    engine,
+    // Backend tu dien `"vi"` khi client KHONG gui `target_lang` (`CreateIn.target_lang: str = "vi"`).
+    target_lang: "vi",
+    prompt_version: "raw-p1",
+    transcript_version: TRANSCRIPT_CHI_TIET[transcriptId]?.version ?? 1,
+    status: "queued",
+    stale: false,
+    created_at: "2026-01-01T00:00:00Z",
+  };
+  // MOI NHAT TRUOC — dung thu tu route that tra ve.
+  TRANSLATIONS = [moi, ...TRANSLATIONS];
+  TRANSLATION_CHI_TIET[id] = {
+    ...moi,
+    // Ban dich VUA XEP: chua dich duoc doan nao (0 segment).
+    segments: [],
+    cps: { max_cps: 21, rows: [] },
+  };
+  const job = makeJob(20 + id, "translate", dem.jobTao, `translate:${engine}`, 0, { translation_id: id });
+  return { translation: moi, job };
+}
+
 /** Anh chup cua hai fixture TRANSCRIPT luc nap module — `beforeEach` tra ve dung anh nay. */
 const TRANSCRIPTS_GOC: TranscriptSummary[] = TRANSCRIPTS;
 const TRANSCRIPT_CHI_TIET_GOC: Record<number, Transcript> = TRANSCRIPT_CHI_TIET;
+const TRANSLATIONS_GOC: Translation[] = TRANSLATIONS;
 const streams = new Set<ServerResponse>();
 const sockets = new Set<Socket>();
 
@@ -333,6 +450,33 @@ const server: Server = createServer((req, res) => {
     return;
   }
   if (url.startsWith("/api/translations")) {
+    // ⚠️ PHAN NHANH THEO METHOD: `POST /api/translations` (tao ban dich) KHONG duoc roi vao
+    // nhanh GET danh sach — no se tra mot MANG cho mot request tao, va bai "bam dich ⇒ POST
+    // toi server" se do vi mot ly do chang lien quan gi tới cua vao.
+    if (req.method === "POST") {
+      dem.postTranslations += 1;
+      dem.contentTypeTao = req.headers["content-type"] ?? "";
+      let raw = "";
+      req.on("data", (chunk) => { raw += String(chunk); });
+      req.on("end", () => {
+        // BODY THAT, doc tu chinh request — khong phai mot gia tri test tu nghi ra.
+        let body: Record<string, unknown> = {};
+        try { body = JSON.parse(raw) as Record<string, unknown>; } catch { body = {}; }
+        dem.bodyTao = body;
+        if (dem.loiTao) {
+          // 409 NGUYEN VAN cua backend (`routes_translations.py`): engine chua san sang.
+          // ⚠️ Client phai hien CAU NAY, khong duoc thay bang mot chu chung.
+          res.writeHead(409, { "content-type": "application/json" });
+          res.end(JSON.stringify({
+            detail: "engine chưa sẵn sàng: 'opus-mt' (model chưa pull hoặc runtime không phục vụ được)",
+          }));
+          return;
+        }
+        res.writeHead(201, { "content-type": "application/json" });
+        res.end(JSON.stringify(taoBanDichTheoYeuCau(body)));
+      });
+      return;
+    }
     dem.translations += 1;
     // Loc theo DUNG query param ma `endpoints.listTranslations` gui di
     // (`/api/translations?transcript_id=<id>`): tra het moi ban dich se lam man Doi chieu
@@ -340,6 +484,17 @@ const server: Server = createServer((req, res) => {
     const transcriptId = Number(new URL(url, "http://127.0.0.1").searchParams.get("transcript_id"));
     res.writeHead(200, { "content-type": "application/json" });
     res.end(JSON.stringify(TRANSLATIONS.filter((t) => t.transcript_id === transcriptId)));
+    return;
+  }
+  if (url.startsWith("/api/registry")) {
+    dem.registry += 1;
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end(JSON.stringify(REGISTRY));
+    return;
+  }
+  if (url.startsWith("/api/status")) {
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end(JSON.stringify(STATUS_HTTP));
     return;
   }
   if (url.startsWith("/api/glossary")) {
@@ -524,6 +679,29 @@ function nutKenh(container: HTMLElement, chuoi: string): Element {
   return khop as Element;
 }
 
+/**
+ * Di DUONG THAT toi vung Doi chieu: cho kenh that, bam kenh, doi radio "Đối chiếu".
+ *
+ * ⚠️ `chiTiet > 0` la mot phep cho THEO TIN HIEU, khong theo dong ho: `transcript` va
+ * `translations` la HAI `useApi` doc lap, nen vung Doi chieu co the mount TRUOC khi
+ * `getTranslation` ket thuc (xem bai `CHE DO: 'Đối chiếu'…` — mutation `W1-5` do dung cho nay).
+ * Voi `chiTiet === 0` thi khong cho: bai "chua co ban dich nao" CAN trang thai rong that.
+ */
+async function toiDoiChieu(container: HTMLElement, chiTiet: number): Promise<void> {
+  await choChu(container, "kenh-mot.wav");
+  fireEvent.click(nutKenh(container, "kenh-mot.wav"));
+  await choChu(container, "câu 1");
+  if (chiTiet > 0) {
+    await waitFor(
+      () => {
+        assert.equal(dem.translationChiTiet, chiTiet, `phai doc CHI TIET ${chiTiet} ban dich cua ban ghi`);
+      },
+      { timeout: 5000, interval: 20 },
+    );
+  }
+  fireEvent.click(getByRole(container, "radio", { name: /đối chiếu/i }));
+}
+
 describe("App: KENH THAT + HANG DOI THAT tu server node:http trong tien trinh", () => {
   before(async () => {
     await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()));
@@ -553,6 +731,13 @@ describe("App: KENH THAT + HANG DOI THAT tu server node:http trong tien trinh", 
     dem.jobs = 0;
     dem.stream = 0;
     dem.loiSources = false;
+    dem.registry = 0;
+    dem.postTranslations = 0;
+    dem.bodyTao = null;
+    dem.contentTypeTao = "";
+    dem.loiTao = false;
+    dem.jobTao = "queued";
+    REGISTRY = REGISTRY_HTTP;
     dem.transcripts = 0;
     dem.transcriptChiTiet = 0;
     dem.translations = 0;
@@ -563,6 +748,9 @@ describe("App: KENH THAT + HANG DOI THAT tu server node:http trong tien trinh", 
     // mot hang song sot sang bai sau se lam moi phep do "MOT luot doc" noi doi.
     TRANSCRIPTS = TRANSCRIPTS_GOC;
     TRANSCRIPT_CHI_TIET = TRANSCRIPT_CHI_TIET_GOC;
+    // ⚠️ CA MANG BAN DICH: bai W3 them mot hang THAT qua `POST` o server, va hang do song sot
+    // sang bai sau thi "ban vua tao tro thanh ban dang xem" se xanh ngay ca khi khong co gi moi.
+    TRANSLATIONS = TRANSLATIONS_GOC;
   });
 
   // `cleanup` cua Testing Library go DOM da render — khong cham vao global nao,
@@ -1262,5 +1450,161 @@ describe("App: KENH THAT + HANG DOI THAT tu server node:http trong tien trinh", 
       "`.shell__head` phai la HANG FLEX: dai trang thai nam CANH ten ban lam viec (khong xuong dong)");
     assert.match(appCss, /\.shell__head \{[^}]*align-items: center/,
       "hang flex phai can doc giua: ten ban lam viec va dai trang thai cung mot truc");
+  });
+
+  // -------------------------------------------------------------------------
+  // TASK W3 — BAT DAU DICH, DI QUA DUONG THAT (server `node:http` trong tien trinh)
+  //
+  // Do duoc TRUOC W3: `endpoints.createTranslation` **0 luot goi trong san pham**,
+  // `endpoints.listEngines` **0**, `<EngineSelect/>` **0 nguoi goi** ⇒ khong co cach nao BAT
+  // DAU mot ban dich tu giao dien. Bon bai duoi day bam nut THAT va do o PHIA SERVER.
+  // -------------------------------------------------------------------------
+
+  it("W3 BAT DAU DICH: bam nut 'dich' ⇒ POST /api/translations voi body {transcript_id, engine}", async () => {
+    const { container, unmount } = render(taoPhanTu(App));
+
+    // ⚠️ Kenh 1, ban ghi 5, ban dich 11 `done` + 12 `queued` ⇒ phai doc CHI TIET ca hai.
+    await toiDoiChieu(container, 2);
+
+    // (a) CUA VAO CO THAT: o chon engine + nut "dich".
+    const nut = await choPhanTu(
+      container,
+      '[data-testid="tao-ban-dich"]',
+      (t) => t.length > 0,
+      "vung Doi chieu khong co cua vao 'bat dau dich'",
+    );
+    assert.ok(nut.length > 0, "nut 'dich' phai co chu");
+
+    // O chon engine: CHI engine `kind === "mt"` VA `available === true` cua `/api/registry` THAT.
+    // ⚠️ ASR nam trong registry (fixture dung hinh dang that) nen mot ban sua truyen
+    // `[...asr, ...mt]` xuong se lam dong nay DO — va backend se tra 422.
+    const loai = textCua(container, '[data-testid="tao-ban-dich"]')
+      .concat([...container.querySelectorAll("option")].map((o) => o.textContent ?? ""));
+    assert.ok(loai.some((t) => t.includes("OPUS-MT")), `o chon phai liet ke MT dung duoc; do duoc ${JSON.stringify(loai)}`);
+    assert.ok(
+      !loai.some((t) => t.includes("Faster Whisper")),
+      `KHONG duoc liet ke ASR o o chon engine DICH (backend tra 422); do duoc ${JSON.stringify(loai)}`,
+    );
+    assert.ok(dem.registry >= 1, "phai doc `/api/registry` de biet engine nao dung duoc");
+
+    // (b) BAM ⇒ POST THAT.
+    fireEvent.click(phanTu(container, '[data-testid="tao-ban-dich"]'));
+    await waitFor(
+      () => {
+        assert.equal(dem.postTranslations, 1, "bam 'dich' phai gui DUNG MOT `POST /api/translations`");
+      },
+      { timeout: 5000, interval: 20 },
+    );
+
+    // (c) BODY THAT, doc o PHIA SERVER tu chinh request.
+    const body = dem.bodyTao;
+    assert.ok(body !== null, "server khong doc duoc body JSON nao");
+    assert.equal(body["transcript_id"], 5, `body phai mang transcript_id cua ban ghi dang mo; do duoc ${JSON.stringify(body)}`);
+    assert.equal(body["engine"], "opus-mt", `body phai mang engine DANG CHON; do duoc ${JSON.stringify(body)}`);
+    // ⚠️ `target_lang` KHONG duoc gui: backend mac dinh `"vi"` (`CreateIn.target_lang: str = "vi"`),
+    // gui cung la NGUON SU THAT THU HAI (brief §2).
+    assert.equal(
+      "target_lang" in body,
+      false,
+      `client KHONG duoc gui target_lang (backend tu mac dinh "vi"); do duoc ${JSON.stringify(body)}`,
+    );
+    assert.match(dem.contentTypeTao, /application\/json/,
+      `POST phai gui content-type JSON; do duoc ${JSON.stringify(dem.contentTypeTao)}`);
+
+    // (d) HANG MOI XUAT HIEN tu mot lan DOC LAI danh sach (khong tu chen vao state): id 13 la
+    //     hang server da ghi va `GET /api/translations` moi tra ve.
+    await choPhanTu(
+      container,
+      '[data-testid="pick-13"]',
+      (t) => t.includes("bản dịch"),
+      "hang ban dich MOI khong xuat hien ⇒ danh sach khong duoc lam moi",
+    );
+    assert.ok(dem.translations >= 2, `phai doc lai danh sach ban dich; do duoc ${dem.translations}`);
+
+    // (e) BAN VUA TAO tro thanh BAN DANG XEM — cung cau tra loi ma thanh transport dung.
+    const dangChon = [...container.querySelectorAll('[data-testid^="pick-"]')].filter(
+      (el) => el.getAttribute("aria-checked") === "true",
+    );
+    assert.equal(dangChon.length, 1, `phai co DUNG MOT ban dich dang chon; do duoc ${dangChon.length}`);
+    assert.equal(
+      (dangChon[0].getAttribute("data-testid") ?? "").replace("pick-", ""),
+      "13",
+      "ban VUA TAO phai la ban DANG XEM, khong phai ban `done` cu",
+    );
+
+    // (f) Ban moi la `queued` ⇒ cot phai NOI RA trang thai + trang thai JOB THAT, KHONG RONG.
+    const cotPhai = textCua(container, '[data-testid="col-right"]');
+    assert.equal(cotPhai.length, 3, `ban ghi co ba doan ⇒ ba o cot phai; do duoc ${JSON.stringify(cotPhai)}`);
+    for (const o of cotPhai) {
+      assert.match(o, /đang dịch/,
+        `ban dich queued ⇒ cot phai phai noi ra trang thai (khong duoc rong); do duoc ${JSON.stringify(cotPhai)}`);
+      // Trang thai JOB that den tu body 201 cua server (`{translation, job}`), khong bia o test.
+      assert.match(o, /chờ gom lô/,
+        `phai kem trang thai JOB THAT (job dang o trang thai 'queued'); do duoc ${JSON.stringify(cotPhai)}`);
+    }
+
+    assert.deepEqual(tiengOn, [], "bat dau dich khong duoc sinh tieng on console");
+    unmount();
+  });
+
+  it("W3 LOI BACKEND: 409 ⇒ hien NGUYEN VAN cau tieng Viet cua backend, khong thay bang chu chung", async () => {
+    dem.loiTao = true;
+    const { container, unmount } = render(taoPhanTu(App));
+
+    await toiDoiChieu(container, 2);
+    const truoc = [...container.querySelectorAll('[data-testid^="pick-"]')].length;
+    assert.equal(truoc, 2, "ban ghi nay co hai ban dich truoc khi bam");
+
+    fireEvent.click(phanTu(container, '[data-testid="tao-ban-dich"]'));
+    await waitFor(
+      () => {
+        assert.equal(dem.postTranslations, 1, "phai gui DUNG MOT `POST /api/translations`");
+      },
+      { timeout: 5000, interval: 20 },
+    );
+
+    // CAU NGUYEN VAN cua backend — do o PHIA SERVER roi doi chieu voi DOM (khong chep tay).
+    const cau = "engine chưa sẵn sàng: 'opus-mt' (model chưa pull hoặc runtime không phục vụ được)";
+    await choChu(container, cau);
+
+    // Va khong co hang moi nao: backend TU CHOI TRUOC KHI GHI, nen UI cung khong duoc bia ra hang.
+    assert.equal(
+      [...container.querySelectorAll('[data-testid^="pick-"]')].length,
+      2,
+      "409 ⇒ KHONG co ban dich moi nao duoc them vao danh sach",
+    );
+    assert.equal(container.querySelectorAll('[data-testid="pick-13"]').length, 0,
+      "409 ⇒ khong duoc co hang ban dich 13 nao");
+
+    assert.deepEqual(tiengOn, [], "loi backend phai di ra DOM, khong duoc chi ghi console");
+    unmount();
+  });
+
+  it("W3 KHONG CO ENGINE: moi MT deu `available === false` ⇒ nut VO HIEU + noi RO cach sua, va KHONG goi API", async () => {
+    // Dung hinh dang THAT cua mot may chua pull model: MT co trong registry nhung `available`
+    // false (do `app/main.py::_mark_availability`). Registry VAN co ASR ⇒ bai nay cung chung
+    // minh ASR khong duoc tinh la engine dich.
+    REGISTRY = {
+      asr: [spec("faster-whisper-large", "Faster Whisper Large", "inprocess", undefined, "asr")],
+      mt: [spec("qwen2.5-7b", "Qwen 2.5 7B", "ollama", false)],
+    };
+    const { container, unmount } = render(taoPhanTu(App));
+
+    await toiDoiChieu(container, 2);
+
+    const nut = phanTu(container, '[data-testid="tao-ban-dich"]') as HTMLButtonElement;
+    assert.equal(nut.disabled, true, "khong co engine MT dung duoc ⇒ nut 'dich' phai VO HIEU");
+    // ⚠️ ERRATA #30 / §4.8: doi mau la KHONG DU — phai noi RO VI SAO va CACH SUA.
+    const ly = chu(container, '[data-testid="ly-do-khong-dich"]');
+    assert.match(ly, /không có engine dịch nào dùng được/i,
+      `phai noi RO vi sao; do duoc ${JSON.stringify(ly)}`);
+    assert.match(ly, /(ollama|pull)/i, `phai noi RO CACH SUA; do duoc ${JSON.stringify(ly)}`);
+
+    fireEvent.click(nut);
+    await choNhip(250);
+    assert.equal(dem.postTranslations, 0, "nut VO HIEU thi KHONG duoc goi API nao");
+
+    assert.deepEqual(tiengOn, [], "nhanh khong co engine khong duoc sinh tieng on console");
+    unmount();
   });
 });
