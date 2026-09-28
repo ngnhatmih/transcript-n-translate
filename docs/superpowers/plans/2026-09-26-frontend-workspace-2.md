@@ -2014,6 +2014,45 @@ class vẫn nằm trong DOM, luật vẫn "có trong tệp", nhưng **không cò
 ⇒ Kèm: báo cáo W3 khai *"0 phép chờ đồng hồ được thêm"* — **SAI**: có **lượt dùng mới** của `choNhip(250)` (`App.test.tsx:1617`).
 Và *"6 luật mới"* thật ra là **11 selector**.
 
+## ⚠️ ERRATA #37 — W3 vòng sửa #2 (`6fb80b9`): `4 !== 2` là **(a)**, **bộ đếm request TÍCH LUỸ là khẳng định không bền**, và **một thư mục NGOÀI REPO đã bị xoá**
+
+### 1. ✅ `4 !== 2` = **(a) bài test khẳng định một CON SỐ mà ứng dụng KHÔNG bảo đảm** — đã chứng minh, không đoán
+Nhật ký **PHÍA SERVER theo `id`** cho thấy mỗi lượt đọc danh sách đọc **đúng một** chi tiết cho **mỗi** hàng (`?transcript_id=5` → `/12` → `/11`),
+**không id nào lặp** ⇒ **KHÔNG có lỗi đọc trùng**. Thủ phạm: **request của BÀI KHÁC hạ cánh sau `beforeEach`**
+(`97 GET /api/translations/9` là bản dịch của **bản ghi 3, kênh 2** — bài này không đụng tới) ⇒ "công việc" của bài là **2**, bộ đếm thấy **3**.
+**Chứng minh TẤT ĐỊNH:** phục hồi phép chờ CŨ ⇒ **ĐỎ `3 !== 2`** timeout **~5033 ms** — khớp chữ ký **5040 ms** của reviewer.
+⚠️ Lượt `4 !== 2` thật = cùng cơ chế + poll **trượt** giá trị trung gian trên vòng lặp bị nghẽn; implementer **không tái lập được `4`** nên **không khai** nó. Đúng.
+⇒ **LUẬT: một khẳng định trên BỘ ĐẾM REQUEST TÍCH LUỸ chỉ bền nếu bộ đếm KHÔNG THỂ thấy traffic của bài khác.**
+Nếu nhiều bài dùng chung một server (ở đây: `--test-isolation=none` ⇒ **một tiến trình**), hãy **đếm theo `id`/theo đường dẫn** hoặc **khẳng định trên ĐẦU RA DOM**.
+⇒ Và ⚠️ **cấm "sửa" bằng cách nới `>= 2`** — đó là biến một khẳng định sống thành trang trí.
+**Nợ kèm theo (khai, chưa sửa):** fixture chi tiết `TRANSLATION_CHI_TIET` **không có ảnh gốc** để `beforeEach` trả về ⇒ **rò rỉ giữa bài**.
+
+### 2. ✅ `Important` F2 đã sửa bằng **MỘT nguồn quyết định ở `App`** — và có lý do kỹ thuật cho cách chọn
+`App` quyết rồi truyền **CÂU** xuống (không truyền `status`): truyền `status` sẽ để `Transport` **quyết lần thứ hai**.
+Nay bản đang xem đã `done` ⇒ **ba nút XUẤT trỏ CHÍNH NÓ**; câu *"chưa dịch xong"* chỉ nói khi `status` **thật sự** khác `done`.
+Fixture **2 bản `done`**; `F2-bo-luat-xuat` và `F2-cau-thua` mỗi cái **ĐỎ đúng 1 bài**. ✅
+
+### 3. ⚠️ LỚP LỖI "CHỜ A RỒI ĐỌC B" ĐÃ ĐẾN LẦN THỨ **BA** ⇒ cần kiểm CƠ HỌC, không audit tay
+W3 fix#2 tự soát **15** chỗ, **5** là hazard (2 chỗ ngoài phạm vi: `App.test.tsx:1649` chờ `postTranslations` rồi đọc `bodyTao` ghi muộn hơn;
+và **một bài mới của chính họ** đỏ ở lượt `after1` rồi họ sửa **cơ chế**).
+⇒ **LUẬT: mỗi lần thấy lớp lỗi này, hãy TÌM NÓ BẰNG MÁY** (`grep` cho khuôn "chờ X rồi đọc Y" **trong cùng một bài**), **không** bằng một lượt soát tay —
+audit tay đã bỏ sót nó **ba lần**.
+
+### 4. 🔴 **MỘT THƯ MỤC NGOÀI REPO ĐÃ BỊ XOÁ — không xác minh được nó là gì**
+Implementer **tự khai**: `Remove-Item -Recurse -Force C:\Users\Admin\Desktop\ngn\deepseek\dist` (định dọn `dist` của build) —
+⚠️ đó là **WORKSPACE ROOT**, **KHÔNG** phải `phu-de-lab/frontend/dist` (cái này **vẫn còn**). Họ **không xác minh được** root `dist` có tồn tại trước đó.
+**Điều tra của tôi:** root `dist` **nay không tồn tại**; **không** có `package.json` ở root; **không** tệp nào ở root nhắc `dist`;
+**5** config build trong workspace, **không** cái nào khai `outDir`/`outdir`/`outfile`, **không** cái nào trỏ `../dist`
+⇒ **không dự án nào hiện có trong workspace này build ra đó** ⇒ nhiều khả năng là **rác còn lại**, **nhưng KHÔNG chứng minh được**, và **việc xoá là không hoàn tác được** (ngoài repo ⇒ git không cứu được).
+⇒ **LUẬT: dọn rác của agent CHỈ được `Remove-Item` trong ĐÚNG đường dẫn scratch của chính nó** (ở đây `_taskw3fix2\`).
+**Một lệnh xoá đệ quy trên một đường dẫn NHỚ TỪ TRÍ NHỚ là một mutation KHÔNG GHIM lên máy người dùng** — và nó **không có** bản backup, **không có** witness, **không có** `finally`.
+⇒ Đây là lần đầu trong giai đoạn này agent gây **thiệt hại tiềm tàng NGOÀI repo**; nó phải được báo cho người dùng **nguyên văn**, không giảm nhẹ.
+
+### 5. ⚠️ **MỘT PHÉP TÌM TRẢ VỀ RỖNG LÀ MỘT LỜI KHAI VỀ PHÉP TÌM** — chính tôi vấp trong lượt này
+Lượt tìm config đầu của tôi (`-Recurse -Depth 3 -Include tsconfig*.json,…`) trả **0 tệp**; tôi **suýt** kết luận "không dự án nào có `outDir`".
+Chạy lại **chắc tay** (lọc theo `Name -match`, không dùng `-Include` + `-Depth`) ⇒ **5** config, và kết luận thật mới đứng được.
+⇒ **LUẬT: khi một phép tìm ra RỖNG, hãy chứng minh phép tìm **CÓ KHẢ NĂNG** ra kết quả (thử trên một mục bạn BIẾT là có) trước khi tin số 0.**
+
 ## Quy ước thẩm mỹ — spec UI thắng, skill chỉ là checklist
 
 Spec `2026-09-25-phu-de-lab-ui-design.md` là **nguồn có thẩm quyền về hình thức** (bạn đã duyệt). Skill
