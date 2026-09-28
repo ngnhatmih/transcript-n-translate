@@ -1386,6 +1386,76 @@ với `mode:"compare"`) ⇒ **là NỢ, không phải "đã kiểm"**. Guard wit
 ⇒ **không ghi tệp nào**). Mọi lượt phục hồi byte-exact + sha256 trùng (**kể cả `M14`, nơi số byte bằng nhau**).
 **Và `M11` ĐỔI VAI** (nay giết `I1c`, không còn giết đường "đang Sửa") — implementer **ghi rõ để không ai đọc bảng cũ**.
 
+## ⚠️ ERRATA #25 — Re-review Task 9 vòng sửa #1: **một bài test đọc NGAY sau sự kiện thì MÙ với hiệu ứng DEBOUNCE**
+
+Re-review: **`CONDITIONAL PASS`, 0 Critical / 1 Important / 4 Minor** (vòng trước 0/2/6). **R1, R2, R3, R5, R6, R7 ĐẠT.**
+**`R4(b)` KHÔNG ĐẠT** — và đó là lý do duy nhất không cho `PASS`. **Và nó bác một lời khai TÔI đã ghi vào ERRATA #24 mục 4.**
+
+### 1. 🔴 `I-1` — lớp khoá THỨ HAI có THẬT và có sức nặng, nhưng **KHÔNG được ghim**
+
+Review **tách đôi** mutation `M13`:
+- `M13a` (chỉ bỏ `readOnly`/`disabled`, **giữ** bỏ-qua `onChange`) ⇒ **giết đúng** bài `I2`;
+- **`M13b` (chỉ bỏ bỏ-qua `onChange`, GIỮ thuộc tính) ⇒ SỐNG SÓT:** `ℹ pass 130 / ℹ fail 2` = **y lượt sạch**.
+
+**Nguyên nhân ĐO ĐƯỢC:** bài `I2` đọc số xem trước **NGAY sau `fireEvent.change`** (dòng **663–666**), **TRƯỚC debounce 200 ms**
+⇒ dù state có đổi thì **con số chưa kịp đổi**, nên bài test **không phân biệt được** hai lớp.
+**Lớp hai VẪN CÓ THẬT** (probe ngoài repo, **chờ 1600 ms**): component thật giữ `term="犬" lang="zh"`,
+`SO XEM TRUOC = 1 · SO LAN GHI = 1 · BANG NHAU = true`; bản `M13b` cho `SO XEM TRUOC = null · SO LAN GHI = 1 · BANG NHAU = false`
+⇒ **lỗi `I2` quay lại TRONG KHI TOÀN BỘ `npm test` VẪN XANH.**
+⇒ **Lời khai của implementer** *"test tự phát `change` để chứng minh lớp hai"* **và `ERRATA #24` mục 4 của TÔI**
+(ghi rằng bài test *"phải vượt qua lớp một mới đo được lớp hai"*) **BỊ BÁC BỎ.**
+
+**LUẬT MỚI:**
+- **Một bài test đọc trạng thái NGAY sau khi phát sự kiện sẽ MÙ với mọi hiệu ứng DEBOUNCE.**
+  Nếu hiệu ứng bị debounce, bài test phải **CHỜ QUA ngưỡng debounce** (hoặc **điều khiển đồng hồ**) trước khi khẳng định.
+- **Khi một bản vá có N LỚP, phải mutate TỪNG LỚP RIÊNG.** `M13` (bỏ **cả hai**) giết bài test và **che mất** sự thật rằng
+  **chỉ MỘT** lớp được ghim. Đây là **lần thứ hai** trong giai đoạn một mutation "gộp" che một lỗ hổng
+  (lần đầu: `M4` của Task 3 là đột biến tương đương nhưng brief tôi tưởng nó phân biệt được).
+
+### 2. ✅ Ba lỗi thật mà vòng sửa nhắm — **cả ba ĐẠT bằng phép đo của review** (đừng làm lại)
+
+- **R1 ĐẠT — CA THỨ BA thật sự được sửa, đo trên màn hình thật:** `[PROBE new-third] XEM TRUOC SAU KHI BO TICK:
+  "⚠ bỏ duyệt glossary → 1 bản ghi bị đánh dấu lỗi thời"` + `CAU SAU KHI LUU: "Đã lưu. Máy chủ báo 1 bản ghi…"`,
+  form **MỚI** (nút ghi `"Lưu thuật ngữ"`), DB đổi `龙` → `approved:false`; **cùng seed trên cây `48a84b4` in**
+  `"Thuật ngữ CHƯA DUYỆT: đổi nó không ảnh hưởng gì — …"` ⇒ **lỗi có thật, bản vá xoá THẬT.**
+- **R2 ĐẠT — bài test từng ghim câu sai, nay đúng:** gọi trên **chính DB gieo của tệp test**:
+  `lang=zh term=龙 translation=long approved=false -> 200 {"affected":[1]}` ·
+  `lang=zh term=mèo translation=cat approved=false -> 200 {"affected":[]}` ⇒ bộ ba **CŨ** đúng là ghim câu sai,
+  bộ ba **MỚI** (`mèo`) **thật sự rỗng**.
+- **R5 ĐẠT:** `M11` giết **đúng** `I1c`; và **bẫy byte-bằng-nhau được xác nhận**:
+  `[mutant] bytes=20643 sha256=fc3100e2…` so baseline `bytes=20643 sha256=2304778b…`
+  ⇒ **byte BẰNG NHAU, sha256 KHÁC**, `fail 3`, đỏ **đúng một** `I1b`.
+
+### 3. ✅ `R6` được đo **MẠNH** — đảo thứ tự CẢ 12 khối `it`
+
+Review dựng bản sao **ngoài repo** và **đảo thứ tự cả 12 khối `it`** (chỉ đổi 6 import sang URL tuyệt đối):
+`EXIT=0 · ℹ tests 12 · ℹ pass 12 · ℹ fail 0`; tệp gốc chạy một mình cũng **12/12**. Và **ở thứ tự đảo, ba bài GHI
+(`LUU`, `I2`, `I1b`) chạy TRƯỚC `BANG`/`HOP DONG THAM SO` mà hai bài này VẪN XANH** ⇒ vế *"kỳ vọng tính TỪ ROUTE"* **là THẬT**.
+⇒ **Đây là cách kiểm phụ thuộc thứ tự đúng: ĐẢO THỨ TỰ, đừng chỉ đọc mã.**
+
+### 4. Bốn Minor — trong đó **hai cái là lời khai SAI cần sửa**
+
+- **`M-1` — lời khai `I1c` về cây TRƯỚC sai phần câu chữ:** chuỗi `"⚠ đổi glossary → 0 bản ghi"` cho một lần **BỎ DUYỆT**
+  **KHÔNG tái lập được từ revision nào đã commit**; trên `48a84b4` đường "đang Sửa" in **ĐÚNG**
+  `"⚠ bỏ duyệt glossary → 0 bản ghi"`, còn "đổi" chỉ hiện khi **KHÔNG** bỏ duyệt.
+  ⇒ **Lỗi thật trên cây cũ là một CÂU KHÁC** — và **một lời khai về revision cũ phải tái lập được TỪ REVISION ĐÃ COMMIT.**
+- **`M-2` — lớp "ảnh chụp cũ" chỉ phủ ở nhánh `>0`:** ở nhánh **`0`**, UI **vẫn gọi một hàng ĐANG duyệt là "bản nháp"**
+  (probe `new-stale-zero`: `POST … -> HTTP 201`, `MAY CHU SAU POST: [{"term":"鳥","approved":true}]`
+  trong khi câu là *"Thuật ngữ CHƯA DUYỆT …"*). **Con số vẫn đúng `0`** nên chỉ **LÝ DO** sai — nhưng đó vẫn là **nói dối về lý do**.
+- **`M-3`:** hằng số kỳ vọng còn sót (`hang-1/hang-2/trong-2/sua-1/sua-3/hang-3/anh-huong-1`, `giuNguyen.affected==[]`) —
+  phụ thuộc **thứ tự GIEO**, không phải thứ tự **CHẠY** (nên R6 vẫn đạt).
+- **`M-4`:** *"4 tệp CRLF"* chỉ đúng cho **tập 10 tệp**; **toàn cây: 71/168 tệp CRLF, 0 tệp TRỘN**.
+- Ghi nhận thêm: **ô "Ảnh hưởng" của hàng đích hiện `—`** ở ca thứ ba (đo: `cot Anh huong cua hang 1: "—Sửa"`)
+  **trong khi câu xem trước hiện `1`** ⇒ hai chỗ trên cùng màn hình nói khác nhau.
+
+### 5. Điều review **KHÔNG** đo được (ghi đúng mức)
+
+**"Bàn phím bị chặn thật sự"** (không trình duyệt, Playwright bất khả, `e2e` bị cấm); **`M9` không chạy lại**;
+nghĩa của `I1b` khi `馬` **đã duyệt sẵn lúc nạp** (chạy 2 lần trong cùng tiến trình) — **mới suy luận**;
+**"đỏ trước khi sửa" nguyên văn của `I1`/`I2`** (bản nháp trung gian **KHÔNG commit** ⇒ không tái lập được — và **review trước
+đã từng nhắc điều này**); con số `826` cho máy thiếu `ffmpeg` (**mới khớp SỐ HỌC**);
+nhánh `200` trên `data/app.db` thật (**Task 12**); `contract.test.ts:705`; và **mọi kết luận HÌNH** (không có ảnh render thật).
+
 ## Quy ước thẩm mỹ — spec UI thắng, skill chỉ là checklist
 
 Spec `2026-09-25-phu-de-lab-ui-design.md` là **nguồn có thẩm quyền về hình thức** (bạn đã duyệt). Skill
