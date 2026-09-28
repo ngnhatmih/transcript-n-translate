@@ -1680,6 +1680,70 @@ và `[phuc hoi] readback.equals(HEAD) === true · bytes=24131 sha256=002559ac…
 - **Chưa ai nhìn thấy màn hình này trong trình duyệt thật** (`jsdom` không layout/CSS; `readOnly` không chặn devtools);
   `npm run e2e`/Playwright **bị cấm**; nhánh `200` trên `data/app.db` thật (**rỗng**) là việc của **Task 12**.
 
+## ⚠️ ERRATA #29 — TASK 9 ĐÓNG (`PASS` 0/0/2): **cách chứng minh "request THẬT SỰ đi ra"**, và **trần `waitFor` giải thích đường ĐỎ chậm**
+
+Re-review vòng sửa #3: **`PASS`, 0 Critical / 0 Important / 2 Minor.** **R1–R7 đều ĐẠT**, R1/R2/R3 bằng phép đo độc lập.
+**TASK 9 XONG.** Bốn điều đáng chép:
+
+### 1. ✅ CÁCH CHỨNG MINH "request bị GIỮ vẫn THẬT SỰ đi ra": **log ở tầng `undici`**
+
+Review preload một hook ở **tầng `undici`** (`undici:request:create` / `undici:request:headers`) — **DƯỚI `fetch`**,
+nên **một wrapper `fetch` KHÔNG THỂ giả** nó. Kết quả (**5/5 lượt cùng thứ tự**):
+```
+938 ms create  GET  /api/glossary?lang=zh
+941 ms headers 200
+970 ms create  POST /api/glossary
+981 ms headers 201
+982 ms create  GET  /api/glossary/affected?lang=zh&term=%E9%BE%8D&translation=long&approved=false
+985 ms headers 200
+```
+⇒ request bị **GIỮ** chỉ **rời client SAU khi được thả**, và **ĐÃ tới server** (`200`); khe lý-do→POST chỉ **16–31 ms**, **5/5 lượt**.
+⇒ **LUẬT: muốn chứng minh "request THẬT SỰ đi ra" mà không bị chính cái wrapper đánh lừa, hãy log ở TẦNG THẤP HƠN cái wrapper**
+(ở đây: `undici`). Đây là mức bằng chứng mạnh hơn `server-test đếm request` khi client có bọc `fetch`.
+
+### 2. ✅ `M14` bị giết, và **đồng bằng chứng chỉ chênh ĐÚNG MỘT bài**
+
+`[witness] "if (affected.length === 0 && laNhapThat) {" khop 1 lan ⇒ PRESENT` · `[mutant] bytes=24106` ·
+`ℹ tests 134 / pass 131 / fail 3` · `✖ I1e: … (8301,4985ms)` · `[phuc hoi] readback.equals(HEAD) === true`.
+**Ba bài lá đỏ = `I1e` + ĐÚNG 2 bài `EMPTY_DB` nền** (đã đỏ trên cây sạch) ⇒ **chênh lệch ĐÚNG MỘT bài**.
+⇒ **Cách đọc một mutation sạch: nêu TÊN các bài đỏ và trừ đi phần nền — "fail 3" một mình không nói gì.**
+
+### 3. ✅ `I1e` điều khiển thứ tự bằng **TÍN HIỆU**: `0` `setTimeout`/`sleep` trong thân nó
+
+`I1e` lẻ **5/5 XANH**, thời lượng **325,7175 / 322,4157 / 326,5724 / 304,2552 / 320,6855 ms** (ngưỡng review đặt: **900 ms** và **450 ms** — **ĐẠT cả hai**),
+**EXIT=0**. `grep` toàn tệp: **0** `setTimeout`/`sleep` trong thân `I1e` (**dòng 690–761**) — thứ tự do **CỜ `daDocTrangThai`**
+mà cính cầu nối bật. **Đảo 14 khối `it`** trên bản sao **NGOÀI repo** (dùng **junction** cho `node_modules`/`.venv`):
+**`14/14` EXIT=0 ×2**, `I1e` **286/320 ms**.
+
+### 4. ⚠️ **TRẦN `waitFor` GIẢI THÍCH ĐƯỜNG ĐỎ CHẬM** — một cách chẩn đoán đáng chép
+
+Câu hỏi tôi đặt ở vòng trước (*"vì sao đường ĐỎ của `M14` chậm **8282 ms**?"*) **nay đã được đo**:
+đó là **trần `waitFor({timeout: 8000, interval: 25})`** của helper `choChu` (**dòng 215–223**) **hết hạn** —
+và **số học khớp**: `8295,76 − 8000 = 295,76 ms` ≈ **thời lượng đường XANH (304–327 ms)**, thông điệp lỗi khớp đúng `moTa` (**dòng 750**).
+**Và log HTTP dưới `M14` Y HỆT lượt xanh** ⇒ **KHÔNG có phép chờ ẩn nào trên đường XANH**.
+⇒ **LUẬT: khi một đường ĐỎ chậm bất thường, hãy kiểm xem nó có đang CHỜ HẾT TRẦN `waitFor`/timeout không**
+(`thời lượng đỏ − trần ≈ thời lượng xanh` là dấu hiệu), **và so TRACE I/O của mutant với lượt xanh** để loại trừ phép chờ ẩn.
+
+### 5. Nợ của Task 9 — **hai Minor, một trong đó là RỦI RO XANH GIẢ cần nhớ**
+
+- **`M-1` (RỦI RO THẬT, chưa sửa):** **`I1e` KHÔNG tự khẳng định TIỀN ĐỀ của nó** (`laNhapThat === true`, tức hàng `龍`
+  **chưa duyệt tại thời điểm đọc**). Hôm nay tiền đề **đúng** (seed `approved=False`; `龍` chỉ có trong seed/comment/`I1e`;
+  lần đọc về **TRƯỚC** `POST` **16–31 ms**) và **`M14` giết được** — **nhưng nếu một bài SAU này duyệt `龍` TRƯỚC `I1e`
+  thì `I1e` sẽ XANH GIẢ và `M14` sẽ SỐNG SÓT** (phép phá tiền đề **chưa được chạy**).
+  ⇒ **Việc cần làm khi có dịp chạm `frontend/src/screens/GlossaryScreen.test.tsx`:** thêm **MỘT dòng** khẳng định tiền đề
+  (`assert.ok(... laNhapThat ...)`) hoặc **đọc trạng thái máy chủ để chứng minh hàng đang chưa duyệt** ngay trước khi thả.
+  **Ghi vào sổ nợ; đừng để nó trôi.**
+- **`M-2`:** đường **ĐỎ** tốn **8,3 s** vì khẳng định cuối **chờ hết trần 8000 ms** (toàn suite dưới `M14` = **35,1 s** vs **27,0 s** sạch).
+  Chấp nhận được, nhưng đường nâng cấp rẻ: **hạ trần cho khẳng định cuối**, hoặc **khẳng định trên giá trị đã bắt được** thay vì chờ.
+- **`M9`** (nhánh `glossary` của `App`): **không đường nào tới** (`setMode` **0** dispatch) ⇒ **nợ đã khai từ trước**.
+- **Lệch đơn vị "bản dịch" vs "bản ghi"**: **nợ của ROUTE**.
+- **`§4.4` khối dưới** chưa làm — **lý do nay đã ĐÚNG**: làm thế là **dựng lại `glossary_match.terms_in` ở client** (nguồn sự thật thứ hai) + N request.
+- **`contract.test.ts:705`** vẫn chưa chạm.
+- **Chưa ai nhìn thấy màn hình này trong trình duyệt thật** (`e2e` bị cấm).
+- **Và điều review nói thẳng là CHƯA ĐO ĐƯỢC:** **không có bộ đếm PHÍA SERVER** — "tới server" chứng minh bằng `headers 200`
+  + **giá trị mà chỉ route thật mới tính được**; nó **chỉ tự chạy lại `M14`**, **17 lượt mutation còn lại là đọc `run.log`** đã publish;
+  và **lượt chạy HỎNG ĐẦU của `do-treo.mjs` không có log** (chỉ xác nhận `[L3 vao]` + `L3 = 1159,99 ms > 900 ms`).
+
 ## Quy ước thẩm mỹ — spec UI thắng, skill chỉ là checklist
 
 Spec `2026-09-25-phu-de-lab-ui-design.md` là **nguồn có thẩm quyền về hình thức** (bạn đã duyệt). Skill
