@@ -13,6 +13,7 @@ import { endpoints } from "../api/endpoints.ts";
 import { CompareScreen } from "../screens/CompareScreen.tsx";
 import { EditScreen } from "../screens/EditScreen.tsx";
 import { GlossaryScreen } from "../screens/GlossaryScreen.tsx";
+import { OllamaDown } from "../screens/OllamaDown.tsx";
 import { initialState, reduce } from "../state/reducer.ts";
 import { useApi } from "../state/useApi.ts";
 import { useJobStream } from "../state/useJobStream.ts";
@@ -31,10 +32,23 @@ export function App() {
   const sources = useApi(() => endpoints.listSources(), []);
   // HÀNG ĐỢI: MỘT subscription SSE cho cả app (ảnh chụp + sự kiện), không request riêng.
   const jobs = useJobStream();
+  // §4.8 — TRẠNG THÁI HỆ THỐNG: MỘT lượt `GET /api/status` cho CẢ dải ở header LẪN panel.
+  // `reload` của hook chính là nút `[ Thử lại ]`: nó tăng một con số, effect chạy lại, và
+  // đó là một request THẬT mới (không cache, `useApi` TRẦN).
+  const status = useApi(() => endpoints.status(), []);
+  // REGISTRY: MỘT lượt `GET /api/registry`. Đây là NGUỒN DUY NHẤT của `capabilities.available`
+  // — client KHÔNG suy lại từ `runtime`/`model_ref` (Global Constraints dòng 25).
+  const engines = useApi(() => endpoints.registry(), []);
+  const specs = engines.data === null ? [] : [...engines.data.asr, ...engines.data.mt];
 
   return (
     <div className="shell">
-      <Header />
+      <Header status={status.data} />
+      {/* §4.8 HẠNG NHẤT (không phải toast): panel là MỘT HÀNG RIÊNG của lưới `.shell`,
+          ngay dưới header và TRÊN bàn làm việc — nó không đè lên nội dung, và không biến
+          mất sau vài giây. `up` (hoặc chưa đọc được status) ⇒ component trả `null` ⇒ hàng
+          `auto` co lại bằng không ⇒ không có khoảng trống nào. */}
+      <OllamaDown status={status.data} specs={specs} onRetry={status.reload} />
       <div className="shell__mid">
         <aside className="shell__channels">
           {/* KÊNH nhận `jobs` để suy TRẠNG THÁI TỪNG BƯỚC qua `payload.source_id`

@@ -33,11 +33,15 @@ body {
    Cột 214px / flex / 286px là số của spec §3, khai một lần ở tokens.css. */
 .shell {
   display: grid;
-  grid-template-rows: var(--head-h) 1fr var(--transport-h);
+  grid-template-rows: var(--head-h) auto 1fr var(--transport-h);
   height: 100vh;
 }
 
 .shell__head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding-inline: var(--sp-3);
   border-bottom: var(--rule-w) solid var(--rule);
 }
 
@@ -694,4 +698,166 @@ body {
   padding: var(--sp-4);
   color: var(--ink-1);
   font-size: var(--fs-note);
+}
+
+/* ── §4.8 Trạng thái Ollama (Task 10) — dải trạng thái + panel hạng nhất + dropdown engine ──
+   Spec UI §4.8: "Dải vằn chéo `--fault` chạy ngang ĐỈNH cửa sổ (không phải toast)".
+   Ba trạng thái của `probe_ollama` KHÁC NHAU về HÌNH THỨC: `down` là lỗi (--fault),
+   `unknown` là CHƯA ĐO ĐƯỢC (--ink-2 — không tô đỏ như một lỗi đã xác nhận), `up` bình thường. */
+
+/* Tên bàn làm việc: header nay là một HÀNG FLEX (tên + dải trạng thái), nên `h1` phải bỏ
+   lề mặc định của trình duyệt — nếu không nó đội hàng 48px ra ngoài. */
+.head__ten {
+  margin: 0;
+  font-family: var(--font-label);
+  font-size: var(--fs-ui);
+  letter-spacing: var(--track-label);
+  font-weight: 600;
+}
+
+/* Dải trạng thái ở header (spec UI §3: `[● Ollama] [▮▮▮▯▯ 3.2/8GB] [GĐ: ASR·turbo]`). */
+.stt {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: var(--fs-num);
+  color: var(--ink-1);
+}
+
+.stt__ollama {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  color: var(--ink-0);
+}
+
+/* Chấm trạng thái: mặc định là "chưa đọc được" (--ink-2). */
+.stt__cham {
+  width: var(--sp-2);
+  height: var(--sp-2);
+  border-radius: 50%;
+  background: var(--ink-2);
+}
+
+.stt[data-ollama="up"] .stt__cham {
+  background: var(--ok);
+}
+
+.stt[data-ollama="down"] .stt__cham {
+  background: var(--fault);
+}
+
+/* `unknown` KHÁC `down`: chưa đo được thì KHÔNG được tô đỏ như một lỗi đã xác nhận. */
+.stt[data-ollama="unknown"] .stt__cham {
+  background: var(--ink-2);
+}
+
+.stt__vram,
+.stt__gd {
+  color: var(--ink-1);
+}
+
+/* Dropdown engine — CHỈ engine `available === true` (lọc ở TSX, không ở CSS). */
+.eng {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+.eng__nhan {
+  font-family: var(--font-label);
+  font-size: var(--fs-label);
+  letter-spacing: var(--track-label);
+  color: var(--ink-1);
+}
+
+.eng__chon {
+  font-family: var(--font-mono);
+  font-size: var(--fs-num);
+  color: var(--ink-0);
+  background: var(--panel-3);
+  border: var(--rule-w) solid var(--rule);
+  border-radius: var(--radius);
+  padding: var(--sp-1) var(--sp-2);
+  transition: border-color var(--dur-1) var(--ease-1);
+}
+
+.eng__chon:disabled {
+  color: var(--ink-2);
+  background: var(--panel-1);
+}
+
+/* Panel §4.8 — HẠNG NHẤT: một hàng của lưới `.shell`, ngay dưới header và TRÊN bàn làm việc
+   (không đè lên nội dung, không tự biến mất). Khi Ollama lên, component trả `null` ⇒ hàng
+   `auto` co lại bằng không. */
+.od {
+  display: grid;
+  gap: var(--sp-2);
+  padding: var(--sp-3);
+  background: var(--panel-1);
+  border-bottom: var(--rule-w) solid var(--rule);
+}
+
+/* "Dải vằn chéo --fault chạy ngang ĐỈNH cửa sổ" — vân, không phải một nền đặc. */
+.od__van {
+  height: var(--suspect-hatch-w);
+  background-image: repeating-linear-gradient(
+    var(--suspect-hatch-angle),
+    var(--fault) 0,
+    var(--fault) var(--suspect-hatch-step),
+    transparent var(--suspect-hatch-step),
+    transparent calc(var(--suspect-hatch-step) * 2)
+  );
+}
+
+/* Chưa đo được ⇒ vân MỜ: một lỗi CHƯA xác nhận không được nói to hơn sự thật. */
+.od[data-ollama="unknown"] .od__van {
+  opacity: 0.5;
+}
+
+.od__tieu-de {
+  margin: 0;
+  font-family: var(--font-label);
+  font-size: var(--fs-ui);
+  color: var(--ink-0);
+}
+
+.od__ly-do,
+.od__con,
+.od__khong {
+  margin: 0;
+  font-size: var(--fs-ui);
+  color: var(--ink-1);
+}
+
+.od__sua {
+  margin: 0;
+  padding-left: var(--sp-2);
+  border-left: var(--focus-w) solid var(--signal);
+  font-size: var(--fs-ui);
+  color: var(--ink-0);
+}
+
+.od__sua code {
+  font-family: var(--font-mono);
+  font-size: var(--fs-note);
+  color: var(--signal);
+}
+
+.od__thu-lai {
+  justify-self: start;
+  font-family: var(--font-ui);
+  font-size: var(--fs-ui);
+  color: var(--ink-0);
+  background: var(--panel-2);
+  border: var(--rule-w) solid var(--rule);
+  border-radius: var(--radius);
+  padding: var(--sp-1) var(--sp-3);
+  transition: border-color var(--dur-1) var(--ease-1);
+}
+
+.od__thu-lai:hover {
+  border-color: var(--signal);
 }
