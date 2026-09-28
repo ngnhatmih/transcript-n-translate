@@ -653,6 +653,22 @@ body {
   text-align: right;
 }
 
+/* Nút đưa một hàng vào form. Nó là một NÚT (không phải `onClick` trên `<tr>`) vì một
+   affordance chỉ bấm chuột được là một affordance không tồn tại với bàn phím (spec §7). */
+.gl__sua {
+  margin-left: var(--sp-2);
+  padding: var(--sp-1) var(--sp-2);
+  border: var(--rule-w) solid var(--rule);
+  border-radius: var(--radius);
+  background: var(--panel-2);
+  color: var(--ink-1);
+  font-family: var(--font-label);
+  font-size: var(--fs-label);
+  letter-spacing: var(--track-label);
+  cursor: pointer;
+  transition: border-color var(--dur-1) var(--ease-1);
+}
+
 /* §4.4 nguyên văn: "Hàng chưa có bản dịch có chip `✕ trống` màu lỗi." Một hàng
    glossary không có bản dịch là LỖI THẬT (nó không ràng buộc được bản dịch nào),
    nên `--fault` đúng nghĩa ở đây — không phải một sắc thái trang trí. */

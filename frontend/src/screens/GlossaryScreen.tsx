@@ -169,16 +169,31 @@ export function GlossaryScreen() {
 
   const soDuyet = (terms ?? []).filter((t) => t.approved).length;
 
+  /**
+   * Hàng đang sửa (nếu có) — cần nó để phân biệt HAI ca rất khác nhau của `approved=false`:
+   *
+   *   - **nháp**: thuật ngữ chưa từng được duyệt ⇒ sửa nó KHÔNG ràng buộc gì ⇒ `[]`;
+   *   - **BỎ DUYỆT**: hàng ĐANG duyệt bị gỡ ràng buộc ⇒ bản dịch cũ sai ⇒ CÓ ảnh hưởng.
+   *
+   * Đo được trên route thật: cùng `term` + cùng `translation`, chỉ khác `approved`, cho
+   * `{"affected":[1]}` khi bỏ duyệt và `[]` khi giữ duyệt. Nói "không ảnh hưởng gì" cho
+   * ca thứ hai là một câu NÓI SAI — đúng lớp lỗi "nhãn đảo" của ERRATA #10 mục 9.
+   */
+  const hangDangSua = (terms ?? []).find((t) => t.id === editingId) ?? null;
+  const dangBoDuyet = approved === false && hangDangSua !== null && hangDangSua.approved;
+
   /** Con số hiện TRƯỚC khi lưu: bốn nhánh, nhánh "chưa duyệt" là CHỮ. */
   function noiXemTruoc(): string {
-    if (approved === false) {
+    if (approved === false && !dangBoDuyet) {
       return "Thuật ngữ CHƯA DUYỆT: đổi nó không ảnh hưởng gì — bản nháp không đi vào "
         + "prompt, nên không bản ghi nào bị đánh dấu lỗi thời.";
     }
     if (term.trim() === "") return "Gõ thuật ngữ để xem trước số bản ghi bị ảnh hưởng.";
     if (loiXemTruoc !== null) return `Không đọc được số ảnh hưởng: ${loiXemTruoc}`;
     if (affected === null) return "đang đếm…";
-    return `⚠ đổi glossary → ${affected.length} bản ghi bị đánh dấu lỗi thời`;
+    // Bỏ duyệt là GỠ một ràng buộc, không phải "đổi": câu chữ phải nói đúng việc sắp xảy ra.
+    const viec = dangBoDuyet ? "bỏ duyệt glossary" : "đổi glossary";
+    return `⚠ ${viec} → ${affected.length} bản ghi bị đánh dấu lỗi thời`;
   }
 
   return (
@@ -309,7 +324,6 @@ export function GlossaryScreen() {
                 key={t.id}
                 className={"gl__hang" + (t.approved ? "" : " is-cho-duyet")}
                 data-testid={`hang-${t.id}`}
-                onClick={() => moHang(t)}
               >
                 <td className="gl__nguon">{t.term}</td>
                 <td className="gl__dich">
@@ -323,10 +337,22 @@ export function GlossaryScreen() {
                 <td className="gl__trang-thai">{t.approved ? "đã duyệt" : "chờ duyệt"}</td>
                 <td className="gl__anh-huong" data-testid={`anh-huong-${t.id}`}>
                   {/* Cột "Ảnh hưởng" chỉ có nghĩa cho HÀNG ĐANG SỬA: con số xem trước là
-                      "nếu tôi lưu hàng này thì sao". Hàng khác chưa đo ⇒ `—`, không bịa 0. */}
-                  {editingId === t.id && approved && affected !== null
+                      "nếu tôi lưu hàng này thì sao". Hàng khác chưa đo ⇒ `—`, không bịa 0.
+                      Con số hiện cả khi `approved` đang TẮT, vì tắt nó trên một hàng ĐANG
+                      duyệt chính là ca BỎ DUYỆT — ca CÓ ảnh hưởng. */}
+                  {editingId === t.id && affected !== null
                     ? String(affected.length)
                     : "—"}
+                  {/* Đưa hàng vào form bằng một NÚT, không phải `<tr onClick>`: một đường
+                      chỉ-bấm-chuột-được là một đường không tồn tại với bàn phím (spec §7). */}
+                  <button
+                    className="gl__sua"
+                    type="button"
+                    data-testid={`sua-${t.id}`}
+                    onClick={() => moHang(t)}
+                  >
+                    Sửa
+                  </button>
                 </td>
               </tr>
             ))}

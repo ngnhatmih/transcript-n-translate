@@ -351,11 +351,21 @@ describe("GlossaryScreen: §4.4 tab THUAT NGU tren BACKEND THAT (DB gieo, cong r
     await choChu(container, '[data-testid="bang"]', (t) => t.includes("猫"),
       "bang thieu hang thu hai cua DB gieo");
 
-    // Thanh dem cua §4.4: `5 thuật ngữ · 4 đã duyệt` — hai con so nay dem tu du lieu
-    // vua nap, nen chung phai khop DB gieo (2 thuat ngu, 1 da duyet).
+    // Thanh dem cua §4.4 (`5 thuật ngữ · 4 đã duyệt`) phai khop DU LIEU CUA ROUTE —
+    // va hai con so ky vong duoc DOC LAI tu route ngay tai day, khong phai hang so
+    // trong test: bai LUU o duoi ghi THEM mot thuat ngu, va mot bai khang dinh mot
+    // con so cung se phu thuoc vao viec bai nao chay truoc (do duoc: ban nhap dau cua
+    // bai "BO DUYET qua FORM" do dung vi bai LUU da chay truoc no).
+    const rows = (await (await fetch("/api/glossary?lang=zh")).json()) as {
+      approved: boolean;
+    }[];
+    assert.ok(rows.length >= 2, `${EMPTY_DB_MSG} (doc duoc ${rows.length} hang)`);
+    const soDuyet = rows.filter((r) => r.approved).length;
     const dongDem = chu(container, '[data-testid="dem"]');
-    assert.match(dongDem, /\b2\b/, `thanh dem phai noi so thuat ngu, dang co: ${dongDem}`);
-    assert.match(dongDem, /\b1\b/, `thanh dem phai noi so DA DUYET, dang co: ${dongDem}`);
+    assert.match(dongDem, new RegExp(`\\b${rows.length}\\b`),
+      `thanh dem phai noi so thuat ngu cua route, dang co: ${dongDem}`);
+    assert.match(dongDem, new RegExp(`\\b${soDuyet}\\b`),
+      `thanh dem phai noi so DA DUYET cua route, dang co: ${dongDem}`);
     assert.match(dongDem, /đã duyệt/i, `thanh dem phai noi ro "da duyet", dang co: ${dongDem}`);
 
     // Hang CHUA duyet: le trai amber la HINH THUC (§4.4), nhung lop phai CO that tren
@@ -534,6 +544,11 @@ describe("GlossaryScreen: §4.4 tab THUAT NGU tren BACKEND THAT (DB gieo, cong r
   // -------------------------------------------------------------------------
 
   it("LUU: POST tu tang version DUNG MOT lan, client khong goi gi them, bang nap lai", async () => {
+    // Bai nay la bai GHI DUY NHAT cua tep, va no ghi mot thuat ngu MOI (`chó`, chi co
+    // trong transcript thu hai) — no KHONG sua `龙`/`猫` cua DB gieo. Ly do: moi bai
+    // trong tep nay dung CHUNG mot backend + mot DB gieo, nen mot bai ghi de len du
+    // lieu ma bai khac dang khang dinh la mot phu thuoc THU TU (do duoc: ban nhap dau
+    // cua bai "BO DUYET qua FORM" do vi bai nay da chay truoc no va doi `龙`).
     const truoc = (await (await fetch("/api/glossary/version")).json()) as {
       glossary_version: number;
     };
@@ -541,8 +556,8 @@ describe("GlossaryScreen: §4.4 tab THUAT NGU tren BACKEND THAT (DB gieo, cong r
     const { container, unmount } = render(taoPhanTu(GlossaryScreen));
     await choChu(container, '[data-testid="bang"]', (t) => t.includes("rồng"), "bang chua nap xong");
 
-    go(container, '[data-testid="o-thuat-ngu"]', "龙");
-    go(container, '[data-testid="o-ban-dich"]', "long");
+    go(container, '[data-testid="o-thuat-ngu"]', "chó");
+    go(container, '[data-testid="o-ban-dich"]', "dog");
     await choChu(container, '[data-testid="affected-preview"]', (t) => /\b1\b/.test(t),
       "chua do duoc so anh huong truoc khi luu");
 
@@ -574,11 +589,57 @@ describe("GlossaryScreen: §4.4 tab THUAT NGU tren BACKEND THAT (DB gieo, cong r
     assert.equal(sau.glossary_version, truoc.glossary_version + 1,
       `mot lan Luu phai tang version DUNG MOT lan: ${truoc.glossary_version} -> ${sau.glossary_version}`);
 
-    // Bang phai NAP LAI tu route: ban dich vua sua hien ra.
-    await choChu(container, '[data-testid="bang"]', (t) => t.includes("long"),
+    // Bang phai NAP LAI tu route: thuat ngu vua ghi hien ra.
+    await choChu(container, '[data-testid="bang"]', (t) => t.includes("dog"),
       "sau khi luu, bang khong nap lai du lieu tu route");
 
     assert.deepEqual(tiengOn, [], "luu thuat ngu khong duoc sinh tieng on console");
+    unmount();
+  });
+
+  it("BO DUYET qua FORM: bo tick o mot hang DANG DUYET phai hien SO, khong duoc noi 'khong anh huong gi'", async () => {
+    // DO DUOC: mot thuat ngu DANG DUYET ma bi BO DUYET la GO mot rang buoc ⇒ ban dich cu
+    // sai ⇒ CO anh huong (route that: cung `term` + cung `translation`, chi khac `approved`,
+    // cho `{"affected":[1]}`). Nhanh "chua duyet ⇒ khong anh huong gi" chi DUNG cho mot
+    // thuat ngu CHUA TUNG duoc duyet; ap no cho ca truong hop BO DUYET la mot cau NOI SAI
+    // — dung lop loi "nhan dao" ma ERRATA #10 muc 9 do duoc o Task 4: chu NGUOI DUNG DOC
+    // noi nguoc su that, va khong bai nao bat duoc.
+    //
+    // Bai nay cung ghim AFFORDANCE: hang duoc dua vao form bang mot NUT (khong phai
+    // `<tr onClick>`), vi mot duong chi-bam-chuot duoc la mot duong khong ton tai voi
+    // ban phim (spec §7 / §12.5).
+    const { container, unmount } = render(taoPhanTu(GlossaryScreen));
+    await choChu(container, '[data-testid="bang"]', (t) => t.includes("rồng"), "bang chua nap xong");
+
+    fireEvent.click(container.querySelector('[data-testid="sua-1"]') as Element);
+    const oDuyet = container.querySelector('[data-testid="o-da-duyet"]') as HTMLInputElement;
+    assert.equal(oDuyet.checked, true, "hang 1 dang DUYET ⇒ o 'da duyet' phai bat sau khi bam Sua");
+    assert.match(
+      (container.querySelector('[data-testid="o-thuat-ngu"]') as HTMLInputElement).value,
+      /龙/,
+      "bam Sua phai dua DUNG hang do vao form",
+    );
+
+    fireEvent.click(oDuyet);                       // BO DUYET mot hang DANG duyet
+
+    const cau = await choChu(
+      container,
+      '[data-testid="affected-preview"]',
+      (t) => /\b1\b/.test(t),
+      "BO DUYET mot hang dang duyet PHAI hien so anh huong",
+    );
+    assert.doesNotMatch(cau, /không ảnh hưởng gì/i,
+      `bo duyet la GO mot rang buoc ⇒ khong duoc noi "khong anh huong gi": ${cau}`);
+    assert.match(cau, /bản ghi/i, `phai giu DUNG DON VI (ban ghi/transcript): ${cau}`);
+
+    // Cot "Anh huong" cua chinh hang do cung phai hien so, khong duoc de `—`.
+    // ⚠️ `/^1/` chu khong `/\b1\b/`: trong o nay con co nut "Sửa" ngay sau con so, va
+    // `\b` KHONG ton tai giua hai ky tu WORD (`1` va `S`) — mot khang dinh dung `\b` o
+    // day do vi ly do KY TU, khong phai vi san pham sai (do duoc: `actual: '1Sửa'`).
+    assert.match(chu(container, '[data-testid="anh-huong-1"]'), /^1(?!\d)/,
+      "cot Anh huong cua hang dang sua phai hien so cua route");
+
+    assert.deepEqual(tiengOn, [], "bo duyet qua form khong duoc sinh tieng on console");
     unmount();
   });
 
