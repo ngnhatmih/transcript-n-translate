@@ -1318,6 +1318,74 @@ nhưng lưu *"Đã lưu. Máy chủ báo **1 bản ghi**…"*.
 - Reviewer **tự khai** một vi phạm: lượt `tsc --listFiles` đầu dùng **`npx --no-install`** (luật cấm `npx`) — đã chạy lại
   bằng binary cục bộ. **Tự khai, không ảnh hưởng kết quả.**
 
+## ⚠️ ERRATA #24 — Task 9 vòng sửa #1 (`185a12f`): **ẢNH CHỤP dữ liệu máy chủ KHÔNG phải sự thật của máy chủ**
+
+Vòng sửa xong (**một** commit, **3 tệp**, backend **không** đổi): pytest **`835 passed, 13 deselected`** EXIT=0,
+`npm test` **`tests 132 / suites 17 / pass 130 / fail 2 / cancelled 0`** EXIT=1 (128 → 132), `typecheck` 0, `build` 0.
+**Gốc chung đã xoá:** `affected.length > 0` **của ROUTE luôn thắng** mọi câu giải thích, và *"có phải bỏ duyệt không"*
+suy từ **dữ liệu máy chủ đã cho** (danh sách `terms` đã tải, khoá `(lang, term)` — **đúng khoá `upsert_term` dùng**),
+**không** từ trạng thái form. **Và nó tự tìm ra ba điều brief tôi KHÔNG giao:**
+
+### 1. ⚠️ "Suy từ dữ liệu máy chủ" **VẪN CHƯA ĐỦ** — vì đó là một **ẢNH CHỤP**
+
+Nếu ai đó **duyệt** thuật ngữ **SAU khi màn đã nạp**, ảnh chụp nói *"không phải bỏ duyệt"* trong khi **route nói có ảnh hưởng**
+⇒ **cùng một lời nói dối, khác đường vào**. Nó dựng test làm ảnh chụp **CŨ một cách TẤT ĐỊNH**:
+gieo `馬 -> ngựa` **chưa duyệt** + transcript 4 chứa `馬`; màn nạp xong; bài test **TỰ DUYỆT `馬` qua route THẬT** (`POST` ⇒ `201`);
+rồi gõ `馬` + bỏ tick ⇒ route trả `{"affected":[4]}` ⇒ **phải hiện số**. Mutation **`M14`** (đặt câu giải thích **LÊN TRƯỚC** con số)
+giết **đúng** bài đó.
+⚠️ **Và một bẫy tinh tế nó tự ghi ra: `M14` có SỐ BYTE BẰNG baseline (`20643`) vì nó là phép ĐẢO THỨ TỰ THUẦN**
+⇒ **"tệp có khác không?" sẽ MÙ**. Chỉ **witness + sha256** bắt được. ⇒ **Luật: mutation đảo thứ tự có thể KHÔNG đổi số byte —
+đừng dùng kích thước tệp làm dấu hiệu.**
+
+### 2. ⚠️ Một câu chữ DÙNG CHUNG cho hai nhánh sẽ nói sai về VIỆC đang xảy ra
+
+**`I1c` — lỗi THẬT THỨ HAI trong chính bản vá của nó:** bỏ duyệt một hàng **đang duyệt** mà **không transcript nào dùng**
+⇒ route trả **0**, và nhánh `0` của nó **viết cùng chuỗi** *"⚠ đổi glossary → 0 bản ghi"* ⇒ **đang BỎ DUYỆT mà câu chữ nói "đổi"**.
+Đo trước khi sửa: `AssertionError: phai noi dung VIEC sap xay ra (bo duyet): ⚠ đổi glossary → 0 bản ghi…`.
+Sửa: `viec` tính **MỘT lần cho CẢ HAI nhánh số**. Mutation **`M11`** (bỏ điều kiện `!laBoDuyet`) giết **đúng** `I1c`.
+⇒ **Nếu chỉ làm đúng brief thì lỗi này ĐI TIẾP.** **Luật: khi hai nhánh chia sẻ một câu chữ mô tả HÀNH ĐỘNG,
+hãy hỏi câu đó có đúng cho CẢ HAI không.**
+
+### 3. ⚠️ Phụ thuộc THỨ TỰ trong test — **lần thứ HAI trong cùng một tệp**
+
+Bản nháp đầu của `I2` **ghi vào hàng `龙` (id 1)** ⇒ làm `HOP DONG THAM SO` + `BO DUYET qua FORM` **đỏ ngay**.
+Đã sửa: gieo thêm transcript 3 (`犬`) + hàng `犬 -> chó` đang duyệt, và cho `I2` ghi vào **HÀNG RIÊNG**;
+bài `BANG` nay **tính số kỳ vọng TỪ ROUTE** thay vì hằng số trong test.
+(**Lần đầu** cùng lớp lỗi: bài `LUU` đổi `龙`.) ⇒ **Luật: mỗi bài test phải ghi vào DỮ LIỆU RIÊNG của nó,
+và kỳ vọng phải TÍNH TỪ NGUỒN, không hằng số.**
+
+### 4. ✅ `I2` — chọn **KHOÁ ô**, và khoá **HAI LỚP** (vì một lớp KHÔNG đủ)
+
+Nó **không** thêm trường `term` vào `TermPatch` (backend **không** nhận; gửi lên sẽ **bị bỏ im lặng**).
+Khoá **cả `lang` lẫn `term`** (TermPatch không có trường nào). Khoá bằng **HAI lớp**: `readOnly`/`disabled` (**thuộc tính HTML**)
+**VÀ** `onChange` **bỏ qua** khi `editingId !== null` (**hành vi**) — **vì jsdom VẪN phát được `change` bằng tay, nên thuộc tính một mình KHÔNG đủ**.
+Màn **NÓI RA** vì sao khoá (`data-testid="khoa-danh-tinh"`). Mutation **`M13`** giết **đúng** bài `I2`.
+⚠️ **Và test đó tự phát `change` để chứng minh LỚP HAI có tác dụng** — một bài test mà **phải vượt qua lớp một** mới đo được lớp hai.
+
+### 5. Ba Minor đã sửa, và **một lời khai số đo SAI được sửa CẢ HAI báo cáo**
+
+- **Census EOL của implementer SAI — đã sửa, KÈM LỆNH.** Đo lại: `app.css` **687/0** · `routes_glossary.py` **258/0** ·
+  `test_api_glossary.py` **568/0** · `backend/README.md` **278/0** ⇒ **4 tệp CRLF** (không phải 1 hay 3), còn lại toàn LF,
+  **không tệp nào TRỘN**. Và làm rõ **687 vs 697**: **687 là lúc REVIEW**, **697 là BÂY GIỜ** (vòng sửa thêm **10 dòng**
+  `.gl__khoa`; `git show --stat 185a12f` ghi `app.css | 10 ++`) ⇒ con số **697 trong báo cáo vòng 1 là SAI ở thời điểm đó**,
+  nay **tình cờ đúng**. (Review đếm "3 tệp CRLF" vì **tập tệp khác nhau** — nó tính cả `README.md`; đã kèm lệnh để ai cũng đếm lại được.)
+- **Câu TRẦN "không có nguồn HTTP" đã sửa cho khớp sự thật:** `GET /api/transcripts` (danh sách) **không** kèm `segments`,
+  **nhưng `/api/transcripts/{id}` THÌ CÓ** ⇒ dữ liệu **ghép được** bằng N request + tự quét `text`.
+  Quyết định hoãn **không đổi**, và **LÝ DO THẬT** nay mới được nêu: làm thế là **dựng lại `glossary_match.terms_in` ở client**
+  — **nguồn sự thật thứ hai** cho đúng quy tắc mà GĐ2 đã phải vá **hai lần** — cộng N request.
+- **`contract.test.ts:705` VẪN chưa chạm** (diff tệp đó trong vòng này **RỖNG**) ⇒ **nợ còn nguyên**, đúng như review chốt:
+  *"có lý về chi phí NHƯNG vẫn là nợ"*.
+
+### 6. Mutation vòng này: **15 lượt, 1 sống sót có khai**
+
+**14/14 giết ĐÚNG bài chỉ định** (G1⇒`CHUA DUYET`, G2⇒backend unapprove, G3⇒backend id +2, G4⇒`HOP DONG`+`LUU`,
+G5⇒`XEM TRUOC` +8, M6⇒`LOI NAP`, M7⇒`XEM TRUOC`+`BO DUYET`, M8⇒backend writes-nothing +2, M10⇒`LUU`+`I2`,
+M11⇒`I1c`, M12⇒`I1`+`I1c`, M13⇒`I2`, M14⇒`I1b`). **1 SỐNG SÓT: `M9`** (bỏ nhánh `glossary` khỏi `App`) — lỗ hổng độ phủ
+**ĐÃ KHAI**, và review **đã độc lập chứng minh "không thể có vế hai"** (`setMode` **chỉ** xuất hiện trong `reducer.test.ts`
+với `mode:"compare"`) ⇒ **là NỢ, không phải "đã kiểm"**. Guard witness **từ chối mutate một lần** (khớp 0 lần ⇒ ABSENT
+⇒ **không ghi tệp nào**). Mọi lượt phục hồi byte-exact + sha256 trùng (**kể cả `M14`, nơi số byte bằng nhau**).
+**Và `M11` ĐỔI VAI** (nay giết `I1c`, không còn giết đường "đang Sửa") — implementer **ghi rõ để không ai đọc bảng cũ**.
+
 ## Quy ước thẩm mỹ — spec UI thắng, skill chỉ là checklist
 
 Spec `2026-09-25-phu-de-lab-ui-design.md` là **nguồn có thẩm quyền về hình thức** (bạn đã duyệt). Skill
