@@ -2053,6 +2053,48 @@ Lượt tìm config đầu của tôi (`-Recurse -Depth 3 -Include tsconfig*.jso
 Chạy lại **chắc tay** (lọc theo `Name -match`, không dùng `-Include` + `-Depth`) ⇒ **5** config, và kết luận thật mới đứng được.
 ⇒ **LUẬT: khi một phép tìm ra RỖNG, hãy chứng minh phép tìm **CÓ KHẢ NĂNG** ra kết quả (thử trên một mục bạn BIẾT là có) trước khi tin số 0.**
 
+## ⚠️ ERRATA #38 — W3 ĐÓNG (`CONDITIONAL PASS` 0/0/3): **cách CHỨNG MINH một bộ đếm bị nhiễm chéo**, và **lớp "chờ A rồi đọc B" tái phát ở chỗ thứ 16 SAU một lượt soát 15 chỗ**
+
+Chuỗi W3: `9a9aa66`+`2653a52` (tính năng) → `0fa362a` (sửa #1) → `6fb80b9` (sửa #2) → re-review: **`CONDITIONAL PASS` 0 Critical / 0 Important / 3 Minor**.
+**Cả hai `Important` đã đóng, đo ĐỘC LẬP:** câu xuất hết sai (`11 ⇒ href=11, cau=null`; `12 queued ⇒ href=13 + câu giải thích`; `13 ⇒ cau=null`),
+và `M1`/`M2` mỗi cái **giết đúng 1 bài** `W3 I2 (XUAT)`. Cổng: `204/202/2/cancelled 0`, **EXIT=1** (đỏ đúng 2 `EMPTY_DB_MSG`), 3 lượt sạch `13 037–13 192 ms`, `typecheck` 0, `build` 0.
+
+### 1. ✅ **CÁCH CHỨNG MINH MỘT BỘ ĐẾM BỊ NHIỄM CHÉO: LÀM CHẬM NGUỒN KIA** — kỹ thuật đáng chép
+Kết luận `4 !== 2` là **(a)** (bài khẳng định một CON SỐ ứng dụng không bảo đảm) được **tái lập độc lập** bằng một phép rất rẻ:
+**tiêm `setTimeout 300 ms` vào response `DANH SÁCH`** ⇒ cửa sổ của bài `W3 I2 (SAME)` thấy **7** request chi tiết trong khi việc của nó là **5**;
+2 request của bài `W3 I1: doi KENH` **hạ cánh sang cửa sổ sau mà không có list nào mở đầu** ⇒ bộ đếm đi `0→…→4`, **đúng chữ ký `4 !== 2`**.
+⇒ **LUẬT: muốn chứng minh "bộ đếm của tôi bị bài khác làm nhiễu", hãy LÀM CHẬM nguồn kia** — nhiễu vốn không tất định sẽ trở thành **tất định và tái lập được**.
+(Đây là anh em với ERRATA #28 mục 1: điều khiển **THỨ TỰ** thay vì cầu may.)
+⚠️ Và điều kiện để kết luận (a) đứng vững: **nhật ký PHÍA SERVER theo `id`** cho thấy mỗi lượt đọc danh sách đọc **đúng một** chi tiết cho **mỗi** hàng, **không id nào lặp** ⇒ **(b) "đọc trùng" bị BÁC BỎ**, chứ không phải "không thấy".
+⚠️ Và phép chờ mới **vẫn còn khả năng đỏ**: `M5` (`rows.slice(0,1)`) ⇒ `fail 14` = **12 bài đỏ theo tên** (`CHON KENH` đỏ ngay `[31.6 ms]`). **Không chỗ nào bị nới `>=`.**
+
+### 2. 🔴 **LỚP "CHỜ A RỒI ĐỌC B" TÁI PHÁT Ở CHỖ THỨ 16 — SAU MỘT LƯỢT SOÁT TAY 15 CHỖ**
+`App.test.tsx` bài `CHON KENH` (`:1090–:1115`): **chờ chữ của `transcript`** rồi **đọc `href` của `translations`** — hai `useApi` **độc lập**.
+Reviewer **tự đo được ĐỎ** (`[53.6 ms]`/`[54.1 ms]`) khi tiêm **300 ms** vào **nguồn kia**. Lượt soát tay khai 15 chỗ ⇒ **bỏ sót chỗ này**.
+⇒ **LUẬT (đã ghi ở #37 mục 3, nay có bằng chứng thứ tư): audit TAY không scale.** Sửa phải **cơ học**: mỗi phép chờ phải chờ **ĐÚNG tín hiệu mà bài sắp ĐỌC**,
+và phải có cách **tìm ra** vi phạm (grep theo khuôn trong cùng một bài) chứ không dựa vào một lượt đọc kỹ.
+⇒ Đường sửa reviewer đề: chờ `choDanhSachBanDich(container, 2)` (hoặc `.tp__xuat` có `href`) **trước** hai khẳng định `href`/timecode.
+
+### 3. ⚠️ `GlossaryScreen.test.tsx:796` — **CÙNG LỚP với sự cố đã vá ở `aea1a80`, và là chỗ thứ BA trong CÙNG tệp**
+Đỏ **1 lượt** bằng `not wrapped in act(...)` ở **302,9 ms** — ⚠️ **tiền tồn, ngoài phạm vi mutant** (tệp không import `App`/`Transport`).
+⇒ Vòng vá `aea1a80` xử **hai** cửa sổ `act` (dòng ~815 và ~923) **theo từng chỗ một** — và còn **một chỗ thứ ba** cùng tệp.
+⇒ **LUẬT: khi vá một LỚP lỗi, hãy `grep` TÌM HẾT các hiện diện của nó TRONG TOÀN BỘ tệp (và toàn bộ suite) rồi vá một lượt** —
+vá từng chỗ theo báo cáo là cách chắc chắn nhất để còn sót cái tiếp theo.
+
+### 4. ⚠️ Ghi chú về một mutant **TƯƠNG ĐƯƠNG** (đúng, không phải lỗ hổng)
+`M9` ("`Transport` tự quyết lại bằng điều kiện CŨ `idXuatDuoc !== translationId`", 2 tệp) ⇒ **0 bài đỏ**:
+nhánh đó **chết** vì `App` đã truyền **câu** xuống ⇒ `Transport` không còn tự đoán. Theo **ERRATA #35 mục 3** đây là **mutant tương đương**, **không** phải lỗ hổng.
+⚠️ **Nhưng phải khai:** bất biến *"`Transport` không tự đoán"* **không có bài ghim riêng** — hôm nay nó đúng **nhờ** thiết kế, không nhờ test.
+
+### 5. Nợ còn lại của W3 (không chặn) + một đính chính
+- **Hai hazard test** ở mục 2 và 3 ⇒ **vòng vá riêng** (rẻ, và chúng làm nhiễu bộ đo của MỌI task sau).
+- **Báo cáo vòng sửa khai SAI `bytes`/`sha256` của `App.test.tsx`** (`108665 / 8ffc9efd…` so với thật `109302 / 6f072c25…`).
+  ⚠️ Đây là **lời khai sai về sản phẩm lần thứ BA** của cùng một agent (sau "message không chữ số" và "6 `assert.match`"). ⇒ **đếm và băm từ CHÍNH TỆP.**
+- **Nợ fixture rò rỉ** (`TRANSLATION_CHI_TIET` không có ảnh gốc): reviewer đo **HAI CHIỀU** (xoá khoá / đầu độc nó ở `beforeEach`) ⇒ **0 bài đỏ** ⇒ **CHƯA HẠI**;
+  cơ chế: `taoBanDichTheoYeuCau` ghi detail **TRƯỚC** `res.end(201)` nên không có cửa sổ đọc giá trị cũ. **Ghi nợ kèm lý do "chưa hại", không sửa.**
+- **`hash-object` mù LF↔CRLF nay đã chứng minh TRÊN MÁY:** `app.css` worktree **39 893 B** (CRLF=1171) vs blob **38 722 B** — **hash vẫn BẰNG**. (Khẳng định ở #36 mục 1 nay có số.)
+- ⚠️ **W3 có BA commit** (`9a9aa66`, `2653a52` cùng tiêu đề, `0fa362a`) — lần gộp `reset --mixed` **thất bại**; **không mất nội dung**; **không viết lại lịch sử** (đúng luật).
+
 ## Quy ước thẩm mỹ — spec UI thắng, skill chỉ là checklist
 
 Spec `2026-09-25-phu-de-lab-ui-design.md` là **nguồn có thẩm quyền về hình thức** (bạn đã duyệt). Skill
