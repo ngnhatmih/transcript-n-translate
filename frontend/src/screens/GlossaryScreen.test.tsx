@@ -812,13 +812,43 @@ describe("GlossaryScreen: §4.4 tab THUAT NGU tren BACKEND THAT (DB gieo, cong r
 
     const soXemTruoc = soTrong(container);
 
+    // ⚠️ CÙNG LỚP LỖI VỚI `LUU`, VÀ BÀI NÀY LỘ HƠN: sau cửa sổ `act` nó đọc
+    // `soTrong(container, '[data-testid="da-luu"]')` **NGAY**, không có `choChu` đỡ hơn
+    // 8 000 ms. Điều kiện thoát theo DOM (`da-luu`) vì thế là **chịu lực ngầm** của cả
+    // bài: nó cháy hết trần MỌI lượt (đo được `9 178–9 201 ms`), và khi suite chậm thì
+    // cập nhật state rơi ra ngoài `act` ⇒ React in "not wrapped in act" ⇒ bài ĐỎ vì
+    // chính bộ gác tiếng ồn.
+    //
+    // Tín hiệu SỐNG thay thế cho cửa sổ `act`: `glossary_version` Ở MÁY CHỦ. `I2` đi qua
+    // `PATCH` (`patchTerm`), và `upsert_term` của route cũng tăng version — nên "version
+    // đã đổi" đúng nghĩa "lệnh ghi đã được xử lý" cho cả hai đường (`POST` ở `LUU`, `PATCH` ở đây).
+    // ⚠️ ĐO ĐƯỢC (probe, tệp Glossary chạy một mình): React KHÔNG đẩy cập nhật state ra DOM
+    // khi `act` còn mở (`daLuuTrongAct=false`, kể cả sau khi nhường thêm 400 ms), và nó
+    // commit NGAY khi callback của `act` trả về (`domNgaySauAct=true`). Nhưng "ngay" ở đây
+    // chỉ là "trong cùng một vi-task": đọc DOM ở dòng kế tiếp vẫn có thể rơi TRƯỚC lần
+    // commit đó — đo được **1/10 lượt** (`khong thay phan tu "[data-testid="da-luu"]"`
+    // tại `soTrong`). Bản cũ không bao giờ lộ vì nó luôn ngủ hết 8 000 ms TRƯỚC khi đọc.
+    // ⇒ Vì vậy phải có một phép CHỜ trên tín hiệu DOM ở đây, đúng khuôn `LUU` đã dùng
+    // (`choChu(container, '[data-testid="da-luu"]', …)`): nó chờ CHÍNH XÁC cái mà bài
+    // khẳng định, và chờ bằng `waitFor` có hạn chứ không bằng một giấc ngủ cố định.
+    // Khẳng định cuối KHÔNG đổi (`soDaLuu == soXemTruoc`).
+    const truocI2 = (await (await fetch("/api/glossary/version")).json()) as {
+      glossary_version: number;
+    };
     await act(async () => {
       fireEvent.click(container.querySelector('[data-testid="luu"]') as Element);
       const het = Date.now() + 8000;
-      while (Date.now() < het && container.querySelector('[data-testid="da-luu"]') === null) {
+      let v = truocI2.glossary_version;
+      while (Date.now() < het && v === truocI2.glossary_version) {
         await new Promise((resolve) => setTimeout(resolve, 25));
+        const r = (await (await fetch("/api/glossary/version")).json()) as {
+          glossary_version: number;
+        };
+        v = r.glossary_version;
       }
     });
+    await choChu(container, '[data-testid="da-luu"]', (t) => /đã lưu/i.test(t),
+      "bam Luu khong thay cau xac nhan `da-luu`");
     const soDaLuu = soTrong(container, '[data-testid="da-luu"]');
     assert.equal(soDaLuu, soXemTruoc,
       `so XEM TRUOC (${soXemTruoc}) phai BANG so lan GHI (${soDaLuu}): `
@@ -920,11 +950,34 @@ describe("GlossaryScreen: §4.4 tab THUAT NGU tren BACKEND THAT (DB gieo, cong r
     // "An update to GlossaryScreen inside a test was not wrapped in act(...)" — một
     // tiếng ồn của MÔI TRƯỜNG TEST, không phải lỗi sản phẩm, nhưng nó làm phép đo
     // "không có tiếng ồn console" mất nghĩa.
+    //
+    // ⚠️ ĐIỀU KIỆN THOÁT PHẢI QUAN SÁT ĐƯỢC **BÊN TRONG** `act`. Bản trước thoát theo
+    // `container.querySelector('[data-testid="da-luu"]') !== null` — một câu hỏi về
+    // **DOM**. ĐO ĐƯỢC (review W1 §5.2, `P2`):
+    //   `PROBE-FLAKY act-thoat-sau 8021ms vong=255 daLuuTrongAct=false`
+    // ⇒ React KHÔNG đẩy cập nhật state ra DOM khi `act` còn mở, nên điều kiện đó
+    // **KHÔNG BAO GIỜ đúng**: vòng lặp chạy hết trần 8 000 ms MỌI lượt (`LUU` luôn
+    // ~8,25–8,30 s), và đó là **giấc ngủ cố định**, không phải phép chờ. Khi suite
+    // chậm, cập nhật state rơi RA NGOÀI cửa sổ `act` ⇒ React in
+    // "not wrapped in act" ⇒ bài ĐỎ vì chính bộ gác tiếng ồn của nó.
+    //
+    // Tín hiệu SỐNG: `glossary_version` Ở MÁY CHỦ — chính `POST` đã tự tăng nó bên
+    // trong `upsert_term` (ruling T6 GĐ2), nên "version đã đổi" = "lệnh ghi đã được
+    // xử lý". Đây là quan hệ mà khẳng định cuối bài vốn đã dựa vào (`+1`), không phải
+    // một điều kiện mới được nới ra: KHÔNG có lần ghi nào mà version đứng yên.
+    // ⚠️ Và cửa sổ `act` vẫn PHẢI giữ: bỏ nó ⇒ `waitFor` của RTL KHÔNG tự bọc `act`
+    // trong setup `node --test` này ⇒ ĐỎ 100% ở 287 ms kèm `not wrapped in act`
+    // (đường sai đã bị review loại, §5.4).
     await act(async () => {
       fireEvent.click(container.querySelector('[data-testid="luu"]') as Element);
       const het = Date.now() + 8000;
-      while (Date.now() < het && container.querySelector('[data-testid="da-luu"]') === null) {
+      let v = truoc.glossary_version;
+      while (Date.now() < het && v === truoc.glossary_version) {
         await new Promise((resolve) => setTimeout(resolve, 25));
+        const r = (await (await fetch("/api/glossary/version")).json()) as {
+          glossary_version: number;
+        };
+        v = r.glossary_version;
       }
     });
 

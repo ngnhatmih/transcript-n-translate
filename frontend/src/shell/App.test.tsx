@@ -934,6 +934,69 @@ describe("App: KENH THAT + HANG DOI THAT tu server node:http trong tien trinh", 
     unmount();
   });
 
+  it("DOI KENH: danh sach `/api/transcripts` KHONG duoc doc lai (do bang so request o SERVER)", async () => {
+    // ---------------------------------------------------------------------------
+    // `Minor #2` cua re-review W1: bao cao KHAI (va reviewer do duoc) *"doi kenh chi GHI
+    // LAI MOC ⇒ khong sinh 2 request"*, nhung KHONG bai nao GHIM tinh chat do.
+    // Do duoc: `PROBE-KENH danh-sach truoc=1 sau=1 delta=0`.
+    //
+    // Vi sao mot loi khai khong co bai ghim la mot khe DO PHU THAT: `transcripts` la
+    // `useApi(..., [])` — mot lan cho CA app — va ban ghi dang mo duoc suy ra qua `deps`
+    // `[ui.channelId]` cua `chonTranscript`. Nen neu sau nay ai them
+    // `transcripts.reload()` vao nhanh doi kenh thi HAI request cho MOT lan bam, ma
+    // KHONG bai nao do: bai `CHUA CHON KENH` khong bao gio bam kenh, con bai `CHON KENH`
+    // chi khang dinh du lieu dung (mot lan doc lai THUA van cho ra dung du lieu).
+    //
+    // ⚠️ Bo dem o PHIA SERVER (`dem.transcripts`, tang trong `createServer`), khong phai
+    // mot bo dem o client: mot `fetch` bi boc o client co the dem sai thu, con day la so
+    // lan request THUC SU toi noi nhan.
+    // ---------------------------------------------------------------------------
+    const { container, unmount } = render(taoPhanTu(App));
+
+    await choChu(container, "kenh-mot.wav");
+    fireEvent.click(nutKenh(container, "kenh-mot.wav"));
+    await choChu(container, "câu 1");
+    // Moc do SAU khi kenh 1 da mo xong: lan doc danh sach luc mount da xay ra TRUOC moc nay,
+    // nen hieu so duoi day chi con do duoc nhung lan doc do viec DOI KENH keo theo.
+    const truoc = dem.transcripts;
+
+    fireEvent.click(nutKenh(container, "kenh-hai"));
+
+    // Cho TIN HIEU doi kenh THANH SU xay ra (khong phai mot `setTimeout` hy vong): muc kenh
+    // thu hai mang `aria-pressed="true"` VA ban ghi cua chinh kenh do da vao DOM.
+    await waitFor(
+      () => {
+        assert.equal(
+          phanTu(container, '.ch__item[aria-pressed="true"]').textContent?.includes("kenh-hai"),
+          true,
+          "chua thay muc kenh thu hai duoc chon (`aria-pressed=\"true\"`)",
+        );
+      },
+      { timeout: 5000, interval: 20 },
+    );
+    await choChu(container, "bản kênh hai");
+
+    // (1) TINH CHAT DUOC GHIM: doi kenh ⇒ **0** request danh sach `/api/transcripts`.
+    assert.equal(
+      dem.transcripts - truoc,
+      0,
+      "doi kenh KHONG duoc doc lai danh sach transcript: ban ghi dang mo suy ra tu `deps` "
+      + `[ui.channelId], mot lan doc lai nua la HAI request cho MOT lan bam; do duoc +${dem.transcripts - truoc}`,
+    );
+    // (2) VE NGUOC LAI — neu bang chung duy nhat la "delta = 0" thi mot bai KHONG BAO GIO
+    //     doc duoc gi cung xanh. Doi kenh PHAI keo theo DUNG MOT lan doc BAN GHI chi tiet
+    //     (route khac: `/api/transcripts/{id}`), nen phep do (1) khong the xanh vi ca hai
+    //     request deu khong xay ra.
+    assert.equal(
+      dem.transcriptTheoId[3],
+      1,
+      `ban ghi cua kenh hai (#3) phai duoc doc dung MOT lan; do duoc ${JSON.stringify(dem.transcriptTheoId)}`,
+    );
+
+    assert.deepEqual(tiengOn, [], "doi kenh khong duoc sinh tieng on console");
+    unmount();
+  });
+
   it("MOT ban dich duy nhat: ba nut XUAT va vung DOI CHIEU tro CUNG mot ban (mac dinh = ban `done`)", async () => {
     // ---------------------------------------------------------------------------
     // `Important #1` cua review W1 (§B(8)) — phep do `SAME`.
