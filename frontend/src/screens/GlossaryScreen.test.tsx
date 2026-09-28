@@ -114,6 +114,11 @@ const EMPTY_DB_MSG =
  *     `0`): bai test tu duyet no qua route that SAU khi man da nap, nen LY DO hien ra phai
  *     theo may chu (`bo duyet`) chu khong theo anh chup (`ban nhap`). La hang RIENG vi `猫`
  *     (cung chua duyet, cung khong o transcript nao) da thuoc bai `BANG`.
+ *   - transcript `5` (zh) chua `龍`, va `龍 -> long` **CHUA duyet** ⇒ bai `I1e`: hang DUY NHAT
+ *     vua (a) CHUA duyet luc DOC trang thai, vua (b) CO trong mot transcript ⇒ bai test dieu
+ *     khien THU TU hai loi goi de tao ra trang thai "ly do noi NHAP **MA** route tra khac rong",
+ *     va ghim rang CON SO phai thang cau giai thich. `龍` (U+9F8D) khac `龙` (U+9F99), va khong
+ *     ten thuat ngu nao khac la chuoi con cua `龍` ⇒ chi transcript `5` bi anh huong.
  */
 const SEED_PY = `
 import sys
@@ -137,6 +142,8 @@ repos.add_transcript(source_id=source_id, engine="fw-small", lang="zh",
                      segments=[Segment(i=1, start=0.0, end=2.0, text="犬")])
 repos.add_transcript(source_id=source_id, engine="fw-small", lang="zh",
                      segments=[Segment(i=1, start=0.0, end=2.0, text="馬")])
+repos.add_transcript(source_id=source_id, engine="fw-small", lang="zh",
+                     segments=[Segment(i=1, start=0.0, end=2.0, text="龍")])
 for k in range(2):
     repos.add_translation(transcript_id=tid, transcript_version=1, engine="opus-mt",
                           target_lang="vi", prompt_version="opus-p1", status="done",
@@ -147,6 +154,7 @@ repos.upsert_term(lang="zh", term="犬", translation="chó", note=None, approved
 repos.upsert_term(lang="zh", term="馬", translation="ngựa", note=None, approved=False)
 repos.upsert_term(lang="zh", term="鳥", translation="chim", note=None, approved=True)
 repos.upsert_term(lang="zh", term="魚", translation="cá", note=None, approved=False)
+repos.upsert_term(lang="zh", term="龍", translation="long", note=None, approved=False)
 print("[glossary-test] da gieo transcript", tid, "thuat ngu", len(repos.list_terms(lang="zh")))
 `;
 
@@ -677,6 +685,79 @@ describe("GlossaryScreen: §4.4 tab THUAT NGU tren BACKEND THAT (DB gieo, cong r
 
     assert.deepEqual(tiengOn, [], "ly do sai khong duoc sinh tieng on console");
     unmount();
+  });
+
+  it("I1e: DIEU KHIEN THU TU hai loi goi ⇒ ly do noi 'nhap' MA route tra khac rong thi CON SO phai thang", async () => {
+    // ⚠️ BAI NAY TON TAI VI MOT LOI KHAI CUA TOI BI BAC BO (review vong #3, `R6`).
+    // Toi da viet: trang thai "`laNhapThat === true` NHUNG route tra khac rong" la **KHONG
+    // QUAN SAT DUOC** vi no chi toi duoc qua mot cuoc dua giua hai loi goi song song. **SAI.**
+    // THU TU cua hai loi goi DIEU KHIEN DUOC: giu request xem truoc lai, de cho lan DOC
+    // trang thai da ve ("chua duyet"), roi DUYET hang do qua route that, roi THA request xem
+    // truoc ⇒ route tinh voi hang DA duyet ⇒ `{"affected":[5]}` trong khi `laNhapThat = true`.
+    //
+    // Cau noi "khong quan sat duoc" la mot TUYEN BO, khong phai mot mien tru (ERRATA #27 muc 1):
+    // phai chung minh MOI duong toi trang thai do deu khong dieu khien duoc — va o day thi
+    // dieu khien duoc. ⇒ Bai nay ghim ve PHONG THU `affected.length === 0` cua dieu kien cau
+    // "nhap": mutation `M14` (bo ve do) lam bai nay DO.
+    //
+    // ⚠️ `globalThis.fetch` o day la CAU NOI DIEU KHIEN THU TU, KHONG phai gia lap mang:
+    // request giu lai VAN di HTTP THAT khi duoc tha (qua cau noi origin cua `test/dom.ts`),
+    // va moi request khac di thang. No chi quyet dinh KHI NAO request xem truoc duoc gui.
+    const that = globalThis.fetch;
+    let moXemTruoc!: () => void;
+    const choXemTruoc = new Promise<void>((giai) => { moXemTruoc = giai; });
+    let daDocTrangThai = false;
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes("/glossary/affected?")) {
+        await choXemTruoc;                       // GIU request xem truoc lai
+        return that(input, init);                // ... roi moi di HTTP THAT
+      }
+      const dap = await that(input, init);
+      if (url.includes("/glossary?lang=")) daDocTrangThai = true;   // lan DOC trang thai da ve
+      return dap;
+    }) as typeof fetch;
+
+    try {
+      const { container, unmount } = render(taoPhanTu(GlossaryScreen));
+      await choChu(container, '[data-testid="bang"]', (t) => t.includes("long"), "bang chua nap xong");
+
+      go(container, '[data-testid="o-thuat-ngu"]', "龍");
+      go(container, '[data-testid="o-ban-dich"]', "long");
+      fireEvent.click(container.querySelector('[data-testid="o-da-duyet"]') as Element);
+
+      // (1) Cho lan DOC TRANG THAI ve — KHONG phai "cho 200 ms roi hy vong": mot tin hieu
+      //     tuong minh, do chinh cau noi dieu khien thay doi.
+      await waitFor(
+        () => { assert.ok(daDocTrangThai, "chua thay request doc trang thai (`/glossary?lang=`) nao"); },
+        { timeout: 8000, interval: 20 },
+      );
+      // (2) Luc nay may chu VAN co `龍` o trang thai CHUA duyet (do la thu lan doc vua thay).
+      //     Duyet no qua ROUTE THAT ⇒ request xem truoc (dang bi giu) se tinh voi hang DA duyet.
+      const duyet = await that("/api/glossary", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ lang: "zh", term: "龍", translation: "long", approved: true }),
+      });
+      assert.equal(duyet.status, 201, `duyet \`龍\` qua route that phai la 201, nhan ${duyet.status}`);
+      // (3) Tha request xem truoc.
+      moXemTruoc();
+
+      const cau = await choChu(
+        container,
+        '[data-testid="affected-preview"]',
+        (t) => /\b1\b/.test(t),
+        "route tra khac rong ⇒ PHAI hien con so, du ly do (doc TRUOC do) noi 'nhap'",
+      );
+      assert.doesNotMatch(cau, /không ảnh hưởng gì|CHƯA DUYỆT/i,
+        `route vua noi CO anh huong ⇒ khong duoc in cau "nhap vo hai": ${cau}`);
+      assert.match(cau, /bản ghi/i, `phai giu DUNG DON VI: ${cau}`);
+
+      assert.deepEqual(tiengOn, [], "dieu khien thu tu khong duoc sinh tieng on console");
+      unmount();
+    } finally {
+      globalThis.fetch = that;
+    }
   });
 
   it("I2: dang SUA thi 'nguon' + 'thuat ngu' la KHOÁ — thu duoc xem truoc == thu duoc ghi", async () => {
