@@ -2174,6 +2174,52 @@ ba vùng kênh/bàn/việc · transport ở đáy (`0:00.00 / —:—.—`, `ch�
 - **Mọi tuyên bố "hình thức CHƯA được chứng minh" trong các báo cáo cũ** nay **có đường chứng minh**; đừng lặp lại câu đó như một sự thật bất biến nữa — hãy **chụp ảnh**.
 - ⚠️ **Vẫn chưa đạt được:** chụp ảnh chứng minh **bố cục/vẽ**, KHÔNG chứng minh **chất lượng bản dịch tiếng Việt** — câu đó vẫn cần **chạy engine thật**.
 
+## ⚠️ ERRATA #41 — **CHỤP ẢNH THẬT BỐN MÀN: đường đã dựng xong**, và **bảy thứ trước đây chỉ là suy luận nay được NHÌN THẤY**
+
+### 1. ✅ Đường chụp ảnh (không cần Playwright, không cần daemon, không cần tích "Allow")
+```
+1) gieo DB + media THẬT ngoài repo    (_seed/seed.py — chỉ thư viện chuẩn: `wave`+`struct`)
+2) PHUDE_DATA/_DB trỏ vào đó ⇒ backend 8620   (venv: python -B run_api.py)
+3) cd frontend; npm run dev                    (3100)
+4) chrome --headless=new --disable-gpu --remote-debugging-port=9222 --user-data-dir=…  (CẦN danger-full-access)
+5) node cdp.mjs   # WebSocket TOÀN CỤC của Node 24 ⇒ KHÔNG cần thư viện nào
+```
+`cdp.mjs`: `Page.navigate` → `Runtime.evaluate` để **bấm radio THẬT** → `Page.captureScreenshot`.
+⇒ **Playwright trở nên KHÔNG cần thiết** cho việc *nhìn*; `browser-harness` chỉ cần khi muốn **tương tác dài**.
+⚠️ `04-bien-tap-lai.png` **trùng BYTE** với `01-bien-tap.png` (38 646 B) ⇒ render **TẤT ĐỊNH** giữa hai lượt (một tín hiệu lành mạnh).
+
+### 2. 🔴 BẢY THỨ ĐƯỢC XÁC NHẬN BẰNG MẮT (trước đây chỉ là suy luận từ mã/log)
+| # | Nhìn thấy gì | Xác nhận |
+|---|---|---|
+| 1 | transport là **dải MỎNG ở ĐÁY**, vùng giữa chiếm gần hết chiều cao | **`Critical #1` của Task 10** — bản sửa lưới `.shell` |
+| 2 | Đối chiếu chọn **`bản dịch 2 · opus-mt`** (`done`) trong khi hàng **MỚI NHẤT** là **`qwen2.5-3b` (`queued`)** — và cột phải **CÓ NỘI DUNG** | **Bản sửa `SAME`** — đúng ca trước đây cho cột phải RỖNG. "Một điểm quyết định" đúng ngoài trình duyệt thật |
+| 3 | mục kênh đang chọn có **viền amber + glyph `▸`** (dấu NHÌN THẤY được) | **W1** |
+| 4 | `EngineSelect` hiện `OPUS-MT (Marian)` + nút `+ bản dịch mới` | **W3** |
+| 5 | dải trạng thái `● Ollama: đang chạy · VRAM: chưa đo được · GĐ: chưa chạy gì` và **panel §4.8 VẮNG** | **Task 10** — luật ba trạng thái (chỉ hiện khi `down`/`unknown`) |
+| 6 | `0:00.00 / 0:06.00` (khớp `Source.duration=6` đã gieo) | **W1** — `duration` chảy tới transport |
+| 7 | đoạn `suspect` có **gạch chéo đỏ + nhãn `NGHI NGỜ`**; Thuật ngữ hiện `2 thuật ngữ · 0 đã duyệt`, trạng thái `chờ duyệt` | §4.1 / §4.4 |
+**Ảnh:** `_shots/01-bien-tap.png` (38 646 B, sha256 `29f1ad01…`) · `02-doi-chieu.png` (58 881 B, `f3d4e7ff…`) · `03-thuat-ngu.png` (39 120 B, `2218c4fe…`) · `04-bien-tap-lai.png` (38 646 B) — đều **ngoài repo** ⇒ cây vẫn sạch.
+
+### 3. ⚠️ QUAN SÁT MỚI (chưa phải lỗi — nhưng phải ghi, vì mắt thấy mà test không thấy)
+- **(a) Tab bản dịch đánh số theo VỊ TRÍ MẢNG** (`bản dịch 1 · qwen2.5-3b`, `bản dịch 2 · opus-mt`) ⇒ **số ĐỔI khi thêm/bớt bản dịch**.
+  Nhãn bền hơn: **tên engine**, hoặc id. (Việc nhỏ, nhưng là loại "đúng hôm nay, sai ngày mai".)
+- **(b) Cả 5 dòng CPS đều `⚠` (37–88)** — ⚠️ **do DỮ LIỆU GIEO CỦA TÔI** (đoạn **1 giây** với câu dài), **không phải lỗi CPS**.
+  ⇒ **Task 12 nên gieo độ dài đoạn KHÁC NHAU** để có **cả dòng dưới ngưỡng** — nếu không, cột CPS chỉ chứng minh được một chiều.
+- **(c)** `ĐÃ DUYỆT`: nhãn nằm **TRƯỚC** ô tick. **(d)** cột `ẢNH HƯỞNG` hiện `−` cho mọi hàng (chỉ hiện số khi đang gõ) ⇒ **§12.3 chỉ chứng minh được TRONG LÚC SỬA**, không phải trên bảng tĩnh.
+
+### 4. 🔴 HAI PHÉP ĐO **HỎNG** CỦA CHÍNH TÔI TRONG LƯỢT NÀY (ghi để đừng lặp)
+1. **`Get-NetTCPConnection -LocalPort` cho ÂM TÍNH GIẢ với 8620 và 3100** trong khi **cả hai server ĐANG chạy** (log job ghi rõ "Uvicorn running…" và "build dau tien xong").
+   ⇒ Bẫy đã ghi cho cổng **11434** hoá ra **TỔNG QUÁT**. **Phép đúng: `Test-NetConnection 127.0.0.1 -Port <p>` (TCP thật).**
+2. **`Get-CimInstance Win32_Process` ⇒ Access denied** ⇒ dòng *"0 tiến trình"* của tôi là **PHÉP ĐO HỎNG**, không phải sự thật. Hệ quả: **không đọc được CommandLine** ⇒ **không thể** phân biệt Chrome của tôi với Chrome của người dùng.
+   ⇒ **LUẬT: khi không đọc được CommandLine, TUYỆT ĐỐI không giết theo TÊN tiến trình.** Hãy đóng **qua giao thức mà chỉ tiến trình của mình mở** — ở đây là **CDP `Browser.close` tới cổng 9222** (chỉ trình duyệt đã tự nguyện mở cổng gỡ lỗi mới nhận lệnh). Đã làm đúng vậy: `9222` ⇒ **False**, và **Chrome của người dùng (19 tiến trình, từ 27/09 23:46) KHÔNG bị chạm**.
+   ⚠️ **Hai tiến trình `chrome` lúc `05:34:07` chưa xác định được là của ai** ⇒ **tôi KHÔNG giết** (có thể là của người dùng). Khai ra thay vì đoán.
+   ⚠️ Và **`Remove-Item` của lượt trước (xoá `…\deepseek\dist`) vẫn là bài học cùng họ: thao tác phá huỷ trên thứ mình KHÔNG xác minh được là của mình.**
+
+### 5. Việc phải làm vì lượt này
+- **Task 12 đổi hình dạng lần thứ hai:** nó **phải chụp ảnh từng màn** (tiêu chí thị giác thật), không chỉ jsdom.
+- **Nên biến đường chụp thành script dùng lại** (hiện ở `_shots/`, ngoài repo) — và cân nhắc đưa vào `frontend/` như một tiện ích có tài liệu, hoặc để ngoài repo như công cụ kiểm.
+- ⚠️ **Vẫn CHƯA chứng minh:** chất lượng **bản dịch tiếng Việt** (ảnh chỉ chứng minh bố cục/vẽ) — vẫn cần **chạy engine thật**.
+
 ## Quy ước thẩm mỹ — spec UI thắng, skill chỉ là checklist
 
 Spec `2026-09-25-phu-de-lab-ui-design.md` là **nguồn có thẩm quyền về hình thức** (bạn đã duyệt). Skill
