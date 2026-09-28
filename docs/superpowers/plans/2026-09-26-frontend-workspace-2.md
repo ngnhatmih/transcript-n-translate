@@ -1184,6 +1184,73 @@ Grep `.superpowers/sdd/2026-09-26-frontend-workspace-2/` thấy **108 dòng / 32
 - Và reviewer **tự khai** một con số rác của **driver của nó** (`chuoi MOI xuat hien 13155 lan` — nó đếm **chuỗi rỗng**),
   **không** phải số đo. ⇒ **Đúng cách: gọi rác là rác.**
 
+## ⚠️ ERRATA #22 — Task 9 (`b223ab4` + `4c357d1` + `48a84b4`): **`approved=false` có HAI nghĩa**, và một lỗi thật tìm ra SAU commit
+
+Task 9 xong (3 commit): pytest **`835 passed, 13 deselected`** EXIT=0 (baseline **830** → +5), `npm test`
+**`tests 128 / suites 17 / pass 126 / fail 2 / cancelled 0`** EXIT=1, `typecheck` 0, `build` 0, **12 lượt mutation** đủ bốn thứ.
+
+### 1. ✅ `P3` được chứng minh bằng SỐ ĐO MẠNH NHẤT CÓ THỂ: **preview == kết quả ghi thật**
+
+Trước Step 0, **gọi THẬT** (backend thật + DB scratch, cổng 8622):
+`GET /api/glossary/affected -> HTTP 405 {"detail":"Method Not Allowed"}` — **405 chứ KHÔNG phải 404**,
+vì `/{term_id}` **đã nuốt** `affected` (⇒ đúng cái bẫy thứ tự khai báo mà brief lo). Sau Step 0:
+`200 {"affected":[1]}`. Ca **bỏ duyệt** (cùng term, cùng translation, chỉ khác `approved=false`) ⇒ **cũng** `{"affected":[1]}`.
+Và **một `PATCH` THẬT trả `affected: [1]` — BẰNG ĐÚNG con số xem trước.**
+⇒ Đây là bằng chứng mạnh nhất có thể cho `P3`: **số xem trước == số mà lần ghi thật trả**, không phải "trông hợp lý".
+
+**Mutation `G2`** (lọc hàng đang sửa khỏi `old` — **đúng cái `M-3` đã bác**) giết **ĐÚNG** bài
+`test_affected_preview_agrees_with_the_write_when_the_term_is_UNAPPROVED` (`1 failed, 834 passed`), phục hồi
+`readback.equals(baseline) === true` + sha256 khớp. ⇒ **Đính chính `M-3` nay đã được GHIM**, không chỉ được viết ra.
+
+### 2. 🔴 BÀI HỌC LỚN NHẤT — **`approved=false` có HAI NGHĨA**, và một trong hai **CÓ** ảnh hưởng
+
+Bản đầu của màn hình khoá câu *"Thuật ngữ CHƯA DUYỆT: đổi nó không ảnh hưởng gì"* theo **cờ checkbox**.
+**SAI**, vì `approved=false` gồm hai ca **ngược nhau**:
+- **(a) nháp MỚI** ⇒ thật sự **không** ảnh hưởng;
+- **(b) BỎ DUYỆT một hàng ĐANG được duyệt** ⇒ **GỠ một ràng buộc** ⇒ **CÓ** ảnh hưởng (`{"affected":[1]}`, đã đo).
+
+Đường **(b) CÓ THẬT trong app** (bấm một hàng đang duyệt → bỏ tick), nên màn hình **nói SAI** ngay trước lúc Lưu
+⇒ đúng lớp **"nhãn đảo"** của ERRATA #10 mục 9. **Đây là lỗi THẬT, tìm ra SAU khi đã commit tầng frontend** ⇒ commit thứ ba.
+
+**LUẬT CHO T10–T13 (và cho mọi UI chạm "duyệt"):**
+- **ĐỪNG bao giờ khoá một lời khẳng định vào GIÁ TRỊ BOOLEAN hiện tại.** Phải hỏi **trạng thái TRƯỚC ĐÓ** của hàng:
+  `false` từ **chưa từng duyệt** ≠ `false` do **vừa bỏ duyệt**.
+- **Và một câu brief dễ bị đọc sai, phải nói RIÊNG:** *"term chưa có trong DB ⇒ `{affected: []}`"* **ĐÚNG**, nhưng
+  **KHÔNG** có nghĩa *"`approved=false` ⇒ luôn rỗng"* — sai khi thuật ngữ **đang** được duyệt.
+  **Chính chỗ này làm bản nháp test ĐẦU của implementer sai, rồi thành lỗi thật trong UI.**
+⇒ Ngoài ra nó còn sửa 3 thứ cùng lúc và **ghim bằng `M11`**: câu chữ *"bỏ duyệt glossary → N bản ghi"*,
+**cột "Ảnh hưởng" hiện số CẢ KHI đã bỏ tick**, và hàng vào form bằng **NÚT `Sửa`** thay `<tr onClick>` (**bàn phím tới được**).
+
+### 3. ⚠️ LỆCH ĐƠN VỊ — spec nói "bản DỊCH", route trả id TRANSCRIPT
+
+Spec UI §4.4/§12.3 viết *"số **BẢN DỊCH** bị ảnh hưởng"*, nhưng route trả **id transcript**, và **KHÔNG route nào
+trả số bản dịch**. ⇒ UI hiện **đúng đơn vị của route** (*"N bản GHI bị đánh dấu lỗi thời"*), **có bài test ghim đơn vị**,
+và **KHÔNG** tự nhân/chia ở client (khuôn Task 8: *"endpoint không đủ thì đó là lỗi của endpoint"*).
+**DB gieo có Ý hai bản dịch** cho transcript bị ảnh hưởng ⇒ client tự đếm sẽ ra **2**, route nói **1**, test ghim **1**.
+⇒ **NỢ THẬT: muốn nói "bản dịch" thì ROUTE phải trả số bản dịch.** Đừng "sửa" bằng cách đếm ở client.
+
+### 4. Nợ khác của Task 9
+
+- **§4.4 khối dưới ("thuật ngữ xuất hiện ở đâu") KHÔNG LÀM:** `GET /api/transcripts` **cố ý** không kèm `segments`
+  ⇒ **không có nguồn HTTP**. `ponytail:` TRẦN + đường nâng cấp (**route occurrences**) đã khai trong doc-comment.
+- **`M9` — mutation SỐNG SÓT (lỗ hổng độ phủ ĐÃ KHAI):** bỏ nhánh `glossary` khỏi `App` không bài nào bắt,
+  vì **không UI nào dispatch `setMode`** ⇒ không có đường đặt mode, nên **không thể** chứng minh hai vế. (Cùng gốc với
+  lỗ thiếu **đường CHỌN KÊNH**.)
+- **Token mồ côi 5 → 1:** `--ok`, `--fs-read`, `--row-1`, `--sp-5` nay **có người dùng thật**; **`--sp-6` VẪN mồ côi**.
+- **`types.ts` bị sửa NGOÀI Files của brief — CHỈ comment, và đúng:** khối comment khai `AffectedPreview`/`Term`/
+  `TermWithAffected` thuộc nhóm *"CHỈ đối chiếu MÃ NGUỒN"*, nhưng nay chúng **ĐÃ có bài soi qua HTTP thật**
+  ⇒ để nguyên là **một câu SAI trong mã sản phẩm**.
+- **`contract.test.ts:705` VẪN CÒN SAI** (comment kể sai cơ chế đổi tên khoá). Implementer **cố ý không chạm** (brief cho phép):
+  hợp đồng tham số của route mới **đã** được ghim bằng **HTTP thật** trong `GlossaryScreen.test.tsx` (bài HỢP ĐỒNG THAM SỐ,
+  `G4` giết nó), và thêm khối backend thứ ba chỉ **lặp lại phép đo** mà tốn thêm một tiến trình mỗi lượt `npm test`.
+  ⇒ **Quyết định có ghi, không phải bỏ sót.** Sửa comment đó ở task kế tiếp chạm tệp.
+- **Ba commit thay vì một-hai** — vì lỗi thật ở mục 2 tìm ra **sau** khi đã commit frontend; nó **từ chối `git reset --soft`**
+  (*"đó là viết lại lịch sử"*). Tiền lệ: ERRATA #14 mục 3.
+- **Số nền của brief lần này ĐÚNG CẢ HAI** (pytest `830/13`, npm `120/118/2/0`) — implementer **ghi ra** vì các brief trước
+  từng sai số. Và nó **đã cập nhật `backend/README.md` (835/13, +826 cho máy thiếu `ffmpeg`) CÙNG khối comment trong
+  `tests/test_backend_readme.py`, TRONG CÙNG commit backend** — guard **đã** kêu trước khi bump (`1 failed, 834 passed`).
+  `app.css` +209 dòng (478 → 687), **CRLF=687 / LF-only=0** (không tệp nào trộn).
+
 ## Quy ước thẩm mỹ — spec UI thắng, skill chỉ là checklist
 
 Spec `2026-09-25-phu-de-lab-ui-design.md` là **nguồn có thẩm quyền về hình thức** (bạn đã duyệt). Skill
