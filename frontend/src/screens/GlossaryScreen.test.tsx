@@ -109,7 +109,11 @@ const EMPTY_DB_MSG =
  *     hang cho duyet lan chip `✕ trong`);
  *   - `鳥 -> chim` DANG DUYET va KHONG xuat hien o transcript nao ⇒ bai `I1c`: bo duyet
  *     mot hang DANG duyet ma khong ai dung phai hien CON SO `0`, KHONG duoc roi ve cau
- *     "ban nhap khong di vao prompt" (cau do NOI SAI ve trang thai cua hang).
+ *     "ban nhap khong di vao prompt" (cau do NOI SAI ve trang thai cua hang);
+ *   - `魚 -> cá` **CHUA duyet** va khong o transcript nao ⇒ bai `I1d` (anh chup CU + con so
+ *     `0`): bai test tu duyet no qua route that SAU khi man da nap, nen LY DO hien ra phai
+ *     theo may chu (`bo duyet`) chu khong theo anh chup (`ban nhap`). La hang RIENG vi `猫`
+ *     (cung chua duyet, cung khong o transcript nao) da thuoc bai `BANG`.
  */
 const SEED_PY = `
 import sys
@@ -142,6 +146,7 @@ repos.upsert_term(lang="zh", term="猫", translation="", note=None, approved=Fal
 repos.upsert_term(lang="zh", term="犬", translation="chó", note=None, approved=True)
 repos.upsert_term(lang="zh", term="馬", translation="ngựa", note=None, approved=False)
 repos.upsert_term(lang="zh", term="鳥", translation="chim", note=None, approved=True)
+repos.upsert_term(lang="zh", term="魚", translation="cá", note=None, approved=False)
 print("[glossary-test] da gieo transcript", tid, "thuat ngu", len(repos.list_terms(lang="zh")))
 `;
 
@@ -555,6 +560,13 @@ describe("GlossaryScreen: §4.4 tab THUAT NGU tren BACKEND THAT (DB gieo, cong r
     assert.match(cau, /bỏ duyệt/i,
       `cau phai noi dung VIEC sap xay ra (bo duyet), dang co: ${cau}`);
 
+    // ⚠️ HAI CHO TREN CUNG MOT MAN HINH PHAI NOI CUNG MOT CON SO. Do duoc (review vong #2):
+    // o "Anh huong" cua HANG DICH hien `—Sua` trong khi dong xem truoc hien `1` ⇒ hai cho
+    // noi khac nhau ve cung mot lan ghi. Cot do phai tinh cho hang ma lan ghi se GHI DE —
+    // tuc hang khop KHOA `(lang, term)` cua form, khong chi hang dang mo bang nut Sua.
+    assert.match(chu(container, '[data-testid="anh-huong-1"]'), /^1(?!\d)/,
+      "o 'Anh huong' cua HANG DICH phai bang con so cua dong xem truoc, khong duoc de `—`");
+
     assert.deepEqual(tiengOn, [], "bo tick tren form moi khong duoc sinh tieng on console");
     unmount();
   });
@@ -593,6 +605,10 @@ describe("GlossaryScreen: §4.4 tab THUAT NGU tren BACKEND THAT (DB gieo, cong r
     );
     assert.doesNotMatch(cau, /không ảnh hưởng gì/i,
       `route noi CO anh huong ⇒ khong duoc noi vo hai: ${cau}`);
+    // Lý do cũng phải theo MÁY CHỦ đọc lại: `馬` vừa được duyệt qua route thật, nên việc
+    // bỏ tick là GỠ một ràng buộc (`bỏ duyệt`), không phải "đổi" — kể cả khi ảnh chụp đã
+    // tải (lúc `馬` còn chưa duyệt) nói khác. Đây là vế `>0` của cùng lỗi `M-2` ở `I1d`.
+    assert.match(cau, /bỏ duyệt/i, `phai noi dung VIEC sap xay ra (bo duyet): ${cau}`);
 
     assert.deepEqual(tiengOn, [], "anh chup cu khong duoc sinh tieng on console");
     unmount();
@@ -621,6 +637,45 @@ describe("GlossaryScreen: §4.4 tab THUAT NGU tren BACKEND THAT (DB gieo, cong r
     assert.match(cau, /bỏ duyệt/i, `phai noi dung VIEC sap xay ra (bo duyet): ${cau}`);
 
     assert.deepEqual(tiengOn, [], "bo duyet hang khong dung o dau khong duoc sinh tieng on console");
+    unmount();
+  });
+
+  it("I1d: anh chup CU + con so `0` ⇒ LY DO cung phai theo MAY CHU, khong duoc goi hang DANG duyet la 'ban nhap'", async () => {
+    // Review vong #2 bat (`M-2`): nhanh `0` van goi mot hang DANG duyet la "ban nhap".
+    // Probe `new-stale-zero`: `POST … -> HTTP 201`, may chu co `{"term":"魚","approved":true}`,
+    // trong khi cau hien ra la *"Thuật ngữ CHƯA DUYỆT …"*. Con so `0` DUNG, chi LY DO sai.
+    //
+    // ⇒ Ly do cung phai suy tu DU LIEU MAY CHU DOC LAI LUC QUYET DINH, khong tu anh chup da
+    // tai: `魚` duoc gieo CHUA duyet va khong transcript nao chua no, nen sau khi bai test
+    // tu duyet no qua route that, anh chup trong bo nho noi "khong phai bo duyet" trong khi
+    // may chu noi nguoc lai. `魚` la hang RIENG: `猫` (cung chua duyet, cung khong o
+    // transcript nao) da thuoc bai `BANG` (hang cho duyet + chip `✕ trong`), nen duyet no o
+    // day se lam bai do do khi thu tu chay doi (review do R6 bang cach DAO 12 khoi `it`).
+    const { container, unmount } = render(taoPhanTu(GlossaryScreen));
+    await choChu(container, '[data-testid="bang"]', (t) => t.includes("cá"), "bang chua nap xong");
+
+    const duyet = await fetch("/api/glossary", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ lang: "zh", term: "魚", translation: "cá", approved: true }),
+    });
+    assert.equal(duyet.status, 201, `duyet \`魚\` qua route that phai la 201, nhan ${duyet.status}`);
+
+    go(container, '[data-testid="o-thuat-ngu"]', "魚");
+    go(container, '[data-testid="o-ban-dich"]', "cá");
+    fireEvent.click(container.querySelector('[data-testid="o-da-duyet"]') as Element);
+
+    const cau = await choChu(
+      container,
+      '[data-testid="affected-preview"]',
+      (t) => /\b0\b/.test(t) && /bản ghi/i.test(t),
+      "hang DANG duyet thi phai hien con so 0 kem chu 'ban ghi'",
+    );
+    assert.doesNotMatch(cau, /không ảnh hưởng gì|CHƯA DUYỆT/i,
+      `may chu dang co hang NAY o trang thai DUYET ⇒ khong duoc goi no la ban nhap: ${cau}`);
+    assert.match(cau, /bỏ duyệt/i, `phai noi dung VIEC sap xay ra (bo duyet): ${cau}`);
+
+    assert.deepEqual(tiengOn, [], "ly do sai khong duoc sinh tieng on console");
     unmount();
   });
 
@@ -662,6 +717,17 @@ describe("GlossaryScreen: §4.4 tab THUAT NGU tren BACKEND THAT (DB gieo, cong r
     const CHU_GO_SAI = "KHONG-DUOC-GHI";
     fireEvent.change(oTerm, { target: { value: CHU_GO_SAI } });
     fireEvent.change(oLang, { target: { value: "en" } });
+
+    // ⚠️ PHAI CHO QUA NGUONG DEBOUNCE ROI MOI DOC SO. Bản đầu của bài này đọc NGAY sau
+    // `fireEvent.change` (trước `CHO_GO_MS` = 200 ms), nên **nó MÙ với mọi hiệu ứng
+    // debounce**: state có đổi thì con số cũng chưa kịp đổi. Đo được (review vòng #2):
+    // mutation chỉ bỏ lớp BỎ QUA `onChange` (giữ `readOnly`/`disabled`) **SỐNG SÓT** —
+    // `ℹ pass 130 / ℹ fail 2` y hệt lượt sạch — nghĩa là bài test chỉ ghim được LỚP MỘT.
+    // ⇒ Luật (ERRATA #25 mục 1): một bài đọc trạng thái NGAY sau khi phát sự kiện là một
+    // bài MÙ với debounce; và một bản vá có N lớp thì phải mutate TỪNG LỚP RIÊNG.
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 900));
+    });
 
     const soXemTruoc = soTrong(container);
 

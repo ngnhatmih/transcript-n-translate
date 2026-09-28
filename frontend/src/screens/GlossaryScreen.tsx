@@ -85,6 +85,16 @@ export function GlossaryScreen() {
   const [affected, datAffected] = useState<number[] | null>(null);
   const [loiXemTruoc, datLoiXemTruoc] = useState<string | null>(null);
 
+  /**
+   * Trạng thái HIỆN TẠI của hàng `(lang, term)`, ĐỌC LẠI từ máy chủ:
+   * `undefined` = chưa đọc được · `null` = máy chủ nói KHÔNG có hàng · `Term` = có hàng.
+   *
+   * Vì sao không dùng danh sách `terms` đã tải: đó là một **ẢNH CHỤP**, và nó có thể CŨ.
+   * Đo được (`I1d`): hàng được duyệt SAU khi màn nạp xong ⇒ ảnh chụp nói "chưa duyệt",
+   * máy chủ nói "đang duyệt", và màn hình gọi một hàng ĐANG DUYỆT là "bản nháp".
+   */
+  const [trangThaiHang, datTrangThaiHang] = useState<Term | null | undefined>(undefined);
+
   const [dangLuu, datDangLuu] = useState(false);
   const [daLuu, datDaLuu] = useState<number | null>(null);
   const [loiLuu, datLoiLuu] = useState<string | null>(null);
@@ -115,22 +125,48 @@ export function GlossaryScreen() {
     if (term.trim() === "") {
       datAffected(null);
       datLoiXemTruoc(null);
+      datTrangThaiHang(undefined);
       return;
     }
     let con = true;
+    // Bộ ba input vừa đổi ⇒ con số CŨ không còn là câu trả lời cho câu hỏi HIỆN TẠI.
+    // Xoá nó đi để dòng xem trước nói "đang đếm…" thay vì trưng một con số của lần gõ
+    // trước (kèm một LÝ DO của lần gõ trước) — và nhờ vậy một bài test chờ "con số mới"
+    // không thể vô tình khớp con số CŨ.
+    datAffected(null);
+    datLoiXemTruoc(null);
     const hen = setTimeout(() => {
-      endpoints.affectedPreview({ lang, term, translation, approved }).then(
-        (body) => {
-          if (!con) return;
-          datAffected(body.affected);
-          datLoiXemTruoc(null);
-        },
-        (error: unknown) => {
-          if (!con) return;
-          datAffected(null);
-          datLoiXemTruoc(error instanceof Error ? error.message : String(error));
-        },
+      // HAI request chay SONG SONG va duoc gop vao MOT lan cap nhat state: con so va LY DO
+      // phai doi nhau trong cung mot lan render. Neu cap nhat rieng le thi dong xem truoc
+      // nhay tu "đổi glossary" sang "bỏ duyệt glossary" sau khi con so da hien — hai cho
+      // tren cung mot man hinh noi khac nhau trong vai chuc ms (do duoc o bai `I1`).
+      const xemTruoc = endpoints.affectedPreview({ lang, term, translation, approved }).then(
+        (body) => ({ affected: body.affected as number[] | null, loi: null as string | null }),
+        (error: unknown) => ({
+          affected: null,
+          loi: error instanceof Error ? error.message : String(error),
+        }),
       );
+      // LÝ DO phải suy từ trạng thái HIỆN TẠI của hàng, không từ ảnh chụp đã tải — và nó
+      // chỉ cần khi lần ghi này CÓ THỂ là một lần bỏ duyệt (`approved === false`).
+      // Đo được (review vòng #2, `M-2`): với ảnh chụp cũ, nhánh `0` gọi một hàng ĐANG
+      // duyệt là "bản nháp" trong khi máy chủ nói ngược lại. Số đúng mà LÝ DO sai vẫn là
+      // một lời nói dối. Đây là MỘT request đọc thêm, chỉ chạy khi ô "đã duyệt" đang tắt.
+      const trangThai: Promise<{ hang: Term | null | undefined }> = approved === false
+        ? endpoints.listTerms(lang).then(
+            (rows) => ({ hang: rows.find((t) => t.term === term) ?? null }),
+            // Đọc không được ⇒ KHÔNG biết trạng thái ⇒ `undefined`, và khi đó màn hình
+            // không được khẳng định lý do nào (xem `laNhapThat`).
+            () => ({ hang: undefined }),
+          )
+        : Promise.resolve({ hang: undefined });
+
+      Promise.all([xemTruoc, trangThai]).then(([a, b]) => {
+        if (!con) return;
+        datAffected(a.affected);
+        datLoiXemTruoc(a.loi);
+        datTrangThaiHang(b.hang);
+      });
     }, CHO_GO_MS);
     return () => {
       con = false;
@@ -175,46 +211,49 @@ export function GlossaryScreen() {
   const soDuyet = (terms ?? []).filter((t) => t.approved).length;
 
   /**
-   * Hàng sẽ bị GHI ĐÈ, tra theo KHOÁ `(lang, term)` — đúng khoá mà `upsert_term` dùng.
+   * LÝ DO của lần ghi, suy từ **TRẠNG THÁI MÁY CHỦ ĐỌC LẠI** (`trangThaiHang`), không từ
+   * ảnh chụp `terms`. Hai lần sai trước đây, và cả hai đều là "UI đoán trước":
    *
-   * ⚠️ ĐÂY LÀ CHỖ TỪNG SAI (review vòng #1, `I1`). Bản trước suy "có phải bỏ duyệt không"
-   * từ `editingId` (`hangDangSua`), nên **đường vào thứ ba** lọt lưới: form MỚI + gõ một
-   * thuật ngữ ĐANG được duyệt + bỏ tick. `POST` upsert theo `(lang, term)` ⇒ đó CHÍNH LÀ
-   * bỏ duyệt hàng đang có, nhưng `editingId === null` nên UI vẫn nói "không ảnh hưởng gì".
-   * Đo được trên route thật (cổng 8624, DB gieo):
-   *   `?lang=zh&term=龙&translation=long&approved=false` ⇒ **HTTP 200 `{"affected":[1]}`**
-   *   — trong khi màn hình nói *"…không bản ghi nào bị đánh dấu lỗi thời."*
+   * 1. (review vòng #1, `I1`) suy từ `editingId` ⇒ form MỚI + gõ một thuật ngữ ĐANG duyệt
+   *    bị coi là "nháp" ⇒ màn hình nói "không ảnh hưởng gì" trong khi lần Lưu báo `1`.
+   * 2. (review vòng #2, `M-2`) suy từ **ảnh chụp đã tải** ⇒ hàng được duyệt SAU khi màn nạp
+   *    xong bị coi là "nháp" ⇒ **số `0` đúng nhưng LÝ DO sai**. Một lý do sai cũng là một
+   *    lời nói dối: người dùng bỏ duyệt một hàng đang duyệt mà được bảo là "bản nháp".
    *
-   * Cách suy ĐÚNG: từ **DỮ LIỆU MÁY CHỦ ĐÃ CHO** (danh sách `terms` đã tải), không từ
-   * trạng thái form. Và nó chỉ dùng để chọn CÂU CHỮ — con số luôn là của route.
+   * Nay: `trangThaiHang` là kết quả của một lần ĐỌC LẠI đúng khoá `(lang, term)`.
+   *   `laBoDuyet` = máy chủ xác nhận hàng ĐANG duyệt ⇒ đây là GỠ một ràng buộc.
+   *   `laNhapThat` = máy chủ xác nhận hàng KHÔNG có hoặc đang CHƯA duyệt ⇒ câu "nháp" là sự thật.
+   * Khi CHƯA đọc được (`undefined`) thì **không** khẳng định lý do nào.
    */
-  const hangTheoKhoa = (terms ?? []).find((t) => t.lang === lang && t.term === term) ?? null;
-  const laBoDuyet = approved === false && hangTheoKhoa?.approved === true;
+  const coHang = trangThaiHang !== undefined && trangThaiHang !== null;
+  const laBoDuyet = approved === false && coHang && trangThaiHang.approved === true;
+  const laNhapThat = approved === false
+    && trangThaiHang !== undefined
+    && (trangThaiHang === null || trangThaiHang.approved === false);
 
   /**
    * Con số hiện TRƯỚC khi lưu.
    *
-   * LUẬT: **con số của ROUTE luôn thắng.** Một câu giải thích ("nháp thì vô hại") KHÔNG
-   * bao giờ được đè lên một con số khác 0 mà route vừa trả — đó đúng là lỗi `I1`: UI tự
-   * chặn câu trả lời của máy chủ bằng logic cục bộ. Câu "chưa duyệt" chỉ được nói khi
-   * **route đã trả 0** VÀ **dữ liệu máy chủ xác nhận** đây không phải một lần bỏ duyệt.
+   * LUẬT: **con số của ROUTE luôn thắng.** Câu "nháp thì vô hại" chỉ được nói khi **route đã
+   * trả `0`** VÀ **máy chủ xác nhận** đây là một bản nháp. Vế `affected.length === 0` là
+   * PHÒNG THỦ CHO MỘT CUỘC ĐUA giữa hai lời gọi song song (đọc lại trạng thái + xem trước):
+   * theo luật của `affected_segments`, `laNhapThat` suy ra `affected === []`, nên trạng thái
+   * "nháp mà ảnh hưởng" **không tới được** bằng một phép đo tất định — vế đó vì thế là
+   * "đúng nhưng chưa quan sát được", và được khai đúng mức (ERRATA #7 mục 5), KHÔNG được
+   * tính là "đã kiểm".
    */
   function noiXemTruoc(): string {
     if (term.trim() === "") return "Gõ thuật ngữ để xem trước số bản ghi bị ảnh hưởng.";
     if (loiXemTruoc !== null) return `Không đọc được số ảnh hưởng: ${loiXemTruoc}`;
     if (affected === null) return "đang đếm…";
-    // Bỏ duyệt là GỠ một ràng buộc, không phải "đổi": câu chữ phải nói đúng việc sắp xảy ra.
-    // Tính MỘT lần cho CẢ HAI nhánh số (0 và khác 0) — bản trước chỉ dùng nó ở nhánh khác 0
-    // nên nhánh `0` nói "đổi glossary" ngay cả khi đang BỎ DUYỆT (bài `I1c` bắt được).
+    // Bỏ duyệt là GỠ một ràng buộc, không phải "đổi": câu chữ phải nói đúng việc sắp xảy ra,
+    // cho CẢ nhánh `0` lẫn nhánh khác `0`.
     const viec = laBoDuyet ? "bỏ duyệt glossary" : "đổi glossary";
-    if (affected.length > 0) {
-      return `⚠ ${viec} → ${affected.length} bản ghi bị đánh dấu lỗi thời`;
-    }
-    if (approved === false && !laBoDuyet) {
+    if (affected.length === 0 && laNhapThat) {
       return "Thuật ngữ CHƯA DUYỆT: đổi nó không ảnh hưởng gì — bản nháp không đi vào "
         + "prompt, nên không bản ghi nào bị đánh dấu lỗi thời.";
     }
-    return `⚠ ${viec} → 0 bản ghi bị đánh dấu lỗi thời`;
+    return `⚠ ${viec} → ${affected.length} bản ghi bị đánh dấu lỗi thời`;
   }
 
   return (
@@ -378,11 +417,16 @@ export function GlossaryScreen() {
                 <td className="gl__ghichu">{t.note ?? ""}</td>
                 <td className="gl__trang-thai">{t.approved ? "đã duyệt" : "chờ duyệt"}</td>
                 <td className="gl__anh-huong" data-testid={`anh-huong-${t.id}`}>
-                  {/* Cột "Ảnh hưởng" chỉ có nghĩa cho HÀNG ĐANG SỬA: con số xem trước là
-                      "nếu tôi lưu hàng này thì sao". Hàng khác chưa đo ⇒ `—`, không bịa 0.
-                      Con số hiện cả khi `approved` đang TẮT, vì tắt nó trên một hàng ĐANG
-                      duyệt chính là ca BỎ DUYỆT — ca CÓ ảnh hưởng. */}
-                  {editingId === t.id && affected !== null
+                  {/* Cột "Ảnh hưởng" trả lời ĐÚNG câu hỏi của dòng xem trước: *"nếu tôi LƯU
+                      thứ đang có trong form thì sao"*. Hàng đích vì thế là hàng mà lần ghi
+                      sẽ GHI ĐÈ — hoặc hàng đang mở bằng nút `Sửa` (`editingId`), hoặc hàng
+                      khớp KHOÁ `(lang, term)` của form (`POST` upsert theo đúng khoá đó).
+                      ⚠️ Đo được (review vòng #2): bản trước chỉ nhận `editingId`, nên ở
+                      **đường vào thứ ba** (form MỚI + gõ một thuật ngữ đang duyệt) ô này
+                      hiện `—Sửa` trong khi dòng xem trước hiện `1` — HAI CHỖ TRÊN CÙNG MỘT
+                      MÀN HÌNH NÓI KHÁC NHAU. Hàng khác thì chưa đo ⇒ `—`, không bịa 0. */}
+                  {affected !== null
+                    && (editingId === t.id || (t.lang === lang && t.term === term))
                     ? String(affected.length)
                     : "—"}
                   {/* Đưa hàng vào form bằng một NÚT, không phải `<tr onClick>`: một đường
