@@ -1251,6 +1251,73 @@ và **KHÔNG** tự nhân/chia ở client (khuôn Task 8: *"endpoint không đ�
   `tests/test_backend_readme.py`, TRONG CÙNG commit backend** — guard **đã** kêu trước khi bump (`1 failed, 834 passed`).
   `app.css` +209 dòng (478 → 687), **CRLF=687 / LF-only=0** (không tệp nào trộn).
 
+## ⚠️ ERRATA #23 — Review Task 9: **`CONDITIONAL PASS`**, CA THỨ BA của `approved=false` mà bản vá đầu BỎ SÓT
+
+Review độc lập: **`CONDITIONAL PASS`, 0 Critical / 2 Important / 6 Minor** (V1, V4, V5, V6, V7 ĐẠT; **V2 KHÔNG ĐẠT**).
+
+### 1. 🔴 `I1` — CA THỨ BA: **form MỚI + một thuật ngữ ĐANG DUYỆT + bỏ tick** vẫn nói "không ảnh hưởng gì"
+
+Bản vá đầu (`48a84b4`) phân biệt **nháp mới** với **bỏ duyệt** bằng `hangDangSua !== null` — tức nó đòi **đang Sửa một hàng**.
+**Nhưng `POST` upsert theo `(lang, term)`**, nên **form MỚI** (`editingId = null`) mà gõ một thuật ngữ **ĐANG ĐƯỢC DUYỆT** rồi bỏ tick
+**CHÍNH LÀ bỏ duyệt** — và `dangBoDuyet` **không** nhận ra (vì `hangDangSua === null`), nên màn hình **vẫn** nói
+*"CHƯA DUYỆT … không ảnh hưởng gì"*.
+
+**Đo trên màn hình THẬT** (probe render `GlossaryScreen` + backend thật):
+- câu xem trước: *"Thuật ngữ CHƯA DUYỆT: đổi nó không ảnh hưởng gì — bản nháp không đi vào prompt, nên không bản ghi nào
+  bị đánh dấu lỗi thời."*
+- câu **sau khi bấm Lưu**: *"Đã lưu. Máy chủ báo 1 bản ghi bị đánh dấu lỗi thời."* — và hàng **`犬` đổi `approved:true→false`**.
+⇒ **Màn hình nói SAI ngay trước Lưu.** Tệ hơn: route cho **đúng bộ ba y hệt** bài test `CHUA DUYET`
+(`term=龙, translation=long, approved=false`) trả **`{"affected":[1]}`** ⇒ **bài test đó đang GHIM CÂU SAI**, trong khi bài
+`HOP DONG` **cùng tệp** ghim rằng route trả **khác rỗng** cho cùng dữ liệu vào. **`M11` KHÔNG bắt được ca này** (nó chỉ giết
+đường "đang Sửa").
+
+### 2. 🔴 `I2` — SỐ XEM TRƯỚC ≠ SỐ LẦN GHI: `patchTerm` KHÔNG gửi `term`, nhưng ô vẫn SỬA ĐƯỢC
+
+Đang **Sửa một hàng đang duyệt** mà sửa ô **"Thuật ngữ"** rồi bỏ tick ⇒ xem trước *"⚠ bỏ duyệt glossary → **0 bản ghi**…"*
+nhưng lưu *"Đã lưu. Máy chủ báo **1 bản ghi**…"*.
+**Gốc:** `patchTerm` **KHÔNG gửi `term`** (`TermPatch` của backend **không có** trường `term`) **nhưng ô vẫn sửa được**
+⇒ chữ người dùng gõ **bị bỏ IM LẶNG**, và preview được tính cho **một thuật ngữ KHÁC**.
+⇒ **Tiêu chí `P3` vỡ trên một đường TỚI ĐƯỢC.** (Khớp Minor "ô Thuật ngữ sửa được nhưng PATCH không gửi term".)
+
+### 3. LUẬT RÚT RA — và nó áp cho T10–T13
+
+- **Một boolean có hai nghĩa thì phải liệt kê HẾT các đường tới được, không chỉ đường hiển nhiên.**
+  Bản vá đầu xử **(a) nháp mới** và **(b) bỏ duyệt khi đang Sửa**; còn **(c) nháp mới trỏ vào một hàng ĐANG DUYỆT** —
+  cùng bản chất với (b), chỉ khác **đường vào**. **`ERRATA #22` mục 2 đã đúng nhưng CHƯA ĐỦ.**
+- **❗ VÀ ĐÂY LÀ GỐC CHUNG CỦA CẢ HAI LỖI: UI TỰ CHẶN CÂU TRẢ LỜI CỦA MÁY CHỦ BẰNG LOGIC CỤC BỘ.**
+  Route **đã** tính đúng (`{"affected":[1]}` cho đúng bộ ba đó) — nhưng UI **không thèm hỏi** vì nó tự đoán
+  "nháp thì vô hại". ⇒ **Luật: khi máy chủ đã trả lời được, HỎI NÓ; đừng đoán trước rồi mới hiển thị.**
+  Nếu cần chặn để bớt request, thì chỉ được chặn theo **dữ liệu máy chủ đã cho** (ví dụ "term này chưa từng tồn tại
+  trong danh sách"), **không** theo trạng thái form.
+- **Và một ô sửa được mà giá trị không được gửi đi là một lời nói dối về khả năng sửa.** Hoặc gửi nó, hoặc **khoá nó lại**.
+
+### 4. Những gì review **ĐÃ** xác nhận đạt (giữ nguyên, đừng làm lại)
+
+- **V1 ĐẠT:** `405` trước / `200` sau + **`PATCH` thật trả `"affected":[1]` = ĐÚNG số xem trước**; route `@router.get("/affected")`
+  dòng **189** < `patch("/{term_id}")` **243**.
+- **V4 ĐẠT:** **9 mutation** của review, `G2` giết **đúng** `test_affected_preview_agrees_with_the_write_when_the_term_is_UNAPPROVED`
+  (`{'affected': []} != {'affected': [1]}`); `G4` giết `HOP DONG THAM SO` + `LUU`; `M11` giết đúng một bài;
+  **`M9` SỐNG SÓT tái lập** và review **chứng minh được "không thể có vế hai"**: `setMode` **chỉ** xuất hiện trong
+  `reducer.test.ts` với `mode:"compare"` ⇒ cả app lẫn test **không** chạm nhánh glossary.
+- **V5 ĐẠT:** route gọi **LẠI** `_recompute_affected` (dòng **226/230**, cùng hàm `_after_write` dùng); `old` không lọc;
+  "đỏ trước" tái lập bằng cách chạy tệp test HEAD trên cây cũ (`5 failed, 18 passed`); guard README **trong cùng commit**
+  `b223ab4`, kêu đúng `1 failed, 834 passed` + `(835,13)==(830,13)`; `835/848` và `test_ingest.py` 9 bài ⇒ `826`.
+- **V6 ĐẠT:** pytest `835 passed, 13 deselected` EXIT=0; `npm test` **5/5** `128/17/126/2/0` EXIT=1; typecheck 0; build 0.
+- **V7 ĐẠT:** ba commit **đúng luật** (ERRATA #14 mục 3 nguyên văn); `types.ts` diff **toàn comment**;
+  `contract.test.ts` diff **RỖNG** ⇒ `:705` còn nguyên ⇒ **"có lý về chi phí NHƯNG vẫn là nợ"**
+  (hợp đồng route giờ nằm trong tệp test DOM); và **một đính chính cho Task 9**: câu *"§4.4 khối dưới không có nguồn HTTP"*
+  là **hơi quá** — `GET /api/transcripts` **đúng là** không kèm `segments`, **nhưng `/api/transcripts/{id}` THÌ CÓ**.
+  Quyết định hoãn vẫn **đúng**, lý do **hơi quá**.
+
+### 5. Minor — trong đó **một lời khai SAI về số đo** của implementer
+
+- ❌ **Census EOL trong báo cáo implementer SAI:** nó ghi `app.css` **697/0** và *"8 tệp còn lại toàn LF"*.
+  Đo được: **687/0** và **3 tệp CRLF**. ⇒ Lại là **con số không kèm lệnh**; và báo cáo **tự mâu thuẫn 687 vs 697**.
+- Ô "Thuật ngữ" sửa được nhưng `PATCH` không gửi `term` (xem `I2`).
+- Con số **826** cho máy thiếu `ffmpeg` **chỉ khớp SỐ HỌC** (review không gỡ `ffmpeg` để chạy thật) ⇒ ghi đúng mức.
+- Reviewer **tự khai** một vi phạm: lượt `tsc --listFiles` đầu dùng **`npx --no-install`** (luật cấm `npx`) — đã chạy lại
+  bằng binary cục bộ. **Tự khai, không ảnh hưởng kết quả.**
+
 ## Quy ước thẩm mỹ — spec UI thắng, skill chỉ là checklist
 
 Spec `2026-09-25-phu-de-lab-ui-design.md` là **nguồn có thẩm quyền về hình thức** (bạn đã duyệt). Skill
