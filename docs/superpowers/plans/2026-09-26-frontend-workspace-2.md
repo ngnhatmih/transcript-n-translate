@@ -1606,6 +1606,80 @@ lần đầu là `useJobStream` ở Task 3 — khi đó **jsdom + server `node:h
 - **Mutation còn sống: CHỈ `M14`** (xem mục 1) ⇒ **đang được vá**. `M9` review không chạy lại. **~22 lượt `npm test` đầy đủ**,
   **không lượt nào bị `timeoutMs` cắt**.
 
+## ⚠️ ERRATA #28 — Task 9 vòng sửa #3 (`7fb23a1`): **CÁCH BIẾN MỘT "CUỘC ĐUA" THÀNH PHÉP ĐO TẤT ĐỊNH**, và một cái bẫy thời lượng
+
+Vòng sửa #3 xong: **MỘT commit, MỘT tệp** (`frontend/src/screens/GlossaryScreen.test.tsx`, **+81 dòng**);
+**KHÔNG tệp sản phẩm nào bị đụng** (`GlossaryScreen.tsx`/`app.css`/`endpoints.ts`/`App.tsx`/`types.ts`/`backend`: diff **RỖNG**).
+pytest **`835 passed, 13 deselected`** EXIT=0 · `npm test` **`tests 134 / suites 17 / pass 132 / fail 2 / cancelled 0`** EXIT=1
+(133 → **134** = +`I1e`) · `typecheck` 0 · `build` 0 · **18 lượt mutation, 16/16 giết ĐÚNG bài, 1 sống sót (`M9`, đã khai)**.
+
+### 1. ✅ `R6` ĐÓNG — `M14` nay là **lớp (b) đã bịt**, không còn là lớp (c)
+
+**CÔNG THỨC (đáng chép cho mọi "cuộc đua" ở T10–T13):** để biến một cuộc đua giữa **hai lời gọi song song** thành
+**phép đo TẤT ĐỊNH**, hãy **điều khiển THỨ TỰ**, không đua:
+1. **Bọc `globalThis.fetch` thành CẦU NỐI ĐIỀU KHIỂN THỨ TỰ** — request `/glossary/affected?` bị **GIỮ**, mọi request khác
+   **đi thẳng**, và request bị giữ **VẪN đi HTTP THẬT khi được thả**. (Khai rõ: **không phải giả lập mạng.**)
+2. Gõ input ⇒ lần **ĐỌC TRẠNG THÁI** (`GET /api/glossary?lang=…`) đi thẳng và trả *"chưa duyệt"*.
+3. **CHỜ BẰNG TÍN HIỆU TƯỜNG MINH** (cầu nối bật cờ, qua `waitFor`) — **không** "chờ 200 ms rồi hy vọng".
+4. **`POST` duyệt hàng đó qua route THẬT** (`201`) ⇒ máy chủ giờ nói *"đang duyệt"*.
+5. **THẢ** request xem trước ⇒ route trả **`{"affected":[5]}`** trong khi ảnh chụp cũ nói `laNhapThat = true`.
+6. Khẳng định: **PHẢI hiện SỐ** và **KHÔNG** được in câu *"không ảnh hưởng gì"*.
+**Kết quả:** `✔ I1e: … (314,4057 ms)` · `tests 14 / pass 14 / fail 0` EXIT=0 ⇒ **thứ tự do TÍN HIỆU, không do CHỜ**
+(314 ms, không phải ~900 ms). **Và `M14` GIẾT NÓ:** `tests 134 / pass 131 / fail 3` với `✖ I1e: … (8282,8592ms)`;
+witness `PRESENT`; mutant `bytes=24106`; phục hồi `equals=true`.
+Hai request được **gộp vào MỘT lần cập nhật state** (`Promise.all`) nên cặp `(lý do: nháp, số: 1)` là **trạng thái QUAN SÁT ĐƯỢC**.
+
+### 2. ✅ `M-1` ĐÓNG — **cái phân biệt hai lớp là VIỆC XOÁ SỐ, không phải PHÉP CHỜ**
+
+Implementer chạy **thí nghiệm hai yếu tố** (`task-9fix3-do-treo.mjs/.log`), **cả ba lượt phục hồi byte-exact**:
+| Lượt | Cấu hình | Kết quả |
+|---|---|---|
+| `L1` | phép chờ **50 ms**, cây **SẠCH** | `tests 134 / pass 132 / fail 2` — **XANH** |
+| `L2` | **50 ms** + `M13b` | `pass 131 / fail 3`, đỏ tại `khong doc duoc con so nao trong: "đang đếm…"` (**315 ms**) |
+| `L3` | **900 ms** + `M13b` | `pass 131 / fail 3`, đỏ tại `khong doc duoc con so nao trong: "Thuật ngữ CHƯA DUYỆT: …"` (**1160 ms**) |
+⇒ **Thứ phân biệt hai lớp là `datAffected(null)` ĐẦU EFFECT** (xoá con số **ngay khi input đổi**, **không cần debounce**),
+**KHÔNG** phải phép chờ. **Phép chờ chỉ đổi HÌNH DẠNG bằng chứng**: ở 50 ms nó bắt được khung `"đang đếm…"`,
+ở 900 ms nó bắt được **CON SỐ SAI**. Câu chữ trong `task-9-fix-round-2-report.md` đã sửa kèm bảng này.
+
+### 3. ⚠️ MỘT CÁI BẪY ĐÁNG CHÉP: **THỜI LƯỢNG LÀ DẤU HIỆU**
+
+Script thí nghiệm **lượt đầu** của implementer **có lỗi, và nó TỰ BẮT**: nó chỉ khôi phục `GLOSS` sau `L2`
+⇒ **`L3` chạy trên tệp test VẪN CÒN 50 ms** ⇒ **`L3` là BẢN SAO CỦA `L2`**.
+**Dấu hiệu DUY NHẤT** là **thời lượng `314 ms < 900 ms`** — tức **phép chờ mà nó TIN là 900 ms đã không xảy ra**.
+Đã sửa (khôi phục **CẢ HAI** tệp + in `equals` cho **cả hai** + **in số lần `"setTimeout(resolve, 900)"` khớp** ở đầu `L3`) rồi chạy lại.
+⇒ **Luật: khi một phép đo phụ thuộc vào một NGƯỠNG/THỜI LƯỢNG bạn tự đặt, hãy IN THỜI LƯỢNG ĐO ĐƯỢC và SO với ngưỡng đó.**
+Một lượt chạy **nhanh hơn ngưỡng** là bằng chứng **ngưỡng chưa hề được áp** — không phải bằng chứng nó chạy tốt.
+
+### 4. ✅ DRIVER LÀ BẰNG CHỨNG ⇒ **NAY ĐỌC LẠI ĐƯỢC**, và lời TỪ CHỐI đã được sửa để chỉ đúng nghi phạm
+
+Publish vào `.superpowers/sdd/2026-09-26-frontend-workspace-2/` (**gitignore ⇒ `git status` vẫn RỖNG**):
+`task-9fix3-mutate.mjs` (driver đầy đủ: **KIỂM TRƯỚC 5 đầu văn** + witness + `finally` + lưới `exit` + **`SIGINT`/`SIGTERM`/`SIGHUP`**
++ chế độ `verify`), `task-9fix3-run.log` (**18 lượt**, gồm **5/5** dòng `[kiem truoc] dau van khop 1 lan ⇒ OK`),
+`task-9fix3-verify.log`, `task-9fix3-do-treo.mjs` + `.log`.
+**Và điều đắt nhất: lời TỪ CHỐI nay NÓI ĐÚNG NGHI PHẠM** —
+`[TU CHOI MUTATE] K0: co cap witness khong khop DUNG 1 lan. KHONG ghi tep nao. Tep nguyen trang: true — ⚠️ HOI NGAY: TEP co dang sai (di san mutant) khong?`
+⇒ **Bài học của sự cố "tệp mutant làm baseline" (ERRATA #26 mục 4) đã được MÃ HOÁ VÀO CÔNG CỤ**, không chỉ nằm trong tài liệu.
+
+### 5. ⚠️ Lưới an toàn nay khôi phục về **TRẠNG THÁI ĐÍCH**, và baseline được đối chiếu byte-exact
+
+Lượt `verify` **sau commit** in **cả hai vế**:
+`[baseline] … bytes=24131 sha256=002559ac…181d eol=LF | HEAD bytes=24131 sha256=002559ac…181d` (**cây làm việc == HEAD, byte-exact**)
+và `[phuc hoi] readback.equals(HEAD) === true · bytes=24131 sha256=002559ac…181d`.
+**Trước** commit, baseline là **cây làm việc** (chính là thứ được commit) — và nó được **đối chiếu byte-exact với HEAD NGAY SAU commit**:
+**10/10 tệp** `git hash-object --path=<f>` == `git rev-parse HEAD:<f>`.
+⇒ **`ERRATA #27` mục 3.1 nay được thi hành** (lưới khôi phục về **HEAD**, không về "ảnh chụp lúc bắt đầu").
+
+### 6. Nợ còn lại của Task 9 (khai minh bạch, không chặn)
+
+- **`M9`** (nhánh `glossary` của `App`): **không có đường nào tới được** (`setMode` **0** dispatch) ⇒ **nợ**, không phải "đã kiểm".
+- **Lệch đơn vị "bản dịch" vs "bản ghi"**: vẫn là **nợ của ROUTE** (muốn nói "bản dịch" thì route phải trả số bản dịch).
+- **`§4.4` khối dưới** ("thuật ngữ xuất hiện ở đâu") **vẫn không làm** — nay lý do đã đúng: làm thế là **dựng lại
+  `glossary_match.terms_in` ở client** (nguồn sự thật thứ hai) + N request.
+- **`contract.test.ts:705`** vẫn **chưa chạm** (diff tệp đó **RỖNG**) ⇒ nợ còn nguyên.
+- **`M-3`** id hàng trong các bài **cũ** vẫn phụ thuộc **thứ tự GIEO**; `I1e` **tra hàng theo CHỮ** nên **không thêm** phụ thuộc mới.
+- **Chưa ai nhìn thấy màn hình này trong trình duyệt thật** (`jsdom` không layout/CSS; `readOnly` không chặn devtools);
+  `npm run e2e`/Playwright **bị cấm**; nhánh `200` trên `data/app.db` thật (**rỗng**) là việc của **Task 12**.
+
 ## Quy ước thẩm mỹ — spec UI thắng, skill chỉ là checklist
 
 Spec `2026-09-25-phu-de-lab-ui-design.md` là **nguồn có thẩm quyền về hình thức** (bạn đã duyệt). Skill
