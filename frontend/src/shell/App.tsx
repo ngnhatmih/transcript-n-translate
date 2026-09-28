@@ -12,6 +12,7 @@ import { useReducer } from "react";
 import { endpoints } from "../api/endpoints.ts";
 import { CompareScreen } from "../screens/CompareScreen.tsx";
 import { EditScreen } from "../screens/EditScreen.tsx";
+import { GlossaryScreen } from "../screens/GlossaryScreen.tsx";
 import { initialState, reduce } from "../state/reducer.ts";
 import { useApi } from "../state/useApi.ts";
 import { useJobStream } from "../state/useJobStream.ts";
@@ -60,7 +61,9 @@ export function App() {
               `state/reducer.ts`), không phải router.
               ⚠️ TRẦN CỦA LƯỢT NÀY, hai lớp, và cả hai đều là trạng thái THẬT:
               (1) KHÔNG có UI nào dispatch `setMode`, nên hôm nay `mode` luôn là
-                  `"edit"` và màn Đối chiếu CHƯA với tới được trong trình duyệt;
+                  `"edit"` và cả màn Đối chiếu LẪN tab Thuật ngữ (Task 9) CHƯA với
+                  tới được trong trình duyệt. Nhánh dưới đây là ĐƯỜNG ĐÃ NỐI, không
+                  phải một lời hứa: nó chạy được ngay khi có người dispatch `setMode`;
               (2) chưa có đường CHỌN KÊNH (ERRATA #18 mục 4) nên khi tới được thì
                   `CompareScreen` vẫn nhận `transcript={null}`/`translations={[]}` và
                   chỉ render trạng thái rỗng nói thật.
@@ -69,6 +72,12 @@ export function App() {
               `endpoints.listTranslations` — không phải sửa gì trong `CompareScreen`. */}
           {ui.mode === "compare" ? (
             <CompareScreen transcript={null} translations={[]} />
+          ) : ui.mode === "glossary" ? (
+            /* §4.4 tab THUẬT NGỮ (Task 9). Màn này KHÔNG nhận prop: nó độc lập với
+               kênh đang mở, và nó TỰ gọi `listTerms`/`createTerm`/`patchTerm`/
+               `affectedPreview`. Đó là khác biệt có chủ ý với `EditScreen`/
+               `CompareScreen` ở trên — hai màn kia chờ đường CHỌN KÊNH. */
+            <GlossaryScreen />
           ) : (
             <EditScreen transcript={null} currentSegment={ui.currentSegment} />
           )}

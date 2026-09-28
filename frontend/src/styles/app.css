@@ -476,3 +476,196 @@ body {
 .cmp__dong.is-over .cmp__cps {
   color: var(--signal);
 }
+
+/* ── §4.4 Màn THUẬT NGỮ (Task 9) — bảng thuật ngữ + form, số ảnh hưởng TRƯỚC khi lưu ──
+   Mọi giá trị lấy từ tokens.css; tokens.css là nguồn duy nhất của giá trị.
+   Vì sao LUẬT ở đây quan trọng hơn tên lớp: ERRATA #15 mục 3 đo được HAI CHIỀU rằng
+   một test chỉ khẳng định `className` vẫn XANH khi luật CSS bị xoá ⇒ khối này được
+   ghim bằng một bài ĐỌC CHÍNH TỆP NÀY (xem `GlossaryScreen.test.tsx`).
+   Bốn token mồ côi của các task trước nay có NGƯỜI TIÊU THỤ thật ở đây: `--ok`
+   (thông báo đã lưu), `--fs-read` (ô nhập — cỡ ĐỌC, không phải cỡ nhãn), `--row-1`
+   (nhịp dọc một hàng) và `--sp-5` (khe giữa các ô của form). */
+
+.gl {
+  display: grid;
+  /* Năm hàng, và số con của lưới là CỐ ĐỊNH (thông báo nằm trong `.gl__tin`): một
+     `grid-template-rows` cứng mà số con đổi theo trạng thái thì hàng `1fr` trôi. */
+  grid-template-rows: auto auto auto auto 1fr;
+  height: 100%;
+  min-height: 0;
+  background: var(--panel-0);
+}
+
+.gl__dem {
+  margin: 0;
+  padding: var(--sp-2) var(--sp-3);
+  border-bottom: var(--rule-w) solid var(--rule);
+  color: var(--ink-2);
+  font-family: var(--font-mono);
+  font-size: var(--fs-label);
+  letter-spacing: var(--track-label);
+}
+
+/* §12.3 — con số ảnh hưởng TRƯỚC khi lưu. Nó là SỐ (mono, chữ số đều nhau) và nó
+   phải ĐỌC ĐƯỢC: nhánh "chưa duyệt" là một CÂU, không phải một màu. */
+.gl__xem-truoc {
+  margin: 0;
+  padding: var(--sp-2) var(--sp-3);
+  border-bottom: var(--rule-w) solid var(--rule);
+  color: var(--ink-0);
+  font-family: var(--font-mono);
+  font-size: var(--fs-ui);
+  font-variant-numeric: tabular-nums;
+}
+
+.gl__form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: var(--sp-3) var(--sp-5);
+  padding: var(--sp-4) var(--sp-3);
+  border-bottom: var(--rule-w) solid var(--rule);
+}
+
+.gl__o {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+}
+
+/* Nhãn TRÊN ô nhập (checklist của plan), lỗi DƯỚI ô nhập (`.gl__loi`). */
+.gl__nhan {
+  display: block;
+  color: var(--ink-2);
+  font-family: var(--font-label);
+  font-size: var(--fs-label);
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+}
+
+.gl__nhap {
+  padding: var(--sp-1) var(--sp-2);
+  border: var(--rule-w) solid var(--rule);
+  border-radius: var(--radius);
+  background: var(--panel-1);
+  color: var(--ink-0);
+  font-family: var(--font-ui);
+  font-size: var(--fs-read);
+}
+
+.gl__o--duyet {
+  flex-direction: row;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+.gl__luu {
+  padding: var(--sp-2) var(--sp-4);
+  border: var(--rule-w) solid var(--rule);
+  border-radius: var(--radius);
+  background: var(--panel-2);
+  color: var(--ink-0);
+  font-family: var(--font-label);
+  font-size: var(--fs-label);
+  letter-spacing: var(--track-label);
+  cursor: pointer;
+  transition: border-color var(--dur-1) var(--ease-1);
+}
+
+.gl__luu:disabled {
+  color: var(--ink-2);
+  cursor: default;
+}
+
+/* Lỗi nằm DƯỚI ô nhập và chiếm trọn một dòng của form. `--fault` chỉ dành cho LỖI
+   THẬT (§2.2 quy tắc 3). */
+.gl__loi {
+  flex-basis: 100%;
+  margin: 0;
+  color: var(--fault);
+  font-size: var(--fs-note);
+}
+
+/* Xác nhận đã ghi: `--ok` là màu "xác nhận, rất tiết chế" của tokens.css — nó không
+   phải accent thứ ba, và đây là người dùng ĐẦU TIÊN của token đó. */
+.gl__da-luu {
+  margin: 0;
+  padding: var(--sp-2) var(--sp-3);
+  color: var(--ok);
+  font-size: var(--fs-note);
+}
+
+.gl__cuon {
+  overflow-y: auto;
+  min-height: 0;
+}
+
+.gl__bang {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--fs-ui);
+}
+
+.gl__cot {
+  padding: var(--sp-1) var(--sp-3);
+  text-align: left;
+  color: var(--ink-2);
+  font-family: var(--font-label);
+  font-size: var(--fs-label);
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  border-bottom: var(--rule-w) solid var(--rule);
+}
+
+/* Mỗi hàng cao đúng MỘT nhịp dọc (`--row-1`), cộng lề trái dành cho MỐC CHỜ DUYỆT. */
+.gl__hang {
+  min-height: var(--row-1);
+  border-left: var(--sp-1) solid transparent;
+  border-bottom: var(--rule-w) solid var(--rule);
+}
+
+/* §4.4 nguyên văn: "Hàng chờ duyệt có lề trái amber." Amber ở đây vẫn chỉ có MỘT
+   nghĩa: đang chờ người dùng quyết định (§2.2 quy tắc 1). */
+.gl__hang.is-cho-duyet {
+  border-left-color: var(--signal);
+}
+
+.gl__nguon,
+.gl__dich,
+.gl__ghichu,
+.gl__trang-thai,
+.gl__anh-huong {
+  padding: var(--sp-1) var(--sp-3);
+  color: var(--ink-0);
+}
+
+.gl__ghichu,
+.gl__trang-thai {
+  color: var(--ink-1);
+  font-size: var(--fs-note);
+}
+
+.gl__anh-huong {
+  color: var(--ink-1);
+  font-family: var(--font-mono);
+  font-size: var(--fs-num);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+/* §4.4 nguyên văn: "Hàng chưa có bản dịch có chip `✕ trống` màu lỗi." Một hàng
+   glossary không có bản dịch là LỖI THẬT (nó không ràng buộc được bản dịch nào),
+   nên `--fault` đúng nghĩa ở đây — không phải một sắc thái trang trí. */
+.gl__trong {
+  color: var(--fault);
+  font-family: var(--font-label);
+  font-size: var(--fs-label);
+  letter-spacing: var(--track-label);
+}
+
+.gl__rong {
+  margin: 0;
+  padding: var(--sp-4);
+  color: var(--ink-1);
+  font-size: var(--fs-note);
+}

@@ -30,6 +30,11 @@
  *     · `GlossaryVersion` (`GET /api/glossary/version`) · `TranslationDetail`,
  *     `TranslationCps`, `TranslationCpsRow` (`GET /api/translations/{id}` — Task 8,
  *     soi trên một backend có DB GIEO, vì DB repo rỗng).
+ *     · `AffectedPreview`, `Term`, `TermWithAffected`: route `GET /api/glossary/affected`
+ *     và `GET`/`POST`/`PATCH /api/glossary` (Task 9). Ba kiểu này được soi qua
+ *     `src/screens/GlossaryScreen.test.tsx` trên một backend có DB GIEO, và bài ghim
+ *     hợp đồng tham số ở đó khẳng định URL do `endpoints.affectedPreview` sinh ra
+ *     được ROUTE THẬT chấp nhận — đổi tên một khoá hay một tham số làm nó đỏ.
  *     `Word` cũng được soi, nhưng CHỈ khi một segment thật sự CÓ khoá `words` —
  *     và khoá đó có thể là mảng RỖNG, xem `Segment` bên dưới.
  *
@@ -40,9 +45,8 @@
  *       và một engine MT thật — Ollama đang tắt, nên không endpoint nào được gọi.
  *     - `JobSlim` (TYPE ALIAS, không phải interface — `Pick<Job, …>`): cùng body đó.
  *     - `JobEvent`: chỉ có trên SSE `/api/jobs/stream`; test không mở stream.
- *     - `AffectedPreview`: route `GET /api/glossary/affected` ra đời ở Task 9.
- *     - `Source`, `Job`, `Term`, `TermWithAffected`: route `GET` CÓ thật, nhưng bài
- *       hiện tại chỉ khẳng định "là một mảng" — chưa soi khoá nào.
+ *     - `Source`, `Job`: route `GET` CÓ thật, nhưng bài hiện tại chỉ khẳng định
+ *       "là một mảng" — chưa soi khoá nào.
  *
  *   `*Create`/`*Patch` là BODY gửi LÊN (không phải response):
  *   `TranscriptPatch`, `TranslationSegmentPatch`, `TranslationCreate`, `TermCreate`,
@@ -341,7 +345,13 @@ export interface GlossaryVersion {
   glossary_version: number;
 }
 
-/** `GET /api/glossary/affected` — xem `affectedPreview` trong `endpoints.ts`. */
+/**
+ * `GET /api/glossary/affected` — xem `affectedPreview` trong `endpoints.ts`.
+ *
+ * `affected` là id TRANSCRIPT (không phải số bản dịch): xem `TermWithAffected`. Route
+ * này ra đời ở Task 9 Step 0 và được ghim qua HTTP thật bởi
+ * `src/screens/GlossaryScreen.test.tsx`.
+ */
 export interface AffectedPreview {
   affected: number[];
 }
