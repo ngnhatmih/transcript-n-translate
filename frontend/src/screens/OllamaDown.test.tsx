@@ -160,6 +160,21 @@ const SPECS_ASR_MT: EngineSpec[] = [
   spec("qwen2.5-3b", "Qwen 2.5 3B", "ollama", false),
 ];
 
+/**
+ * FIXTURE CHO NO TASK 10 (§5b muc 2): mot ASR co `runtime === "ollama"`.
+ *
+ * VI SAO BAT BUOC: cau `.od__boc-bang` khang dinh *"buoc phien am chay NGAY TREN MAY, khong
+ * can Ollama"*. Do la su that cua `runtime === "inprocess"`, KHONG phai cua MOI `kind === "asr"`.
+ * Hom nay cau do dung **4/4** chi vi ca bon ASR trong registry deu `inprocess` (`app/main.py`);
+ * mot ASR chay qua Ollama se lam cau do NOI SAI, va **fixture nay la thu duy nhat lo ra dieu do**
+ * (ERRATA #31 muc 3: fixture phai co DUNG hinh dang that + mot ca MAU THUAN de phan biet).
+ */
+const SPECS_ASR_OLLAMA: EngineSpec[] = [
+  spec("fw-large-v3-turbo", "Faster-Whisper large-v3-turbo", "inprocess", undefined, "asr"),
+  spec("asr-qua-ollama", "ASR chạy qua Ollama", "ollama", undefined, "asr"),
+  spec("opus-mt", "OPUS-MT", "inprocess", true),
+];
+
 // ---------------------------------------------------------------------------
 // Server `node:http` trong tien trinh — dem duoc request nao da THUC SU di ra
 // ---------------------------------------------------------------------------
@@ -398,7 +413,11 @@ describe("§4.8 trang thai Ollama: dai trang thai + panel hang nhat + dropdown e
   });
 
   it("Header dat dai trang thai vao header, canh ten ban lam viec", () => {
-    const { container } = render(taoPhanTu(Header, { status: status("unknown") }));
+    // Task W1 them `mode`/`onModeChange` (bo chon che do) vao `Header`; bai nay chi quan tam
+    // dai trang thai, nen hai prop moi duoc truyen gia tri THAT (component dieu khien).
+    const { container } = render(
+      taoPhanTu(Header, { status: status("unknown"), mode: "edit", onModeChange: () => {} }),
+    );
 
     const head = chu(container, ".shell__head");
     assert.ok(head.includes("PHÒNG THU BIÊN TẬP"),
@@ -549,6 +568,31 @@ describe("§4.8 trang thai Ollama: dai trang thai + panel hang nhat + dropdown e
       `MT available === false phai nam trong "khong dung duoc"; do duoc: ${JSON.stringify(khong)}`);
     assert.ok(!khong.includes("Faster-Whisper") && !khong.includes("SenseVoice"),
       `ASR van boc bang duoc ⇒ khong duoc nam trong "khong dung duoc"; do duoc: ${JSON.stringify(khong)}`);
+
+    unmount();
+  });
+
+  it("`.od__boc-bang` chi khang dinh 'chay ngay tren may' cho ASR `runtime === \"inprocess\"` (§5b)", () => {
+    // NO TASK 10 dong kem o W1: cau nay truoc day loc `kind === "asr"` KHONG kem `runtime`,
+    // nen mot ASR chay qua Ollama (khong co model tren may) van duoc khang dinh "chay ngay
+    // tren may". Fixture `SPECS_ASR_OLLAMA` co DUNG mot ca nhu vay.
+    const { container, unmount } = render(taoPhanTu(OllamaDown, {
+      status: status("unknown"),
+      specs: SPECS_ASR_OLLAMA,
+      onRetry: () => {},
+    }));
+
+    const bocBang = chu(container, ".od__boc-bang");
+    assert.ok(bocBang.includes("Faster-Whisper large-v3-turbo"),
+      `ASR in-process PHAI nam trong cau "chay ngay tren may"; do duoc: ${JSON.stringify(bocBang)}`);
+    assert.ok(!bocBang.includes("ASR chạy qua Ollama"),
+      `ASR co runtime === "ollama" KHONG duoc khang dinh chay ngay tren may; do duoc: ${JSON.stringify(bocBang)}`);
+
+    // Va no cung KHONG duoc roi vao hai cau danh cho engine DICH: no la ASR, khong dich cau nao.
+    assert.ok(!chu(container, ".od__con").includes("ASR chạy qua Ollama"),
+      "ASR khong dich cau nao ⇒ khong duoc nam trong 'con dung duoc'");
+    assert.ok(!chu(container, ".od__khong").includes("ASR chạy qua Ollama"),
+      "ASR khong phai engine DICH ⇒ khong duoc nam trong 'khong dung duoc'");
 
     unmount();
   });

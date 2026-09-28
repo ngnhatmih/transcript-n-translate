@@ -17,6 +17,7 @@ import { CompareScreen } from "../screens/CompareScreen.tsx";
 import { EditScreen } from "../screens/EditScreen.tsx";
 import { GlossaryScreen } from "../screens/GlossaryScreen.tsx";
 import { OllamaDown } from "../screens/OllamaDown.tsx";
+import { chonTranscript, chonTranslation } from "../state/channelData.ts";
 import { initialState, reduce } from "../state/reducer.ts";
 import { useApi } from "../state/useApi.ts";
 import { useJobStream } from "../state/useJobStream.ts";
@@ -29,7 +30,8 @@ export function App() {
   // TRẠNG THÁI CLIENT: MỘT reducer cho cả shell (spec/plan: `src/state/reducer.ts`).
   // Task 7 là người gọi THẬT đầu tiên của nó: thanh transport ĐỌC `playing` +
   // `currentSegment` và GHI lại qua hai action `setPlaying`/`setCurrentSegment`.
-  // Trước đó reducer chỉ có test — một tầng trạng thái không ai dùng là một tầng sẽ trôi.
+  // Task W1 đóng nốt hai action còn thiếu đường: `setMode` (bộ chọn chế độ ở `Header`)
+  // và `selectChannel` (mỗi mục của vùng KÊNH) — trước W1 cả hai có **0 lượt dispatch**.
   const [ui, dispatch] = useReducer(reduce, initialState);
   // KÊNH: một lượt đọc `GET /api/sources`. `[]` vì đường dẫn không phụ thuộc gì.
   const sources = useApi(() => endpoints.listSources(), []);
@@ -44,9 +46,52 @@ export function App() {
   const engines = useApi(() => endpoints.registry(), []);
   const specs = engines.data === null ? [] : [...engines.data.asr, ...engines.data.mt];
 
+  // ---------------------------------------------------------------------------
+  // SUY DỮ LIỆU CHO BA MÀN (Task W1) — theo đúng comment cũ ở vùng BÀN LÀM VIỆC:
+  // `listTranscripts()` → chọn bản ghi của kênh → `getTranscript(tid)`; và
+  // `listTranslations(tid)` → `getTranslation` cho TỪNG hàng.
+  // ---------------------------------------------------------------------------
+
+  // DANH SÁCH TRANSCRIPT: MỘT lượt cho CẢ app (`[]` — đường dẫn không phụ thuộc gì). Đọc
+  // một lần rồi suy ra bản ghi đang mở, thay vì mỗi màn tự hỏi một câu khác nhau.
+  const transcripts = useApi(() => endpoints.listTranscripts(), []);
+  // QUY ƯỚC "id lớn nhất là hiện tại" nằm trong `channelData.chonTranscript` — CÙNG quy ước
+  // với `ChannelZone.buocCuaKenh` (hai quy ước cho một câu hỏi là nguồn sự thật thứ hai).
+  const banGhiTomTat = chonTranscript(transcripts.data ?? [], ui.channelId);
+  const tid = banGhiTomTat === null ? null : banGhiTomTat.id;
+
+  // BẢN GHI ĐANG MỞ. ⚠️ `channelId === null` ⇒ `tid === null` ⇒ `Promise.resolve(null)`:
+  // KHÔNG được gọi `/api/transcripts/null` (đo được bằng số request ở server trong test).
+  const transcript = useApi(
+    () => (tid === null ? Promise.resolve(null) : endpoints.getTranscript(tid)),
+    [tid],
+  );
+
+  // BẢN DỊCH CỦA BẢN GHI ĐÓ — **MỘT** hook, **N request** qua `Promise.all` (đúng comment
+  // cũ: "translations lấy từ `endpoints.getTranslation` cho từng hàng của
+  // `endpoints.listTranslations`"). ⚠️ KHÔNG gọi `useApi` trong vòng lặp: số hook phải cố
+  // định giữa các lần render (Rules of Hooks), nên N request nằm TRONG một hook.
+  // Kết quả đúng kiểu prop của `CompareScreen`: `TranslationDetail[]`.
+  const translations = useApi(async () => {
+    if (tid === null) return [];
+    const rows = await endpoints.listTranslations(tid);
+    return await Promise.all(rows.map((row) => endpoints.getTranslation(row.id)));
+  }, [tid]);
+  // Bản dịch để XUẤT: `status === "done"` và mới nhất (chưa xong thì chưa có nội dung dịch).
+  const banDichXuat = chonTranslation(translations.data ?? []);
+
+  // THỜI LƯỢNG: lấy từ `Source.duration` của kênh đang chọn — KHÔNG tự đo lại (client đo
+  // lại là nguồn sự thật thứ hai, và `duration` của phần tử media là `NaN` cho tới khi tải
+  // xong metadata).
+  const kenhDangChon = sources.data?.find((source) => source.id === ui.channelId) ?? null;
+
   return (
     <div className="shell">
-      <Header status={status.data} />
+      <Header
+        status={status.data}
+        mode={ui.mode}
+        onModeChange={(mode) => dispatch({ type: "setMode", mode })}
+      />
       {/* §4.8 HẠNG NHẤT (không phải toast): panel là MỘT HÀNG RIÊNG của lưới `.shell`
           (hàng 2, track `auto`), ngay dưới header và TRÊN bàn làm việc — nó không đè lên
           nội dung, và không biến mất sau vài giây. `up` (hoặc chưa đọc được status) ⇒
@@ -66,40 +111,37 @@ export function App() {
             jobs={jobs}
             loading={sources.loading}
             error={sources.error}
+            selectedId={ui.channelId}
+            onSelect={(id) => dispatch({ type: "selectChannel", id })}
           />
         </aside>
-        {/* BÀN LÀM VIỆC: màn Biên tập (§4.1) là màn ĐẦU TIÊN — Task 6.
-            `transcript` là PROP (brief Task 6 §1): chưa có đường CHỌN KÊNH (vùng KÊNH
-            của Task 4 mới chỉ hiện), nên chưa có bản ghi THẬT nào để đưa vào và `null`
-            là sự thật của lượt này — TRẦN đã khai trong báo cáo task. Màn KHÔNG tự
-            `fetch`: một chỗ gọi API cho mỗi màn là hai nguồn sự thật.
+        {/* BÀN LÀM VIỆC: màn hiện theo `ui.mode` (xem khối dưới). Dữ liệu của CẢ BA màn
+            đến từ MỘT chuỗi đọc ở trên (`listTranscripts` → `getTranscript` →
+            `listTranslations` → `getTranslation`), và màn KHÔNG tự `fetch`: một chỗ gọi
+            API cho mỗi màn là hai nguồn sự thật.
             `currentSegment` nối thẳng từ reducer: đó là CÙNG một đoạn mà thanh
             transport đang phát, nên lề amber của §4.1 và đầu đọc của §4.1 không thể
             nói hai chuyện khác nhau. */}
         <main className="shell__work">
           {/* Vùng giữa hiện theo `ui.mode` — BA chế độ của spec UI §3 (`Mode` ở
               `state/reducer.ts`), không phải router.
-              ⚠️ TRẦN CỦA LƯỢT NÀY, hai lớp, và cả hai đều là trạng thái THẬT:
-              (1) KHÔNG có UI nào dispatch `setMode`, nên hôm nay `mode` luôn là
-                  `"edit"` và cả màn Đối chiếu LẪN tab Thuật ngữ (Task 9) CHƯA với
-                  tới được trong trình duyệt. Nhánh dưới đây là ĐƯỜNG ĐÃ NỐI, không
-                  phải một lời hứa: nó chạy được ngay khi có người dispatch `setMode`;
-              (2) chưa có đường CHỌN KÊNH (ERRATA #18 mục 4) nên khi tới được thì
-                  `CompareScreen` vẫn nhận `transcript={null}`/`translations={[]}` và
-                  chỉ render trạng thái rỗng nói thật.
-              Ngày có đường chọn kênh: `transcript` lấy từ bản ghi đang mở và
-              `translations` lấy từ `endpoints.getTranslation` cho từng hàng của
-              `endpoints.listTranslations` — không phải sửa gì trong `CompareScreen`. */}
+              Task W1 đóng hai TRẦN cũ: (1) bộ chọn chế độ ở `Header` dispatch `setMode`,
+              nên màn Đối chiếu và tab Thuật ngữ nay TỚI ĐƯỢC; (2) vùng KÊNH dispatch
+              `selectChannel`, nên `transcript`/`translations` là dữ liệu THẬT của bản ghi
+              đang mở chứ không còn luôn `null`/`[]`.
+              ⚠️ CÒN LẠI một TRẦN, và nó là sự thật: `CompareScreen` ghim bản B bằng state
+              CỤC BỘ của chính nó, vì `reducer` chưa có action BỎ GHIM (`pinnedB` chỉ ghi
+              được). Nâng cấp: truyền `pinnedB`/`onPinB` xuống + thêm action bỏ ghim. */}
           {ui.mode === "compare" ? (
-            <CompareScreen transcript={null} translations={[]} />
+            <CompareScreen transcript={transcript.data} translations={translations.data ?? []} />
           ) : ui.mode === "glossary" ? (
             /* §4.4 tab THUẬT NGỮ (Task 9). Màn này KHÔNG nhận prop: nó độc lập với
                kênh đang mở, và nó TỰ gọi `listTerms`/`createTerm`/`patchTerm`/
                `affectedPreview`. Đó là khác biệt có chủ ý với `EditScreen`/
-               `CompareScreen` ở trên — hai màn kia chờ đường CHỌN KÊNH. */
+               `CompareScreen` ở trên — hai màn kia đọc bản ghi đang mở. */
             <GlossaryScreen />
           ) : (
-            <EditScreen transcript={null} currentSegment={ui.currentSegment} />
+            <EditScreen transcript={transcript.data} currentSegment={ui.currentSegment} />
           )}
         </main>
         <aside className="shell__queue">
@@ -107,17 +149,17 @@ export function App() {
         </aside>
       </div>
       {/* Thanh transport (§4.1): phát, timecode, track có đầu đọc, ba nút xuất — Task 7.
-          ⚠️ TRẦN của lượt này, cùng lớp với `transcript={null}` ở trên: chưa có đường
-          CHỌN KÊNH nên `channelId` là `null`, chưa có đường chọn BẢN DỊCH nên
-          `translationId` là `null`, và do đó `segments` là `[]`. Thanh transport KHÔNG
-          tự bịa nguồn: nút phát VÔ HIỆU, không có `src`, ba nút xuất không có `href`.
-          Ngày có đường chọn kênh thì ba prop đó lấy từ `ui.channelId` + bản ghi đang mở
-          — không phải sửa gì trong `Transport.tsx`. */}
+          Task W1 nối BA prop dữ liệu của nó vào bản ghi đang mở: `sourceId` là kênh đang
+          chọn, `segments` là đoạn của bản ghi đó, `duration` là `Source.duration` của
+          CHÍNH kênh đó (backend đo — client không đo lại), và `translationId` là bản dịch
+          `done` MỚI NHẤT. Chưa chọn kênh ⇒ cả ba vẫn `null`/`[]`, và thanh transport nói
+          thật là chưa có gì để phát (nút vô hiệu, không `src`, không `href`). */}
       <footer className="shell__transport">
         <Transport
           sourceId={ui.channelId}
-          segments={[]}
-          translationId={null}
+          duration={kenhDangChon === null ? null : kenhDangChon.duration}
+          segments={transcript.data?.segments ?? []}
+          translationId={banDichXuat === null ? null : banDichXuat.id}
           playing={ui.playing}
           currentSegment={ui.currentSegment}
           onPlayingChange={(playing) => dispatch({ type: "setPlaying", playing })}

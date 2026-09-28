@@ -81,6 +81,12 @@ let taoPhanTu: (type: unknown, props?: unknown) => unknown;
 let Transport: (props: unknown) => unknown;
 /** `<Transport/>` la component DIEU KHIEN: `playing` la prop, nen can mot chu so huu. */
 let Thanh: (props: unknown) => unknown;
+/**
+ * Chu so huu `sourceId` — de DO duong "DOI KENH" (Task W1). `sourceId` la prop, nen muon
+ * doi no giua hai lan render thi phai co mot component giu no (giong `UiState.channelId`
+ * cua shell) va mot nut bam.
+ */
+let ThanhDoiKenh: (props: unknown) => unknown;
 let exportUrl: (id: number, fmt?: "srt" | "vtt" | "ass", bilingual?: boolean) => string;
 let mediaUrl: (id: number) => string;
 
@@ -131,6 +137,22 @@ describe("Transport: nut phat, timecode mono, track co dau doc, ba nut xuat", ()
     Thanh = (props: any): unknown => {
       const [playing, datPlaying] = react.useState(false);
       return react.createElement(Transport, { ...props, playing, onPlayingChange: datPlaying });
+    };
+
+    // Chu so huu `sourceId` cho bai DOI KENH: bam nut ⇒ `sourceId` doi ⇒ `Transport` duoc
+    // render lai voi prop moi (dung cach `App` lam khi `selectChannel` doi `ui.channelId`).
+    ThanhDoiKenh = (props: any): unknown => {
+      const [sourceId, datSourceId] = react.useState<number | null>(3);
+      return react.createElement(
+        "div",
+        null,
+        react.createElement(
+          "button",
+          { type: "button", "data-testid": "doi-kenh", onClick: () => datSourceId(4) },
+          "doi kenh",
+        ),
+        react.createElement(Transport, { ...props, sourceId }),
+      );
     };
 
     // ⚠️ THAY `play`/`pause` CUA JSDOM — khong phai gia lap nghiep vu, ma la go ro mot
@@ -360,6 +382,42 @@ describe("Transport: nut phat, timecode mono, track co dau doc, ba nut xuat", ()
     assert.equal(audio.currentTime, BA_DOAN[2].start, "nhay doan thi phai dat lai vi tri phat");
 
     assert.deepEqual(tiengOn, [], "su kien `timeupdate` khong duoc sinh tieng on console");
+    unmount();
+  });
+
+  it("DOI KENH: vi tri phat ve 0 khi `sourceId` doi — va mount KHONG goi `pause()`", () => {
+    // NO cua Task 7 (`M5`): `viTriPhat` la state CUC BO, khong duoc reset khi `sourceId` doi
+    // ⇒ dau doc giu vi tri cua kenh CU. Hom do chua voi toi duoc (chua co duong chon kenh);
+    // Task W1 lam duong do ton tai, nen no thanh loi THAT.
+    const { container, unmount } = render(
+      taoPhanTu(ThanhDoiKenh, { segments: BA_DOAN, translationId: 7, duration: 120 }),
+    );
+
+    const audio = phanTu(container, "audio") as HTMLAudioElement;
+    const dau = phanTu(container, ".tp__readhead") as HTMLElement;
+    assert.equal(daGoi.pause, 0, "mount KHONG duoc goi `pause()` (App.test.tsx ghim khong tieng on)");
+
+    audio.currentTime = 64.5;
+    fireEvent.timeUpdate(audio);
+    assert.equal(chu(container, ".tp__timecode"), "1:04.50 / 2:00.00");
+    assert.equal(dau.style.left, "53.75%", "dau doc da chay theo vi tri phat");
+
+    fireEvent.click(phanTu(container, '[data-testid="doi-kenh"]'));
+
+    // DOI KENH ⇒ vi tri phat cua kenh CU phai bi xoa, khong duoc mang sang kenh moi.
+    assert.equal(
+      chu(container, ".tp__timecode"),
+      "0:00.00 / 2:00.00",
+      "doi kenh thi vi tri phat phai ve 0 (giu vi tri cu = hien vi tri cua kenh CU)",
+    );
+    assert.equal(dau.style.left, "0%", "dau doc phai ve dau track");
+    // `src` doi theo kenh MOI — chung minh day la mot lan doi kenh THAT, khong phai mot
+    // lan render lai vo nghia.
+    assert.equal(phanTu(container, "audio").getAttribute("src"), "/api/media/4");
+    // Chua tung phat thi doi kenh KHONG duoc sinh them mot co che dung thu hai nao.
+    assert.equal(daGoi.pause, 0, "chua phat thi doi kenh khong duoc goi `pause()`");
+
+    assert.deepEqual(tiengOn, [], "doi kenh khong duoc sinh tieng on console");
     unmount();
   });
 

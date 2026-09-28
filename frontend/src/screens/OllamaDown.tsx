@@ -23,10 +23,13 @@
  * nó KHÁC cả hai: không có dữ liệu thì panel **không khẳng định gì** (render `null`).
  *
  * ⚠️ HAI CÂU KHÁC NHAU, KHÔNG ĐƯỢC GỘP (review Task 10: `Important #1` + `#2`):
- *   - *"Bóc băng vẫn chạy được: …"* — nhóm `kind === "asr"` (phiên âm chạy ngay trên máy,
- *     không cần Ollama). Engine ASR **KHÔNG dịch câu nào**, nên nó không bao giờ được nằm
- *     trong câu "… vẫn **dịch** được" (spec UI §4.8 tách hai câu: *"Bóc băng vẫn chạy
- *     được"* ≠ engine dịch).
+ *   - *"Bóc băng vẫn chạy được: …"* — nhóm `kind === "asr" && runtime === "inprocess"`
+ *     (phiên âm chạy ngay trên máy, không cần Ollama). ⚠️ Điều kiện `runtime` là **nợ Task 10
+ *     đóng kèm ở Task W1**: bản cũ chỉ lọc `kind === "asr"` nên khẳng định *"chạy ngay trên
+ *     máy"* cho **MỌI** ASR **bất kể `runtime`** — hôm nay đúng **4/4** chỉ vì cả bốn ASR
+ *     trong registry đều `inprocess`. Engine ASR **KHÔNG dịch câu nào**, nên nó không bao
+ *     giờ được nằm trong câu "… vẫn **dịch** được" (spec UI §4.8 tách hai câu: *"Bóc băng
+ *     vẫn chạy được"* ≠ engine dịch).
  *   - *"Còn/Không dùng được: …"* — nhóm `kind === "mt"`, chia theo `capabilities.available`
  *     mà **BACKEND** đã tính (`app/main.py::_mark_availability`); client ĐỌC THẲNG, và
  *     **thiếu khoá = KHÔNG dùng được** (cùng quy ước với `EngineSelect.tsx`).
@@ -94,10 +97,19 @@ export function OllamaDown({ status, specs, onRetry }: OllamaDownProps) {
   //     `EngineSelect.tsx:35`). `runtime` KHÔNG quyết định điều đó: `runtime:"ollama"` vẫn có
   //     thể `available:true` (tiến trình sống + model đã pull), và `runtime:"inprocess"` vẫn
   //     có thể `available:false` (model chưa pull) ⇒ suy từ `runtime` là nguồn sự thật thứ hai.
+  //   - "engine này chạy Ở ĐÂU" ⇒ `runtime`, và câu *"chạy ngay trên máy"* chỉ đúng cho
+  //     `runtime === "inprocess"`. Đo được: hôm nay cả **4/4** ASR trong registry đều
+  //     `inprocess`, nên một bản lọc chỉ theo `kind === "asr"` **nói đúng một cách tình cờ** —
+  //     một ASR chạy qua Ollama sẽ bị khẳng định "chạy ngay trên máy" trong khi nó cần model
+  //     đã pull. Fixture `SPECS_ASR_OLLAMA` trong test ghim đúng ca đó.
   //   - "engine này thuộc BƯỚC nào" ⇒ `kind` (`asr` = bóc băng, `mt` = dịch). ASR không dịch
   //     câu nào nên không được nằm trong câu "… vẫn dịch được" (spec UI §4.8 tách hai câu).
-  // Ba nhóm dưới đây PHÂN HOẠCH `specs`: mỗi spec rơi vào ĐÚNG MỘT nhóm, không spec nào bị bỏ.
-  const bocBang = specs.filter((s) => s.kind === "asr");
+  // ⚠️ Vì sao nhóm `bocBang` lọc thêm `runtime`: câu của nó KHẲNG ĐỊNH một điều kiện chạy
+  // ("không cần Ollama"), nên nó phải nói về nhóm engine mà điều kiện đó ĐÚNG. Hệ quả đã
+  // biết và khai ra: một ASR `runtime === "ollama"` KHÔNG được nêu tên ở bất kỳ câu nào
+  // (nó không phải engine DỊCH, và câu "chạy ngay trên máy" thì không đúng với nó) — không
+  // câu nào ở đây khẳng định nó dùng được.
+  const bocBang = specs.filter((s) => s.kind === "asr" && s.runtime === "inprocess");
   const con = specs.filter((s) => s.kind === "mt" && s.capabilities.available === true);
   const khong = specs.filter((s) => s.kind === "mt" && s.capabilities.available !== true);
 

@@ -885,3 +885,111 @@ body {
 .od__thu-lai:hover {
   border-color: var(--signal);
 }
+
+/* ── §3 + §12.5 BỘ CHỌN CHẾ ĐỘ (Task W1) + MỤC KÊNH ĐANG CHỌN ────────────────────────
+   Task W1 nối hai đường trước đây KHÔNG tồn tại: `setMode` (bộ chọn chế độ ở `Header`) và
+   `selectChannel` (mỗi mục của vùng KÊNH). Đây là LUẬT THẬT cho hai control đó — một
+   `className` trong TSX không vẽ gì cả, và một bài test chỉ khẳng định `className` vẫn
+   XANH khi luật CSS bị xoá (đo được HAI CHIỀU ở Task 6 — ERRATA #15 mục 3). */
+
+/* Nhóm chọn chế độ: BA lựa chọn cùng một trục, đẩy về cuối hàng flex của header. */
+.cd {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  margin-left: auto;
+}
+
+/* Một lựa chọn = input + nhãn. `inline-flex` để chữ nằm CẠNH ô radio, không xuống dòng. */
+.cd__o {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+}
+
+/* Ô radio: màu nhấn của trình duyệt lấy token, KHÔNG hard-code màu hệ thống. */
+.cd__radio {
+  accent-color: var(--signal);
+  margin: 0;
+}
+
+/* Nhãn là NHÃN KHẮC (§2.1: mono in hoa, cỡ nhỏ nhất được phép) — nó là tên chế độ. */
+.cd__nhan {
+  font-family: var(--font-label);
+  font-size: var(--fs-label);
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  color: var(--ink-1);
+  cursor: pointer;
+  transition: color var(--dur-1) var(--ease-1);
+}
+
+/* Chế độ ĐANG CHỌN: chữ sáng lên. Đây là tín hiệu THỨ HAI, không phải tín hiệu duy nhất:
+   ô radio đã được đánh dấu, và trạng thái máy đọc được là `checked` của `input`. */
+.cd__radio:checked + .cd__nhan {
+  color: var(--ink-0);
+}
+
+/* Mục KÊNH: mỗi mục là một NÚT (Task W1), nên phải bỏ kiểu nút mặc định của trình duyệt
+   mà KHÔNG bỏ focus ring toàn cục (`:focus-visible` ở đầu tệp). */
+.ch__item {
+  position: relative;
+  display: block;
+  width: 100%;
+  padding: var(--sp-2) var(--sp-3) var(--sp-2) var(--sp-5);
+  border: 0;
+  /* Mốc chọn là ĐƯỜNG KẺ TRÁI dày lên, không đổi bề rộng nút ⇒ danh sách không nhảy. */
+  border-left: var(--sp-1) solid transparent;
+  background: none;
+  color: var(--ink-1);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color var(--dur-1) var(--ease-1);
+}
+
+.ch__item:hover {
+  border-left-color: var(--ink-2);
+}
+
+/* §2.2 quy tắc 1 — amber CHỈ có một nghĩa: đang hoạt động. Kênh ĐANG MỞ là trạng thái
+   hoạt động của bàn làm việc, nên mốc trái của nó là `--signal`. */
+.ch__item[aria-pressed="true"] {
+  background: var(--panel-2);
+  color: var(--ink-0);
+  border-left-color: var(--signal);
+}
+
+/* DẤU NHÌN THẤY được của mục đang chọn: một GLYPH, không phải một sắc thái màu.
+   Ô này LUÔN có mặt (rỗng khi không chọn) nên bề rộng không nhảy khi đổi kênh. */
+.ch__dau {
+  position: absolute;
+  left: var(--sp-2);
+  top: var(--sp-2);
+  color: var(--signal);
+  font-family: var(--font-mono);
+  font-size: var(--fs-note);
+}
+
+.ch__ten,
+.ch__meta,
+.ch__tieng,
+.ch__buoc {
+  display: block;
+}
+
+.ch__ten {
+  font-family: var(--font-ui);
+  font-size: var(--fs-ui);
+}
+
+.ch__meta,
+.ch__buoc {
+  font-family: var(--font-mono);
+  font-size: var(--fs-num);
+  color: var(--ink-2);
+}
+
+.ch__tieng {
+  font-size: var(--fs-note);
+}

@@ -17,6 +17,18 @@
  * Client đã có chỗ chứa từ trước: `types.ts::Job.payload: Record<string, unknown>`, và
  * `useJobStream` giữ nguyên `Job` từ ảnh chụp (sự kiện SSE chỉ ghi sáu khoá của nó).
  *
+ * ## ĐƯỜNG CHỌN KÊNH (Task W1) — cái trước đây KHÔNG tồn tại
+ *
+ * Đo được trước W1: `selectChannel` **0 lượt dispatch** (chỉ có trong `reducer.ts` +
+ * `reducer.test.ts`) ⇒ `ui.channelId` luôn `null` ⇒ `transcript={null}` ở MỌI màn, tức
+ * **mọi màn chỉ hiện trạng thái rỗng** và thanh transport không có `src` (ERRATA #32).
+ * W1 nối đúng một chỗ: mỗi mục là một NÚT gọi `onSelect(source.id)`; `App` biến nó thành
+ * `dispatch({type:"selectChannel", id})`, và reducer xoá mọi vị trí gắn với kênh CŨ
+ * (`reducer.ts` — đoạn đang phát / đang sửa / ghim bản B).
+ *
+ * ⚠️ Vùng này KHÔNG tự giữ "kênh đang chọn": `selectedId` là PROP. Một bản sao cục bộ sẽ
+ * là nguồn sự thật thứ hai cho cùng một câu hỏi — và hai màn có thể nói hai chuyện khác nhau.
+ *
  * ## `ponytail:` TRẦN — cái KHÔNG nối được, và vì sao
  *
  * 1. **Bước DỊCH không nối được ở Task 4.** Payload của job `translate` mang
@@ -45,6 +57,16 @@ export interface ChannelZoneProps {
   jobs: Map<number, Job>;
   loading: boolean;
   error: string | null;
+  /**
+   * Id kênh ĐANG CHỌN (`UiState.channelId`); `null` = chưa chọn kênh nào.
+   *
+   * ⚠️ Đây là PROP, không phải state cục bộ: nguồn sự thật của "kênh nào đang mở" nằm
+   * trong MỘT chỗ (`state/reducer.ts`), và `Transport`/`EditScreen`/`CompareScreen` đọc
+   * cùng giá trị đó. Giữ một bản sao ở đây là mở đường cho hai màn nói hai chuyện khác nhau.
+   */
+  selectedId: number | null;
+  /** Yêu cầu chọn kênh — BEN GOI ghi lại (`dispatch({type:"selectChannel"})`). */
+  onSelect: (id: number) => void;
 }
 
 /** `duration` là GIÂY (số thực) do backend đo — client chỉ ĐỊNH DẠNG, không đo lại. */
@@ -93,7 +115,7 @@ export function buocCuaKenh(sourceId: number, type: JobType, jobs: Job[]): strin
   return CHU_STATE[moiNhat.state];
 }
 
-export function ChannelZone({ sources, jobs, loading, error }: ChannelZoneProps) {
+export function ChannelZone({ sources, jobs, loading, error, selectedId, onSelect }: ChannelZoneProps) {
   if (error !== null) {
     return (
       <div className="ch">
@@ -124,22 +146,41 @@ export function ChannelZone({ sources, jobs, loading, error }: ChannelZoneProps)
   return (
     <div className="ch">
       <ul className="ch__danh-sach">
-        {sources.map((source) => (
-          <li key={source.id} className="ch__item">
-            <span className="ch__ten">{source.origin}</span>
-            <span className="ch__meta">
-              {`${source.kind} · ${source.lang ?? "chưa rõ ngôn ngữ"} · ${thoiLuong(source.duration)}`}
-            </span>
-            {/* Sự thật CỦA CHÍNH `sources`: đã tách được tiếng hay chưa (`audio_path`). */}
-            <span className="ch__tieng">
-              {source.audio_path === null ? "chưa tách tiếng" : "đã tách tiếng"}
-            </span>
-            {/* Trạng thái TỪNG BƯỚC, suy từ job mang `payload.source_id` — xem TRẦN đầu tệp. */}
-            <span className="ch__buoc">
-              {BUOC_NGUON.map((buoc) => `${buoc.ten}: ${buocCuaKenh(source.id, buoc.type, dsJob)}`).join(" · ")}
-            </span>
-          </li>
-        ))}
+        {sources.map((source) => {
+          const dangChon = source.id === selectedId;
+          return (
+            <li key={source.id} className="ch__dong">
+              {/* MỘT NÚT, không phải `<div onClick>`: `button` native mới focus được bằng
+                  Tab và kích hoạt được bằng Enter/Space (spec UI §7 + §12.5). `type="button"`
+                  để nó không bao giờ thành nút submit của một form nào.
+                  `aria-pressed` là trạng thái MÁY đọc được; dấu `▸` bên dưới là trạng thái
+                  NGƯỜI đọc được — hai thứ khác nhau, và chỉ đổi MÀU là không đủ (spec UI §7:
+                  thông tin không được chỉ nằm ở màu). */}
+              <button
+                type="button"
+                className="ch__item"
+                aria-pressed={dangChon}
+                onClick={() => onSelect(source.id)}
+              >
+                {/* Dấu NHÌN THẤY được của mục đang chọn. Ô này LUÔN có mặt (rỗng khi không
+                    chọn) để bề rộng không nhảy khi đổi kênh. */}
+                <span className="ch__dau" aria-hidden>{dangChon ? "▸" : ""}</span>
+                <span className="ch__ten">{source.origin}</span>
+                <span className="ch__meta">
+                  {`${source.kind} · ${source.lang ?? "chưa rõ ngôn ngữ"} · ${thoiLuong(source.duration)}`}
+                </span>
+                {/* Sự thật CỦA CHÍNH `sources`: đã tách được tiếng hay chưa (`audio_path`). */}
+                <span className="ch__tieng">
+                  {source.audio_path === null ? "chưa tách tiếng" : "đã tách tiếng"}
+                </span>
+                {/* Trạng thái TỪNG BƯỚC, suy từ job mang `payload.source_id` — xem TRẦN đầu tệp. */}
+                <span className="ch__buoc">
+                  {BUOC_NGUON.map((buoc) => `${buoc.ten}: ${buocCuaKenh(source.id, buoc.type, dsJob)}`).join(" · ")}
+                </span>
+              </button>
+            </li>
+          );
+        })}
       </ul>
     </div>
   );

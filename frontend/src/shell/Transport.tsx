@@ -41,13 +41,16 @@
  * thai CUC BO — `UiState` khong co truong giay nao, va `timeupdate` ban ra ~4 lan/giay
  * nen keo no vao reducer la mot luong action khong ai doc.
  *
- * ## NO — chua co duong CHON KENH, nen hom nay moi prop du lieu deu `null`
+ * ## Duong CHON KENH nay DA CO (Task W1) — va vi tri phat thi chua
  *
- * Vung KENH (Task 4) moi CHI HIEN kenh, chua co duong CHON kenh, va chua co duong
- * chon BAN DICH. Nen `App` truyen `sourceId={null}`/`translationId={null}` — cung lop
- * TRAN da khai o `<EditScreen transcript={null} />` (Task 6). He qua DO DUOC: nut phat
- * VO HIEU (khong co gi de phat thi mot nut phat duoc la mot loi hua), khong co `src`,
- * va ba nut xuat khong co `href` (`aria-disabled`). Thanh nay KHONG tu bia ra nguon.
+ * Vung KENH (Task 4) truoc day moi CHI HIEN kenh; Task W1 them duong CHON kenh, nen `App`
+ * truyen `sourceId={ui.channelId}` + `segments` + `duration` + `translationId` THAT. Truoc
+ * do bon prop do luon `null`/`[]` ⇒ nut phat VO HIEU, khong `src`, ba nut xuat khong `href`.
+ *
+ * ⚠️ NHUNG vi tri phat (`viTriPhat`) la state CUC BO, nen khi `sourceId` doi no KHONG tu
+ * biet ⇒ dau doc giu vi tri cua kenh CU. Do la NO `M5` cua Task 7 (hom do chua voi toi
+ * duoc vi chua co duong chon kenh) va W1 dong no bang MOT effect reset — xem "DOI KENH"
+ * ngay duoi phan khai bao state.
  */
 import { useEffect, useRef, useState } from "react";
 import type { SyntheticEvent } from "react";
@@ -122,6 +125,24 @@ export function Transport({
   /** Thoi luong dung duoc: `null`/`0`/khong huu han deu la "chua biet" (xem `readheadPercent`). */
   const tongThoiLuong =
     duration !== null && Number.isFinite(duration) && duration > 0 ? duration : null;
+
+  /**
+   * DOI KENH ⇒ vi tri phat cua kenh CU phai bi XOA (no cua Task 7, `M5`).
+   *
+   * `viTriPhat` la state CUC BO (xem "Trang thai" o dau tep), nen no khong tu biet rang
+   * `sourceId` vua doi: khong co effect nay thi dau doc dung nguyen cho cua kenh truoc, va
+   * timecode doc ra mot vi tri KHONG thuoc kenh nao ca.
+   *
+   * ⚠️ Vi sao khong can mot co che DUNG thu hai: `selectChannel` cua reducer da dat
+   * `playing = false` (`state/reducer.ts`), nen effect phat ngay duoi day thay
+   * `playing !== daPhat.current` va tu goi `el.pause()` dung MOT lan. Them mot lan
+   * `pause()` nua o day la co che dung thu hai — va o lan MOUNT (chua co gi de dung) no
+   * con do "Not implemented" ra `console.error`, thu ma `App.test.tsx` ghim la khong duoc co.
+   * `datViTriPhat(0)` luc mount la mot phep gan vo hai (React bo qua khi gia tri khong doi).
+   */
+  useEffect(() => {
+    datViTriPhat(0);
+  }, [sourceId]);
 
   useEffect(() => {
     const el = phanTuMedia.current;
