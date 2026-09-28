@@ -1787,6 +1787,86 @@ Và **ràng buộc dòng 2722 (đọc thẳng `available`) phải được MÃ H
 là một ràng buộc chưa được bảo vệ.
 ⚠️ Và **`app.css` phải nằm trong `Files`** (ERRATA #16 mục 4) vì Task 10 **thêm hình thức** (dải trạng thái + panel).
 
+## ⚠️ ERRATA #31 — Review Task 10: **một lỗi BỐ CỤC đang xảy ra hôm nay**, panel nói SAI về ASR, và **cạm bẫy `git show` LF vs worktree CRLF**
+
+Review độc lập `e044d0b`: **`CONDITIONAL PASS` — 1 Critical / 3 Important / 3 Minor.** Cổng khớp lượt tôi tự đo (151/19/149/**2**/0, EXIT=1;
+typecheck 0; build 0; `--listFiles` 87 tệp / 0 `.test.`); bảng mutation của implementer **khớp** ở mọi lượt review chạy lại
+(`O1` +4, `O2` +3 **có đúng bài `unknown`**, `O6` +3, `X7`/`X8` +0). **Không đóng PASS.**
+
+### 1. 🔴 `Critical` — **`.shell` khai BỐN track nhưng KHÔNG con nào có `grid-row`** ⇒ lưới sai NGAY HÔM NAY
+`app.css:36` = `grid-template-rows: var(--head-h) auto 1fr var(--transport-h)`; `grep 'grid-row|grid-area' src/styles/` ⇒ **0 khop**;
+`.grain` là `position:fixed` nên **không phải grid item**. Khi `<OllamaDown/>` trả `null` (`OllamaDown.tsx:76` — nhánh `up`
+**và `status === null` lúc đang nạp**), DOM chỉ còn **3** con ⇒ auto-placement đẩy **`.shell__mid` vào track `auto`**
+và **`footer.shell__transport` vào `1fr`**, còn track `--transport-h` **bỏ trống**.
+⇒ **Comment `App.tsx:49-50` (*"hàng `auto` co lại bằng không ⇒ không có khoảng trống nào"*) SAI về cơ chế**: hàng `auto` **nuốt luôn
+bàn làm việc**. Đây là **trạng thái thật hôm nay** (11434 trả lời ⇒ panel vắng). **Bộ test MÙ HOÀN TOÀN** (`X7` +0, `M2` +0).
+⇒ **LUẬT: khai N track thì phải khai VỊ TRÍ (`grid-row`/`grid-area`) cho từng con** — auto-placement biến "hàng co lại" thành "hàng cướp chỗ".
+⇒ ⚠️ **Và ĐỪNG ghim `grid-template-rows` như báo cáo Task 10 đề nghị** — ghim thế là **đóng băng chính lỗi này**. Phải **ghim VỊ TRÍ**.
+
+### 2. 🟠 `Important` — panel **tính lại ở client** đại lượng backend đã tính (`runtime` thay vì `capabilities.available`)
+`OllamaDown.tsx:81-82` lọc `s.runtime === "inprocess"`; `EngineSelect.tsx` thì đọc thẳng `available`. Vi phạm `## Global Constraints`
+("không tính lại ở client") và **mâu thuẫn với chính §8.5 của báo cáo** (*"câu đúng phải là engine có `available !== true`"*).
+**Bị CHE** vì panel chỉ hiện khi `down`/`unknown`, lúc đó `ollama_available()` = `set()` ⇒ hai tiêu chí **trùng kết quả**.
+**Bằng chứng che khuất:** mutation `M1` (đổi sang `available`) ⇒ **0 bài đỏ** ⇒ *không bài nào phân biệt được hai cách hiểu*.
+⇒ **LUẬT: khi hai định nghĩa có thể TRÙNG NHAU trên dữ liệu thật, phải có một FIXTURE trong đó chúng MÂU THUẪN** (ví dụ `runtime:"ollama"`, `available:true`).
+
+### 3. 🟠 `Important` — panel nói SAI về **ASR**: `App.tsx:42` làm phẳng `asr + mt`, rồi `.od__con` in *"… vẫn **dịch** được"*
+Trên registry thật câu đó liệt kê **4 engine NHẬN DẠNG GIỌNG NÓI** (Faster-Whisper ×3, SenseVoice) là **dịch được**.
+Spec UI §4.8 **tách hai câu** (*"Bóc băng vẫn chạy được"* ≠ engine dịch). Và nó **ngược quy ước của chính task**:
+`EngineSelect.tsx:10-14` nói *"thiếu khoá ≠ dùng được"* nên **loại cả 4 ASR** khỏi dropdown, còn panel lại khẳng định cả 4 "vẫn dùng được".
+⚠️ Fixture `SPECS` của `OllamaDown.test.tsx` chỉ có **MT** ⇒ lỗi này **không thể lộ ra**. ⇒ **LUẬT: fixture phải có ĐÚNG HÌNH DẠNG THẬT** (đủ loại `kind`).
+
+### 4. 🟠 `Important` — `.shell__head` bị đổi sang `display:flex` (sửa luật bố cục của Task 1) **trong im lặng**
+`task-10-report.md` §8 liệt kê 12 chỗ lệch, **mục 10 chỉ nói `grid-template-rows`** — **không** dòng nào nói `.shell__head` đổi từ khối sang flex.
+Thay đổi là **cần**, nhưng **không được khai** và **`M2` (bỏ `display:flex`) ⇒ 0 bài đỏ**. ⇒ **LUẬT (đã có, nay bị vi phạm): MỌI thay đổi hình thức phải được khai VÀ được ghim.**
+
+### 5. 🔴 CẠM BẪY PHƯƠNG PHÁP MỚI — **ảnh phục hồi mutation phải là BYTE CỦA WORKTREE (CRLF), KHÔNG phải blob `git show`**
+`core.autocrlf=true` và **không có `.gitattributes`** ⇒ `git show HEAD:frontend/src/styles/app.css` trả **blob LF** (**24766 B**,
+sha256 `53461bbd…`) còn **worktree là CRLF** (**25629 B**, sha256 `c3e57ee0…`). ⇒ Driver dựng ảnh phục hồi từ `git show` sẽ:
+(a) **TRƯỢT** phép so byte "worktree == HEAD" (reviewer suýt bỏ **toàn bộ** lượt mutation vì việc này), **hoặc**
+(b) "phục hồi" về byte **LF** và để lại **cây BẨN trong khi `git diff --quiet` VẪN exit 0** (reviewer đã sập đúng bẫy này với `app.css`).
+⇒ **LUẬT: đẳng thức đúng là `git hash-object <path>` == `git rev-parse HEAD:<path>`** (⚠️ `git diff --quiet` **MÙ** với khác biệt byte này);
+**ảnh phục hồi phải lấy từ WORKTREE, không từ `git show`**; và **một backup cho MỘT TỆP, chụp TRƯỚC khi mutate**.
+(Đây là bản sharpening của ERRATA #20: `git show` trả **LF** — nhưng hậu quả lên **ẢNH PHỤC HỒI** thì nay mới đo được.)
+
+### 6. ⚠️ **Số dòng trong brief trôi** — đừng trỏ plan bằng số dòng
+Sau khi ERRATA #30 vá vào plan, mọi tham chiếu dạng "dòng 2687–2691"/"dòng 2722" trong brief Task 10 **đã cũ ~+45 dòng**
+(đính chính Task 2 nay ở **2735–2739**, ràng buộc `available` ở **2772**). ⇒ **LUẬT: trỏ plan bằng TÊN MỤC/TIÊU ĐỀ, không bằng số dòng**
+(một lần chèn ở giữa làm mọi số dòng phía sau **sai một cách im lặng**).
+⇒ **Nợ ghi lại (Minor, chưa sửa):** `Minor #1` `data-ollama="chua-doc-duoc"` là **giá trị thứ tư** ngoài `OllamaState`, **không có luật CSS**
+⇒ không phân biệt được *"chưa đọc xong"* với *"chưa đo được"*; `Minor #2` `.od` thiếu `role="status"`/`aria-live` (**spec KHÔNG đòi** — chỉ là đề nghị);
+`Minor #3` `X8` (`specs={[]}` ⇒ **+0 bài đỏ**) + **cách cắt khối CSS dễ vỡ** (`slice(indexOf(mốc))` tới **hết tệp** ⇒ luật của task SAU tự
+chui vào "khối Task 10"; sửa: cắt tới mốc `/* ──` kế tiếp).
+
+## ⚠️ ERRATA #32 — **BA ĐƯỜNG NỐI ĐANG THIẾU** ⇒ người dùng phê duyệt nối cả ba; chèn **Task W1** + **Task W2**
+
+Đo được, trước khi sửa: **`setMode` 0 lượt dispatch** · **`selectChannel` 0 lượt dispatch** · **`uploadSource` 0 lượt gọi** +
+**0** `type="file"`/`onDrop`/`dataTransfer` trong `frontend/src`. Hệ quả: **không rời được màn Biên tập**, **mọi màn chỉ hiện trạng thái rỗng**,
+và **workspace 1 không có cửa vào**. ⇒ **Task 12 của plan KHÔNG THỂ chạy như viết** (nó `findByRole("radio", {name:/thuật ngữ/i})`
+trên một control **không tồn tại**).
+⇒ Tôi hỏi người dùng **một câu** (đây là **quyết định phạm vi**, không phải xin phép thủ tục); người dùng chọn **"Nối cả ba"**
+(**chế độ + kênh + nạp tệp**). ⇒ **Task W1** (chế độ + kênh) và **Task W2** (nạp tệp §4.2) được chèn **TRƯỚC Task 11**, và
+**thứ tự thi hành nay là: W1 → W2 → 11 → 12 → 13** (để §12.5 có nhiều thứ chứng minh được hơn, xem ERRATA #33).
+⇒ **LUẬT: một màn hình "đã xong" mà không có đường tới nó thì chưa xong.** Bảng `## Spec coverage` đã tính §4.1/§4.3/§4.4 là **T6/T8/T9** —
+nhưng **dựng màn ≠ tới được màn**; ba đường nối này **không task nào sở hữu**, và đó là **lỗ hổng của plan**, không phải của implementer.
+
+## ⚠️ ERRATA #33 — Task 11: **`resolveKey` trả về action KHÔNG TỒN TẠI**, và **§12.5 KHÔNG gồm việc nạp tệp**
+
+### 1. 🔴 Plan Step 1 đòi `{type:"togglePlay"}` và `{type:"nudge"}` — **cả hai đều không có đích**
+`reducer.ts` `Action` **chỉ** có `selectChannel · setMode · setPlaying · setCurrentSegment · startEdit · endEdit · pinB · setError`.
+`nudge` **không tồn tại ở đâu** trong `frontend/src` ngoài **hai comment** (`lib/timecode.ts:24`, `lib/timecode.test.ts:23`).
+⇒ Làm y nguyên plan ⇒ **bàn phím là đồ trang trí**. ⇒ Brief Task 11 định nghĩa **`KeyAction` là từ vựng RIÊNG của bàn phím**
+(`useShortcuts` nhận **bảng xử lý**, không tự `dispatch`), nối **chỉ** những phím có đích thật (`togglePlay`→`setPlaying`, `setMode`→`setMode`),
+⚠️ **và `nudge` để RESOLVE nhưng KHÔNG nối** — vì `endpoints.patchTranscript(id, {segments})` **đủ** để ghi mốc thời gian qua đường thật,
+nhưng đó là **hành vi MỚI không task nào sở hữu** ⇒ **báo cáo, đừng tự làm**. ⇒ **§12.5 CHƯA ĐẠT ở đúng một bước: `nudge mốc`.**
+
+### 2. ✅ **§12.5 KHÔNG BAO GỒM việc nạp tệp ban đầu — spec nói thẳng** (dòng 435–437)
+*"Thao tác nạp tệp ban đầu vẫn cần chuột hoặc dán liên kết — đó là giới hạn của trình duyệt, không phải của thiết kế."*
+⇒ **Brief Task 11 gốc của tôi đã SAI** khi gọi việc thiếu nạp tệp là "bất khả vì thiếu chức năng". **Nó là ngoại lệ được spec cho phép.**
+⇒ **LUẬT: trước khi khai một tiêu chí là "không đạt", hãy ĐỌC chính câu tiêu chí đó trong spec** — spec này **tự khai giới hạn của nó**.
+⇒ Và vì W1/W2 chạy trước Task 11, §12.5 nay **tới được nhiều hơn**: `setMode`/`selectChannel` **đã có dispatch**, nên `1/2/3` đổi chế độ
+và chọn kênh **phải chứng minh được trên DOM THẬT**. **Đoạn duy nhất còn bất khả là `nudge`.**
+
 ## Quy ước thẩm mỹ — spec UI thắng, skill chỉ là checklist
 
 Spec `2026-09-25-phu-de-lab-ui-design.md` là **nguồn có thẩm quyền về hình thức** (bạn đã duyệt). Skill
@@ -2780,6 +2860,39 @@ it("dropdown chi liet ke engine available", () => {
   - Ba trạng thái `up`/`down`/`unknown` được kiểm **bằng props** (ba bài test + ba mutation `O2`/`O3`), không bằng cách đổi máy.
 
 - [ ] **Step 5: Commit** — `feat(fe): trang thai Ollama tat la hang nhat + dropdown loc theo available`.
+
+---
+
+### Task W1: NỐI CHẾ ĐỘ + NỐI KÊNH — hai đường đang thiếu (chèn bởi **ERRATA #32**, người dùng đã phê duyệt)
+
+**Vì sao có task này:** đo được `setMode` **0 lượt dispatch** (`Header.tsx` chỉ có một `<h1>`) ⇒ **Đối chiếu/Thuật ngữ KHÔNG tới được**;
+`selectChannel` **0 lượt dispatch** ⇒ `transcript={null}` ở mọi màn ⇒ **mọi màn chỉ hiện trạng thái rỗng**. Không có hai đường này thì
+Task 12 **không thể chạy** (nó click một `radio` không tồn tại) và §4.1/§4.3/§4.4 **không chứng minh được**.
+
+**Files:** Modify `src/shell/Header.tsx` (+test) · `src/shell/ChannelZone.tsx` (+test) · `src/shell/App.tsx` (+test) ·
+`src/shell/Transport.tsx` (+test) · `src/styles/app.css`; Create `src/state/channelData.ts` (+test).
+**Interfaces:** `chonTranscript(rows, channelId) → TranscriptSummary | null` (MỚI NHẤT theo `id`, khớp `source_id` — **cùng quy ước với `ChannelZone.buocCuaKenh`**) ·
+`chonTranslation(rows) → Translation | null` (`status === "done"`, mới nhất) · `RoleList` chế độ ở `Header` · `ChannelZone` thêm `selectedId` + `onSelect`.
+**Bước:** (1) test ĐỎ; (2) chọn chế độ + chọn kênh; (3) suy dữ liệu cho ba màn **đúng comment `App.tsx:70-72`** (một hook `useApi` + `Promise.all` cho `TranslationDetail[]` — ⚠️ **không** `useApi` trong vòng lặp);
+(4) reset vị trí phát khi đổi kênh; (5) mutation; (6) commit.
+**Đóng nợ:** `M9` (nhánh `glossary` của `App` nay tới được) và nợ "chưa chọn được kênh". ⚠️ **`nudge` VẪN MỞ.**
+**Brief đầy đủ:** `.superpowers/sdd/2026-09-26-frontend-workspace-2/task-w1-brief.md`.
+
+---
+
+### Task W2: NẠP TỆP §4.2 — đường vào của workspace 1 (chèn bởi **ERRATA #32**)
+
+**Vì sao có task này:** `uploadSource` **0 lượt gọi**, **không** `type="file"`/`onDrop`/`dataTransfer` ở đâu trong `frontend/src`
+⇒ **workspace 1 (audio → text) không có cửa vào.** Spec UI §4.2 mô tả chỗ này: **khung kẻ nét đứt** ở **vùng giữa** + `KÉO TỆP VÀO ĐÂY`
++ dòng mono định dạng; §12.2 đòi **nạp 3 tệp cùng lúc** ⇒ cần **một lối nạp luôn tới được**.
+
+**Files:** Create `src/shell/IntakeFrame.tsx` (+test); Modify `src/screens/EditScreen.tsx` (+test) · `src/shell/ChannelZone.tsx` (+test) ·
+`src/shell/App.tsx` (+test) · `src/styles/app.css`.
+**Interfaces:** `napTep(files: File[], lang: SourceLang) → Promise<KetQuaNap[]>` ở `App` (**MỘT** hàm, hai lối vào) — nạp **lần lượt**,
+mỗi tệp trả `ok`/`loi` (`ApiError.message`); xong thì `sources.reload()` + `selectChannel` cho tệp **thành công đầu tiên** (mọi tệp lỗi ⇒ **không** đổi kênh).
+**Ràng buộc THẬT:** `POST /api/sources/upload` là **multipart**, `lang` là trường **FORM**, `ALLOWED_LANGS = {zh, en}` ⇒ UI **chỉ cho `zh`/`en`**.
+⚠️ **Backend KHÔNG có whitelist định dạng** (`_safe_name` chỉ giữ `suffix`) ⇒ dòng mono là **thông tin, KHÔNG phải thi hành**; **client KHÔNG được chặn** tệp (chặn ở client khi backend không chặn = **nguồn sự thật thứ hai**). `accept=` **không** phải phép kiểm (kéo-thả bỏ qua nó).
+**Brief đầy đủ:** `.superpowers/sdd/2026-09-26-frontend-workspace-2/task-w2-brief.md`.
 
 ---
 
