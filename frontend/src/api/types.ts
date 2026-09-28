@@ -11,29 +11,30 @@
  * Vì sao viết tay thay vì sinh từ `/openapi.json`: spec §2 chốt rằng thứ nhỏ nhất
  * sập khi shape trôi là một contract test, và nó sập ỒN ÀO. Xem `contract.test.ts`.
  *
- * MỨC KIỂM THẬT của MỌI KIỂU đã export — 33 kiểu (23 `interface` + 10 `type`),
- * đọc ra từ `contract.test.ts`, KHÔNG phải lời hứa. Dưới đây là BỐN nhóm, mỗi
- * nhóm mở đầu bằng con số của nó; bốn con số đó là 10, 9, 5, 8 và cộng lại bằng
- * 32; thêm `OllamaState` nêu riêng ở cuối là ĐỦ 33. Cũng đủ nếu cộng theo khoá
- * khai báo: 23 `interface` + 9 `type` không có bài kiểm + `OllamaState` (cũng là
- * `type`) = 33:
- *   đếm lại từ `frontend/` — Select-String -Path src/api/types.ts -Pattern '^export (interface|type) '
- *   đếm `type` riêng (cùng `frontend/`) — Select-String -Path src/api/types.ts -Pattern '^export type '
- *   kiểu nào test chạm (cùng `frontend/`, quét CẢ `src/` lẫn `test/`) —
+ * MỨC KIỂM THẬT của MỌI KIỂU đã export — đọc ra từ `contract.test.ts`, KHÔNG phải
+ * lời hứa. ⚠️ KHÔNG viết con số vào khối này: ERRATA #4 mục 7 / #6 mục 1 cấm nó, và
+ * chính tệp này đã nói dối bằng số BỐN vòng liên tiếp (lần cuối: khai 33 kiểu trong
+ * khi đo được 36). Một khối comment liệt kê/đếm là nghĩa vụ bảo trì không ai canh.
+ * Đếm bằng LỆNH, chạy từ `frontend/`:
+ *   đếm MỌI kiểu đã export —
+ *     Select-String -Path src/api/types.ts -Pattern '^export (interface|type) '
+ *   đếm `export type` riêng — cùng lệnh, đổi mẫu thành '^export type '
+ *   kiểu nào test chạm (quét CẢ `src/` lẫn `test/`) —
  *     $f = Get-ChildItem src,test -Recurse -File | Where-Object { $_.Name -match '\.test\.(ts|tsx|mjs|js)$' }
- *     $f | Select-String '\bOllamaState\b'
+ *     $f | Select-String '\b<TenKieu>\b'
  *
- *   CÓ bài kiểm khoá (route được GỌI THẬT, response được soi từng khoá) — 10
- *   `interface`:
+ *   CÓ bài kiểm khoá (route được GỌI THẬT, response được soi từng khoá):
  *     `Status` (`GET /api/status`) · `Registry`, `EngineSpec`, `EngineCapabilities`
  *     (`GET /api/registry`) · `TranscriptSummary`, `Translation`
  *     (`GET /api/transcripts`) · `Transcript`, `Segment` (`GET /api/transcripts/{id}`)
- *     · `GlossaryVersion` (`GET /api/glossary/version`).
+ *     · `GlossaryVersion` (`GET /api/glossary/version`) · `TranslationDetail`,
+ *     `TranslationCps`, `TranslationCpsRow` (`GET /api/translations/{id}` — Task 8,
+ *     soi trên một backend có DB GIEO, vì DB repo rỗng).
  *     `Word` cũng được soi, nhưng CHỈ khi một segment thật sự CÓ khoá `words` —
  *     và khoá đó có thể là mảng RỖNG, xem `Segment` bên dưới.
  *
  *   CHỈ được đối chiếu MÃ NGUỒN (đọc `routes_*.py`/`models.py`); một lần trôi khoá
- *   ở nhóm này KHÔNG làm tệp test đỏ — 8 `interface` + 1 `type` = 9:
+ *   ở nhóm này KHÔNG làm tệp test đỏ:
  *     - `SourceCreated`, `TranslationCreated`: chỉ có trong body của
  *       `POST /api/sources/*` và `POST /api/translations`. Gọi thật cần upload thật
  *       và một engine MT thật — Ollama đang tắt, nên không endpoint nào được gọi.
@@ -43,16 +44,16 @@
  *     - `Source`, `Job`, `Term`, `TermWithAffected`: route `GET` CÓ thật, nhưng bài
  *       hiện tại chỉ khẳng định "là một mảng" — chưa soi khoá nào.
  *
- *   `*Create`/`*Patch` là BODY gửi LÊN (không phải response) — 5 `interface`:
+ *   `*Create`/`*Patch` là BODY gửi LÊN (không phải response):
  *   `TranscriptPatch`, `TranslationSegmentPatch`, `TranslationCreate`, `TermCreate`,
  *   `TermPatch`. Đối chiếu với `routes_*.py` bằng cách đọc mã, cộng hai bài 422 đo
  *   TÊN trường (`transcript_id`, `lang`). Đừng nhóm theo HẬU TỐ: `TranslationCreated`
  *   và `SourceCreated` cũng kết thúc bằng "Created" nhưng là RESPONSE, đã ở nhóm 2;
- *   theo hậu tố `*Create|*Created|*Patch` thì đếm ra 7 `interface`, không phải 5.
+ *   theo hậu tố `*Create|*Created|*Patch` thì nhóm này phình thêm hai tên SAI nhóm.
  *
- *   8 `type` dưới đây KHÔNG có bài kiểm nào: `JobType`, `JobState`, `SourceLang`,
+ *   Các `type` union GIÁ TRỊ không có bài kiểm nào: `JobType`, `JobState`, `SourceLang`,
  *   `SourceKind`, `TranscriptStatus`, `TranslationStatus`, `EngineKind`,
- *   `EngineRuntime`. Không tệp `*.test.*` nào import hay nhắc chúng. Cả 8 là union
+ *   `EngineRuntime`. Không tệp `*.test.*` nào import hay nhắc chúng. Tất cả là union
  *   GIÁ TRỊ và đều là KIỂU CỦA MỘT TRƯỜNG của interface ở nhóm 1 hoặc nhóm 2
  *   (`JobState` còn ở `JobEvent`, `TranscriptStatus` còn ở `TranscriptPatch` nhóm
  *   3): `JobType`, `JobState` của `Job`; `SourceLang`, `SourceKind` của `Source`;

@@ -109,9 +109,17 @@ def cps_issue(row: CpsRow) -> str | None:
     Định dạng giữ nguyên y như trước khi tách hàm — nó là hợp đồng grep được.
 
     Nhánh `nowindow` ghi SỐ KÝ TỰ chứ không ghi một thời lượng: `0.0s` cho một cửa
-    sổ âm là con số bịa, và in `inf` thì `json.dumps` ném `ValueError: Out of range
-    float values are not JSON compliant`. Báo như thế này thay vì để phép chia giết
-    cả job dịch.
+    sổ âm là con số bịa. Báo như thế này thay vì để phép chia giết cả job dịch.
+
+    ⚠️ CƠ CHẾ (ERRATA #15 mục 2 — bản đầu của khối này kể SAI): `json.dumps({"cps":
+    inf})` **KHÔNG** ném, nó trả `{"cps": Infinity}` (đã đo). `ValueError: Out of range
+    float values are not JSON compliant` đến từ `JSONResponse.render` của Starlette,
+    nơi gọi `json.dumps(..., allow_nan=False)`. Nên `inf` không phải thứ `json.dumps`
+    từ chối — nó là thứ **tầng HTTP** từ chối.
+
+    ⚠️ `CpsRow.chars` ở trên đếm `len(text.strip())` — **CÓ** khoảng trắng. Route
+    `readability` phát một khoá đếm ký tự **KHÁC** (`chars_no_space`, bỏ khoảng
+    trắng), nên cùng một dòng có thể ra hai con số. Hai tên khác nhau là cố ý.
     """
     if row.cps is None:
         return f"cps:{row.i}=nowindow/{row.chars}c"

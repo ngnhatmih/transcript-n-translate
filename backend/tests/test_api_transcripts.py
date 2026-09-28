@@ -306,7 +306,8 @@ def test_readability_does_not_crash_on_a_zero_duration_segment(client):
 
     assert r.status_code == 200, r.text
     assert "Infinity" not in r.text, (
-        "`inf` lọt vào JSON chính là lỗi 500 cũ; `json.dumps` ghi nó là `Infinity`"
+        "`inf` tới được response là lỗi 500 cũ; tầng HTTP ghi nó là `Infinity` trước "
+        "khi `JSONResponse.render` từ chối (`allow_nan=False`)"
     )
     rows = {item["i"]: item for item in r.json()["too_fast"]}
     assert 0 in rows, (
@@ -314,4 +315,7 @@ def test_readability_does_not_crash_on_a_zero_duration_segment(client):
         "thì người dùng tưởng dòng đó đọc vừa"
     )
     assert rows[0]["cps"] is None, "không đo được thì không được bịa một tốc độ"
-    assert rows[0]["chars"] == 2, "vẫn phải nói được đã đếm bao nhiêu ký tự"
+    # Tên khoá là `chars_no_space`, KHÔNG phải `chars`: `mt_qa` cũng phát một khoá tên
+    # `chars` nhưng nghĩa KHÁC (`len(text.strip())` — CÓ đếm khoảng trắng). Hai khoá
+    # cùng tên mang hai nghĩa là đúng thứ khiến người sau đọc sai số.
+    assert rows[0]["chars_no_space"] == 2, "vẫn phải nói được đã đếm bao nhiêu ký tự"

@@ -76,12 +76,18 @@ def _readme_baseline(text: str | None = None) -> tuple[int, int]:
 
 
 #: Dòng tổng kết của `--collect-only` khi `addopts = -q` đang bật (xem
-#: `pytest.ini`), nay là `821/834 tests collected (13 deselected) in 1,07s`. Đọc
-#: CẢ HAI vế của phân số chứ không chỉ một con số: lần chạy mặc định CHỌN `821`
-#: bài nhưng chỉ `821` bài đó mới `passed` khi `ffmpeg`/`ffprobe` có mặt — thiếu
+#: `pytest.ini`), nay là `830/843 tests collected (13 deselected) in 1,07s`. Đọc
+#: CẢ HAI vế của phân số chứ không chỉ một con số: lần chạy mặc định CHỌN `830`
+#: bài nhưng chỉ `830` bài đó mới `passed` khi `ffmpeg`/`ffprobe` có mặt — thiếu
 #: chúng thì `tests/test_ingest.py` skip cả module và số `passed` tụt xuống
-#: `812`. Vì vậy "số bài chọn được" không bằng "số bài passed", và tệp này chỉ
+#: `821`. Vì vậy "số bài chọn được" không bằng "số bài passed", và tệp này chỉ
 #: được phép khẳng định thứ nó đo được.
+#:
+#: ⚠️ LUẬT: hai con số trên là SỐ BÀI TEST, nên mọi task backend THÊM/GỠ bài test
+#: PHẢI cập nhật `backend/README.md` trong CÙNG commit — nếu không,
+#: `test_readme_baseline_matches_the_tests_actually_collected` đỏ. Và khi cập nhật
+#: thì cập nhật CẢ khối comment này: nó từng còn ghi `821/834` trong khi README đã
+#: bump lên `830` — tức số cũ nằm ngay trong tệp tồn tại để ghim số.
 _COLLECTED = re.compile(r"(\d+)/(\d+) tests? collected \((\d+) deselected\)")
 
 

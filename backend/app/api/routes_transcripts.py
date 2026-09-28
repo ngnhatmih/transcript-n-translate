@@ -128,25 +128,38 @@ def readability(transcript_id: int, threshold: float = CPS_WARN,
     vẫn có thể không đọc kịp).
 
     Một đoạn có thời lượng `<= 0` KHÔNG được đi qua `reading_cps`: hàm đó trả
-    `float("inf")` (đúng về toán), mà `inf` thì `json.dumps` từ chối —
-    `ValueError: Out of range float values are not JSON compliant` ⇒ cả route 500
-    và người dùng mất TOÀN BỘ danh sách vì MỘT dòng dữ liệu hỏng. Cách xử ở đây
-    theo ĐÚNG nhánh `nowindow` mà `mt_qa.qa_translation` đã dùng: báo là KHÔNG ĐO
-    ĐƯỢC kèm số ký tự, KHÔNG in một tốc độ chưa từng đo được, và báo BẤT KỂ ngưỡng
-    — đây là dữ liệu hỏng, không phải "hơi nhanh". `chars` có mặt ở CẢ HAI nhánh để
-    hình dạng mỗi mục là một: người đọc không phải xử hai hình dạng.
+    `float("inf")` (đúng về toán), và để `inf` tới được response thì
+    `ValueError: Out of range float values are not JSON compliant` ⇒ cả route 500 và
+    người dùng mất TOÀN BỘ danh sách vì MỘT dòng dữ liệu hỏng.
+
+    ⚠️ CƠ CHẾ, nói cho đúng (ERRATA #15 mục 2 — một lời giải thích cơ chế cũng là một
+    lời khai, và bản đầu của khối này đã kể SAI): `json.dumps({"cps": inf})` **KHÔNG**
+    ném — nó trả `{"cps": Infinity}` (đã đo). `ValueError` đến từ
+    `starlette.responses.JSONResponse.render`, nơi gọi `json.dumps(..., allow_nan=False)`.
+    Đây là ràng buộc của TẦNG HTTP, không phải của `json.dumps` nói chung.
+
+    Cách xử ở đây theo ĐÚNG nhánh `nowindow` mà `mt_qa.qa_translation` đã dùng: báo là
+    KHÔNG ĐO ĐƯỢC kèm số ký tự, KHÔNG in một tốc độ chưa từng đo được, và báo BẤT KỂ
+    ngưỡng — đây là dữ liệu hỏng, không phải "hơi nhanh".
+
+    Khoá đếm ký tự tên là `chars_no_space` vì định nghĩa ở đây là của `reading_cps`
+    (BỎ khoảng trắng). ⚠️ `mt_qa` cũng phát một khoá tên `chars` nhưng nghĩa **KHÁC**
+    (`len(text.strip())` — CÓ đếm khoảng trắng), nên cùng một dòng có thể ra hai con số
+    khác nhau. Hai khoá cùng tên mà khác nghĩa là đúng thứ khiến người sau đọc sai số;
+    tên ở đây nói rõ nghĩa của nó.
     """
     transcript = _require_transcript(repos, transcript_id)
     too_fast = []
     for seg in transcript.segments:
-        chars = len("".join(seg.text.split()))
+        chars_no_space = len("".join(seg.text.split()))
         if seg.end - seg.start <= 0:
-            too_fast.append({"i": seg.i, "cps": None, "chars": chars,
+            too_fast.append({"i": seg.i, "cps": None, "chars_no_space": chars_no_space,
                              "start": seg.start, "end": seg.end})
             continue
         cps = reading_cps(seg.text, seg.start, seg.end)
         if cps > threshold:
-            too_fast.append({"i": seg.i, "cps": round(cps, 1), "chars": chars,
+            too_fast.append({"i": seg.i, "cps": round(cps, 1),
+                             "chars_no_space": chars_no_space,
                              "start": seg.start, "end": seg.end})
     return {"threshold": threshold, "too_fast": too_fast}
 

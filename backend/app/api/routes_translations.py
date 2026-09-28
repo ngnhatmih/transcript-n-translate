@@ -186,9 +186,21 @@ def get_translation(translation_id: int, repos=Depends(get_repos)):
     không có nguồn nào cho cột phải và cho cột CPS.
 
     CPS KHÔNG được tính lại ở đây. `mt_qa.cps_row` là chỗ DUY NHẤT tính nó, và cũng
-    là chỗ sinh chuỗi `cps:` trong `qa_issues` — nên con số giao diện hiển thị và
-    chuỗi mà QA ghi lại KHÔNG THỂ lệch nhau, và client không phải parse một chuỗi
+    là chỗ sinh chuỗi `cps:` trong `qa_issues`, nên client không phải parse một chuỗi
     hiển thị để lấy con số nó hiển thị.
+
+    ⚠️ ĐIỀU KIỆN của "cùng một chỗ tính", nói cho đúng (ERRATA #15 mục 2: một lời
+    giải thích cơ chế cũng là một lời khai): hai đường chỉ chắc chắn khớp nhau khi
+    `QaLimits` dùng để SINH `qa_issues` đúng bằng `QaLimits()` mà route dùng ở đây.
+    Hôm nay đúng như vậy — `main.py` dựng `TranslateHandler(repos, mt_engines)` và
+    không truyền `limits=`, nên cả hai đi bằng mặc định. Nhưng ngưỡng **không được
+    lưu** cùng hàng `translations` (`schema.py` không có cột nào cho nó), nên một
+    đường chạy với `QaLimits` tuỳ biến sẽ làm con số của route lệch khỏi chuỗi đã
+    ghi trong `qa_issues` — và lệch IM LẶNG.
+    `ponytail:` TRẦN: "con số của route = con số của `qa_issues`" chỉ đúng trong
+    điều kiện `QaLimits()` mặc định. ĐƯỜNG NÂNG CẤP: lưu ngưỡng (`max_cps`) cùng hàng
+    `translations` lúc `TranslateHandler` ghi kết quả, rồi route đọc ngưỡng ĐÃ LƯU
+    thay vì dựng `QaLimits()` mới.
 
     `segments` là đoạn của BẢN DỊCH, nhưng cửa sổ thời gian để đo CPS vẫn là cửa sổ
     NGUỒN (`mt_qa._window`): đó mới là khoảng người xem thật sự thấy dòng dịch.
