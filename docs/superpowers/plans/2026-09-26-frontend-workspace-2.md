@@ -2230,9 +2230,24 @@ Muốn chụp ảnh vùng HÀNG ĐỢI (để thấy §12.2 *"vì sao chờ"* v�
 | `running` | **`interrupted`** | backend **đối soát job mồ côi lúc khởi động** (Task 10 recovery) |
 | `queued` | **`failed`** | **worker SỐNG trong tiến trình nhặt và chạy** nó; chưa pull model ⇒ thất bại |
 ⇒ **Chỉ ba trạng thái TĨNH quan sát được: `done`, `failed`, `interrupted`.**
-🔴 **Hệ quả cho D2 + Task 12:** nút **HUỶ** chỉ có nghĩa với `queued`/`running` ⇒ **nút huỷ KHÔNG THỂ chụp ảnh bằng dữ liệu gieo tĩnh**;
+🔴 **Hệ quả cho D2 + Task 12:** nút **HUỶ** chỉ có nghĩa với `queued`/`running` ⇒ **với server THƯỜNG, nút huỷ không chụp ảnh được bằng dữ liệu gieo tĩnh**;
 nó **buộc phải** được chứng minh bằng **test** (fixture `node:http` điều khiển được trạng thái). Ảnh chỉ chứng minh được **nút chạy lại**.
+⚠️ **Nhưng xem NGAY mục 1b bên dưới — điều đó KHÔNG đúng nói chung, và tôi đã đo được cách chụp nút huỷ.**
 ⇒ **LUẬT: fixture phải khớp điều hệ thống THẬT SỰ làm, không phải điều mình muốn nó làm.** (Cùng họ với `INSERT OR IGNORE` no-op ở #35 mục 3.)
+
+### 1b. ✅ **ĐÍNH CHÍNH CHÍNH MỤC 1 — nút HUỶ CHỤP ẢNH ĐƯỢC**, nếu phục vụ app **KHÔNG kèm worker**
+Câu ở mục 1 (*"nút huỷ KHÔNG THỂ chụp ảnh"*) đúng với **server thường**, nhưng **SAI** nói chung.
+Đo được: `app/main.py` gọi `worker.recover()` rồi `Thread(worker.run_forever)` **vô điều kiện** (không có công tắc env),
+**nhưng** `build_components()` và `build_app()` **tách rời** khỏi việc chạy worker ⇒ có thể phục vụ app mà **bỏ cả hai**:
+`_seed/serve_no_worker.py` (scratch, ngoài repo). Khi đó trạng thái gieo **đứng yên**, đo qua `/api/jobs`:
+```
+id=1 ingest    done     xong
+id=2 asr       queued   chờ chạy       ← NÚT HUỶ hiện được
+id=3 translate running  đang dịch 0.42 ← thanh tiến trình + nút HUỶ
+```
+(Ép trạng thái bằng `_seed/make_queued.py` sau khi gieo.)
+⇒ **LUẬT: "không quan sát được" phải được kiểm bằng cách TÁCH THÀNH PHẦN RA, không chỉ bằng cách chạy nguyên hệ thống.** — lần thứ hai trong giai đoạn này một câu *"không thể"* của tôi bị chính phép đo của tôi lật (lần trước: Chromium, #40).
+⚠️ Và đây **không** phải cách chạy sản phẩm: không worker thì **không có gì tiến triển**. Nó là **công cụ chụp ảnh trạng thái**, dùng xong tắt.
 
 ### 2. ✅ NỢ ĐÃ ĐÓNG — độ dài đoạn khác nhau để cột CPS có **cả hai chiều**
 `_seed/seed.py` trước đây dùng **mọi đoạn 1 giây** ⇒ **cả 5 dòng CPS đều vượt ngưỡng** (phát hiện từ **ảnh chụp thật**, #41 mục 3b).
