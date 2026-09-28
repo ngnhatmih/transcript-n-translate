@@ -10,7 +10,7 @@
  *
  * `aria-hidden` trên `.grain`: lớp nhiễu là trang trí, không phải nội dung.
  */
-import { useReducer } from "react";
+import { useEffect, useReducer, useRef } from "react";
 
 import { endpoints } from "../api/endpoints.ts";
 import { CompareScreen } from "../screens/CompareScreen.tsx";
@@ -52,8 +52,9 @@ export function App() {
   // `listTranslations(tid)` → `getTranslation` cho TỪNG hàng.
   // ---------------------------------------------------------------------------
 
-  // DANH SÁCH TRANSCRIPT: MỘT lượt cho CẢ app (`[]` — đường dẫn không phụ thuộc gì). Đọc
-  // một lần rồi suy ra bản ghi đang mở, thay vì mỗi màn tự hỏi một câu khác nhau.
+  // DANH SÁCH TRANSCRIPT: MỘT lượt cho CẢ app (`[]` — đường dẫn không phụ thuộc gì), CỘNG
+  // ngòi nổ đọc lại ở dưới (kênh đổi, hoặc job của kênh đang chọn chuyển trạng thái).
+  // Đọc một lần rồi suy ra bản ghi đang mở, thay vì mỗi màn tự hỏi một câu khác nhau.
   const transcripts = useApi(() => endpoints.listTranscripts(), []);
   // QUY ƯỚC "id lớn nhất là hiện tại" nằm trong `channelData.chonTranscript` — CÙNG quy ước
   // với `ChannelZone.buocCuaKenh` (hai quy ước cho một câu hỏi là nguồn sự thật thứ hai).
@@ -79,6 +80,71 @@ export function App() {
   }, [tid]);
   // Bản dịch để XUẤT: `status === "done"` và mới nhất (chưa xong thì chưa có nội dung dịch).
   const banDichXuat = chonTranslation(translations.data ?? []);
+
+  // ---------------------------------------------------------------------------
+  // NGÒI NỔ ĐỌC LẠI `/api/transcripts` (vòng sửa W1 #1 — `Minor #3`, LỖI CHỨC NĂNG)
+  //
+  // ĐO ĐƯỢC trước vòng sửa: danh sách transcript được đọc ĐÚNG MỘT lần với `deps = []`, và
+  // `transcripts.reload` không được nối vào đâu (`grep '\.reload'` chỉ ra `status.reload`)
+  // ⇒ sau khi job `ingest`/`asr` xong, BẢN GHI MỚI KHÔNG BAO GIỜ HIỆN cho tới khi tải lại
+  // cả trang. W2 (nạp tệp) và W3 (bắt đầu dịch) đụng ngay chỗ này.
+  //
+  // HAI vế của một ngòi nổ, và cả hai đều phải có:
+  //   (a) `ui.channelId` ĐỔI ⇒ đọc lại danh sách (bản ghi đang mở của kênh mới có thể chưa
+  //       có trong ảnh chụp cũ). Ngòi này chạy một lần cho mỗi lần đổi kênh.
+  //   (b) MỘT JOB CỦA KÊNH ĐANG CHỌN chuyển sang `done` ⇒ đọc lại. Đây là vế đóng lỗi
+  //       "job xong mà danh sách không đổi".
+  //
+  // ⚠️ VẾ (b) SO VỚI BẢN ĐỒ JOB TRƯỚC ĐÓ, KHÔNG PHẢI "job nào đó đang `done`": gọi lại mỗi
+  // nhịp SSE là BÃO REQUEST (mỗi sự kiện tiến độ ⇒ một `GET /api/transcripts`), và bài test
+  // `khong bao request` đếm số request ở PHÍA SERVER để ghim đúng vế đó.
+  // ⚠️ Và lần đổi kênh chỉ GHI LẠI MỐC, không tự kích: lần đọc lại của (a) xảy ra qua `deps`
+  // `[ui.channelId]` của `banGhiTomTat`/`chonTranscript`. Gọi `reload()` ở đây nữa là HAI
+  // request cho MỘT lần bấm kênh.
+  // ---------------------------------------------------------------------------
+  const jobDoneRef = useRef<Set<number> | null>(null);
+  const kenhRef = useRef(ui.channelId);
+
+  useEffect(() => {
+    const kenhDoi = kenhRef.current !== ui.channelId;
+    kenhRef.current = ui.channelId;
+
+    const doneCuaKenh = new Set<number>();
+    if (ui.channelId !== null) {
+      for (const job of jobs.values()) {
+        if (job.state !== "done") continue;
+        // `payload` là `Record<string, unknown>`: đọc bằng KHOÁ CỤ THỂ và so qua một biến
+        // `unknown` — cùng cách `ChannelZone.buocCuaKenh` đọc, không hứa gì về kiểu.
+        const idTrongPayload: unknown = job.payload["source_id"];
+        if (idTrongPayload !== ui.channelId) continue;
+        doneCuaKenh.add(job.id);
+      }
+    }
+
+    const truoc = jobDoneRef.current;
+    jobDoneRef.current = doneCuaKenh;
+    // Lần chạy ĐẦU chỉ ghi mốc: không có "trước đó" thì không có chuyển trạng thái nào cả.
+    if (truoc === null || kenhDoi) return;
+
+    // CHUYỂN TRẠNG THÁI, không phải TRẠNG THÁI: so HAI CHIỀU (job vào `done` = xong; job rời
+    // `done` = chạy lại). Một sự kiện tiến độ của job đang chạy không đổi tập này ⇒ không đọc lại.
+    let coChuyenTrangThai = false;
+    for (const id of doneCuaKenh) {
+      if (!truoc.has(id)) {
+        coChuyenTrangThai = true;
+        break;
+      }
+    }
+    if (!coChuyenTrangThai) {
+      for (const id of truoc) {
+        if (!doneCuaKenh.has(id)) {
+          coChuyenTrangThai = true;
+          break;
+        }
+      }
+    }
+    if (coChuyenTrangThai) transcripts.reload();
+  }, [jobs, ui.channelId]);
 
   // THỜI LƯỢNG: lấy từ `Source.duration` của kênh đang chọn — KHÔNG tự đo lại (client đo
   // lại là nguồn sự thật thứ hai, và `duration` của phần tử media là `NaN` cho tới khi tải
@@ -133,7 +199,18 @@ export function App() {
               CỤC BỘ của chính nó, vì `reducer` chưa có action BỎ GHIM (`pinnedB` chỉ ghi
               được). Nâng cấp: truyền `pinnedB`/`onPinB` xuống + thêm action bỏ ghim. */}
           {ui.mode === "compare" ? (
-            <CompareScreen transcript={transcript.data} translations={translations.data ?? []} />
+            /* ⚠️ `macDinhId` là QUYẾT ĐỊNH CỦA CHÍNH `App` (`banDichXuat` — bản `done` mới
+               nhất), truyền xuống thay vì để màn tự đoán lần thứ hai: `Transport` xuất đúng
+               bản đó, và vùng Đối chiếu hiện đúng bản đó ⇒ hai vùng KHÔNG THỂ nói khác nhau.
+               Trước vòng sửa này, màn lấy `translations[0]` theo VỊ TRÍ MẢNG (route thật trả
+               MỚI NHẤT TRƯỚC ⇒ hàng `queued`), nên người dùng đang ĐỌC một bản rỗng trong
+               khi ba nút xuất trỏ vào bản `done` khác — đo được `SAME = false`
+               (review W1 §B(8)). */
+            <CompareScreen
+              transcript={transcript.data}
+              translations={translations.data ?? []}
+              macDinhId={banDichXuat === null ? null : banDichXuat.id}
+            />
           ) : ui.mode === "glossary" ? (
             /* §4.4 tab THUẬT NGỮ (Task 9). Màn này KHÔNG nhận prop: nó độc lập với
                kênh đang mở, và nó TỰ gọi `listTerms`/`createTerm`/`patchTerm`/

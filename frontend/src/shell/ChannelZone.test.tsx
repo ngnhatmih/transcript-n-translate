@@ -24,6 +24,7 @@
  */
 import { after, afterEach, before, beforeEach, describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 
 import type { Job, Source } from "../api/types.ts";
 import { setupDom, teardownDom } from "../../test/dom.ts";
@@ -237,5 +238,49 @@ describe("ChannelZone: chon duoc KENH (Task W1)", () => {
 
     assert.deepEqual(tiengOn, [], "bam muc kenh khong duoc sinh tieng on console");
     unmount();
+  });
+
+  // -------------------------------------------------------------------------
+  // HINH THUC — ghim LUAT CSS cua BO CHON CHE DO + MUC KENH DANG CHON
+  //
+  // VI SAO BAI NAY TON TAI (do duoc, KHONG phai suy luan): mutation `B7-css` xoa TAM khoi
+  // luat `.cd*` + `.ch__item[aria-pressed="true"]` + `.ch__dau` ma GIU nguyen
+  // `className`/`aria-pressed`/glyph. Tren CAY TRUOC vong sua do duoc
+  // `tests 180 / pass 178 / fail 2 / cancelled 0`, tuc **0 bai do them**: ba bai DOM o tren
+  // chi khang dinh `className`/`aria-pressed`/glyph, va mot `className` trong TSX KHONG ve gi ca
+  // (ERRATA #15 muc 3, do duoc HAI CHIEU o Task 6). Bon tinh nang HINH THUC cua T6–T10 deu co
+  // mot bai DOC `app.css`; W1 la ngoai le duy nhat. Sau khi them bai nay, cung mutation do
+  // `tests 185 / pass 182 / fail 3` ⇒ **dung MOT bai do them**, va no la bai nay.
+  //
+  // ⚠️ BAI NAY GHIM **QUAN HE**, KHONG GHIM NGUYEN VAN KHOI LUAT/TEN CLASS: ghim literal la
+  // DONG BANG hinh thuc (ERRATA #34 muc 1) — them/bot mot khai bao o noi khac van phai XANH.
+  // Moi assertion khang dinh mot KHAI BAO trong luat VA mot QUAN HE (trang thai `:checked` /
+  // `[aria-pressed="true"]` ↔ hinh thuc; glyph ↔ le cua o; hai luat bo cuc voi nhau).
+  // -------------------------------------------------------------------------
+
+  it("HINH THUC: LUAT CSS cua BO CHON CHE DO + MUC KENH DANG CHON CO THAT trong `app.css`", () => {
+    const appCss = readFileSync(new URL("../styles/app.css", import.meta.url), "utf8");
+
+    // (1) QUAN HE giua hai luat: bo chon che do chi nam tren MOT hang neu hang header la flex.
+    assert.match(appCss, /\.shell__head \{[^}]*display: flex/,
+      "bo chon che do chi nam MOT hang neu `.shell__head` la flex");
+    assert.match(appCss, /\.cd \{[^}]*display: flex[^}]*align-items: center/,
+      "nhom chon che do phai la MOT hang flex can doc giua (nhan nam CANH o radio)");
+
+    // (2) QUAN HE trang thai -> hinh thuc: chu cua nhan phai SANG len theo `:checked` cua
+    //     chinh o radio BEN CANH no (`+`) — khong phai theo mot lop rieng (lop rieng la
+    //     nguon su that thu hai cho cung mot cau hoi "che do nao dang chon").
+    assert.match(appCss, /\.cd__radio:checked \+ \.cd__nhan \{[^}]*color: var\(--ink-0\)/,
+      "che do DANG CHON phai doi hinh thuc bang QUAN HE `:checked + nhan`");
+
+    // (3) QUAN HE trang thai MAY doc duoc -> hinh thuc: luat to hinh thuc cua muc KENH phai
+    //     KEYED tren chinh `[aria-pressed="true"]` (cung nguon su that voi thuoc tinh ma
+    //     screen reader doc), khong phai mot lop trang tri song song.
+    assert.match(appCss, /\.ch__item\[aria-pressed="true"\] \{[^}]*border-left-color: var\(--signal\)/,
+      'muc DANG CHON phai doi hinh thuc bang chinh `[aria-pressed="true"]`');
+
+    // (4) DAU NHIN THAY duoc (khong chi doi MAU): glyph phai duoc DINH VI trong o.
+    assert.match(appCss, /\.ch__dau \{[^}]*position: absolute[^}]*left: var\(--sp-2\)/,
+      "glyph `▸` phai duoc dinh vi tuyet doi o le trai muc kenh");
   });
 });

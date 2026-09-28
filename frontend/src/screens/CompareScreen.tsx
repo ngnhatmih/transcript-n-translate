@@ -39,11 +39,30 @@ interface Props {
   transcript: Transcript | null;
   /** Bản dịch của bản ghi đó, ĐÃ kèm `segments` + `cps` (`TranslationDetail`). */
   translations: TranslationDetail[];
+  /**
+   * Bản dịch MẶC ĐỊNH khi người dùng CHƯA tự chọn — quyết định của BÊN GỌI.
+   *
+   * ⚠️ Vì sao nó là một PROP chứ không phải một `useState(translations[0]?.id ?? null)`:
+   * "bản dịch đang xem" có HAI người trả lời trong cùng một màn (`Transport` xuất bản
+   * `chonTranslation` = `done` mới nhất, còn màn này lấy `translations[0]` theo VỊ TRÍ MẢNG)
+   * ⇒ người dùng xuất bản 11 trong khi đang đọc bản 12 rỗng, và **không** câu nào nói vì sao
+   * (đo được: cột phải `["","",""]`, CPS `["—CPS","—CPS","—CPS"]`, `SAME = false`; review W1 §B(8)).
+   *
+   * ⚠️ **VÀ KHÔNG được tự áp `status === "done"` ở đây.** Làm thế là CHÉP LẠI `chonTranslation`
+   * (`state/channelData.ts`) — hai bản cài đặt của MỘT quy ước, tức nguồn sự thật thứ hai, và
+   * lỗi quay lại ngay lần sau ai đó đổi quy ước. `App` là nơi DUY NHẤT đọc `/api/translations`,
+   * nên nó trả lời MỘT lần rồi đưa CÙNG câu trả lời cho `Transport` VÀ màn này: khi đó hai vùng
+   * KHÔNG THỂ nói khác nhau — đó là một BẤT BIẾN, không phải một sự trùng hợp.
+   *
+   * Vẫn là FALLBACK (không phải giá trị khởi tạo của state): prop đổi thì lựa chọn chưa-có-chủ
+   * đi theo, còn lựa chọn người dùng đã bấm thì được tôn trọng.
+   */
+  macDinhId?: number | null;
 }
 
 /** Cột nào đang được chọn làm bản A (bản dịch hiện ở cột phải). */
-export function CompareScreen({ transcript, translations }: Props) {
-  const [chonId, datChonId] = useState<number | null>(translations[0]?.id ?? null);
+export function CompareScreen({ transcript, translations, macDinhId = null }: Props) {
+  const [chonId, datChonId] = useState<number | null>(null);
   const [ghim, datGhim] = useState(false);
 
   if (transcript === null) {
@@ -57,9 +76,14 @@ export function CompareScreen({ transcript, translations }: Props) {
     );
   }
 
-  // Bản A: id đang chọn, nhưng PHẢI kiểm nó còn trong danh sách — prop đổi thì id cũ
-  // có thể trỏ vào hư không, và một `find` trả `undefined` là chỗ dễ vẽ ra màn trống.
-  const chon = translations.find((tr) => tr.id === chonId) ?? translations[0] ?? null;
+  // Bản A: id người dùng ĐÃ CHỌN (nếu còn trong danh sách), rồi tới quyết định của BÊN GỌI
+  // (`macDinhId` — cùng câu trả lời mà `Transport` dùng để xuất), rồi mới tới hàng đầu.
+  // `find` trả `undefined` khi prop đổi và id cũ trỏ vào hư không — đó là lý do phải kiểm.
+  const chon =
+    translations.find((tr) => tr.id === chonId) ??
+    translations.find((tr) => tr.id === macDinhId) ??
+    translations[0] ??
+    null;
   // Bản B: bản KHÁC bản A. Ghim chính bản đang chọn là so một hàng với chính nó
   // (`reducer.pinB` từ chối đúng ca đó) — ở đây đơn giản là không có gì để ghim.
   const ghimBan = ghim ? translations.find((tr) => tr.id !== chon?.id) ?? null : null;
