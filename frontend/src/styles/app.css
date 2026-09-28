@@ -595,6 +595,16 @@ body {
   font-size: var(--fs-note);
 }
 
+/* Vì sao hai ô DANH TÍNH (Nguồn, Thuật ngữ) bị khoá khi đang Sửa. Nó là một lời GIẢI
+   THÍCH, không phải lỗi ⇒ `--ink-2` chứ không `--fault`, và chiếm trọn một dòng của form
+   (`flex-basis: 100%`, cùng khuôn với `.gl__loi`). */
+.gl__khoa {
+  flex-basis: 100%;
+  margin: 0;
+  color: var(--ink-2);
+  font-size: var(--fs-note);
+}
+
 .gl__cuon {
   overflow-y: auto;
   min-height: 0;

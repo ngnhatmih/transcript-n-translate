@@ -38,11 +38,16 @@
  *    hiệu NỘI DUNG. Không có glyph nào khác được thêm vào.
  *
  * ⚠️ TRẦN CỦA LƯỢT NÀY (`ponytail:`), ba lớp, cả ba đều là trạng thái THẬT:
- *   (a) **KHỐI DƯỚI của §4.4** (*"thuật ngữ đang chọn xuất hiện ở đâu — liệt kê mốc
- *       thời gian theo từng kênh"*) **CHƯA LÀM**: không route nào trả một thuật ngữ
- *       xuất hiện ở đoạn nào. `GET /api/transcripts` cố ý KHÔNG kèm `segments`
- *       (`TranscriptSummary`), nên dữ liệu đó không có nguồn HTTP. ĐƯỜNG NÂNG CẤP:
- *       một route `GET /api/glossary/{id}/occurrences` trả `(transcript_id, i)`.
+ *   (a) **KHỐI DƯỚI của §4.4** (*"thuật ngữ đang chọn xuất hiện ở đâu — liệt kê mốc thời
+ *       gian theo từng kênh"*) **CHƯA LÀM**. Lý do phải nói ĐÚNG (bản trước của câu này
+ *       nói quá — ERRATA #15 mục 2): ĐO ĐƯỢC rằng `GET /api/transcripts` (danh sách) cố ý
+ *       KHÔNG kèm `segments` (`TranscriptSummary`), **nhưng `GET /api/transcripts/{id}` THÌ
+ *       CÓ** ⇒ dữ liệu ghép được bằng cách gọi route chi tiết cho TỪNG transcript rồi tự
+ *       quét text ở client. Quyết định hoãn KHÔNG đổi, và lý do thật là: làm thế là DỰNG LẠI
+ *       `glossary_match.terms_in` ở client — nguồn sự thật thứ hai cho đúng cái quy tắc mà
+ *       Giai đoạn 2 đã phải vá hai lần (spec frontend §2) — cộng N request cho N bản ghi.
+ *       ĐƯỜNG NÂNG CẤP: một route `GET /api/glossary/{id}/occurrences` trả `(transcript_id, i)`
+ *       — MỘT request, và quy tắc khớp nằm ở server.
  *   (b) **Sửa một hàng** chỉ đưa hàng đó vào form rồi `PATCH`; chưa có XOÁ thuật ngữ
  *       (backend cũng không có route xoá). ĐƯỜNG NÂNG CẤP: `DELETE /api/glossary/{id}`
  *       + nút xoá trong `.gl__anh-huong`.
@@ -170,30 +175,46 @@ export function GlossaryScreen() {
   const soDuyet = (terms ?? []).filter((t) => t.approved).length;
 
   /**
-   * Hàng đang sửa (nếu có) — cần nó để phân biệt HAI ca rất khác nhau của `approved=false`:
+   * Hàng sẽ bị GHI ĐÈ, tra theo KHOÁ `(lang, term)` — đúng khoá mà `upsert_term` dùng.
    *
-   *   - **nháp**: thuật ngữ chưa từng được duyệt ⇒ sửa nó KHÔNG ràng buộc gì ⇒ `[]`;
-   *   - **BỎ DUYỆT**: hàng ĐANG duyệt bị gỡ ràng buộc ⇒ bản dịch cũ sai ⇒ CÓ ảnh hưởng.
+   * ⚠️ ĐÂY LÀ CHỖ TỪNG SAI (review vòng #1, `I1`). Bản trước suy "có phải bỏ duyệt không"
+   * từ `editingId` (`hangDangSua`), nên **đường vào thứ ba** lọt lưới: form MỚI + gõ một
+   * thuật ngữ ĐANG được duyệt + bỏ tick. `POST` upsert theo `(lang, term)` ⇒ đó CHÍNH LÀ
+   * bỏ duyệt hàng đang có, nhưng `editingId === null` nên UI vẫn nói "không ảnh hưởng gì".
+   * Đo được trên route thật (cổng 8624, DB gieo):
+   *   `?lang=zh&term=龙&translation=long&approved=false` ⇒ **HTTP 200 `{"affected":[1]}`**
+   *   — trong khi màn hình nói *"…không bản ghi nào bị đánh dấu lỗi thời."*
    *
-   * Đo được trên route thật: cùng `term` + cùng `translation`, chỉ khác `approved`, cho
-   * `{"affected":[1]}` khi bỏ duyệt và `[]` khi giữ duyệt. Nói "không ảnh hưởng gì" cho
-   * ca thứ hai là một câu NÓI SAI — đúng lớp lỗi "nhãn đảo" của ERRATA #10 mục 9.
+   * Cách suy ĐÚNG: từ **DỮ LIỆU MÁY CHỦ ĐÃ CHO** (danh sách `terms` đã tải), không từ
+   * trạng thái form. Và nó chỉ dùng để chọn CÂU CHỮ — con số luôn là của route.
    */
-  const hangDangSua = (terms ?? []).find((t) => t.id === editingId) ?? null;
-  const dangBoDuyet = approved === false && hangDangSua !== null && hangDangSua.approved;
+  const hangTheoKhoa = (terms ?? []).find((t) => t.lang === lang && t.term === term) ?? null;
+  const laBoDuyet = approved === false && hangTheoKhoa?.approved === true;
 
-  /** Con số hiện TRƯỚC khi lưu: bốn nhánh, nhánh "chưa duyệt" là CHỮ. */
+  /**
+   * Con số hiện TRƯỚC khi lưu.
+   *
+   * LUẬT: **con số của ROUTE luôn thắng.** Một câu giải thích ("nháp thì vô hại") KHÔNG
+   * bao giờ được đè lên một con số khác 0 mà route vừa trả — đó đúng là lỗi `I1`: UI tự
+   * chặn câu trả lời của máy chủ bằng logic cục bộ. Câu "chưa duyệt" chỉ được nói khi
+   * **route đã trả 0** VÀ **dữ liệu máy chủ xác nhận** đây không phải một lần bỏ duyệt.
+   */
   function noiXemTruoc(): string {
-    if (approved === false && !dangBoDuyet) {
-      return "Thuật ngữ CHƯA DUYỆT: đổi nó không ảnh hưởng gì — bản nháp không đi vào "
-        + "prompt, nên không bản ghi nào bị đánh dấu lỗi thời.";
-    }
     if (term.trim() === "") return "Gõ thuật ngữ để xem trước số bản ghi bị ảnh hưởng.";
     if (loiXemTruoc !== null) return `Không đọc được số ảnh hưởng: ${loiXemTruoc}`;
     if (affected === null) return "đang đếm…";
     // Bỏ duyệt là GỠ một ràng buộc, không phải "đổi": câu chữ phải nói đúng việc sắp xảy ra.
-    const viec = dangBoDuyet ? "bỏ duyệt glossary" : "đổi glossary";
-    return `⚠ ${viec} → ${affected.length} bản ghi bị đánh dấu lỗi thời`;
+    // Tính MỘT lần cho CẢ HAI nhánh số (0 và khác 0) — bản trước chỉ dùng nó ở nhánh khác 0
+    // nên nhánh `0` nói "đổi glossary" ngay cả khi đang BỎ DUYỆT (bài `I1c` bắt được).
+    const viec = laBoDuyet ? "bỏ duyệt glossary" : "đổi glossary";
+    if (affected.length > 0) {
+      return `⚠ ${viec} → ${affected.length} bản ghi bị đánh dấu lỗi thời`;
+    }
+    if (approved === false && !laBoDuyet) {
+      return "Thuật ngữ CHƯA DUYỆT: đổi nó không ảnh hưởng gì — bản nháp không đi vào "
+        + "prompt, nên không bản ghi nào bị đánh dấu lỗi thời.";
+    }
+    return `⚠ ${viec} → 0 bản ghi bị đánh dấu lỗi thời`;
   }
 
   return (
@@ -219,12 +240,18 @@ export function GlossaryScreen() {
       >
         <span className="gl__o">
           <label className="gl__nhan" htmlFor="gl-lang">Nguồn</label>
+          {/* Đang Sửa thì `lang` là một phần DANH TÍNH của hàng: `TermPatch` của backend
+              KHÔNG có trường `lang`, nên `patchTerm` không gửi nó — đổi ở đây là đổi thứ
+              sẽ KHÔNG được ghi. Xem khối `I2` ở `khoa-danh-tinh`. */}
           <select
             className="gl__nhap"
             id="gl-lang"
             data-testid="o-lang"
             value={lang}
-            onChange={(e) => datLang(e.target.value)}
+            disabled={editingId !== null}
+            onChange={(e) => {
+              if (editingId === null) datLang(e.target.value);
+            }}
           >
             {NGUON.map((n) => <option key={n} value={n}>{n}</option>)}
           </select>
@@ -232,12 +259,18 @@ export function GlossaryScreen() {
 
         <span className="gl__o">
           <label className="gl__nhan" htmlFor="gl-term">Thuật ngữ</label>
+          {/* `readOnly` (thuộc tính HTML) VÀ bỏ qua `onChange` (hành vi): chỉ thuộc tính
+              là CHƯA ĐỦ — jsdom vẫn phát được `change` bằng tay, và một khi state đổi thì
+              số xem trước lại tính cho một thuật ngữ khác với thuật ngữ sẽ được GHI. */}
           <input
             className="gl__nhap"
             id="gl-term"
             data-testid="o-thuat-ngu"
             value={term}
-            onChange={(e) => datTerm(e.target.value)}
+            readOnly={editingId !== null}
+            onChange={(e) => {
+              if (editingId === null) datTerm(e.target.value);
+            }}
           />
         </span>
 
@@ -278,6 +311,15 @@ export function GlossaryScreen() {
         <button className="gl__luu" data-testid="luu" type="submit" disabled={dangLuu}>
           {editingId === null ? "Lưu thuật ngữ" : "Lưu thay đổi"}
         </button>
+
+        {/* NÓI RA vì sao hai ô kia bị khoá. Bỏ qua thay đổi một cách IM LẶNG là cùng lớp
+            lỗi với `I1`: người dùng không biết chữ mình gõ đã bị bỏ. */}
+        {editingId !== null ? (
+          <p className="gl__khoa" data-testid="khoa-danh-tinh">
+            Nguồn và Thuật ngữ là KHOÁ của hàng nên không đổi được khi Sửa — `PATCH` chỉ
+            gửi Bản dịch, Ghi chú và Đã duyệt. Muốn đổi thuật ngữ, tạo một hàng mới.
+          </p>
+        ) : null}
 
         {/* Lỗi nằm DƯỚI ô nhập (checklist của plan: lỗi DƯỚI input), trong khi nhãn
             nằm TRÊN (`.gl__nhan`). */}
