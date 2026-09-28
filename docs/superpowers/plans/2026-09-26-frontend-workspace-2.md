@@ -1967,6 +1967,53 @@ Bảng `## Spec coverage` tính §4.1/§4.3/§4.4 là **T6/T8/T9** — nhưng **
 đường ghi sửa-dòng/duyệt (**giai đoạn riêng** theo quyết định người dùng) · khoảng trống **quy ước** *"MT thiếu khoá `available`"* ·
 `contract.test.ts:705` · và **chưa ai nhìn thấy màn hình nào trong trình duyệt thật** (lần thứ năm).
 
+## ⚠️ ERRATA #36 — Review W3 (`CONDITIONAL PASS` 1/3/4), **`hash-object` MÙ VỚI XUỐNG DÒNG**, và **một lần "gộp commit" THẤT BẠI mà tôi đã báo cáo là thành công**
+
+### 1. 🔴 **ĐÍNH CHÍNH CHÍNH TÔI — ERRATA #31 mục 5 SAI: `git hash-object` KHÔNG chứng minh được byte khớp**
+Tôi đã viết: *"đẳng thức đúng là `git hash-object <path>` == `git rev-parse HEAD:<path>`"*. **Đo lại trên chính máy này:**
+`frontend/src/styles/app.css` worktree = **34 743 B**, `git hash-object` = `f587d369…`, `git rev-parse HEAD:…` = `f587d369…` ⇒ **BẰNG NHAU**,
+trong khi blob trong git là **LF** còn worktree là **CRLF**. Vì `core.autocrlf=true`, **git áp filter khi băm**, nên phép so này
+**KHÔNG nhìn thấy** sự khác biệt xuống dòng — nó **mù đúng với cái bẫy mà nó được viết ra để phòng**.
+⇒ **LUẬT ĐÚNG (thay thế):** **chứng minh phục hồi CHỈ có một cách đáng tin — so BYTE với bản backup chụp TRƯỚC khi mutate**
+(`bytes` + `sha256`). ⚠️ **Cả `git diff --quiet` LẪN `git hash-object` đều MÙ với LF↔CRLF** ⇒ chúng là điều kiện **CẦN, KHÔNG ĐỦ**.
+Giữ chúng như **kiểm tra phụ** (bắt nội dung sai), **không bao giờ** là bằng chứng duy nhất.
+⚠️ Hệ quả kèm theo: **worktree của các tệp `.tsx` là LF, chỉ `app.css` là CRLF** — "worktree là CRLF" (câu tôi viết ở #31 mục 5) là **sai tổng quát**.
+
+### 2. 🔴 **MỘT LẦN "GỘP COMMIT" THẤT BẠI — và tôi đã xác nhận nó thành công mà không kiểm**
+W3 lẽ ra là **một** commit 5 tệp. Đo được: `9a9aa66` (**5 tệp**) và `2653a52` (**3 tệp**) — **HAI commit, CÙNG TIÊU ĐỀ**.
+Người làm khai đã gộp bằng `git reset --mixed`; **reflog cho thấy `reset` về `9a9aa66` rồi commit lại ⇒ vẫn 2 commit.**
+**KHÔNG mất nội dung** (diff gộp = đủ 5 tệp, đã kiểm). ⚠️ **Và phép kiểm của TÔI đã bỏ sót nó:** tôi chạy `git log --oneline -1`
+(⇒ chỉ thấy một) + `grep`, **không** chạy `git show --stat` ⇒ tôi đã **nhắc lại lời khai** "1 commit, 5 tệp" trong brief vòng sau.
+⇒ **LUẬT: kiểm số lượng commit/tệp bằng `git show --stat <hash>` + `git log --oneline -<n>` + `git reflog`, KHÔNG bằng `git log -1`.**
+⇒ **LUẬT (lặp lần thứ ba): "kiểm từ CHÍNH VẬT, không từ báo cáo" áp cả cho NGƯỜI ĐIỀU PHỐI** — tôi vừa là người vi phạm.
+⇒ **Không viết lại lịch sử để dọn** (`--amend`/rebase vẫn bị cấm): ghi nợ, `9a9aa66` ở lại, và W3 sẽ có thêm commit vòng sửa.
+
+### 3. 🔴 `Critical` C1 (W3) — **cùng ĐÚNG lớp lỗi với `Critical #1` của Task 10, lần thứ HAI**
+`.cmp` khai **4** track (`app.css:419`), nhưng W3 đưa vào **con thứ NĂM** luôn có mặt (`.cmp__tin`). Đo ở **đúng trạng thái rỗng của W3**:
+con của `.cmp` = `["cmp__thanh","cmp__tin","cmp__rong","cmp__dau","cmp__danh-sach"]`, `.cmp__tin:empty` = **false**
+⇒ `.cmp__dau` chiếm hàng `1fr`, danh sách rơi vào hàng **implicit** `auto`. **Tiền lệ ĐÚNG nằm cùng tệp: `.gl` khai 5 track** (`app.css:609-611`).
+⇒ **LUẬT (đã có ở #31 mục 1, nay có bằng chứng lặp): THÊM MỘT CON VÀO MỘT LƯỚI `grid-template-rows` CỐ ĐỊNH LÀ MỘT THAY ĐỔI BỐ CỤC.**
+Bài ghim phải khẳng định **số con CÓ MẶT ≤ số track** **VÀ** `grid-row` của từng con — không chỉ "có `grid-row`".
+
+### 4. 🟠 `Important` I1/I2/I3 (W3)
+- **I1 — rò rỉ THẬT, nhưng KHÔNG ở chỗ người làm khai:** `banMoiTao` **đã** ghim theo kênh (không rò rỉ);
+  **hai state ANH EM thì rò rỉ** — `trangThaiJobMoi`/`loiTao` **không kèm kênh, không effect nào dọn**. Probe chạy thật:
+  chọn bản 11 (`done`, không job) ⇒ cột phải hiện `"chưa có đoạn này · job: chờ gom lô"` — **job của bản 13**; và đổi kênh vẫn thấy **câu 409 cũ**.
+  ⇒ **LUẬT: khi một state được "ghim theo kênh", phải kiểm MỌI state anh em cùng nhóm — sửa một cái không làm nhóm đó an toàn.**
+- **I2 — "MỘT điểm quyết định" đã thành HAI biểu thức:** ở `73a9a18` cả hai vùng dùng `banDichXuat.id`; ở HEAD
+  `CompareScreen` = `banDangXemId` vs `Transport` = `banDichXuat.id`. Comment *"hai vùng KHÔNG THỂ nói khác nhau"* **nay SAI**.
+  Mutant `W3-17` (đổi `Transport` sang `banDangXemId`) ⇒ **0 bài đỏ** ⇒ **không bài nào ghim bất biến này**.
+  ⇒ **LUẬT: một bất biến được TUYÊN BỐ trong comment mà không có bài ghim thì nó đã có thể sai rồi** — và ở đây nó **đã sai**.
+- **I3 — job dịch xong KHÔNG đọc lại `translations`** ⇒ *"đang dịch…"* **đứng mãi**; **trần CHƯA được khai** trong báo cáo.
+  (Đây chính là *"đường kề bên không ai kiểm"* mà việc xoá ngòi nổ bảo hiểm đã để lộ — xem `#35` mục 3.)
+
+### 5. 🟡 `Minor` (W3) — **một LỚP lỗ hổng độ phủ MỚI: luật CSS MỒ CÔI**
+`W3-14/15/16` (**đổi TÊN luật** `.cmp__ly-do-khong-dich`/`.cmp__cua`/`.cmp__tin:empty` trong khi **giữ `className`**) ⇒ **0 bài đỏ**:
+class vẫn nằm trong DOM, luật vẫn "có trong tệp", nhưng **không còn khớp nhau** ⇒ **luật mồ côi**. Bài ghim hiện chỉ khẳng định *"luật có tồn tại"*.
+⇒ **LUẬT: bài ghim CSS phải khẳng định LUẬT và CLASS **KHỚP NHAU** (tên lớp trong `app.css` === tên lớp trong DOM), không chỉ mỗi vế.**
+⇒ Kèm: báo cáo W3 khai *"0 phép chờ đồng hồ được thêm"* — **SAI**: có **lượt dùng mới** của `choNhip(250)` (`App.test.tsx:1617`).
+Và *"6 luật mới"* thật ra là **11 selector**.
+
 ## Quy ước thẩm mỹ — spec UI thắng, skill chỉ là checklist
 
 Spec `2026-09-25-phu-de-lab-ui-design.md` là **nguồn có thẩm quyền về hình thức** (bạn đã duyệt). Skill
