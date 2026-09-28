@@ -2137,6 +2137,43 @@ tức một **"chiến dịch delay"** nhỏ, chứ không phải đọc kỹ h�
 `Transport.tsx 15 218 7dc4717c` · `app.css 39 893 8817c702 (crlf=1171)`). ⚠️ `hash-object` mù LF↔CRLF **lại được chứng minh**: `app.css` **39 893 B** vs blob **38 722 B**
 (chênh **đúng 1171**) mà **hash vẫn BẰNG**. Đính chính `App.test.tsx` = `109302 / 6f072c25…` (báo cáo W3 khai `108665 / 8ffc9efd…`, chênh **637 B**) — **băm lại từ chính tệp**.
 
+## ⚠️ ERRATA #40 — 🔴 **ĐÍNH CHÍNH LỚN: CHROME CHẠY ĐƯỢC — mệnh đề "Chromium bất khả" SAI vì QUÁ RỘNG**, và **ảnh chụp thật ĐẦU TIÊN của app**
+
+### 1. 🔴 Mệnh đề sai, và nó đã được lặp lại **NĂM lần** (bốn lần bởi tôi)
+`ERRATA #5 mục 3` chốt: *"Chromium **bất khả** ở môi trường này"*. **SAI.** Đo lại hôm nay: chạy Chrome dưới **`danger-full-access`**:
+```
+chrome --headless=new --disable-gpu --no-sandbox --dump-dom about:blank   ⇒   EXIT=0
+<html><head></head><body></body></html>
+```
+⇒ **Chrome KHỞI ĐỘNG ĐƯỢC.** Câu đúng phải là: **"Chromium không mở được DƯỚI CÁC CHẾ ĐỘ SANDBOX HẠN CHẾ"** (`workspace-write`/`read-only`).
+Mọi phép đo cũ — kể cả phép tôi tự chạy lại trong phiên này (`FATAL:mojo…platform_channel.cc:108`, `EXIT=-36863`) — đều ở chế độ hạn chế.
+⇒ **LUẬT: một mệnh đề "BẤT KHẢ" phải kèm ĐIỀU KIỆN ("dưới chế độ X").** Và: **mọi kết luận "bất khả" đã rút ra dưới quyền HẸP phải được ĐO LẠI dưới quyền RỘNG trước khi tin.**
+⚠️ Hệ quả kéo theo: **Playwright bị kết luận "bất khả" OAN** cùng lý do (nó chỉ cần Chromium mở được), và `browser-use` cũng vậy.
+⚠️ Đây là **lần thứ TƯ** một mệnh đề "bất khả" của giai đoạn này bị phép đo lật (ba lần trước: `npm i`, jsdom + Testing Library, và **chính trình duyệt** — lần này là bản đính chính của chính bản đính chính đó).
+
+### 2. ✅ **ĐƯỜNG RẺ NHẤT ĐỂ NHÌN THẤY APP — không cần CDP, không cần daemon, không cần tích Allow**
+```
+1) cd frontend; npm run dev                      # cổng 3100
+2) chrome --headless=new --disable-gpu --no-sandbox --hide-scrollbars \
+     --virtual-time-budget=6000 --window-size=1440,900 \
+     --screenshot=<ngoài repo>\app.png http://127.0.0.1:3100      # CẦN danger-full-access
+```
+⇒ **Bức tường lớn nhất của cả giai đoạn ("chưa ai nhìn thấy màn hình nào") ĐÃ BIẾN MẤT.** `browser-harness` (đã cài) chỉ còn cần thiết khi muốn **tương tác**; để **nhìn**, `--screenshot` là đủ.
+
+### 3. ✅ **Ảnh thật đầu tiên: xác nhận THỊ GIÁC bản sửa `Critical #1`**
+`_shots/app-empty.png` — **1440×900**, **23 266 B**, sha256 `df96accf24f5ea200aa41126dfdd95a6a2686bc646eec7a34c52311427c00b5c` (ngoài repo, không làm bẩn cây).
+Trong ảnh: header `PHÒNG THU BIÊN TẬP` · bộ chọn chế độ `● BIÊN TẬP ○ ĐỐI CHIẾU ○ THUẬT NGỮ` (**W1**) · dải trạng thái `○ OLLAMA: chưa đọc được · VRAM: chưa đọc được · GĐ: chưa chạy gì` (**Task 10**) ·
+ba vùng kênh/bàn/việc · transport ở đáy (`0:00.00 / —:—.—`, `chưa chọn kênh để nghe`, `SRT · VTT · ASS`).
+⇒ 🔴 **XÁC NHẬN `Critical #1` BẰNG MẮT:** transport là **dải MỎNG ở ĐÁY**, vùng giữa chiếm gần hết chiều cao. **Trước khi sửa**, `footer` sẽ bị **giãn vào hàng `1fr`** và nuốt phần lớn trang.
+Đây là **bằng chứng thị giác đầu tiên** cho một bản sửa mà tới nay chỉ được chứng minh **tĩnh** — và nó **đúng**.
+⇒ Cũng thấy ngay **cái còn thiếu**: vùng giữa **chưa có khung kẻ nét đứt `KÉO TỆP VÀO ĐÂY`** của §4.2 = **W2**.
+⚠️ Ảnh chụp **chỉ dev server** (backend không chạy) ⇒ vùng kênh hiện `502: Bad Gateway`. Đó là **trạng thái lỗi thật**, không phải lỗi bố cục.
+
+### 4. Việc phải làm vì đính chính này
+- **Task 12 phải đổi hình dạng:** nó không còn là "thay Playwright bằng jsdom" — **Playwright/Chrome THẬT giờ khả thi** dưới `danger-full-access`. ⇒ Cân nhắc: `e2e` chạy trên **backend thật + Chrome thật**, chụp ảnh từng màn, thay vì chỉ jsdom.
+- **Mọi tuyên bố "hình thức CHƯA được chứng minh" trong các báo cáo cũ** nay **có đường chứng minh**; đừng lặp lại câu đó như một sự thật bất biến nữa — hãy **chụp ảnh**.
+- ⚠️ **Vẫn chưa đạt được:** chụp ảnh chứng minh **bố cục/vẽ**, KHÔNG chứng minh **chất lượng bản dịch tiếng Việt** — câu đó vẫn cần **chạy engine thật**.
+
 ## Quy ước thẩm mỹ — spec UI thắng, skill chỉ là checklist
 
 Spec `2026-09-25-phu-de-lab-ui-design.md` là **nguồn có thẩm quyền về hình thức** (bạn đã duyệt). Skill
