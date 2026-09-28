@@ -26,12 +26,20 @@
  * hiện 0 hàng (`data/app.db`); Task 12 gieo dữ liệu thật vào đó. Trên backend CÓ dữ
  * liệu thì hai bài này xanh.
  *
+ * KHỐI THỨ HAI (`GET /api/translations/{id}`) đi ngược lại: nó KHÔNG phụ thuộc DB của
+ * repo, vì nó tự gieo một DB scratch ở thư mục tạm (ngoài repo) rồi dựng backend riêng
+ * ở cổng 8621. Lý do: DB rỗng làm route chi tiết trả 404 cho MỌI id, nên nhánh 200 —
+ * nhánh duy nhất mang `segments` + `cps` — không bao giờ chạy, và một khẳng định shape
+ * không bao giờ chạy là một bài XANH-VÌ-KHÔNG-CÓ-GÌ-ĐỂ-ĐO.
+ *
  * Ollama KHÔNG cần bật. "Ollama tắt" là trạng thái hợp lệ và được kiểm ở đây
  * (spec §4.8 dành hẳn một màn hình cho nó) — không bài nào phụ thuộc Ollama sống.
  */
 import { after, before, describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -43,6 +51,7 @@ import type {
   Status,
   Transcript,
   TranscriptSummary,
+  TranslationDetail,
 } from "./types.ts";
 
 /** Origin THẬT của backend. Trong trình duyệt `BASE` là tương đối (proxy 3100 lo). */
@@ -117,6 +126,13 @@ function stopSpawnedBackend(): void {
 async function getJson(path: string): Promise<unknown> {
   const response = await fetch(`${API}${path}`);
   assert.ok(response.ok, `GET ${path} -> HTTP ${response.status}`);
+  return response.json();
+}
+
+/** Như `getJson`, nhưng trên backend 8621 (DB gieo) của khối route chi tiết. */
+async function getSeedJson(path: string): Promise<unknown> {
+  const response = await fetch(`${SEED_API}${path}`);
+  assert.ok(response.ok, `GET ${path} -> HTTP ${response.status} (backend 8621, DB gieo)`);
   return response.json();
 }
 
@@ -451,6 +467,274 @@ describe("hop dong API that (backend 8620)", () => {
         assert.match(error.detail, /lang/, "detail của 422 phải nêu tên trường thiếu");
         return true;
       },
+    );
+  });
+});
+
+// ═════════════════════════════════════════════════════════════════════════════════
+// Route MỚI của Task 8: `GET /api/translations/{id}` — `TranslationDetail` + CPS dạng SỐ
+// ═════════════════════════════════════════════════════════════════════════════════
+
+/**
+ * VÌ SAO KHỐI NÀY TỒN TẠI: `TranslationDetail`, `TranslationCps`, `TranslationCpsRow` là ba
+ * interface VIẾT TAY trong `types.ts`, và trước khối này `contract.test.ts` có **0 hit** cho
+ * `cps` / `max_cps`. Nghĩa là shape của route mới chỉ được phía BACKEND ghim: đổi `cps` thành
+ * CHUỖI (`"45.2"`), hay `max_cps` thành `"21.0"`, thì **cả `pytest` lẫn `npm test` VẪN XANH**
+ * — hai guard duy nhất của tệp này chỉ soi `/api/transcripts`. Một lần trôi như thế là IM LẶNG,
+ * đúng thứ spec §2 từ chối.
+ *
+ * VÌ SAO PHẢI LÀ BACKEND THỨ HAI (8621), không dùng lại 8620: DB của repo **RỖNG**
+ * (`data/app.db`), nên `/api/translations/{id}` trên 8620 trả **404 cho MỌI id** — nhánh 200,
+ * tức nhánh DUY NHẤT mang `segments` + `cps`, **KHÔNG BAO GIỜ CHẠY**, và một khẳng định shape
+ * không bao giờ chạy là XANH-VÌ-KHÔNG-CÓ-GÌ-ĐỂ-ĐO. Khối này vì thế **gieo một DB SCRATCH** ở
+ * thư mục tạm của hệ điều hành (**NGOÀI repo**, nên không bẩn `git status`) rồi dựng backend
+ * riêng ở 8621 bằng `PHUDE_DB` / `PHUDE_DATA` / `PHUDE_PORT`.
+ *
+ * HỆ QUẢ — cả hai vế đều TẤT ĐỊNH, đây KHÔNG phải "chịu được hai trạng thái": id thật ⇒ 200 +
+ * shape, id không tồn tại ⇒ 404. Khối 8620 ở trên **không bị chạm vào**: nó vẫn đo trạng thái
+ * THẬT của repo (hai guard `EMPTY_DB_MSG` đỏ), và đó là trạng thái đúng.
+ *
+ * "TỰ TẮT" (Global Constraints): khối này chỉ tắt pid của **CHÍNH NÓ**, và **chứng minh** cổng
+ * 8621 thôi trả lời trước khi kết thúc — cùng khuôn với khối 8620 ở trên.
+ */
+const SEED_ORIGIN = "http://127.0.0.1:8621";
+const SEED_API = `${SEED_ORIGIN}/api`;
+
+/**
+ * Chương trình gieo DB scratch — chạy bằng venv của backend, KHÔNG cần model, GPU hay mạng.
+ *
+ * Gieo bằng chính `SqliteRepos` (không viết SQL tay) để ràng buộc schema được giữ, đúng cách
+ * mà Task 12 đã được giao. Hai đoạn được chọn để **cả hai nhánh** của route chi tiết đều chạy:
+ * `i=2` có cửa sổ 0 ở CẢ nguồn lẫn bản dịch ⇒ `cps: null` (KHÁC `0.0`), còn `i=3` dịch 60 ký
+ * tự trong 1,0 s ⇒ `cps` 60,0 > ngưỡng 21,0 ⇒ `over: true`.
+ */
+const SEED_PY = `
+import sys
+
+backend, db = sys.argv[1], sys.argv[2]
+sys.path.insert(0, backend)
+
+from app.adapters.clock_system import SystemClock
+from app.adapters.persist.sqlite_repos import SqliteRepos
+from app.domain.models import Segment
+
+repos = SqliteRepos(db, clock=SystemClock())
+repos.init_schema()
+source_id = repos.add_source(kind="file", origin="seed.wav", media_path="seed.wav",
+                             lang="zh", duration=8.0)
+source = [
+    Segment(i=1, start=0.0, end=2.0, text="你好"),
+    Segment(i=2, start=0.0, end=0.0, text="空"),
+    Segment(i=3, start=0.0, end=1.0, text="今天我们要聊的是人工智能"),
+]
+dich = [
+    Segment(i=1, start=0.0, end=2.0, text="Xin chao"),
+    Segment(i=2, start=0.0, end=0.0, text="trong"),
+    Segment(i=3, start=0.0, end=1.0, text="x" * 60),
+]
+transcript_id = repos.add_transcript(source_id=source_id, engine="fw-small", lang="zh",
+                                     segments=source)
+translation_id = repos.add_translation(transcript_id=transcript_id, transcript_version=1,
+                                       engine="opus-mt", target_lang="vi",
+                                       prompt_version="opus-p1", status="done",
+                                       segments=dich)
+print("[contract] da gieo transcript", transcript_id, "ban dich", translation_id)
+`;
+
+describe("hop dong route MOI: GET /api/translations/{id} (backend 8621, DB gieo)", () => {
+  /** Thư mục scratch (ngoài repo) và pid backend của CHÍNH khối này. */
+  let seedDir: string | null = null;
+  let seedPid: number | null = null;
+
+  async function seedBackendIsUp(): Promise<boolean> {
+    try {
+      const response = await fetch(`${SEED_API}/status`, {
+        signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
+      });
+      return response.ok;
+    } catch {
+      return false;
+    }
+  }
+
+  /** Tắt ĐÚNG cây tiến trình mình spawn; không có gì của mình ⇒ no-op. */
+  function stopSeedBackend(): void {
+    if (seedPid === null) return;
+    const pid = seedPid;
+    seedPid = null;
+    try {
+      process.kill(pid);
+    } catch {
+      // Đã chết rồi — đích của hàm là "không còn sống", không phải "vừa giết".
+    }
+    try {
+      spawnSync("taskkill", ["/PID", String(pid), "/T", "/F"], { stdio: "ignore" });
+    } catch {
+      // taskkill thiếu (không phải Windows) — `process.kill` ở trên đã lo phần đó.
+    }
+  }
+
+  before(async () => {
+    seedDir = mkdtempSync(path.join(tmpdir(), "phude-contract-"));
+    const dbPath = path.join(seedDir, "app.db");
+    const seedScript = path.join(seedDir, "seed.py");
+    writeFileSync(seedScript, SEED_PY, "utf8");
+
+    // `stdio: "inherit"` chứ KHÔNG `"pipe"`: trong sandbox này `pipe` chết EPERM, và một
+    // lượt spawn hỏng sẽ trông y như "không có dữ liệu" (ERRATA #17 mục 1).
+    const seeded = spawnSync(VENV_PYTHON, [seedScript, BACKEND_DIR, dbPath], {
+      cwd: BACKEND_DIR,
+      stdio: "inherit",
+      windowsHide: true,
+    });
+    assert.equal(
+      seeded.status,
+      0,
+      "gieo DB scratch that bai (xem traceback python ngay tren dong nay) — "
+      + "khong co du lieu thi bai duoi day khong do duoc shape nao",
+    );
+
+    let spawnError: string | null = null;
+    const child = spawn(VENV_PYTHON, ["run_api.py"], {
+      cwd: BACKEND_DIR,
+      stdio: "ignore",
+      windowsHide: true,
+      env: {
+        ...process.env,
+        PHUDE_DB: dbPath,
+        PHUDE_DATA: path.join(seedDir, "data"),
+        PHUDE_PORT: "8621",
+      },
+    });
+    child.on("error", (error: Error) => {
+      spawnError = error.message;
+    });
+    child.unref();
+    seedPid = typeof child.pid === "number" ? child.pid : null;
+
+    const deadline = Date.now() + START_TIMEOUT_MS;
+    while (Date.now() < deadline) {
+      if (await seedBackendIsUp()) return;
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    }
+    stopSeedBackend();
+    assert.fail(
+      `backend 8621 (DB gieo) khong len sau ${START_TIMEOUT_MS / 1000}s; loi spawn: `
+      + `${spawnError === null ? "khong ro" : spawnError}. Chay tay: PHUDE_DB=<scratch>/app.db `
+      + `PHUDE_PORT=8621 "${VENV_PYTHON}" run_api.py (cwd=${BACKEND_DIR}).`,
+    );
+  });
+
+  after(async () => {
+    const killed = seedPid;
+    stopSeedBackend();
+    if (killed !== null) {
+      // Phải CHỨNG MINH đã tắt, không chỉ gọi kill rồi tin (cùng luật với khối 8620).
+      const deadline = Date.now() + STOP_TIMEOUT_MS;
+      let stopped = false;
+      while (Date.now() < deadline) {
+        if (!(await seedBackendIsUp())) {
+          stopped = true;
+          break;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 250));
+      }
+      if (!stopped) {
+        assert.fail(`backend 8621 (pid ${killed}) van song sau khi kill — con tien trinh mo coi`);
+      }
+    }
+    if (seedDir !== null) {
+      try {
+        rmSync(seedDir, { recursive: true, force: true });
+      } catch {
+        // Windows co the giu lock `.db` them mot nhip; thu muc nam trong TEMP cua HDH,
+        // ngoai repo, nen mot lan don that bai khong lam ban `git status`.
+      }
+    }
+  });
+
+  it("GET /api/translations/{id}: segments i/start/end/text, cps SỐ·null, over BOOL; id lạ ⇒ 404", async () => {
+    // Lấy id qua ĐƯỜNG THẬT (không đọc thẳng id đã gieo): nếu route danh sách trôi shape
+    // thì bài này đỏ ngay ở bước lấy id, thay vì đo một id cứng có thể không còn tồn tại.
+    const rows = (await getSeedJson("/transcripts")) as TranscriptSummary[];
+    const ids = rows.flatMap((row) => row.translations.map((tr) => tr.id));
+    assert.notEqual(
+      ids.length,
+      0,
+      "DB gieo khong co BAN DICH nao ⇒ bai nay khong do duoc shape cua route chi tiet. "
+      + "Xem traceback cua buoc gieo o tren. " + EMPTY_DB_MSG,
+    );
+
+    let rowsSeen = 0;
+    let nullCpsSeen = 0;
+    let overSeen = 0;
+    for (const id of ids) {
+      const response = await fetch(`${SEED_API}/translations/${id}`);
+      assert.equal(response.status, 200, `GET /api/translations/${id} -> HTTP ${response.status}`);
+      const body = (await response.json()) as TranslationDetail;
+
+      // `segments` là đoạn của BẢN DỊCH (cột phải của §4.3) — bốn khoá `to_json` ghi VÔ
+      // ĐIỀU KIỆN, nên chúng KHÔNG được phép vắng.
+      assert.ok(Array.isArray(body.segments), `ban dich ${id}: segments phải là mảng`);
+      assert.notEqual(body.segments.length, 0, `ban dich ${id}: DB gieo phải có đoạn thật`);
+      for (const seg of body.segments) {
+        const where = `ban dich ${id}/segment ${String(seg.i)}`;
+        for (const key of ["i", "start", "end", "text"]) {
+          assert.ok(Object.hasOwn(seg, key), `${where}: thiếu khoá ${key}`);
+        }
+        assert.equal(typeof seg.i, "number", `${where}: i phải là số`);
+        assert.equal(typeof seg.start, "number", `${where}: start phải là số`);
+        assert.equal(typeof seg.end, "number", `${where}: end phải là số`);
+        assert.equal(typeof seg.text, "string", `${where}: text phải là chuỗi`);
+      }
+
+      // `cps` dạng SỐ là CẢ LÝ DO route này tồn tại: `translations.qa_issues` giữ CPS dưới
+      // dạng chuỗi (`"cps:3=45.2>21.0"`) và chuỗi đó KHÔNG tới HTTP, nên client không được
+      // parse một chuỗi hiển thị để lấy con số nó hiển thị — và cũng không được tự tính.
+      assert.ok(Array.isArray(body.cps.rows), `ban dich ${id}: cps.rows phải là mảng`);
+      assert.equal(typeof body.cps.max_cps, "number",
+        `ban dich ${id}: cps.max_cps phải là SỐ, nhận ${JSON.stringify(body.cps.max_cps)}`);
+      assert.ok(Number.isFinite(body.cps.max_cps),
+        `ban dich ${id}: cps.max_cps phải hữu hạn, nhận ${JSON.stringify(body.cps.max_cps)}`);
+      assert.notEqual(body.cps.rows.length, 0, `ban dich ${id}: DB gieo phải có hàng CPS`);
+
+      for (const r of body.cps.rows) {
+        const where = `ban dich ${id}/cps row ${String(r.i)}`;
+        assert.equal(typeof r.i, "number", `${where}: i phải là số`);
+        assert.equal(typeof r.chars, "number",
+          `${where}: chars phải là số (khoá đã đổi tên để phân biệt với \`chars\` của mt_qa)`);
+        assert.equal(typeof r.window, "number", `${where}: window phải là số`);
+        assert.equal(typeof r.max_cps, "number", `${where}: max_cps phải là số`);
+        if (r.cps === null) {
+          // `null` = KHÔNG ĐO ĐƯỢC (cả hai cửa sổ đều không dương), KHÁC `0.0`. Nó là một
+          // giá trị THẬT của route, không phải khoá thiếu.
+          nullCpsSeen += 1;
+        } else {
+          assert.equal(typeof r.cps, "number",
+            `${where}: cps phải là SỐ hoặc null, KHÔNG phải chuỗi — nhận ${JSON.stringify(r.cps)}`);
+          assert.ok(Number.isFinite(r.cps),
+            `${where}: cps phải hữu hạn — Infinity/NaN là dữ liệu hỏng, không phải "hơi nhanh": `
+            + `${JSON.stringify(r.cps)}`);
+        }
+        assert.equal(typeof r.over, "boolean",
+          `${where}: cờ over phải là BOOL, KHÔNG phải chuỗi — nhận ${JSON.stringify(r.over)}`);
+        if (r.over) overSeen += 1;
+        rowsSeen += 1;
+      }
+    }
+    // Cả HAI nhánh của route phải thật sự chạy, nếu không thì bài này chỉ đo nửa route.
+    assert.notEqual(nullCpsSeen, 0, "khong co hang `cps: null` nao ⇒ nhanh `nowindow` chua duoc do");
+    assert.notEqual(overSeen, 0, "khong co hang `over: true` nao ⇒ nhanh vuot nguong chua duoc do");
+
+    // id KHÔNG tồn tại ⇒ 404 (quy ước của `_require_translation`), không phải 200 rỗng và
+    // không phải 500. Trên một backend CÓ dữ liệu, 404 ở đây nói "thiếu HÀNG", không phải
+    // "route hỏng" — đó là lý do phép đo này phải chạy trên backend đã gieo.
+    const missing = await fetch(`${SEED_API}/translations/999999`);
+    assert.equal(missing.status, 404, "id khong ton tai phai la 404");
+
+    console.log(
+      `[contract] /api/translations/{id}: ${ids.length} ban dich, ${rowsSeen} hang CPS `
+      + `(${nullCpsSeen} hang cps:null, ${overSeen} hang over)`,
     );
   });
 });

@@ -2,7 +2,7 @@
  * §4.3 Màn ĐỐI CHIẾU — hai cột (nguồn / bản dịch) + CỘT CPS, segmented control chọn
  * bản dịch, GHIM bản B, và đánh dấu dòng VƯỢT NGƯỠNG ĐỌC (spec UI §4.3, §12.4).
  *
- * BA quyết định của tệp này, cả ba đều là hệ quả của một phép đo:
+ * BỐN quyết định của tệp này, cả bốn đều là hệ quả của một phép đo:
  *
  * 1. **KHÔNG tính CPS ở client.** `TranslationDetail.cps` đến từ
  *    `GET /api/translations/{id}`, nơi con số được sinh bởi CÙNG hàm `mt_qa.cps_row`
@@ -15,6 +15,11 @@
  * 3. **Màn KHÔNG tự `fetch`.** Dữ liệu vào qua PROP — cùng khuôn với `EditScreen`
  *    (Task 6) và `Transport` (Task 7): một chỗ gọi API cho mỗi màn là hai nguồn sự
  *    thật. Người gọi là đường CHỌN KÊNH, hiện CHƯA có (ERRATA #18 mục 4).
+ * 4. **Glyph `⚠` ở dòng vượt ngưỡng là HÌNH THỨC do SPEC chỉ định, không phải emoji trang
+ *    trí.** §4.3 nguyên văn: *"Dòng vượt ngưỡng đọc có `⚠` màu amber."*, và `grep -i emoji`
+ *    trên spec = **0** ⇒ spec không cấm emoji; lệnh cấm là của PLAN và plan tự mâu thuẫn
+ *    (ERRATA #19 mục 7). Mốc amber ở lề **và** `data-over-cps` vẫn GIỮ vì chúng phục vụ
+ *    TIẾP CẬN (§7) — một glyph là tín hiệu chỉ-có-hình, không đọc được bằng screen reader.
  *
  * ⚠️ TRẦN CỦA LƯỢT NÀY (`ponytail:`): trong app, `App` truyền `transcript={null}` và
  * `translations={[]}` vì chưa có đường CHỌN KÊNH, nên màn chỉ render TRẠNG THÁI RỖNG
@@ -132,6 +137,14 @@ export function CompareScreen({ transcript, translations }: Props) {
               </span>
               <span className="cmp__cps" data-testid="col-cps">
                 {cps === undefined || cps.cps === null ? "—" : cps.cps.toFixed(1)}
+                {/* §4.3 NGUYÊN VĂN: "Dòng vượt ngưỡng đọc có `⚠` màu amber." Glyph này do
+                    SPEC UI chỉ định làm dấu hiệu NỘI DUNG, không phải emoji trang trí ⇒ nó
+                    thuộc NGOẠI LỆ của luật "không emoji" (ERRATA #19 mục 7: spec UI là nguồn
+                    có thẩm quyền về HÌNH THỨC, và `grep -i emoji` trên spec = 0).
+                    Màu amber đến từ `.cmp__dong.is-over .cmp__cps`; mốc amber ở lề +
+                    `data-over-cps` GIỮ NGUYÊN vì chúng phục vụ TIẾP CẬN (§7) — glyph một mình
+                    là tín hiệu chỉ-có-hình, không đọc được bằng screen reader. */}
+                {over ? <span className="cmp__canh-bao">⚠</span> : null}
                 <span className="cmp__don-vi">CPS</span>
               </span>
               {ghimBan !== null ? (

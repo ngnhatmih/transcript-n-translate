@@ -249,6 +249,30 @@ describe("CompareScreen: §4.3 hai cot + cot CPS + segmented control + ghim ban 
       "co `over` phai lay TU BACKEND: tu so `cps > max_cps` o dung bien nay se noi SAI");
   });
 
+  it("HINH THUC: dong VUOT NGUONG co glyph `⚠` (spec UI §4.3), dong khong vuot thi KHONG", () => {
+    // ERRATA #19 muc 7 (RULING cua nguoi dieu phoi): spec UI §4.3 nguyen van — "Dong vuot
+    // nguong doc co `⚠` mau amber."; `grep -i emoji` tren SPEC = 0 ⇒ spec KHONG cam emoji,
+    // lenh cam nam o PLAN va plan tu mau thuan. Spec UI la nguon co tham quyen ve HINH THUC
+    // ⇒ glyph PHAI render. Luat "khong emoji" VAN hieu luc cho moi thu KHAC.
+    //
+    // Khang dinh tren `textContent`, KHONG tren node DOM song: `assert.equal(<node>, null)` o
+    // nhanh DO do duoc 218 697 ms roi OOM (ERRATA #14 muc 3 / #15 muc 1).
+    const t = banGhi([doan(1, "你好"), doan(3, "今天我们要聊的是人工智能")]);
+    const tr = banDich(7, ["Xin chao", "Hom nay chung ta se noi ve tri tue nhan tao"],
+      [{ i: 1, cps: 8, over: false }, { i: 3, cps: 45.2, over: true }]);
+
+    const { container } = render(taoPhanTu(CompareScreen, { transcript: t, translations: [tr] }));
+
+    const vuot = chu(container, '[data-testid="row-3"] [data-testid="col-cps"]');
+    const khongVuot = chu(container, '[data-testid="row-1"] [data-testid="col-cps"]');
+    assert.match(vuot, /⚠/, `dong VUOT nguong phai co glyph canh bao, dang co: ${vuot}`);
+    assert.doesNotMatch(khongVuot, /⚠/,
+      `dong KHONG vuot nguong khong duoc co glyph — mot glyph luon hien la mat tin hieu: ${khongVuot}`);
+    // Moc amber o le + `data-over-cps` phai CON (chung phuc vu TIEP CAN §7, khong bi glyph thay).
+    assert.equal(thuocTinh(container, '[data-testid="row-3"]', "data-over-cps"), "true");
+    assert.equal(thuocTinh(container, '[data-testid="row-1"]', "data-over-cps"), "false");
+  });
+
   // -------------------------------------------------------------------------
   // Segmented control + GHIM ban B
   // -------------------------------------------------------------------------
@@ -292,6 +316,38 @@ describe("CompareScreen: §4.3 hai cot + cot CPS + segmented control + ghim ban 
 
     fireEvent.click(container.querySelector('[data-testid="ghim"]') as Element);
     khongCo(container, '[data-testid="col-pinned"]', "bo ghim thi cot so sanh phai bien mat");
+  });
+
+  it("GHIM: DAU COT cung nhan `is-pinned` — luat luoi bon cot khong tu ap cho dau cot", () => {
+    // LO HONG DO PHU DO DUOC (ERRATA #19 muc 6, M4): bo `is-pinned` o HANG DAU COT thi bo
+    // test CU (`117/115/2`) SONG SOT — do lai y het luot sach. Ly do: bai `HINH THUC` chi
+    // DOC LUAT CSS trong `app.css`, no KHONG do xem DAU COT co that su nhan lop do khong,
+    // nen mot dau cot ba cot nam tren than bon cot di qua XANH.
+    const t = banGhi([doan(1, "你好")]);
+    const a = banDich(7, ["Xin chao"], [{ i: 1, cps: 8, over: false }]);
+    const b = banDich(9, ["Chao ban"], [{ i: 1, cps: 9, over: false }]);
+
+    const { container } = render(taoPhanTu(CompareScreen, { transcript: t, translations: [a, b] }));
+
+    // Dem/lay LOP cua phan tu, khong so sanh NODE (ERRATA #14 muc 3 / #15 muc 1).
+    const dauCotCoLop = (): boolean => {
+      const dau = container.querySelector(".cmp__dau") as HTMLElement | null;
+      assert.ok(dau !== null, "phai co dau cot `.cmp__dau`");
+      return dau.classList.contains("is-pinned");
+    };
+
+    assert.equal(dauCotCoLop(), false, "chua ghim thi DAU COT khong duoc co `is-pinned`");
+    fireEvent.click(container.querySelector('[data-testid="ghim"]') as Element);
+    assert.equal(dauCotCoLop(), true,
+      "ghim roi thi DAU COT phai nhan `is-pinned` — khong thi dau cot lech mot cot so voi than");
+    fireEvent.click(container.querySelector('[data-testid="ghim"]') as Element);
+    assert.equal(dauCotCoLop(), false, "bo ghim thi dau cot phai bo lop theo");
+
+    // Va lop do phai co LUAT THAT ap cho DAU COT: neu `app.css` chi mo cot thu tu cho
+    // `.cmp__dong` thi dau cot van lech, du lop co tren phan tu (ERRATA #15 muc 3).
+    const appCss = readFileSync(new URL("../styles/app.css", import.meta.url), "utf8");
+    assert.match(appCss, /\.cmp__dau\.is-pinned[^{}]*\{[^}]*grid-template-columns:/,
+      "app.css phai mo COT THU TU cho `.cmp__dau.is-pinned`, khong chi cho `.cmp__dong.is-pinned`");
   });
 
   it("chi co MOT ban dich thi nut GHIM khong moi ghim mot ban khong ton tai", () => {

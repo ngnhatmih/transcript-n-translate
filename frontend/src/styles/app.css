@@ -458,6 +458,14 @@ body {
   font-size: var(--fs-label);
 }
 
+/* Glyph `⚠` của dòng vượt ngưỡng: SPEC UI §4.3 chỉ định nó (*"Dòng vượt ngưỡng đọc có `⚠`
+   màu amber."*), nên nó KHÔNG vi phạm luật "không emoji" của plan — luật đó nhường cho một
+   glyph được spec chỉ định làm dấu hiệu NỘI DUNG (ERRATA #19 mục 7). Màu amber THỪA HƯỞNG
+   từ `.cmp__dong.is-over .cmp__cps`; ở đây chỉ chừa khe giữa con số và glyph. */
+.cmp__canh-bao {
+  margin-left: var(--sp-1);
+}
+
 /* §4.3 + §12.4 — DÒNG VƯỢT NGƯỠNG ĐỌC được đánh dấu bằng MỘT MỐC amber ở lề trái
    (không tô nền, không đổi cỡ chữ: `--signal` chỉ có một nghĩa, và đổi cỡ chữ sẽ làm
    lệch nhịp dọc của cả bảng). Cờ `over` là của BACKEND (`data-over-cps`). */
