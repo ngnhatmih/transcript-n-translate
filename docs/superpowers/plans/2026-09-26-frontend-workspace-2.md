@@ -1534,6 +1534,78 @@ chỉ tới được qua một **CUỘC ĐUA giữa hai lời gọi song song** 
   (review đo `71/168` — **khác ở TẬP TỆP**; **điều cả hai khớp và là điều quan trọng: 0 tệp TRỘN**).
 - `contract.test.ts:705` **vẫn chưa chạm** (diff tệp đó **RỖNG**) ⇒ **nợ còn nguyên**.
 
+## ⚠️ ERRATA #27 — Re-review Task 9 vòng sửa #2: **"KHÔNG QUAN SÁT ĐƯỢC" phải được CHỨNG MINH, không được TUYÊN BỐ**
+
+Re-review vòng sửa #2: **`CONDITIONAL PASS`, 0 Critical / 1 Important / 4 Minor.** **R1, R2, R3, R4, R5, R7 ĐẠT** (đủ điều kiện
+`PASS` cho ba mục trọng tâm); **chỉ `R6` KHÔNG ĐẠT** — và nó **bác bỏ** lời khai *"`M14` không quan sát được"*.
+
+### 1. 🔴 `R6` — "KHÔNG TỒN TẠI PHÉP ĐO TẤT ĐỊNH" là **SAI**, và review đã **DỰNG RA** phép đo đó
+
+Implementer khai: `M14` (bỏ vế **PHÒNG THỦ** `affected.length === 0`) sống sót vì *"nháp MÀ có ảnh hưởng"* chỉ tới được qua
+**cuộc đua giữa hai lời gọi song song** ⇒ **không có phép đo tất định**.
+- Vế **suy luận** của nó **ĐÚNG**: luật `affected_segments` (`backend/app/domain/glossary_match.py:76-88`) + **sweep route THẬT 6/6 hàng**
+  ⇒ `laNhapThat` ⇒ `affected === []`.
+- Nhưng **"không tồn tại phép đo tất định" là SAI.** Review dựng **probe2**, **chỉ điều khiển THỨ TỰ**, **mọi lời gọi đều là route THẬT**:
+  **giữ** request `affectedPreview` lại → để `GET /api/glossary?lang=zh` trả *"chưa duyệt"* → **`POST` duyệt hàng đó** (`201`)
+  → **thả** request ⇒ route trả **`{"affected":[1]}`** trong khi `laNhapThat = true`.
+  Bản **NGUYÊN** in `"⚠ đổi glossary → 1 bản ghi…"` (**không nói dối**); bản **`M14`** in
+  `"Thuật ngữ CHƯA DUYỆT: … không ảnh hưởng gì …"` ⇒ `[KET LUAN] phep do TAT DINH phan biet duoc M14? => true`.
+⇒ **`M14` KHÔNG phải lớp (c) "không quan sát được do cấu trúc" — nó là lớp (b) LỖ HỔNG ĐỘ PHỦ NÂNG CẤP ĐƯỢC**,
+và **đang được giao vá** (công thức ở §R6(b) của báo cáo review).
+
+**LUẬT MỚI (quan trọng):** **"Không quan sát được" là một TUYÊN BỐ, không phải một miễn trừ.**
+Muốn tuyên bố nó thuộc lớp (c), phải **chứng minh** rằng **mọi** đường tới trạng thái đó đều **không thể điều khiển tất định** —
+và "hai lời gọi song song" **KHÔNG** tự động là bất khả: **thứ tự của hai lời gọi thường ĐIỀU KHIỂN ĐƯỢC**
+(giữ một cái, đổi trạng thái máy chủ, rồi thả). ⇒ **Trước khi khai lớp (c), hãy thử điều khiển THỨ TỰ.**
+(Đây là **lần thứ hai** trong giai đoạn một agent khai "không đo được" rồi người sau **đo được**:
+lần đầu là `useJobStream` ở Task 3 — khi đó **jsdom + server `node:http`** biến "không đo được" thành **đo được**.)
+
+### 2. ✅ Ba mục trọng tâm ĐẠT — và `R5` (không còn "di sản" mutant) đạt
+
+- **`R1` ĐẠT:** `M13a` ⇒ `pass 130 / fail 3`, đỏ `I2` tại **19,6729 ms** (`dang Sua thi o 'Thuat ngu' phai la readOnly`);
+  `M13b` ⇒ `pass 130 / fail 3`, đỏ `I2` tại **1171,1393 ms** (`khong doc duoc con so nao trong: "Thuật ngữ CHƯA DUYỆT: …"`).
+  **Đối chứng âm trên `185a12f`** (đọc bằng `git show`, blob khớp): `OLD-M13b` = `132 / pass 130 / fail 2` = **y `OLD-CLEAN` ⇒ SỐNG SÓT**.
+  ⇒ **Hai lớp, hai mutation, hai kết luận ngược nhau giữa cây cũ và cây mới** — đây là bằng chứng đúng cho một bản vá hai lớp.
+- **`R3` ĐẠT:** đếm request THẬT — checkbox **BẬT ⇒ `listTerms(lang) = 0`**, **TẮT ⇒ `= 1`**;
+  `MutationObserver` ghi `["⚠ đổi glossary → 1 …","đang đếm…","⚠ bỏ duyệt glossary → 1 …"]` ⇒ **không có khung hình nào
+  "số đúng + lý do sai"**; khi đọc lại **thất bại** ⇒ `"⚠ đổi glossary → 0 bản ghi…"` và **không câu lý do nào**;
+  `M16` ⇒ `129/4` đỏ **đúng `I1b`+`I1d`**; `M11` ⇒ `129/4` đỏ **đúng `I1c`+`I1d`**; `I1d` **tất định** (3/3 probe + 8 lượt `npm test` xanh).
+- **`R5` ĐẠT:** `git diff HEAD` **RỖNG**; **10/10 byte-exact** (trước và sau mọi phép đo);
+  **đọc diff TỪNG DÒNG** `GlossaryScreen.tsx` từ `185a12f` → HEAD (**177 dòng, 82+/40−**) ⇒ **không nhánh/câu nào bị mất**
+  (3 nhánh `noiXemTruoc` vẫn đủ; câu `"CHƯA DUYỆT"` còn nguyên) ⇒ **"di sản" của sự cố mutant KHÔNG còn**;
+  `npm test` **5/5** `133/17/131/2/0`.
+  ⚠️ **Một mục CHƯA KIỂM ĐƯỢC:** **driver của implementer KHÔNG được commit** và scratch `_task9fix2` đã xoá
+  ⇒ bộ **fingerprint 5 đầu văn + lưới `SIGINT`/`SIGTERM`/`SIGHUP`** mà nó khai là **CHƯA KIỂM ĐƯỢC**.
+  ⇒ **Luật: nếu "chốt chặn của driver" là một phần của BẰNG CHỨNG, thì driver phải được COMMIT (hoặc chốt chặn phải được TRÌNH DIỄN).**
+- **`R2` ĐẠT + một Minor sắc:** `CHO_GO_MS = 200`; 900 ms = **4,5×**; settle đo được **250 ms**; mutation **riêng** của review
+  (`M13c`, bỏ bỏ-qua **chỉ ở ô "Thuật ngữ"**) **BỊ BẮT** (**1165,6827 ms**).
+  ⚠️ **Nhưng hạ `900 → 50 ms` thì lượt SẠCH vẫn XANH (`131/2`) mà `M13b` VẪN ĐỎ (`130/3`, tại `"đang đếm…"`)
+  ⇒ phát biểu *"phép chờ là CẦN THIẾT"* KHÔNG tái lập đúng như đã viết.**
+  Thứ giết `M13b` ở 50 ms là **`datAffected(null)` đầu effect**, **không phải** phép chờ.
+  ⇒ **Phép chờ là cần cho việc ĐỌC CON SỐ MỚI, không phải cho việc phân biệt hai lớp.** Ghi đúng mức.
+
+### 3. Hai sự cố của CHÍNH REVIEWER (tự khai; chỉ chạm BẢN SAO, repo không bị chạm)
+
+1. **Lưới `process.on("exit")` của nó khôi phục SAI baseline** — nó ghi tệp `185a12f` lên bản sao **SAU khi** lượt cuối đã
+   khôi phục **đúng** về HEAD. Phát hiện vì probe cho hành vi **cũ**; đã sửa (lưới chỉ khôi phục về **HEAD**), dựng lại bản sao
+   **byte-exact**, chạy lại toàn bộ probe.
+   ⇒ **Luật: lưới an toàn phải khôi phục về TRẠNG THÁI ĐÍCH CỐ ĐỊNH (HEAD), không phải về "ảnh chụp lúc bắt đầu"** —
+   nếu không, nó **phục hồi về một mutant cũ** và tạo ra bằng chứng sai.
+2. **Phép đảo `it` lần đầu GỘP khối cuối** (mang **dòng đóng `describe`**) lên đầu ⇒ `describe` **đóng sớm** ⇒ `120/13` **GIẢ**;
+   đã **tách dòng đóng** rồi chạy lại ⇒ `131/2`.
+   ⇒ **Luật: khi đảo thứ tự khối test, phải xử lý dòng đóng của `describe` như một đơn vị RIÊNG.**
+
+### 4. `R4`/`R7` ĐẠT, và tính trung thực được xác nhận
+
+- **`R4`:** `M15` ⇒ `130/3` đỏ **đúng `I1`**; ca thứ ba trên màn hình thật (nút `"Lưu thuật ngữ"` = form **MỚI**):
+  `XEM TRUOC = "⚠ bỏ duyệt glossary → 1 bản ghi…"` và `ô 'Anh huong' hang-1 = "1Sửa"` (hai hàng khác `"—Sửa"`) ⇒ **HAI CHỖ BẰNG NHAU**.
+- **`R7`:** `typecheck` 0 · `build` 0 · `--listFiles` 85 dòng, **0** tệp `.test.` · pytest `835 passed, 13 deselected` EXIT=0 ·
+  guard README `5 passed` EXIT=0 · `899495d` = **2 tệp, không gì ngoài `frontend/`**.
+  **Trung thực:** **cả hai lời khai bị bác bỏ đã được sửa TẠI CHỖ** (3 khối đính chính ở báo cáo vòng 1 + §3 báo cáo vòng 2);
+  **`M-3` xác nhận** (review tự đảo **13** khối `it` ⇒ `131/2` y lượt sạch); **`M-4` xác nhận từng số** (`CRLF=76 · LF=98 · TRỘN=0 · 5/179`).
+- **Mutation còn sống: CHỈ `M14`** (xem mục 1) ⇒ **đang được vá**. `M9` review không chạy lại. **~22 lượt `npm test` đầy đủ**,
+  **không lượt nào bị `timeoutMs` cắt**.
+
 ## Quy ước thẩm mỹ — spec UI thắng, skill chỉ là checklist
 
 Spec `2026-09-25-phu-de-lab-ui-design.md` là **nguồn có thẩm quyền về hình thức** (bạn đã duyệt). Skill
