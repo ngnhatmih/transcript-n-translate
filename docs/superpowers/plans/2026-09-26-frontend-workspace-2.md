@@ -1035,6 +1035,10 @@ hai định nghĩa là **cố ý** (nguồn vs dịch) thì **ngưỡng và các
 
 `contract.test.ts` có **0 hit** cho `/translations/{id}`, `TranslationDetail`, `TranslationCps`, `cps`, `max_cps`.
 Ba interface mới **viết tay**, chỉ **backend** ghim ⇒ một lần **trôi shape** sẽ để **cả pytest lẫn `npm test` XANH**.
+⚠️ **ĐÍNH CHÍNH (ERRATA #20 mục 2): câu "chỉ backend ghim" là QUÁ MẠNH.** Đo lại: `backend/tests/test_api_translations.py`
+**ĐÃ ghim** `cps` là `float`, `max_cps == 21.0`, `over is True/False`, `chars`, `i`, `segments[].text`/`i`, `stale`, `404`.
+Backend **chỉ mù** ở **`cps.max_cps` tầng TRÊN**, **`cps.rows[].window`**, **`segments[].start`/`end`** — và ca contract
+mới nhắm **đúng ba chỗ đó**.
 ⇒ **Phải thêm ca contract**, và mốc tự nhiên là task **CHỌN KÊNH** (nơi `getTranslation` có người gọi) — **hoặc ngay bây giờ**.
 
 ### 6. Bốn Minor phải vá (đã giao vòng sửa)
@@ -1064,6 +1068,71 @@ một glyph **được spec chỉ định làm dấu hiệu nội dung**. ⇒ Đ
 (mutation README `830→821` cho **đúng nguyên văn** `E assert (830, 13) == (821, 13)` + `1 failed, 4 passed`)
 và **tái lập được HAI LƯỢT SẠCH** (`BM4r`/`BM7r`: `1 failed, 829 passed`, đúng 1 bài, **không** có guard trong danh sách đỏ) —
 nhưng **KHÔNG** tái lập được **con số tổng của chính 5 lượt đó** (trạng thái trung gian **không có trong git**) ⇒ ghi là **chưa đo được**.
+
+## ⚠️ ERRATA #20 — Task 8 vòng sửa #1b (`71f322b`): **`Buffer.equals` KHÔNG TỒN TẠI**, và lời khai của tôi về "backend mù" là QUÁ MẠNH
+
+Vòng sửa #1b xong (**ba** việc còn lại của vòng #1): `npm test` = `tests 120 / suites 16 / pass 118 / fail 2 / cancelled 0`
+EXIT=1 (117 → 120), pytest **`830 passed, 13 deselected`** EXIT=0 (**không đổi** ⇒ không phải sửa `backend/README.md`),
+`typecheck` 0, `build` 0, byte-exact cả **bốn** tệp. Nó bác **hai** chỗ của brief tôi:
+
+### 1. ❌ `Buffer.equals(baseline)` — API **KHÔNG CÓ THẬT**, và brief của tôi đã dùng nó suốt nhiều vòng
+
+`Buffer` **không có** static `equals`. Chạy driver **nguyên văn** của tôi ném
+**`TypeError: Buffer.equals is not a function`**. Agent in **cùng sự thật** bằng **`readback.equals(baseline)`** —
+đó là **method trên instance**, mới là API thật.
+
+⇒ **ĐÍNH CHÍNH CHO MỌI BRIEF TỪ NAY:** câu đúng là **`readback.equals(baseline) === true`**
+(hoặc `Buffer.compare(a, b) === 0`). Câu *"`Buffer.equals(baseline) === true`"* mà tôi viết từ **ERRATA #8** trở đi
+**gọi tên một API không tồn tại** — mọi agent trước đã **tự dịch** nó mà không ai báo. **Đây là lỗi thứ MƯỜI BẢY của tôi**,
+và nó thuộc loại **nguy hiểm nhất**: một **thủ tục** sai chạy qua **nhiều vòng** mà không ai phát hiện, vì người sau
+**đoán được ý** và làm đúng. ⇒ **Luật: khi một brief đưa LỆNH/API cụ thể, implementer phải CHẠY THỬ nó; nếu nó không
+tồn tại thì BÁO, đừng lặng lẽ thay bằng thứ tương đương.** (Lần này đã báo — tốt.)
+
+### 2. ❌ ERRATA #19 mục 5 QUÁ MẠNH: backend **CÓ** ghim phần lớn shape của route mới
+
+Tôi viết *"shape của route mới **chỉ** được backend ghim"* như thể backend mù hoàn toàn. **Đo lại thì không:**
+`backend/tests/test_api_translations.py` **ĐÃ ghim** `isinstance(row["cps"], float)`, `row["max_cps"] == 21.0`,
+`row["over"] is True/False`, `row["i"]`, `row["chars"]`, `segments[].text`/`i`, `stale`, và **404**.
+Đổi `cps` thành **chuỗi** hay đổi tên **`max_cps` ở tầng HÀNG** làm **pytest ĐỎ**.
+**Chỗ backend THẬT SỰ mù** (`grep` = **0 hit**): **`cps.max_cps` ở tầng TRÊN**, **`cps.rows[].window`**,
+**`segments[].start`/`end`**. Agent chọn mutation **đúng ba chỗ đó** ⇒ **phép đo của nó CHẶT HƠN lời khai của tôi**.
+**Nếu nó làm theo trực giác của brief tôi** (đổi `cps` thành chuỗi) thì **pytest cũng đỏ** ⇒ **không chứng minh được gì**
+về khoảng trống phía client. ⇒ **Luật: trước khi khẳng định "chỉ X ghim nó", hãy GREP xem X ghim tới đâu.**
+
+**Và giá trị thật của ca contract mới được chứng minh bằng CÙNG một trạng thái mutate:**
+`routes_translations.py`: `"window": r.window` → `"cua_so": r.window` ⇒ pytest **`35 passed`** (**MÙ**),
+`contract.test.ts` **ĐỎ** (`tests 11 / pass 8 / fail 3`). Y hệt với `"max_cps"` → `"nguong"` và với việc **bỏ `start`**
+của `segments`. ⇒ Client contract **thêm phạm vi thật**, không phải hình thức.
+
+### 3. ✅ Lỗ hổng độ phủ đầu cột: CẢ HAI VẾ
+
+Bộ **CŨ** + mutation bỏ `is-pinned` ở **HÀNG ĐẦU CỘT** ⇒ `117/115/2` **SỐNG SÓT** (y hệt lượt sạch).
+Bộ **MỚI** ⇒ `119/116/3`, giết **đúng một** bài `GHIM: DAU COT cung nhan is-pinned…`.
+Mutation thứ tư (rút `.cmp__dau.is-pinned,` khỏi `app.css`) cũng giết **đúng một** bài đó trong khi bài `HINH THUC`
+cũ **vẫn xanh** ⇒ **luật CSS và class được ghim RIÊNG**, đúng ERRATA #15 mục 3.
+
+### 4. ✅ Glyph `⚠` theo spec UI §4.3 — ĐỎ trước khi sửa
+
+`AssertionError: dong VUOT nguong phai co glyph canh bao, dang co: 45.2CPS` ⇒ đã render `⚠` trong ô CPS,
+**giữ** mốc amber ở lề + `data-over-cps`, **không** thêm emoji nào khác, khẳng định trên `textContent`
+(**không** đưa DOM node sống vào `assert`). Mutation bỏ glyph giết **đúng một** bài.
+
+### 5. ⚠️ BẪY MỚI: `pytest -q` trong môi trường này **MẤT DÒNG TỔNG KẾT**
+
+Log kết thúc ở `-- Docs: …` và **KHÔNG** có `35 passed`, **dù EXIT=0**. ⇒ **ĐỪNG đọc "thiếu dòng tổng kết" là
+"chưa chạy xong"** — hãy **đọc EXIT**, và **bỏ `-q`** khi cần dòng tổng kết.
+(Đây là bẫy thứ **hai** của cùng loại "đầu ra không chứa thứ bạn chờ": ERRATA #10 mục 8 là `typecheck` không kiểm test.)
+
+### 6. Hai điều nhỏ khác từ vòng này
+
+- **"MỘT backup cho MỘT TỆP"**: agent **không tạo tệp backup nào** — nó giữ baseline **trong RAM** dạng Buffer byte-exact,
+  `finally` ghi lại rồi in lại `equals === true`. **Tốt hơn** brief của tôi (không thể để rác lại).
+- **Ba cảnh báo `LF will be replaced by CRLF` là VÔ HẠI:** hệ quả `core.autocrlf=true`; hai tệp TSX toàn LF,
+  hai tệp kia toàn CRLF, **không tệp nào TRỘN**. ⇒ Cảnh báo đó **không** phải dấu hiệu tệp hỏng.
+- **Không đo được (ghi đúng mức):** **màu amber thật** của glyph trong trình duyệt (jsdom **không** layout/CSS) —
+  chỉ ghim được **glyph có trong `textContent`** + **luật CSS tồn tại**; và **nhánh `200` trên DB repo**
+  (`data/app.db` vẫn rỗng — việc của Task 12). Nhánh 200 **đã** được đo trên **backend riêng ở 8621 với DB gieo scratch**
+  (ngoài repo) ⇒ **cả hai vế tất định**; `after` chỉ tắt pid của chính nó **và chứng minh cổng thôi trả lời**.
 
 ## Quy ước thẩm mỹ — spec UI thắng, skill chỉ là checklist
 
