@@ -1912,6 +1912,61 @@ và **chốt chặn chéo `fail − 2 == số bài đỏ thêm`** (lượt này 
   cả bài ghim **và** phép đo của reviewer chỉ khẳng định **VĂN BẢN CSS** khai `grid-row` + cặp hàng↔con khớp nhau —
   **không** khẳng định trình duyệt **VẼ** đúng. `Critical #1` là **chứng minh TĨNH**.
 
+## ⚠️ ERRATA #35 — W1 ĐÓNG, **MỘT GIẤC NGỦ CỐ ĐỊNH ĐANG CHE MỘT CUỘC ĐUA**, và **ba đường GHI còn thiếu**
+
+Chuỗi W1: `f14cc5d` (giao) → review **`CONDITIONAL PASS` 0/2/5** → `29b07cd` (vòng sửa) → re-review **`CONDITIONAL PASS` 0/1/3**
+(1 `Important` = **test flaky tiền tồn**, không thuộc 4 tệp của vòng sửa) → `aea1a80` (vá bộ đo) → **điều kiện đóng đã thoả. W1 XONG.**
+Cổng cuối (tôi tự đo): `tests 186 / suites 23 / pass 184 / fail 2 / cancelled 0`, **EXIT=1** (đỏ **đúng hai** `EMPTY_DB_MSG`), `typecheck` 0, `build` 0.
+
+### 1. 🔴 **MỘT GIẤC NGỦ CỐ ĐỊNH CÓ THỂ ĐANG CHE MỘT CUỘC ĐUA** — bài học đắt nhất của vòng này
+Hai bài trong `GlossaryScreen.test.tsx` có khuôn `while (Date.now() < het && querySelector("da-luu") === null) await 25ms`
+**bên trong** `act`. Reviewer đo `daLuuTrongAct=false` ⇒ **DOM không bao giờ quan sát được bên trong `act`** ⇒ đó **không phải phép chờ
+mà là giấc ngủ cố định 8 000 ms** (lớp ERRATA #29 mục 4). Khi suite chậm, cập nhật state rơi **ra ngoài** `act` ⇒ React in
+`not wrapped in act` ⇒ **bộ gác tiếng ồn của chính bài biến nó thành ĐỎ** (chữ ký `8284 ms`).
+⚠️ **Và đây là chỗ brief của tôi SAI một nửa:** brief chỉ đòi *"đổi điều kiện thoát"*. Làm **đúng nguyên văn** thì `I2`
+**ĐỎ NGẪU NHIÊN ~1/10** — vì React commit **ngay khi callback `act` trả về** nhưng trong **cùng một vi-task**, nên đọc DOM ở **dòng kế tiếp**
+vẫn có thể rơi **trước** commit. **Bản cũ không bao giờ lộ cuộc đua đó — chính giấc ngủ 8 s đã CHE nó.**
+⇒ Phải thêm `await choChu(...)` **SAU** `act` (giá **0 ms**), khẳng định giữ **nguyên văn**.
+⇒ **LUẬT: một phép chờ cố định không chỉ làm chậm test — nó có thể đang CHE một cuộc đua bên dưới.**
+Khi bạn thay nó bằng tín hiệu thật, **hãy chờ đúng cái bạn cần đọc, Ở ĐÚNG CHỖ bạn đọc nó** — nếu không, bạn vừa đổi một test chậm lấy một test **flaky**.
+
+### 2. ✅ **"ĐIỀU KIỆN THOÁT LÀ HÀM CỦA ĐỒNG HỒ" vs "ĐIỀU KIỆN THOÁT CHẾT"** — cách phân biệt
+`grep 'while (Date.now() <'` toàn `frontend/src` = **8 chỗ**. **2 chỗ CHẾT** (đã sửa); **6 chỗ ĐỂ LẠI** (`contract.test.ts` ×4,
+`GlossaryScreen.test.tsx` ×2) — ở đó `deadline` là **hàm của ĐỒNG HỒ**, tức **đúng dần theo thời gian**, dùng đúng chỗ *"chờ một tiến trình KHÁC lên/tắt"*.
+⇒ **LUẬT: điều kiện thoát `while (Date.now() < het)` là ĐÚNG hay CHẾT tuỳ nó có THỂ trở thành đúng hay không.** Nếu vế còn lại là một
+**tín hiệu không bao giờ quan sát được**, thì `while` chỉ là `sleep` — và tệ hơn, là `sleep` **giả dạng phép chờ**.
+**Thời lượng là dấu hiệu:** `LUU` **8 251 → 285 ms**, `I2` **9 200 → 1 184 ms**, **toàn bộ suite 28,5 s → 12,7 s** (tôi tự đo: `13 435 ms`).
+⇒ **LUẬT phụ (rất thực dụng): sửa xong bộ đo thì mọi chiến dịch mutation còn lại RẺ ĐI MỘT NỬA.**
+
+### 3. ⚠️ **`INSERT OR IGNORE` là NO-OP trên SQLite 3.37.2 — kể cả khi có `ON CONFLICT DO UPDATE`**
+Mutation `G1` ("làm POST không đổi `glossary_version`") **không giết được bài** ở lần thử đầu; implementer **không kết luận
+"G1 không giết được"** mà **đo trực tiếp** (`lan 2: [('2',)]`) rồi đổi sang `INSERT OR REPLACE` ⇒ `G1` **giết đúng 1 bài**.
+⇒ **LUẬT: khi một mutation KHÔNG giết được bài, đừng kết luận ngay — hãy kiểm xem MUTANT có thật sự ĐỔI HÀNH VI không.**
+Một mutant "trông như đã phá" mà DB bỏ qua là **mutant không tồn tại**, và kết luận rút ra từ nó là **sai**.
+
+### 4. 🔴 **BA ĐƯỜNG GHI CÒN THIẾU — đo được, và người dùng đã quyết**
+Sau khi W1 nối `setMode` + `selectChannel`, lượt đo **call site trong sản phẩm** (ngoài `endpoints.ts`) cho:
+`createTranslation` **0** · `patchTranscript` **0** · `approveTranscript` **0** · `cancelJob` **0** · `retryJob` **0** · `listEngines` **0**
+(và `EngineSelect` của Task 10 có **0 người gọi**). ⇒ **Không thể BẮT ĐẦU một bản dịch từ giao diện** — tức **cò của workspace 2 không có**;
+không lưu được sửa dòng; không duyệt được bản ghi. ⚠️ `EditScreen` **không nhận callback ghi nào**, và
+`editingSegment`/`startEdit`/`endEdit` là **state CHẾT** trong reducer (**0 dispatch**).
+⇒ **Người dùng quyết:** **nối "bắt đầu dịch" NGAY** (**Task W3**, brief đã viết); **"sửa dòng/duyệt/huỷ-chạy-lại" = GIAI ĐOẠN TÍNH NĂNG RIÊNG**
+(không phải nối dây — nó cần **UI nhập liệu** mới). ⇒ **LUẬT (lặp lại lần thứ năm): dựng màn ≠ tới được màn ≠ LÀM ĐƯỢC VIỆC.**
+Bảng `## Spec coverage` tính §4.1/§4.3/§4.4 là **T6/T8/T9** — nhưng **đường GHI** không task nào sở hữu.
+
+### 5. ⚠️ **HAI LỜI KHAI SAI về chính sản phẩm, cùng một agent, trong hai vòng liền**
+(a) vòng sửa W1 khai khối §B(7) có **6** `assert.match` — **tệp CHỈ CÓ 5** (brief tôi ghi 5 là **ĐÚNG**);
+(b) báo cáo W1 khai *"message không chứa chữ số"* trong khi **thân message có `X7`** (`f14cc5d`; tôi tự kiểm: **chỉ commit này** bẩn, 5 commit kia sạch).
+⇒ **LUẬT: đếm và kiểm từ CHÍNH TỆP/CHÍNH COMMIT, không bao giờ từ báo cáo của người làm.**
+⚠️ Và một cái bẫy của **chính tôi**: phép kiểm chữ số đầu tiên của tôi khớp **cả chuỗi có hash viết tắt** (`aea1a80`) ⇒ **dương tính giả** trên cả 6 commit.
+**Đo thứ gì thì đừng để ĐỊNH DANH của nó lọt vào phép đo.**
+⚠️ Còn lại **không giải thích được:** *"vì sao đúng lượt ấy POST chậm > 8 s"* vẫn là **SUY RA** — không ai tái lập được lượt đỏ `8284 ms`.
+
+### 6. Nợ của W1 (khai, không chặn)
+`nudge` (`[`/`]`) **0 action/handler** (§12.5 chưa đạt ở đúng một bước) · nạp tệp §4.2 (**Task W2**) · "bắt đầu dịch" (**Task W3**) ·
+đường ghi sửa-dòng/duyệt (**giai đoạn riêng** theo quyết định người dùng) · khoảng trống **quy ước** *"MT thiếu khoá `available`"* ·
+`contract.test.ts:705` · và **chưa ai nhìn thấy màn hình nào trong trình duyệt thật** (lần thứ năm).
+
 ## Quy ước thẩm mỹ — spec UI thắng, skill chỉ là checklist
 
 Spec `2026-09-25-phu-de-lab-ui-design.md` là **nguồn có thẩm quyền về hình thức** (bạn đã duyệt). Skill
@@ -2938,6 +2993,25 @@ mỗi tệp trả `ok`/`loi` (`ApiError.message`); xong thì `sources.reload()` 
 **Ràng buộc THẬT:** `POST /api/sources/upload` là **multipart**, `lang` là trường **FORM**, `ALLOWED_LANGS = {zh, en}` ⇒ UI **chỉ cho `zh`/`en`**.
 ⚠️ **Backend KHÔNG có whitelist định dạng** (`_safe_name` chỉ giữ `suffix`) ⇒ dòng mono là **thông tin, KHÔNG phải thi hành**; **client KHÔNG được chặn** tệp (chặn ở client khi backend không chặn = **nguồn sự thật thứ hai**). `accept=` **không** phải phép kiểm (kéo-thả bỏ qua nó).
 **Brief đầy đủ:** `.superpowers/sdd/2026-09-26-frontend-workspace-2/task-w2-brief.md`.
+
+---
+
+### Task W3: **BẮT ĐẦU DỊCH** — cò của workspace 2 (chèn bởi **ERRATA #35 mục 4**, người dùng đã phê duyệt)
+
+**Vì sao có task này:** `endpoints.createTranslation` có **0 lượt gọi trong sản phẩm** ⇒ **không có cách nào bắt đầu một bản dịch từ giao diện**.
+Đó là **mục tiêu người dùng nêu từ đầu** (*"workspace 2 = dịch văn bản đó"*). Cùng lượt đo: `listEngines` **0** lượt gọi và **`EngineSelect` (Task 10) 0 người gọi**
+⇒ W3 là **người gọi đầu tiên** của cả hai. **Người dùng cũng đã quyết:** *"sửa dòng/duyệt/huỷ-chạy-lại"* là **giai đoạn tính năng riêng**, **KHÔNG** làm ở đây.
+
+**Files:** Modify `src/screens/CompareScreen.tsx` (+test) · `src/shell/App.tsx` (+test) · `src/shell/EngineSelect.tsx` (+test, chỉ nếu cần thêm prop) · `src/styles/app.css` (**BẮT BUỘC** + **ghim LUẬT**).
+**Interfaces:** `taoBanDich(engine: string) → Promise<void>` ở `App` (gọi `endpoints.createTranslation`, rồi **làm mới** danh sách, rồi **chọn bản vừa tạo**).
+**Hợp đồng THẬT:** `POST /api/translations` → **201**; body `{transcript_id, engine, target_lang = "vi"}`; **422** nếu engine không có trong registry;
+**422** nếu engine **KHÔNG phải `kind == "mt"`**; **409** nếu engine **chưa sẵn sàng** — ⚠️ **backend từ chối TRƯỚC khi ghi**, nên UI **không đoán thay backend**:
+hiện **nguyên văn `ApiError.message`**; **chỉ đưa ra engine `kind === "mt"`**; **bỏ `target_lang`** (backend mặc định `"vi"` — gửi cứng là nguồn sự thật thứ hai).
+**Bước:** (1) test ĐỎ; (2) nút "dịch" ở **`CompareScreen`**, hiện ở **CẢ** trạng thái rỗng **lẫn** khi đã có bản dịch; (3) `EngineSelect` với **MT-only**;
+(4) tạo ⇒ làm mới ⇒ **chọn bản vừa tạo** (⚠️ **MỘT** điểm quyết định "bản dịch đang xem" — đã có từ vòng sửa W1, `macDinhId`; **đừng** tạo cái thứ hai);
+(5) bản mới là `queued` ⇒ **nói ra trạng thái** (*"đang dịch…"*), **TUYỆT ĐỐI không để cột phải rỗng**; (6) mutation; (7) commit.
+⚠️ **Ghim LUẬT CSS ngay từ đầu** — đừng lặp lại **trần #1** của W1 (ERRATA #34 mục 2: thiếu bài ghim LUẬT là **vi phạm mục bàn giao**, không phải "trần hợp lệ").
+**Brief đầy đủ:** `.superpowers/sdd/2026-09-26-frontend-workspace-2/task-w3-brief.md`.
 
 ---
 
