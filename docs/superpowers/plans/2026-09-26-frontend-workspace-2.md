@@ -1107,7 +1107,10 @@ của `segments`. ⇒ Client contract **thêm phạm vi thật**, không phải 
 ### 3. ✅ Lỗ hổng độ phủ đầu cột: CẢ HAI VẾ
 
 Bộ **CŨ** + mutation bỏ `is-pinned` ở **HÀNG ĐẦU CỘT** ⇒ `117/115/2` **SỐNG SÓT** (y hệt lượt sạch).
-Bộ **MỚI** ⇒ `119/116/3`, giết **đúng một** bài `GHIM: DAU COT cung nhan is-pinned…`.
+Bộ **MỚI** ⇒ **`120/117/3`**, giết **đúng một** bài `GHIM: DAU COT cung nhan is-pinned…`.
+⚠️ **ĐÍNH CHÍNH (ERRATA #21 mục 2):** tôi đã viết **`119/116/3`** ở đây — **KHÔNG tái lập được** trên cây đã commit;
+đo lại là **`120/117/3`**, và con số cũ còn **mâu thuẫn nội bộ** với baseline sạch `120/118/2`. **Chất** ("giết đúng một bài")
+**vẫn đúng**; chỉ **con số của tôi** sai.
 Mutation thứ tư (rút `.cmp__dau.is-pinned,` khỏi `app.css`) cũng giết **đúng một** bài đó trong khi bài `HINH THUC`
 cũ **vẫn xanh** ⇒ **luật CSS và class được ghim RIÊNG**, đúng ERRATA #15 mục 3.
 
@@ -1117,11 +1120,15 @@ cũ **vẫn xanh** ⇒ **luật CSS và class được ghim RIÊNG**, đúng ERR
 **giữ** mốc amber ở lề + `data-over-cps`, **không** thêm emoji nào khác, khẳng định trên `textContent`
 (**không** đưa DOM node sống vào `assert`). Mutation bỏ glyph giết **đúng một** bài.
 
-### 5. ⚠️ BẪY MỚI: `pytest -q` trong môi trường này **MẤT DÒNG TỔNG KẾT**
+### 5. ⚠️ BẪY: `pytest -q` **MẤT DÒNG TỔNG KẾT** — nhưng **KHÔNG phải** "môi trường này"
 
 Log kết thúc ở `-- Docs: …` và **KHÔNG** có `35 passed`, **dù EXIT=0**. ⇒ **ĐỪNG đọc "thiếu dòng tổng kết" là
-"chưa chạy xong"** — hãy **đọc EXIT**, và **bỏ `-q`** khi cần dòng tổng kết.
-(Đây là bẫy thứ **hai** của cùng loại "đầu ra không chứa thứ bạn chờ": ERRATA #10 mục 8 là `typecheck` không kiểm test.)
+"chưa chạy xong"** — hãy **đọc EXIT**.
+⚠️ **ĐÍNH CHÍNH (ERRATA #21 mục 1):** tôi gán nguyên nhân cho *"môi trường này"* — **SAI**. Nguyên nhân thật là
+**`-q` trên CLI + `addopts = -q` trong `pytest.ini` = `-qq`**, và **`-qq` chính là thứ pytest dùng để BỎ dòng tổng kết**.
+⇒ **Cách đúng: ĐỪNG truyền `-q`** (`pytest.ini` đã có sẵn). Đây **không** phải chuyện của sandbox, và nó sẽ **không**
+tự khỏi ở môi trường khác.
+(Cùng họ "đầu ra không chứa thứ bạn chờ": ERRATA #10 mục 8 — `typecheck` **không** kiểm tệp test.)
 
 ### 6. Hai điều nhỏ khác từ vòng này
 
@@ -1133,6 +1140,49 @@ Log kết thúc ở `-- Docs: …` và **KHÔNG** có `35 passed`, **dù EXIT=0*
   chỉ ghim được **glyph có trong `textContent`** + **luật CSS tồn tại**; và **nhánh `200` trên DB repo**
   (`data/app.db` vẫn rỗng — việc của Task 12). Nhánh 200 **đã** được đo trên **backend riêng ở 8621 với DB gieo scratch**
   (ngoài repo) ⇒ **cả hai vế tất định**; `after` chỉ tắt pid của chính nó **và chứng minh cổng thôi trả lời**.
+
+## ⚠️ ERRATA #21 — TASK 8 ĐÓNG HOÀN TOÀN (`PASS` 0/0/5) — và ba món nợ TÀI LIỆU phải biết
+
+Re-review vòng sửa Task 8: **`PASS`, 0 Critical / 0 Important / 5 Minor** (V1, V2, V5 đạt bằng phép đo độc lập).
+**Task 8 xong.** Nó xác nhận **chiều ngược** của `ERRATA #20` mục 2 (mutation ở chỗ backend **CÓ** ghim ⇒ pytest **ĐỎ**:
+`"cps"` → `str(round(...))` cho `3 failed, 32 passed`; `"max_cps"` tầng HÀNG → `"nguong"` cho `2 failed, 33 passed`
+`KeyError: 'max_cps'`), và xác nhận danh sách **"backend mù đúng ba chỗ"** bằng grep **0 hit** kèm **đối chứng dương**
+(`["cps"]["rows"][0]` **4 hit**; `row["max_cps"]/["chars"]/["over"]` **5 hit**; `segments[0]["i"]/["text"]`).
+
+### 1. ⚠️ NỢ LỚN: tên API **SAI** đã lan ra **108 dòng / 32 tệp** trong ledger
+
+Grep `.superpowers/sdd/2026-09-26-frontend-workspace-2/` thấy **108 dòng / 32 tệp** vẫn **khai** `Buffer.equals`
+(**kể cả brief của chính tôi**, `task-8-report.md`, `review-task-4/5/6/7-report.md`, và **báo cáo vòng sửa này**
+— tự mâu thuẫn: `:133` nói driver in `Buffer.equals(readback, baseline)` trong khi `:157` khai API đó **không tồn tại**).
+⇒ **ĐỪNG sửa 108 dòng đó** — chúng là **bản ghi lịch sử**, và sửa chúng là viết lại lịch sử (đúng thứ luật cấm).
+**Nhưng:** bất kỳ ai đọc lại các báo cáo đó phải biết **tên API trong đó là SAI**, còn **phép đo có thể vẫn ĐÚNG**
+(các agent đã tự dịch sang `readback.equals(...)`). **Tên đúng từ nay: `readback.equals(baseline) === true`.**
+⇒ Bài học: **một thủ tục sai tên, nếu đủ dễ đoán, sẽ sống rất lâu** — nó chỉ lộ ra khi có người **chạy nguyên văn** nó.
+
+### 2. Ba Minor TÀI LIỆU còn nợ (ghi nhận, KHÔNG sửa vòng này)
+
+- **`contract.test.ts:705`** — comment nói *"khoá đã đổi tên để phân biệt với `chars` của `mt_qa`"*, nhưng trong ngữ cảnh
+  **`cps.rows[]`** thì khoá **CHÍNH LÀ `chars` của `mt_qa`** (**không** đổi tên); chỗ đổi tên là route **`readability`**.
+  Comment này **ngược** với docstring **ĐÚNG** ở `mt_qa.py:120-122`. ⇒ Cùng lớp lỗi **"comment kể sai cơ chế"**
+  (ERRATA #15 mục 2) — lần này nằm trong **tệp test**. **Sửa ở task kế tiếp chạm tệp đó.**
+- **"`types.ts` bỏ MỌI số tuyệt đối" không đúng nghĩa chữ:** còn **`33`/`36`** ở **dòng 16** (kể **lịch sử** — chấp nhận được,
+  vì nó kể *"tệp này đã nói dối bằng số bốn vòng liền"*, không phải một khẳng định hiện tại) và **"cộng hai bài 422"** ở **dòng 49**.
+  ⇒ Câu **mô tả** việc đã làm là **quá mạnh**, không phải việc làm sai.
+- **`U+23F8 ⏸`** có sẵn trong **COMMENT** ở `frontend/src/shell/QueueZone.tsx:21` — **không render**, **không** thuộc hai
+  commit của Task 8. ⇒ Nợ nhỏ: nếu luật "không emoji" áp cho **cả comment**, thì đây là chỗ vi phạm; nhưng nó **không**
+  tới tay người dùng. **Quyết định: để nguyên** (comment không phải UI), và ghi ra để người sau không ngạc nhiên.
+
+### 3. Điều re-review **KHÔNG** đo được (ghi đúng mức — không suy luận thay)
+
+- **Màu amber THẬT** của glyph trong trình duyệt (**jsdom không có layout/CSS**) — nó **cũng** không đo được; chỉ ghim được
+  **glyph có trong `textContent`** + **luật CSS tồn tại**.
+- **Nhánh `200` trên `data/app.db` THẬT** (vẫn **rỗng** — việc của **Task 12**). Nhánh 200 **chỉ** đo trên
+  **backend riêng ở 8621 + DB gieo scratch**.
+- **Toàn bộ 830 bài trên cây ĐÃ MUTATE** — chỉ chạy **tệp sở hữu route** (35 bài). Cơ sở hợp lý: **52** tệp test backend,
+  chỉ `test_api_translations.py` gọi route chi tiết qua HTTP. ⇒ Chấp nhận, nhưng **phải nói ra**.
+- **CPS của job MT thật**; `npm run e2e`/Playwright (**bị cấm**); khoảng `4555b43..HEAD`.
+- Và reviewer **tự khai** một con số rác của **driver của nó** (`chuoi MOI xuat hien 13155 lan` — nó đếm **chuỗi rỗng**),
+  **không** phải số đo. ⇒ **Đúng cách: gọi rác là rác.**
 
 ## Quy ước thẩm mỹ — spec UI thắng, skill chỉ là checklist
 
