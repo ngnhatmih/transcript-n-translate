@@ -97,13 +97,12 @@ export interface TransportProps {
    */
   translationId: number | null;
   /**
-   * Bản dịch XUẤT ĐƯỢC (`status === "done"` mới nhất) — câu trả lời cho một câu hỏi KHÁC:
-   * *"bản nào có nội dung để xuất"*.
+   * Bản dịch SẼ ĐƯỢC XUẤT — câu trả lời cho một câu hỏi KHÁC: *"bản nào có nội dung để xuất"*.
    *
    * ⚠️ Đây KHÔNG phải điểm quyết định thứ hai cho "bản dịch đang xem" (điểm đó là
-   * `translationId`, và nó có bài ghim `SAME`). Nó tồn tại để ba nút xuất KHÔNG âm thầm trỏ
-   * vào một bản khác bản đang xem: khi `exportableId !== translationId`, thanh này nói thẳng
-   * ra (`.tp__xuat-cho`).
+   * `translationId`, và nó có bài ghim `SAME`). Nó được **BÊN GỌI** (`App`) quyết theo một luật
+   * đã đo được: **bản đang xem đã `done` ⇒ xuất CHÍNH NÓ**; ngược lại mới lấy bản `done` mới nhất.
+   * Nhờ vậy `exportableId !== translationId` chỉ còn **MỘT** nghĩa: bản đang xem **CHƯA** dịch xong.
    *
    * ⚠️ MẶC ĐỊNH là `translationId` (không phải `null`): không truyền prop này thì hành vi
    * **y hệt trước vòng sửa** — "bản đang xem cũng là bản xuất được". Đó là điều kiện để 12
@@ -111,6 +110,17 @@ export interface TransportProps {
    * nghĩa âm thầm thành "không xuất được gì".
    */
   exportableId?: number | null;
+  /**
+   * CÂU NÓI RA khi ba nút xuất trỏ vào một bản KHÁC bản đang xem — **do `App` quyết** (MỘT
+   * nguồn quyết định), `Transport` chỉ render.
+   *
+   * ⚠️ VÌ SAO KHÔNG TỰ DỰNG CÂU Ở ĐÂY (vòng sửa W3 #2, `Important` F2): thanh này KHÔNG nhận
+   * `status` của bản đang xem, nên nó không phân biệt được hai lý do của sự lệch id — và bản cũ
+   * đã in ra một câu **SAI SỰ THẬT** (`"bản đang xem (11) chưa dịch xong — xuất bản 13"` trong khi
+   * 11 đã `done`). Câu chỉ được nói khi bản đang xem THẬT SỰ chưa `done`, và điều kiện đó chỉ đọc
+   * được ở nơi có `status` (`App`).
+   */
+  xuatCho?: string | null;
   /** Thoi luong that cua nguon (`Source.duration`), `null` khi backend chua do duoc. */
   duration?: number | null;
   /** `UiState.playing` — component DIEU KHIEN, khong giu ban sao. */
@@ -130,6 +140,7 @@ export function Transport({
   segments,
   translationId,
   exportableId,
+  xuatCho = null,
   duration = null,
   playing = false,
   currentSegment = null,
@@ -251,12 +262,12 @@ export function Transport({
           Sau khi bấm "dịch", bản đang xem là bản VỪA TẠO (`queued`, chưa có đoạn nào) nên
           nó KHÔNG có nội dung để xuất. Im lặng cho ba nút trỏ vào bản `done` khác chính là
           lỗi mà `W3-17` để lọt: người dùng không có câu nào nói bản nào sẽ được xuất.
-          Không có bản `done` nào ⇒ câu này KHÔNG hiện (không có gì để giải thích). */}
-      {idXuatDuoc !== null && translationId !== null && idXuatDuoc !== translationId ? (
-        <p className="tp__xuat-cho" data-testid="xuat-cho">
-          {`bản đang xem (${translationId}) chưa dịch xong — xuất bản ${idXuatDuoc}`}
-        </p>
-      ) : null}
+          ⚠️ CÂU do `App` quyết (`xuatCho`), KHÔNG dựng ở đây: thanh này không nhận `status` của
+          bản đang xem nên bản cũ đã nói NGƯỢC sự thật khi bản đang xem ĐÃ `done` mà không phải
+          bản `done` mới nhất (probe `RR-PROBE-2`, vòng sửa W3 #2). Không có gì để nói ⇒ `null`. */}
+      {xuatCho === null ? null : (
+        <p className="tp__xuat-cho" data-testid="xuat-cho">{xuatCho}</p>
+      )}
       <div className="tp__nhom-xuat">
         {DINH_DANG_XUAT.map(({ dinhDang, nhan: nhanXuat }) => (
           <a

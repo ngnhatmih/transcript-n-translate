@@ -845,6 +845,28 @@ describe("CompareScreen: §4.3 hai cot + cot CPS + segmented control + ghim ban 
       `hang ${hangDau} (cho \`.cmp__dau\`) KHONG duoc la track \`1fr\`: do la loi C1 (dau cot gian ra, `
       + `danh sach khong cuon duoc); do duoc ${JSON.stringify(trackCua)}`,
     );
+
+    // (iv) HANG `1fr` LA HANG **DUY NHAT** DUOC GIAN — ve phu con thieu (re-review W3 #1, `Minor #1`).
+    //
+    // DO DUOC: mutation `RR-2fr` (`auto auto auto auto auto 1fr` → `auto auto auto auto 1fr 1fr`,
+    // tuc hang 5 — hang RONG — cung thanh `1fr`) lam danh sach cuon CHI CON MOT NUA chieu cao,
+    // nhung **0 bai do** — vi (iii) chi khang dinh *"hang cua `.cmp__danh-sach` LA `1fr`"* va
+    // *"hang cua `.cmp__dau` KHONG la `1fr`"*; no KHONG khang dinh **khong con hang `1fr` nao khac**.
+    // ⇒ Phep dem duoi day ghim dung menh de "DUY NHAT": them mot `1fr` thu hai ⇒ DO.
+    const soHangGian = trackCua.filter((t) => t === "1fr").length;
+    assert.equal(
+      soHangGian,
+      1,
+      `\`.cmp\` chi duoc co DUNG MOT hang \`1fr\` (cho cuon cua danh sach); do duoc ${soHangGian} `
+      + `trong ${JSON.stringify(trackCua)} — mot hang \`1fr\` THUA (vi du hang 5 rong) lam danh sach `
+      + `cuon mat mot nua chieu cao`,
+    );
+    assert.equal(
+      trackCua.indexOf("1fr"),
+      hangDanhSach - 1,
+      `hang \`1fr\` DUY NHAT phai la hang ${hangDanhSach} (cho \`.cmp__danh-sach\`); `
+      + `do duoc ${JSON.stringify(trackCua)}`,
+    );
   });
 
   it("HINH THUC (mồ côi): MOI lop `.cmp` ma `app.css` tao kieu PHAI co trong DOM THAT, va NGUOC LAI", () => {

@@ -258,6 +258,52 @@ export function App() {
         : banDichXuat === null ? null : banDichXuat.id;
 
   /**
+   * HÀNG ĐẦY ĐỦ của bản đang xem — cần `status` để trả lời câu *"nó đã dịch xong chưa"*.
+   *
+   * ⚠️ VÌ SAO PHẢI CÓ (vòng sửa W3 #2, `Important` F2 của re-review): `Transport` cũ tự đoán
+   * lý do của sự lệch id và **đoán SAI**. Probe của reviewer trên fixture có **HAI** bản `done`:
+   *   `XUATCHO="bản đang xem (11) chưa dịch xong — xuất bản 13" HREF=/api/export/13?… TOKEN=11`
+   * trong khi bản **11 ĐÃ `done`**. Sự lệch id có **HAI** lý do khác nhau, và `status` là thứ duy
+   * nhất phân biệt được chúng ⇒ nó phải được đọc ở nơi có dữ liệu (đây), không phải ở `Transport`.
+   */
+  const banDangXem =
+    banDangXemId === null
+      ? null
+      : (translations.data ?? []).find((row) => row.id === banDangXemId) ?? null;
+
+  /**
+   * BẢN SẼ ĐƯỢC XUẤT — **MỘT** nguồn quyết định (ERRATA #36 mục 4; vòng sửa W3 #2, F2).
+   *
+   * Luật: bản ĐANG XEM đã `done` ⇒ xuất **chính nó**; ngược lại (nó `queued`/`running`/
+   * `failed`/`cancelled`, tức chưa có nội dung để xuất) ⇒ xuất bản `done` mới nhất.
+   *
+   * ⚠️ Trước vòng sửa, chỗ này LUÔN là `banDichXuat.id` (bản `done` mới nhất), nên lựa chọn của
+   * người dùng bị **ghi đè để XUẤT**: chọn bản 11 (`done`) mà ba nút vẫn trỏ bản 13. Đó là một
+   * câu hỏi KHÁC với `banDangXemId` (bản đang ĐỌC) — nhưng câu trả lời của nó phải TÔN TRỌNG
+   * lựa chọn đó khi lựa chọn ấy đã có nội dung để xuất.
+   */
+  const banDangXemDaDichXong = banDangXem !== null && banDangXem.status === "done";
+  const idXuatDuoc = banDangXemDaDichXong
+    ? banDangXem.id
+    : banDichXuat === null
+      ? null
+      : banDichXuat.id;
+
+  /**
+   * CÂU NÓI RA khi ba nút xuất trỏ vào một bản KHÁC bản đang xem — do `App` QUYẾT, `Transport`
+   * chỉ render (xem `TransportProps.xuatCho`).
+   *
+   * ⚠️ Điều kiện ở đây là điều kiện **ĐÚNG**: câu này chỉ được nói khi (a) hàng của bản đang xem
+   * CÓ THẬT trong dữ liệu, (b) `status` của nó **KHÁC** `done` — tức nó thật sự chưa có nội dung
+   * để xuất, và (c) có một bản khác để xuất. Thiếu (b) thì câu nói NGƯỢC sự thật đúng như probe
+   * `RR-PROBE-2` đã đo.
+   */
+  const cauXuatCho =
+    banDangXem !== null && !banDangXemDaDichXong && idXuatDuoc !== null
+      ? `bản đang xem (${banDangXem.id}) chưa dịch xong — xuất bản ${idXuatDuoc}`
+      : null;
+
+  /**
    * Trạng thái JOB của bản vừa tạo, **CHỈ khi nó thuộc ĐÚNG bản dịch đang xem VÀ ĐÚNG kênh**
    * — hai khoá, không phải một (vòng sửa `I1`, ERRATA #36 mục 4).
    *
@@ -504,17 +550,19 @@ export function App() {
           `SAME` trong `App.test.tsx`. Trước vòng sửa, chỗ này là `banDichXuat.id`: HAI biểu
           thức, và comment nói "hai vùng KHÔNG THỂ nói khác nhau" là SAI.
 
-          ⚠️ `exportableId` là câu hỏi KHÁC, không phải điểm quyết định thứ hai: bản đang
-          xem có thể `queued` (chưa có nội dung để xuất), khi đó `translationId` (cái đang
-          xem) khác `exportableId` (cái xuất được) và `Transport` phải **NÓI RA** thay vì im
-          lặng xuất bản khác. */}
+          ⚠️ `exportableId` là câu hỏi KHÁC ("bản nào CÓ NỘI DUNG để xuất"), và câu trả lời của nó
+          là `idXuatDuoc` — **do chính `App` quyết** (bản đang xem đã `done` ⇒ xuất chính nó;
+          ngược lại mới lấy bản `done` mới nhất). `xuatCho` là CÂU giải thích của cùng quyết định
+          đó, cũng do `App` quyết: `Transport` KHÔNG tự đoán lý do của sự lệch id nữa (nó không có
+          `status` của bản đang xem, và đoán sai — probe `RR-PROBE-2` của re-review W3 #1). */}
       <footer className="shell__transport">
         <Transport
           sourceId={ui.channelId}
           duration={kenhDangChon === null ? null : kenhDangChon.duration}
           segments={transcript.data?.segments ?? []}
           translationId={banDangXemId}
-          exportableId={banDichXuat === null ? null : banDichXuat.id}
+          exportableId={idXuatDuoc}
+          xuatCho={cauXuatCho}
           playing={ui.playing}
           currentSegment={ui.currentSegment}
           onPlayingChange={(playing) => dispatch({ type: "setPlaying", playing })}

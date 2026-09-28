@@ -295,10 +295,16 @@ export function CompareScreen({
           cách sửa. Bài học §4.8 / ERRATA #30: đổi màu là KHÔNG ĐỦ — người dùng không được
           đoán. `available === true` là thuận tiện của client; **backend mới là thẩm quyền**
           (nó trả 409 nếu engine chưa sẵn sàng), nên lỗi của backend ở dưới vẫn phải hiện.
-          ⚠️ Hai nhánh dưới đây nằm TRONG một `div` (một con của lưới `.cmp`) chứ không phải
-          hai con rời: `.cmp` khai `grid-template-rows: auto auto auto 1fr` cho BỐN con (thanh
-          chọn · dòng ngưỡng · đầu cột · danh sách) — hai con thêm ở đây sẽ là con thứ năm và
-          thứ sáu, và hàng `1fr` (chỗ cuộn của danh sách) rơi vào một trong hai nhánh đó. */}
+          ⚠️ Hai nhánh dưới đây nằm TRONG một `div` `.cmp__tin` — con THỨ NĂM của lưới `.cmp`,
+          chứ không phải hai con rời. `app.css` khai **SÁU** track cho `.cmp`
+          (`grid-template-rows: auto auto auto auto auto 1fr`) và MỖI con có `grid-row` tường
+          minh: `.cmp__thanh` 1 · `.cmp__tin` 2 (co lại khi `:empty`) · `.cmp__nguong`/`.cmp__rong`
+          3 · `.cmp__dau` 4 · `.cmp__danh-sach` 6 (hàng `1fr` **DUY NHẤT** — chỗ cuộn).
+          ĐÓNG LÝ DO CỦA KHỐI NÀY: nếu hai nhánh dưới là hai con RỜI thì chúng là con thứ năm và
+          thứ sáu, và hàng `1fr` (chỗ cuộn của danh sách) rơi vào một trong hai nhánh đó — đúng
+          lỗi `Critical` C1 của ERRATA #36 mục 3. Khối chú thích này từng nói "BỐN con" khi
+          `app.css` đã khai SÁU (đo được ở re-review W3 #1, `Minor` F3): chú thích mâu thuẫn với
+          chính mã nó giải thích là một lời khai sai, nên nó được sửa cho khớp sự thật. */}
       <div className="cmp__tin">
         {dungDuoc.length === 0 ? (
           <p className="cmp__ly-do-khong-dich" data-testid="ly-do-khong-dich">

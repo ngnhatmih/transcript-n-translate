@@ -332,6 +332,16 @@ const dem = {
   transcripts: 0,
   transcriptChiTiet: 0,
   translations: 0,
+  /**
+   * So lan `GET /api/translations/{id}` — bo dem TOAN CUC, **KHONG duoc dung lam PHEP CHO**.
+   *
+   * ⚠️ VI SAO (vong sua W3 #2, `Important` F1 cua re-review): no la mot CON SO TICH LUY, khong
+   * phai mot dai luong CUA BAI NAY — mot request con dang bay cua bai TRUOC ha canh SAU
+   * `beforeEach` (no tra bo dem ve 0) cung lam no tang, nen `waitFor(() => assert.equal(dem.
+   * translationChiTiet, N))` co the KHONG BAO GIO bang N (do duoc: `3 !== 2`, `4 !== 2`). Nay
+   * moi phep cho di qua `choDanhSachBanDich` (DOM THAT). Bo dem o lai lam BANG CHUNG DUONG THAT
+   * khi can probe (log request theo `id`), khong lam phep cho.
+   */
   translationChiTiet: 0,
   /**
    * So request mang mot id KHONG HOP LE (thieu, `null`, `0`, khong nguyen) tren duong dan
@@ -766,6 +776,20 @@ function chu(container: HTMLElement, chon: string): string {
   return phanTu(container, chon).textContent ?? "";
 }
 
+/**
+ * Id BAN DICH ma ba nut XUAT tro toi — doc tu `href` THAT cua nut xuat.
+ *
+ * ⚠️ KHONG doc `data-translation-id`: do la `translationId` (ban DANG XEM), KHONG phai ban SE
+ * XUAT (xem `Transport`). Hai cau hoi khac nhau, va `F2` cua re-review W3 #1 chinh la cho chung
+ * lech nhau: ban dang xem `done` ma `href` van tro ban `done` moi nhat.
+ */
+function idXuat(container: HTMLElement): number | null {
+  const href = phanTu(container, ".tp__xuat").getAttribute("href");
+  if (href === null) return null;
+  const khop = /^\/api\/export\/(\d+)\?/.exec(href);
+  return khop === null ? null : Number(khop[1]);
+}
+
 /** Muc KENH (nut) chua `chuoi` — tra theo CHU, khong theo thu tu mang. */
 function nutKenh(container: HTMLElement, chuoi: string): Element {
   const khop = [...container.querySelectorAll(".ch__item")].find(
@@ -776,26 +800,48 @@ function nutKenh(container: HTMLElement, chuoi: string): Element {
 }
 
 /**
- * Di DUONG THAT toi vung Doi chieu: cho kenh that, bam kenh, doi radio "Đối chiếu".
+ * Cho vung Doi chieu co DU so HANG ban dich trong DOM THAT — **DUNG dau ra ma bai sap doc**.
  *
- * ⚠️ `chiTiet > 0` la mot phep cho THEO TIN HIEU, khong theo dong ho: `transcript` va
- * `translations` la HAI `useApi` doc lap, nen vung Doi chieu co the mount TRUOC khi
- * `getTranslation` ket thuc (xem bai `CHE DO: 'Đối chiếu'…` — mutation `W1-5` do dung cho nay).
- * Voi `chiTiet === 0` thi khong cho: bai "chua co ban dich nao" CAN trang thai rong that.
+ * ⚠️ THAY CHO `waitFor(() => assert.equal(dem.translationChiTiet, N))` (vong sua W3 #2, `Important`
+ * F1 cua re-review). Bo dem do la mot **SO TICH LUY O PHIA SERVER**, va no KHONG phai mot dai luong
+ * CUA BAI NAY: mot request CON DANG BAY cua bai TRUOC ha canh SAU `beforeEach` (no tra bo dem ve 0)
+ * cung lam no tang. DO DUOC bang log request phia server (xem bao cao vong sua #2): mot lan doc
+ * CHI TIET cua mot transcript KHAC roi vao bai sau va lam bo dem khong bao gio bang con so bai
+ * mong ⇒ `waitFor` het han va bao `3 !== 2` / `4 !== 2`.
+ *
+ * ⚠️ Va phep cho nay MANH HON, khong yeu hon: mot hang `pick-` chi co mat khi `GET
+ * /api/translations/{id}` cua MOI hang da ket thuc va React da COMMIT — tuc no cho dung thu bai
+ * sap doc, va no khong the xanh (hay do) vi mot request cua bai khac.
  */
-async function toiDoiChieu(container: HTMLElement, chiTiet: number): Promise<void> {
+async function choDanhSachBanDich(container: HTMLElement, soLuong: number): Promise<void> {
+  await waitFor(
+    () => {
+      const hang = container.querySelectorAll('[data-testid^="pick-"]');
+      assert.equal(
+        hang.length,
+        soLuong,
+        `phai co ${soLuong} hang ban dich cua ban ghi trong vung Doi chieu`,
+      );
+    },
+    { timeout: 5000, interval: 20 },
+  );
+}
+
+/**
+ * Di DUONG THAT toi vung Doi chieu: cho kenh that, bam kenh, doi radio "Đối chiếu", roi cho
+ * `soLuong` HANG ban dich trong DOM.
+ *
+ * ⚠️ `soLuong > 0` la mot phep cho THEO TIN HIEU DOM — khong theo dong ho, va khong theo bo dem
+ * tich luy o phia server (xem `choDanhSachBanDich`). `transcript` va `translations` la HAI `useApi`
+ * doc lap, nen mot hang `pick-` chi xuat hien khi ca hai da xong. Voi `soLuong === 0` thi khong
+ * cho: bai "chua co ban dich nao" CAN trang thai rong that.
+ */
+async function toiDoiChieu(container: HTMLElement, soLuong: number): Promise<void> {
   await choChu(container, "kenh-mot.wav");
   fireEvent.click(nutKenh(container, "kenh-mot.wav"));
   await choChu(container, "câu 1");
-  if (chiTiet > 0) {
-    await waitFor(
-      () => {
-        assert.equal(dem.translationChiTiet, chiTiet, `phai doc CHI TIET ${chiTiet} ban dich cua ban ghi`);
-      },
-      { timeout: 5000, interval: 20 },
-    );
-  }
   fireEvent.click(getByRole(container, "radio", { name: /đối chiếu/i }));
+  if (soLuong > 0) await choDanhSachBanDich(container, soLuong);
 }
 
 describe("App: KENH THAT + HANG DOI THAT tu server node:http trong tien trinh", () => {
@@ -1109,18 +1155,16 @@ describe("App: KENH THAT + HANG DOI THAT tu server node:http trong tien trinh", 
     await choChu(container, "kenh-mot.wav");
     fireEvent.click(nutKenh(container, "kenh-mot.wav"));
     await choChu(container, "câu 1");
-    // ⚠️ Cho theo TIN HIEU, khong khang dinh ngay: `transcript` va `translations` la HAI
-    // `useApi` doc lap, nen "câu 1" co the hien TRUOC khi hai request `getTranslation` ket
-    // thuc. Mot phep khang dinh ngay (`=== 2`) la mot phep do PHU THUOC THOI DIEM — do duoc
-    // trong luot mutation `W1-5` (no do o dung dong nay, khong phai vi mutant).
-    await waitFor(
-      () => {
-        assert.equal(dem.translationChiTiet, 2, "phai doc CHI TIET ca hai ban dich cua ban ghi");
-      },
-      { timeout: 5000, interval: 20 },
-    );
+    // ⚠️ CHO THEO TIN HIEU DOM, khong khang dinh ngay va KHONG doi mot bo dem tich luy o phia
+    // server: `transcript` va `translations` la HAI `useApi` doc lap, nen "câu 1" co the hien
+    // TRUOC khi hai request `getTranslation` ket thuc (mot phep khang dinh ngay la mot phep do
+    // PHU THUOC THOI DIEM — do duoc trong luot mutation `W1-5`). Bo dem `dem.translationChiTiet`
+    // TUNG duoc dung lam phep cho o day, nhung no la so TICH LUY cua ca tien trinh: mot request
+    // con dang bay cua bai TRUOC ha canh sau `beforeEach` cung lam no tang (xem
+    // `choDanhSachBanDich`). Nay cho DUNG hai hang `pick-` ma bai sap doc.
 
     fireEvent.click(getByRole(container, "radio", { name: /đối chiếu/i }));
+    await choDanhSachBanDich(container, 2);
 
     // Bộ chọn bản dịch: hai hàng của bản ghi ⇒ hai nút chọn.
     await choPhanTu(
@@ -1301,11 +1345,20 @@ describe("App: KENH THAT + HANG DOI THAT tu server node:http trong tien trinh", 
     await choChu(container, "kenh-mot.wav");
     fireEvent.click(nutKenh(container, "kenh-mot.wav"));
     await choChu(container, "câu 1");
-    // Doi CA HAI ban dich cua ban ghi duoc doc xong TRUOC khi doi che do: neu khong, vung
-    // Doi chieu co the hien danh sach RONG vi ly do thoi diem, khong phai vi mac dinh sai.
+    // ⚠️ Cho DUNG dau ra DOM ma bai sap doc: ba nut XUAT co `href` (chi co khi danh sach ban
+    // dich da ve va co mot ban `done`).
+    //
+    // ⚠️ THAY CHO `waitFor(() => assert.equal(dem.translationChiTiet, 2))` (vong sua W3 #2): do la
+    // mot bo dem TICH LUY o PHIA SERVER, khong phai dai luong cua bai nay — mot request con dang
+    // bay cua bai TRUOC ha canh sau `beforeEach` cung lam no tang (do duoc: `3 !== 2` / `4 !== 2`;
+    // xem `choDanhSachBanDich` va bao cao vong sua #2). Phep do "hai ban dich da duoc doc" khong
+    // mat: no nam o `choDanhSachBanDich(container, 2)` ngay duoi, tren DOM THAT.
     await waitFor(
       () => {
-        assert.equal(dem.translationChiTiet, 2, "phai doc CHI TIET ca hai ban dich cua ban ghi");
+        assert.ok(
+          phanTu(container, ".tp__xuat").getAttribute("href") !== null,
+          "nut xuat chua co `href` ⇒ danh sach ban dich chua ve",
+        );
       },
       { timeout: 5000, interval: 20 },
     );
@@ -1317,6 +1370,7 @@ describe("App: KENH THAT + HANG DOI THAT tu server node:http trong tien trinh", 
     assert.equal(xuatId, 11, `ba nut xuat phai tro vao ban \`done\` moi nhat; do duoc ${JSON.stringify(href)}`);
 
     fireEvent.click(getByRole(container, "radio", { name: /đối chiếu/i }));
+    await choDanhSachBanDich(container, 2);
     await choPhanTu(
       container,
       '[data-testid="pick-11"]',
@@ -1589,12 +1643,16 @@ describe("App: KENH THAT + HANG DOI THAT tu server node:http trong tien trinh", 
 
     // (b) BAM ⇒ POST THAT.
     fireEvent.click(phanTu(container, '[data-testid="tao-ban-dich"]'));
+    // ⚠️ Cho DUNG thu sap doc: `dem.bodyTao` (server da doc XONG body). Phep cho cu la
+    // `dem.postTranslations === 1` — bo dem do tang NGAY khi server NHAN request, con body duoc
+    // ghi MUON HON (`req.on("end")`), nen do dung khuon "cho A roi doc B" ma B duoc ghi SAU A.
     await waitFor(
       () => {
-        assert.equal(dem.postTranslations, 1, "bam 'dich' phai gui DUNG MOT `POST /api/translations`");
+        assert.ok(dem.bodyTao !== null, "server chua doc duoc body JSON nao");
       },
       { timeout: 5000, interval: 20 },
     );
+    assert.equal(dem.postTranslations, 1, "bam 'dich' phai gui DUNG MOT `POST /api/translations`");
 
     // (c) BODY THAT, doc o PHIA SERVER tu chinh request.
     const body = dem.bodyTao;
@@ -1902,8 +1960,7 @@ describe("App: KENH THAT + HANG DOI THAT tu server node:http trong tien trinh", 
     const { container, unmount } = render(taoPhanTu(App));
 
     await toiDoiChieu(container, 2);
-    // ⚠️ CHO THEO TIN HIEU truoc khi doc: `toiDoiChieu` chi doi `dem.translationChiTiet === 2`
-    // (mot bo dem o PHIA SERVER), no khong doi vung Doi chieu da COMMIT xong. Do duoc trong
+    // ⚠️ CHO THEO TIN HIEU truoc khi doc — va tin hieu do phai la DUNG THU SAP DOC. Do duoc trong
     // chien dich mutation: vot `W3-16`/`W3-10`/`I3-doc-theo-trang-thai` lam bai nay DO them
     // ("phai co DUNG MOT ban dich dang chon; do duoc 0") — tuc no FLAKY khi may cham.
     await choPhanTu(
@@ -1913,11 +1970,11 @@ describe("App: KENH THAT + HANG DOI THAT tu server node:http trong tien trinh", 
       "vung Doi chieu chua commit xong danh sach ban dich",
     );
     // ⚠️ CHO THEO DUNG TIN HIEU MA PHEP DO SAP DOC: `aria-checked="true"` tren hang 11.
-    // Do duoc: chi doi `dem.translationChiTiet === 2` (bo dem PHIA SERVER) la KHONG DU —
-    // `dem.*` tang khi server TRA LOI, con DOM chi doi sau do mot vong React. Trong chien dich
-    // mutation, vot `CONTROL-inert` (chi doi mot cum tu trong CHU THICH ⇒ dung ra phai 0 bai do)
-    // lam bai nay DO: `W3 I2 (SAME)` — tuc phep do con mot KHE FLAKY. Cho theo `aria-checked`
-    // dong khe do.
+    // ⚠️ DINH CHINH vong sua #2: `toiDoiChieu` TUNG doi `dem.translationChiTiet === 2` (bo dem o
+    // PHIA SERVER) — do la mot CON SO TICH LUY khong thuoc bai nay: mot request con dang bay cua
+    // bai TRUOC ha canh sau `beforeEach` cung lam no tang, va bai nay do vi ly do do (do duoc
+    // `3 !== 2` / `4 !== 2`; xem bao cao vong sua #2 va `choDanhSachBanDich`). Nay no cho DOM.
+    // Cho theo `aria-checked` dong not khe "server dem xong ≠ React da commit".
     await choPhuHop(
       container,
       '[data-testid="pick-11"]',
@@ -1959,6 +2016,189 @@ describe("App: KENH THAT + HANG DOI THAT tu server node:http trong tien trinh", 
     assert.match(cho, /11/, `cau noi ro phai neu ban SE DUOC XUAT (11); do duoc ${JSON.stringify(cho)}`);
 
     assert.deepEqual(tiengOn, [], "bat bien SAME khong duoc sinh tieng on console");
+    unmount();
+  });
+
+  // -------------------------------------------------------------------------
+  // VONG SUA W3 #2 — `Important` F2: mot CAU NOI SAI ve du lieu cua NGUOI DUNG
+  //
+  // DO DUOC (probe cua re-review W3 #1, nguyen van):
+  //   RR-PROBE-2 XUATCHO="bản đang xem (11) chưa dịch xong — xuất bản 13" HREF=/api/export/13?…
+  //   TOKEN=11
+  // trong khi ban 11 **DA `done`** (3 doan da dich). Fixture cu CHI co MOT ban `done` cho ban ghi
+  // 5, nen KHONG bai nao nhin thay ca nay: dieu kien cu (`exportableId !== translationId`) noi
+  // "chua dich xong" cho MOI ly do lech id, ke ca ly do nguoc lai.
+  // -------------------------------------------------------------------------
+
+  it("W3 I2 (XUAT): ban dang xem DA `done` ⇒ ba nut XUAT tro CHINH no, va KHONG duoc noi 'chua dich xong'", async () => {
+    // FIXTURE CO **HAI** BAN `done` cho ban ghi 5: 11 (cu) va 13 (MOI NHAT), cong 12 `queued`.
+    // Ban se duoc NGUOI DUNG chon la 11 — mot ban `done` NHUNG KHONG phai moi nhat. Do dung la ca
+    // ma fixture mot-ban-`done` khong the sinh ra.
+    TRANSLATIONS = [...TRANSLATIONS, banDich(13, 5, "done")];
+    TRANSLATION_CHI_TIET[13] = {
+      ...banDich(13, 5, "done"),
+      segments: [doan(0, 0, 2, "câu một (bản 13)")],
+      cps: { max_cps: 21, rows: [] },
+    };
+
+    const { container, unmount } = render(taoPhanTu(App));
+
+    // Ba hang ban dich cua ban ghi 5 trong DOM THAT.
+    await toiDoiChieu(container, 3);
+
+    // (0) MAC DINH: ban `done` MOI NHAT (13) la ban dang xem ⇒ xuat 13 va KHONG co cau nao.
+    await choPhuHop(
+      container,
+      '[data-testid="pick-13"]',
+      (el) => el.getAttribute("aria-checked") === "true",
+      "ban `done` moi nhat (13) phai la ban dang xem truoc khi nguoi dung chon",
+    );
+    assert.equal(idXuat(container), 13,
+      `mac dinh: ban dang xem (13, done moi nhat) cung la ban duoc xuat; do duoc ${idXuat(container)}`);
+    assert.equal(
+      container.querySelectorAll('[data-testid="xuat-cho"]').length,
+      0,
+      "mac dinh hai id BANG nhau ⇒ khong co gi de giai thich, KHONG duoc co cau nao",
+    );
+
+    // (1) NGUOI DUNG BAM CHON BAN 11 — ban DA `done` nhung KHONG phai ban `done` moi nhat.
+    fireEvent.click(phanTu(container, '[data-testid="pick-11"]'));
+    await choPhuHop(
+      container,
+      '[data-testid="pick-11"]',
+      (el) => el.getAttribute("aria-checked") === "true",
+      "chua chon duoc ban 11 trong segmented control",
+    );
+
+    // (2) MENH DE CUA F2: ban dang xem DA dich xong ⇒ ba nut XUAT phai tro CHINH ban do.
+    //     Day la ve ma ban cu VI PHAM: no ghi de lua chon cua nguoi dung bang ban `done` moi nhat.
+    assert.equal(idXuat(container), 11,
+      "ban dang xem (11) DA `done` ⇒ ba nut XUAT phai tro 11; ghi de bang ban `done` moi nhat (13) la "
+      + `ghi de LUA CHON cua nguoi dung; do duoc ${idXuat(container)}`);
+
+    // (3) VA cau "chua dich xong" KHONG duoc noi ra — no KHONG dung su that (11 DA dich xong).
+    assert.equal(
+      container.querySelectorAll('[data-testid="xuat-cho"]').length,
+      0,
+      "ban 11 DA `done` ⇒ cau 'chua dich xong' la mot CAU SAI; do duoc "
+      + `${JSON.stringify(textCua(container, '[data-testid="xuat-cho"]'))}`,
+    );
+
+    // (4) VE NGUOC LAI — cau do PHAI co khi ly do la THAT: chon ban 12 (`queued`, 0 doan).
+    fireEvent.click(phanTu(container, '[data-testid="pick-12"]'));
+    await choPhuHop(
+      container,
+      '[data-testid="pick-12"]',
+      (el) => el.getAttribute("aria-checked") === "true",
+      "chua chon duoc ban 12 trong segmented control",
+    );
+    const cau = await choPhanTu(
+      container,
+      '[data-testid="xuat-cho"]',
+      (t) => t.includes("12") && t.includes("13"),
+      "ban 12 (`queued`) ⇒ phai co cau noi ro ban nao se duoc xuat",
+    );
+    assert.match(cau, /chưa dịch xong/,
+      `ban 12 THAT SU chua dich xong ⇒ cau phai noi dung su that; do duoc ${JSON.stringify(cau)}`);
+    assert.equal(idXuat(container), 13,
+      `ban 12 chua co noi dung ⇒ xuat ban \`done\` moi nhat (13); do duoc ${idXuat(container)}`);
+
+    assert.deepEqual(tiengOn, [], "chon ban dich khong duoc sinh tieng on console");
+    unmount();
+  });
+
+  // -------------------------------------------------------------------------
+  // VONG SUA W3 #2 — `Minor #3`: `failed`/`cancelled` KHONG co bai ghim nao
+  //
+  // DO DUOC (re-review W3 #1): mutation `RR-I3-bo-failed-cancelled` (chi giu `done` trong ngoi no
+  // doc lai) ⇒ **0 bai do** — hai nhanh `failed`/`cancelled` cua ngoi no KHONG duoc ghim. Bai nay
+  // ghim CA HAI bang DOM THAT (cot phai noi SU THAT cua ban dich, khong phai mot loi khai).
+  // -------------------------------------------------------------------------
+
+  it("W3 I3 (ket thuc KHONG thanh cong): job `translate` `failed`/`cancelled` ⇒ cot phai noi SU THAT", async () => {
+    // HAI job `translate` cua CUNG ban dich 13, ca hai vao anh chup o trang thai `running` (KHONG
+    // nam trong tap "da ket thuc") ⇒ moi lan mot trong hai chuyen sang mot trang thai KET THUC la
+    // mot lan CHUYEN TRANG THAI, tuc keo DUNG MOT lan doc lai danh sach ban dich.
+    themJobDich(33, "running", 13);
+    themJobDich(34, "running", 13);
+
+    const { container, unmount } = render(taoPhanTu(App));
+
+    await toiDoiChieu(container, 2);
+    await waitFor(
+      () => {
+        assert.ok(streams.size >= 1, "hook chua mo /api/jobs/stream");
+      },
+      { timeout: 5000, interval: 20 },
+    );
+
+    fireEvent.click(phanTu(container, '[data-testid="tao-ban-dich"]'));
+    await choPhanTu(
+      container,
+      '[data-testid="pick-13"]',
+      (t) => t.includes("bản dịch"),
+      "hang ban dich MOI khong xuat hien ⇒ danh sach khong duoc lam moi",
+    );
+
+    // (A) JOB DICH `failed` — server tra ve ban dich 13 `status: "failed"` o lan doc ke tiep.
+    //     Chu "dich loi" chi co the tới DOM qua mot lan DOC LAI `/api/translations`.
+    TRANSLATION_CHI_TIET[13] = {
+      ...banDich(13, 5, "failed"),
+      segments: [],
+      cps: { max_cps: 21, rows: [] },
+    };
+    TRANSLATIONS = TRANSLATIONS.map((t) => (t.id === 13 ? banDich(13, 5, "failed") : t));
+
+    emit(sse({ id: 33, state: "failed", progress: 1, phase: "translate:opus-mt", error: "loi dich", log_tail: "" }));
+    // ⚠️ Cho DUNG O MA BAI SAP DOC (`.cmp__dich`), KHONG phai `choChu(container, "dịch lỗi")`:
+    // chu do con xuat hien o vung HANG DOI (nhan trang thai job) va o do no doi NGAY khi su kien
+    // SSE tới — tuc mot phep cho "A" trong khi bai doc "B" (dung lop loi ERRATA #35 muc 1, va ban
+    // nhap dau cua chinh bai nay da mac: no doc duoc `dịch lỗi` cu con lai sau buoc `cancelled`).
+    await choPhanTu(
+      container,
+      '[data-testid="col-right"]',
+      (t) => t.includes("dịch lỗi"),
+      "ban dich `failed` chua tới COT PHAI (mot lan doc lai `/api/translations` phai keo no tới)",
+    );
+    const cotPhaiFailed = textCua(container, '[data-testid="col-right"]');
+    assert.ok(
+      cotPhaiFailed.every((t) => t.includes("dịch lỗi")),
+      `ban dich \`failed\` ⇒ cot phai phai noi 'dich loi' o MOI o; do duoc ${JSON.stringify(cotPhaiFailed)}`,
+    );
+    assert.ok(
+      !cotPhaiFailed.some((t) => t.includes("đang dịch")),
+      `ban dich \`failed\` ⇒ cot phai KHONG duoc con noi 'dang dich…'; do duoc ${JSON.stringify(cotPhaiFailed)}`,
+    );
+
+    // (B) NHANH `cancelled` — job THU HAI cua cung ban dich do (tap "da ket thuc" doi tu {33}
+    //     sang {33,34} ⇒ mot lan chuyen trang thai NUA, tuc mot lan doc lai nua).
+    TRANSLATION_CHI_TIET[13] = {
+      ...banDich(13, 5, "cancelled"),
+      segments: [],
+      cps: { max_cps: 21, rows: [] },
+    };
+    TRANSLATIONS = TRANSLATIONS.map((t) => (t.id === 13 ? banDich(13, 5, "cancelled") : t));
+
+    emit(sse({ id: 34, state: "cancelled", progress: 1, phase: "translate:opus-mt", error: null, log_tail: "" }));
+    // Cung ly do: cho DUNG `col-right`, khong phai chu "đã huỷ" o vung HANG DOI (no doi ngay,
+    // truoc khi lan doc lai danh sach ban dich kip ve).
+    await choPhanTu(
+      container,
+      '[data-testid="col-right"]',
+      (t) => t.includes("đã huỷ"),
+      "ban dich `cancelled` chua tới COT PHAI (mot lan doc lai `/api/translations` phai keo no tới)",
+    );
+    const cotPhaiCancelled = textCua(container, '[data-testid="col-right"]');
+    assert.ok(
+      cotPhaiCancelled.every((t) => t.includes("đã huỷ")),
+      `ban dich \`cancelled\` ⇒ cot phai phai noi 'da huy' o MOI o; do duoc ${JSON.stringify(cotPhaiCancelled)}`,
+    );
+    assert.ok(
+      !cotPhaiCancelled.some((t) => t.includes("đang dịch")),
+      `ban dich \`cancelled\` ⇒ cot phai KHONG duoc con noi 'dang dich…'; do duoc ${JSON.stringify(cotPhaiCancelled)}`,
+    );
+
+    assert.deepEqual(tiengOn, [], "job dich ket thuc KHONG thanh cong khong duoc sinh tieng on console");
     unmount();
   });
 
