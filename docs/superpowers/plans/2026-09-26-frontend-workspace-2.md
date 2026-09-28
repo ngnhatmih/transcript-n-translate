@@ -1867,6 +1867,51 @@ nhưng đó là **hành vi MỚI không task nào sở hữu** ⇒ **báo cáo, 
 ⇒ Và vì W1/W2 chạy trước Task 11, §12.5 nay **tới được nhiều hơn**: `setMode`/`selectChannel` **đã có dispatch**, nên `1/2/3` đổi chế độ
 và chọn kênh **phải chứng minh được trên DOM THẬT**. **Đoạn duy nhất còn bất khả là `nudge`.**
 
+## ⚠️ ERRATA #34 — TASK 10 ĐÓNG (`PASS` 0/0/2): **cách ghim một BẤT BIẾN thay vì một LITERAL**, **chứng minh mutant tương đương**, và **cách một brief bị đọc sai**
+
+Chuỗi: `e044d0b` (giao) → review độc lập **`CONDITIONAL PASS` 1/3/3** → `06986db` (vòng sửa) → re-review **`PASS` 0/0/2**.
+**TASK 10 XONG.** Cổng độc lập (tôi và reviewer, hai lượt riêng): `tests 157 / suites 19 / pass 155 / fail 2 / cancelled 0`,
+**EXIT=1** (đỏ **đúng hai** `EMPTY_DB_MSG`), `typecheck` EXIT=0, `build` EXIT=0, `--listFiles` 87 tệp / 0 `.test.`.
+⚠️ **`10/10` lượt `npm_exit=1` — KỂ CẢ lượt SẠCH** ⇒ **EXIT không bao giờ là tín hiệu trong giai đoạn này**; tín hiệu thật là **`cancelled 0`** + **tên** bài đỏ.
+
+### 1. ✅ **Ghim BẤT BIẾN (quan hệ), KHÔNG ghim LITERAL** — bài học đáng chép nhất của vòng này
+Bài ghim CSS của vòng sửa chỉ khẳng định **`grid-row` tồn tại** ⇒ mutation `X7` (đưa `.shell` về **3** track) **LỌT** (+0 bài đỏ).
+Re-review đo **ba biến thể CSS** (current · `X7` 3-track · pre-fix `e044d0b`) và chỉ ra: ghim **thêm** *"khớp cặp hàng ↔ con"*
+(`.od` ↔ `auto`, `.shell__mid` ↔ `1fr`) ⇒ `X7` **ĐỎ** *và* pre-fix **vẫn ĐỎ**.
+⇒ **LUẬT: khi một bài ghim chỉ khẳng định SỰ TỒN TẠI của một khai báo, nó bỏ lọt mọi biến thể làm khai báo đó VÔ NGHĨA.
+Hãy ghim QUAN HỆ (cái này khớp với cái kia), KHÔNG ghim nguyên văn — ghim nguyên văn `grid-template-rows` sẽ ĐÓNG BĂNG số lượng track.**
+
+### 2. 🔴 **Một brief CẤM kỹ thuật X mà không nói ĐƯỢC PHÉP làm gì ⇒ nó bị đọc thành "cấm X"** — và cái nợ đứng yên
+Brief vòng sửa viết: *"TUYỆT ĐỐI KHÔNG ghim `grid-template-rows`"* (ý: **thay cho** vị trí). Implementer đọc thành **cấm ghim track**,
+nên **không đóng `X7`** và **khai một lý do SAI** trong báo cáo. Re-review bác lý do đó bằng phép đo.
+⇒ **LUẬT: mọi lệnh CẤM phải kèm DẠNG ĐƯỢC PHÉP** (*"đừng ghim A thay cho B; ghim B, và A chỉ được ghim CÙNG VỚI B"*).
+⚠️ Hệ quả kèm theo: **một nợ được khai kèm một lý do SAI thì nó trôi vô thời hạn** — nợ phải kèm **phép đo chứng minh nó KHÔNG ĐÓNG ĐƯỢC**, không phải một suy luận.
+
+### 3. ✅ **"MUTANT TƯƠNG ĐƯƠNG" phải được CHỨNG MINH từ KIỂU + NGUỒN SINH + BẤT BIẾN** (nối tiếp ERRATA #26)
+Implementer khai `available !== false` (nhánh `mt`) là tương đương. Re-review **chứng minh** thay vì tin:
+`types.ts` = `available?: boolean`; `main.py` ghi **`bool` cho MỌI spec `kind=="mt"`** và **`continue`** với ASR;
+`deps.get_specs` trả **cùng object** `app.state.specs` mà `_mark_availability` đã sửa. Hai vị từ **trùng trên `{true,false}`**,
+chỉ khác ở `undefined`/`null`/`0` — **hình dạng backend KHÔNG sinh ra** cho MT. ⇒ **chấp nhận, kèm chứng minh**.
+⚠️ **Và nó để lại một khoảng trống thật, phải khai:** quy ước *"MT thiếu khoá = KHÔNG dùng được"* **không có bài ghim** và
+**không thể ghim** bằng fixture đúng hình dạng thật ⇒ **khoảng trống ở mức QUY ƯỚC**, khác với "mutant tương đương".
+⇒ **LUẬT: "tương đương" là một mệnh đề TOÁN HỌC trên MIỀN GIÁ TRỊ — hãy viết miền đó ra; và tách nó khỏi "quy ước không ghim được".**
+
+### 4. ⚠️ **Ba sự cố của chính reviewer (tự khai) — mỗi cái thành một cái TRIPWIRE**
+(a) `cmd /c` **lồng quotes** ⇒ `npm test` **KHÔNG HỀ CHẠY** mà driver vẫn chạy tiếp; (b) bộ phân tích log **thu cả TÊN SUITE**
+⇒ **thổi phồng** cột "bài đỏ thêm"; (c) một lượt đọc `app.css` **trong lúc driver đang mutate** ⇒ kết quả **rác**.
+⇒ **LUẬT: một driver phải có PHÉP KIỂM DƯƠNG (positive control)** — chạy một mutation **biết chắc phải đỏ** trước khi tin bất kỳ lượt nào;
+và **chốt chặn chéo `fail − 2 == số bài đỏ thêm`** (lượt này khớp **9/9**). *(Ba sự cố này KHÔNG làm bẩn commit — cây vẫn sạch.)*
+
+### 5. Nợ còn lại của Task 10 — **hai cái chuyển sang W1, một cái ở lại**
+- **`X7`** (bài ghim bất biến) và **nhánh ASR khẳng định quá mạnh** (`.od__boc-bang` nói *"chạy ngay trên máy"* cho **mọi** `kind === "asr"`
+  bất kể `runtime`; hôm nay đúng **4/4** chỉ vì cả bốn ASR là `inprocess`) ⇒ **đã đưa vào brief Task W1 §5b** (§2 ở trên), kèm mutation.
+- **`Minor #2`** (`.od` thiếu `role="status"`/`aria-live`): **Ở LẠI là nợ hợp lệ** — spec UI **KHÔNG đòi** cho §4.8
+  (chỉ đòi `aria-live` cho trạng thái **job** + `role="status"` cho vùng **hàng đợi**). Reviewer đã kiểm và xác nhận lý do **đúng**.
+- **Khoảng trống quy ước** ở mục 3: ở lại, đã khai.
+- ⚠️ **Và điều KHÔNG ai kiểm được, lặp lại lần thứ tư:** **chưa ai nhìn thấy màn hình này trong trình duyệt thật**;
+  cả bài ghim **và** phép đo của reviewer chỉ khẳng định **VĂN BẢN CSS** khai `grid-row` + cặp hàng↔con khớp nhau —
+  **không** khẳng định trình duyệt **VẼ** đúng. `Critical #1` là **chứng minh TĨNH**.
+
 ## Quy ước thẩm mỹ — spec UI thắng, skill chỉ là checklist
 
 Spec `2026-09-25-phu-de-lab-ui-design.md` là **nguồn có thẩm quyền về hình thức** (bạn đã duyệt). Skill
