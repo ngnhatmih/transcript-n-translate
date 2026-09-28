@@ -2220,6 +2220,44 @@ ba vùng kênh/bàn/việc · transport ở đáy (`0:00.00 / —:—.—`, `ch�
 - **Nên biến đường chụp thành script dùng lại** (hiện ở `_shots/`, ngoài repo) — và cân nhắc đưa vào `frontend/` như một tiện ích có tài liệu, hoặc để ngoài repo như công cụ kiểm.
 - ⚠️ **Vẫn CHƯA chứng minh:** chất lượng **bản dịch tiếng Việt** (ảnh chỉ chứng minh bố cục/vẽ) — vẫn cần **chạy engine thật**.
 
+## ⚠️ ERRATA #42 — **KHÔNG THỂ gieo `queued`/`running` rồi quan sát tĩnh**, và **hình dạng mới của bốn task cuối** (D1/D2/11/12/13)
+
+### 1. 🔴 PHÁT HIỆN MỚI — fixture phải khớp ĐIỀU HỆ THỐNG THẬT SỰ LÀM
+Muốn chụp ảnh vùng HÀNG ĐỢI (để thấy §12.2 *"vì sao chờ"* và nút của D2), tôi gieo job. **Hai lần đo qua `/api/jobs` thật** (backend cổng **8631**, tránh đụng 8620):
+
+| Gieo là | Đọc lại thành | Cơ chế |
+|---|---|---|
+| `running` | **`interrupted`** | backend **đối soát job mồ côi lúc khởi động** (Task 10 recovery) |
+| `queued` | **`failed`** | **worker SỐNG trong tiến trình nhặt và chạy** nó; chưa pull model ⇒ thất bại |
+⇒ **Chỉ ba trạng thái TĨNH quan sát được: `done`, `failed`, `interrupted`.**
+🔴 **Hệ quả cho D2 + Task 12:** nút **HUỶ** chỉ có nghĩa với `queued`/`running` ⇒ **nút huỷ KHÔNG THỂ chụp ảnh bằng dữ liệu gieo tĩnh**;
+nó **buộc phải** được chứng minh bằng **test** (fixture `node:http` điều khiển được trạng thái). Ảnh chỉ chứng minh được **nút chạy lại**.
+⇒ **LUẬT: fixture phải khớp điều hệ thống THẬT SỰ làm, không phải điều mình muốn nó làm.** (Cùng họ với `INSERT OR IGNORE` no-op ở #35 mục 3.)
+
+### 2. ✅ NỢ ĐÃ ĐÓNG — độ dài đoạn khác nhau để cột CPS có **cả hai chiều**
+`_seed/seed.py` trước đây dùng **mọi đoạn 1 giây** ⇒ **cả 5 dòng CPS đều vượt ngưỡng** (phát hiện từ **ảnh chụp thật**, #41 mục 3b).
+Nay cửa sổ khác nhau; **đo qua route thật `/api/translations/{id}`**:
+`23.5 over=True` · `80.0 over=True` · **`17.7 over=False`** · `24.7 over=True` · **`16.0 over=False`** ⇒ có **cả hai chiều** để ảnh chứng minh được.
+Bản gieo CHỐT (đã kiểm qua API): `ingest=done` · `asr=failed` · `translate=interrupted` · `transcripts=1` · `sources=1 duration=10`.
+
+### 3. Hình dạng MỚI của các task cuối (brief `-v2`/`-d*` trong `.superpowers/sdd/<plan>/`)
+- **D1** — `patchTranscript` + **nudge** (cả hai đi qua **một** đường ghi). ⚠️ Vế chống **mất dữ liệu**: `TranscriptPatch.segments` buộc gửi **TOÀN BỘ** mảng ⇒ dựng lại `Segment` thiếu trường sẽ **xoá âm thầm** `suspect`/`qa` của mọi dòng. Và phải **tự đo** xem PATCH có tăng `version` (⇒ bản dịch thành `stale`) không.
+- **D2** — `approveTranscript` + `cancelJob`/`retryJob`, kèm **3 nợ nhỏ** (nhãn tab bản dịch theo **vị trí mảng**; `role="status"` trên `.od`; comment sai `contract.test.ts:705`).
+  ⚠️ Yêu cầu **trung thực**: huỷ job `running` **chỉ ĐẶT CỜ** ⇒ phải nói *"đã YÊU CẦU huỷ"*, **không** được nói *"đã dừng"*.
+- **Task 11 (v2)** — bàn phím + **bảng phím tắt §11.4 phải render**. Bản v2 khác bản 1 ở chỗ: **sau D1 thì `nudge` CÓ ĐÍCH** ⇒ §12.5 phải được chứng minh **TRỌN**; ngoại lệ duy nhất còn lại là **nạp tệp ban đầu**, mà **chính spec tự cho phép** (§12.5 dòng 435–437).
+- **Task 12 (v2)** — bốn màn trên **backend THẬT** + **bảng §12** (chín tiêu chí → bài test → mutation, nói rõ tiêu chí nào **chỉ ẢNH** chứng minh được).
+  ⚠️ **Harness test dùng cổng KHÁC 8620** (`contract.test.ts` tự spawn backend trên 8620); **ảnh chụp** thì backend phải ở **8620** (dev server proxy `/api` → 8620). Hai mục đích, hai cổng.
+- **Task 13 (v2)** — README (kể cả mục **"Nhìn thấy app thật"** — năng lực **mới**) + thu hoạch `ponytail:` + **tài liệu hoá hai định nghĩa CPS** (⚠️ **không** tự đổi ngưỡng: đó là **quyết định sản phẩm**).
+
+### 4. ✅ Tài sản NGOÀI repo (đừng xoá) — và mức đã kiểm của từng cái
+`_seed/seed.py` **đã chạy thật** · `_shots/cdp.mjs` **đã chạy thật** (sinh 4 ảnh) · `_shots/close.mjs` **đã chạy thật** (đóng Chrome qua CDP `Browser.close`, an toàn hơn `Stop-Process` theo tên) ·
+`_shots/chup.mjs` ⚠️ **mới qua `node --check`, CHƯA chạy** · `_shots/plan-tat-ca.json` (20 bước) parse được · `_uv/` (uv 0.12.19 + Python 3.12 + `browser-harness 0.1.13`).
+
+### 5. ✅ Neo phép chờ phải đến từ DỮ LIỆU, không từ GIAO DIỆN
+Kế hoạch chụp dùng `waitText`. Kiểm neo: `seed-kenh-mot.wav` ✓ · `今天我們來說` ✓ · `opus-mt` ✓ · `chi phí` ✓ (đều từ dữ liệu gieo) —
+còn `chờ duyệt` **KHÔNG** có trong `seed.py` vì nó là **nhãn UI**, nên nó **chỉ** được dùng ở bước `eval` (đọc), **không** làm neo chờ.
+⇒ **LUẬT: neo phép CHỜ phải đến từ dữ liệu (bền); neo phép ĐỌC có thể đến từ giao diện (đổi được).** Trộn hai loại ⇒ bài kiểm tự treo rồi báo động giả.
+
 ## Quy ước thẩm mỹ — spec UI thắng, skill chỉ là checklist
 
 Spec `2026-09-25-phu-de-lab-ui-design.md` là **nguồn có thẩm quyền về hình thức** (bạn đã duyệt). Skill
