@@ -127,6 +127,39 @@ const SPECS: EngineSpec[] = [
   spec("qwen2.5-3b", "Qwen 2.5 3B", "ollama", false),
 ];
 
+/**
+ * FIXTURE MAU THUAN (`Important #1` cua review Task 10): `runtime` va `available` noi NGUOC
+ * nhau o CA HAI chieu.
+ *
+ * VI SAO BAT BUOC: hom nay hai tieu chi TRUNG ket qua tren du lieu that — panel chi hien khi
+ * Ollama `down`/`unknown`, ma luc do `ollama_available()` = ∅ nen MOI spec `runtime === "ollama"`
+ * deu co `available === false` (`app/main.py::_mark_availability`). Vi the mutation `M1` cua
+ * reviewer (phan loai theo `runtime` thay vi `available`) **SONG SOT: 0 bai do**. Mot fixture
+ * trong do hai tieu chi mau thuan la thu DUY NHAT phan biet duoc hai cach hieu.
+ *
+ *   - `opus-mt`: `runtime === "inprocess"` NHUNG `available === false` (model chua pull).
+ *   - `qwen2.5-3b`: `runtime === "ollama"` NHUNG `available === true` (tien trinh song + da pull).
+ */
+const SPECS_MAU_THUAN: EngineSpec[] = [
+  spec("opus-mt", "OPUS-MT", "inprocess", false),
+  spec("qwen2.5-3b", "Qwen 2.5 3B", "ollama", true),
+];
+
+/**
+ * FIXTURE DUNG HINH DANG THAT cua `/api/registry` (`Important #2`): registry that co **ASR**
+ * (Faster-Whisper x3 + SenseVoice — ca bon **KHONG co khoa `available`**, vi
+ * `_mark_availability` chi ghi khoa do cho `kind == "mt"`) **lan MT in-process** (OPUS-MT).
+ *
+ * VI SAO BAT BUOC: fixture `SPECS` o tren chi co MT ⇒ loi "panel noi ASR dich duoc" KHONG THE
+ * lo ra (ERRATA #31 muc 3: fixture phai co DUNG hinh dang that — du loai `kind`).
+ */
+const SPECS_ASR_MT: EngineSpec[] = [
+  spec("fw-large-v3-turbo", "Faster-Whisper large-v3-turbo", "inprocess", undefined, "asr"),
+  spec("sensevoice-small", "SenseVoice-Small", "inprocess", undefined, "asr"),
+  spec("opus-mt", "OPUS-MT", "inprocess", true),
+  spec("qwen2.5-3b", "Qwen 2.5 3B", "ollama", false),
+];
+
 // ---------------------------------------------------------------------------
 // Server `node:http` trong tien trinh — dem duoc request nao da THUC SU di ra
 // ---------------------------------------------------------------------------
@@ -349,6 +382,21 @@ describe("§4.8 trang thai Ollama: dai trang thai + panel hang nhat + dropdown e
     assert.deepEqual(tiengOn, [], "dai trang thai khong duoc sinh tieng on console");
   });
 
+  it("dai trang thai khi status === null noi 'chua doc duoc' — gia tri THU TU, KHAC `unknown`", () => {
+    // `status === null` = request con dang bay (hoac loi mang): CHUA DOC XONG. No KHAC
+    // `unknown` ("backend da tra loi: chua do duoc ollama"). Truoc vong sua nay gia tri thu
+    // tu `chua-doc-duoc` khong co LUAT CSS nao nen trung mau voi `unknown` (Minor #1).
+    const { container, unmount } = render(taoPhanTu(StatusStrip, { status: null }));
+
+    assert.equal(thuocTinh(container, ".stt", "data-ollama"), "chua-doc-duoc",
+      "status === null phai mang gia tri RIENG, khong duoc dan nhan thanh `unknown`");
+    assert.ok(chu(container, ".stt__ollama").includes("chưa đọc được"),
+      "chua doc xong phai noi 'chua doc duoc'");
+    assert.ok(!chu(container, ".stt__ollama").includes("chưa đo được"),
+      "`chua-doc-duoc` KHONG duoc dung chung cau voi `unknown` — hai su that khac nhau");
+    unmount();
+  });
+
   it("Header dat dai trang thai vao header, canh ten ban lam viec", () => {
     const { container } = render(taoPhanTu(Header, { status: status("unknown") }));
 
@@ -442,6 +490,86 @@ describe("§4.8 trang thai Ollama: dai trang thai + panel hang nhat + dropdown e
       "engine in-process khong duoc nam trong danh sach 'khong chay duoc'");
   });
 
+  it("phan loai theo `available`, KHONG theo `runtime`: FIXTURE MAU THUAN (ca hai chieu)", () => {
+    // `SPECS_MAU_THUAN`: `runtime` va `available` noi nguoc nhau ⇒ bai nay phan biet duoc
+    // hai cach hieu. Mutation `M1` cua reviewer (doi sang `runtime`) lam bai nay DO.
+    const { container, unmount } = render(taoPhanTu(OllamaDown, {
+      status: status("down"),
+      specs: SPECS_MAU_THUAN,
+      onRetry: () => {},
+    }));
+
+    const con = chu(container, ".od__con");
+    const khong = chu(container, ".od__khong");
+
+    // `runtime === "ollama"` NHUNG `available === true` (tien trinh song + model da pull)
+    // ⇒ PHAI nam trong "con dung duoc". Suy tu `runtime` se BO sot no.
+    assert.ok(con.includes("Qwen 2.5 3B"),
+      `engine co available === true phai nam trong "con dung duoc"; do duoc: ${JSON.stringify(con)}`);
+    assert.ok(!con.includes("OPUS-MT"),
+      `engine co available === false KHONG duoc nam trong "con dung duoc"; do duoc: ${JSON.stringify(con)}`);
+    // `runtime === "inprocess"` NHUNG `available === false` (model chua pull)
+    // ⇒ PHAI nam trong "khong dung duoc". Suy tu `runtime` se liet ke no la dung duoc.
+    assert.ok(khong.includes("OPUS-MT"),
+      `engine co available === false phai nam trong "khong dung duoc"; do duoc: ${JSON.stringify(khong)}`);
+    assert.ok(!khong.includes("Qwen 2.5 3B"),
+      `engine co available === true KHONG duoc nam trong "khong dung duoc"; do duoc: ${JSON.stringify(khong)}`);
+
+    unmount();
+  });
+
+  it("TACH theo `kind`: `.od__con` CHI neu MT — ASR di vao cau 'Boc bang' (hinh dang registry THAT)", () => {
+    // SPECS_ASR_MT co ASR (KHONG co khoa `available`) + MT in-process: dung hinh dang that
+    // cua `/api/registry`. Cau "… van DICH duoc" chi duoc neu engine `kind === "mt"`.
+    const { container, unmount } = render(taoPhanTu(OllamaDown, {
+      status: status("down"),
+      specs: SPECS_ASR_MT,
+      onRetry: () => {},
+    }));
+
+    const bocBang = chu(container, ".od__boc-bang");
+    assert.ok(bocBang.includes("Bóc băng"),
+      `phai co CAU RIENG cho boc bang (spec UI §4.8); do duoc: ${JSON.stringify(bocBang)}`);
+    assert.ok(bocBang.includes("Faster-Whisper large-v3-turbo"),
+      `ASR phai duoc neu ten trong cau BOC BANG; do duoc: ${JSON.stringify(bocBang)}`);
+    assert.ok(bocBang.includes("SenseVoice-Small"),
+      `ASR thu hai phai duoc neu ten trong cau BOC BANG; do duoc: ${JSON.stringify(bocBang)}`);
+    assert.ok(!bocBang.includes("OPUS-MT"),
+      `engine DICH khong duoc nam trong cau BOC BANG; do duoc: ${JSON.stringify(bocBang)}`);
+
+    const con = chu(container, ".od__con");
+    assert.ok(con.includes("OPUS-MT"),
+      `MT available === true phai duoc neu ten; do duoc: ${JSON.stringify(con)}`);
+    assert.ok(/còn dùng được/i.test(con), "cau nay phai noi RO la con dung duoc");
+    assert.ok(!con.includes("Faster-Whisper") && !con.includes("SenseVoice"),
+      `ASR KHONG dich cau nao ⇒ khong duoc nam trong cau "van dich duoc"; do duoc: ${JSON.stringify(con)}`);
+
+    const khong = chu(container, ".od__khong");
+    assert.ok(khong.includes("Qwen 2.5 3B"),
+      `MT available === false phai nam trong "khong dung duoc"; do duoc: ${JSON.stringify(khong)}`);
+    assert.ok(!khong.includes("Faster-Whisper") && !khong.includes("SenseVoice"),
+      `ASR van boc bang duoc ⇒ khong duoc nam trong "khong dung duoc"; do duoc: ${JSON.stringify(khong)}`);
+
+    unmount();
+  });
+
+  it("khong co engine nao (specs = []): HAI cau noi RO 'khong co engine nao', khong de trong", () => {
+    // Do loi do phu `X8`: bo nhanh danh sach RONG cua `lietKe` ⇒ 0 bai do. Bai nay dong no.
+    const { container, unmount } = render(taoPhanTu(OllamaDown, {
+      status: status("down"),
+      specs: [],
+      onRetry: () => {},
+    }));
+
+    const con = chu(container, ".od__con");
+    const khong = chu(container, ".od__khong");
+    assert.ok(con.includes("không có engine nào"),
+      `danh sach rong phai NOI RA, khong duoc de trong im lang; do duoc: ${JSON.stringify(con)}`);
+    assert.ok(khong.includes("không có engine nào"),
+      `danh sach rong phai NOI RA, khong duoc de trong im lang; do duoc: ${JSON.stringify(khong)}`);
+    unmount();
+  });
+
   it("panel noi ro CACH SUA — ca khi `down` LAN khi `unknown`", () => {
     for (const trangThai of ["down", "unknown"] as const) {
       const { container, unmount } = render(taoPhanTu(OllamaDown, {
@@ -488,7 +616,10 @@ describe("§4.8 trang thai Ollama: dai trang thai + panel hang nhat + dropdown e
     const moc = "§4.8 Trạng thái Ollama (Task 10)";
     const viTri = appCss.indexOf(moc);
     assert.ok(viTri > 0, "app.css phai co KHOI LUAT cua Task 10, khong chi co class trong TSX");
-    const khoi = appCss.slice(viTri);
+    // ⚠️ Cat khối tới MỐC `/* ──` KẾ TIẾP, KHONG tới hết tệp (Minor #3b): luật của task SAU
+    // them vao cuoi tệp sẽ tự chui vào "khối Task 10" và bị đem đi kiểm token.
+    const mocKe = appCss.indexOf("/* ──", viTri + 1);
+    const khoi = mocKe === -1 ? appCss.slice(viTri) : appCss.slice(viTri, mocKe);
 
     for (const chon of [".stt {", ".stt__cham {", ".od {", ".od__van {", ".od__sua {"]) {
       assert.ok(khoi.includes(chon), `app.css thieu luat "${chon}"`);
@@ -500,6 +631,13 @@ describe("§4.8 trang thai Ollama: dai trang thai + panel hang nhat + dropdown e
       "`down` phai co LUAT VE THAT (mau loi), khong chi co thuoc tinh `data-ollama`");
     assert.match(khoi, /\.stt\[data-ollama="unknown"\] \.stt__cham \{[^}]*background: var\(--ink-2\)/,
       "`unknown` phai KHAC `down` ve hinh thuc: chua do duoc thi khong duoc to do nhu mot loi da xac nhan");
+    // Gia tri THU TU `chua-doc-duoc` (status === null) phai co LUAT RIENG, va luat do phai
+    // KHAC `unknown` — neu khong thi "chua doc xong" trung mau voi "chua do duoc" (Minor #1).
+    const luatChuaDoc = /\.stt\[data-ollama="chua-doc-duoc"\] \.stt__cham \{([^}]*)\}/.exec(khoi);
+    assert.ok(luatChuaDoc !== null,
+      "`chua-doc-duoc` phai co LUAT CSS rieng, khong duoc roi ve mac dinh trung voi `unknown`");
+    assert.ok(!/background:\s*var\(--ink-2\)/.test(luatChuaDoc[1]),
+      "`chua-doc-duoc` phai KHAC `unknown`: mot cham to cung mau thi khong phan biet duoc hai thu");
     assert.match(khoi, /\.od__van \{[^}]*repeating-linear-gradient/,
       "spec UI §4.8 doi DAI VAN CHEO `--fault` o dinh cua so, khong phai mot duong ke lien");
     assert.match(khoi, /\.od__van \{[^}]*var\(--fault\)/,

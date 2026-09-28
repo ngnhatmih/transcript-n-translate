@@ -22,6 +22,18 @@
  * ⚠️ `status === null` (chưa đọc xong / lỗi mạng) là trạng thái THỨ BA về phía client, và
  * nó KHÁC cả hai: không có dữ liệu thì panel **không khẳng định gì** (render `null`).
  *
+ * ⚠️ HAI CÂU KHÁC NHAU, KHÔNG ĐƯỢC GỘP (review Task 10: `Important #1` + `#2`):
+ *   - *"Bóc băng vẫn chạy được: …"* — nhóm `kind === "asr"` (phiên âm chạy ngay trên máy,
+ *     không cần Ollama). Engine ASR **KHÔNG dịch câu nào**, nên nó không bao giờ được nằm
+ *     trong câu "… vẫn **dịch** được" (spec UI §4.8 tách hai câu: *"Bóc băng vẫn chạy
+ *     được"* ≠ engine dịch).
+ *   - *"Còn/Không dùng được: …"* — nhóm `kind === "mt"`, chia theo `capabilities.available`
+ *     mà **BACKEND** đã tính (`app/main.py::_mark_availability`); client ĐỌC THẲNG, và
+ *     **thiếu khoá = KHÔNG dùng được** (cùng quy ước với `EngineSelect.tsx`).
+ * `runtime` **KHÔNG** được dùng để suy "dùng được": đó là **tính lại ở client** một đại
+ * lượng backend đã tính (`Global Constraints`), và hai tiêu chí chỉ TRÙNG kết quả trên dữ
+ * liệu hôm nay vì panel chỉ hiện lúc Ollama `down`/`unknown` (`ollama_available()` = ∅).
+ *
  * Dữ liệu vào qua **PROP**: `App` là nơi DUY NHẤT gọi `/api/status` và `/api/registry`
  * (`useApi` không cache — hai nơi gọi là hai lượt đọc, hai nguồn sự thật).
  */
@@ -65,7 +77,7 @@ function lietKe(ds: EngineSpec[]): string {
 
 export interface OllamaDownProps {
   status: Status | null;
-  /** Registry đã gộp `asr` + `mt` — nguồn của TÊN engine trong hai câu "còn/không". */
+  /** Registry đã gộp `asr` + `mt` — nguồn của TÊN engine trong BA câu "bóc băng / còn / không". */
   specs: EngineSpec[];
   /** Đọc lại `/api/status` (nút `[ Thử lại ]` của spec UI §4.8 → `useApi().reload`). */
   onRetry: () => void;
@@ -76,10 +88,18 @@ export function OllamaDown({ status, specs, onRetry }: OllamaDownProps) {
   if (status === null || status.ollama === "up") return null;
 
   const chuaDo = status.ollama === "unknown";
-  // `runtime` ở đây chỉ dùng để CHỌN CÂU (engine nào cần Ollama), KHÔNG dùng để suy
-  // `available` — hai đại lượng khác nhau, xem `EngineSelect`.
-  const con = specs.filter((s) => s.runtime === "inprocess");
-  const khong = specs.filter((s) => s.runtime === "ollama");
+  // HAI CÂU HỎI KHÁC NHAU, HAI NGUỒN KHÁC NHAU — và KHÔNG được lẫn:
+  //   - "engine này phục vụ được NGAY BÂY GIỜ không" ⇒ `capabilities.available`, đại lượng
+  //     BACKEND đã tính. Client ĐỌC THẲNG; THIẾU KHOÁ = KHÔNG dùng được (cùng quy ước với
+  //     `EngineSelect.tsx:35`). `runtime` KHÔNG quyết định điều đó: `runtime:"ollama"` vẫn có
+  //     thể `available:true` (tiến trình sống + model đã pull), và `runtime:"inprocess"` vẫn
+  //     có thể `available:false` (model chưa pull) ⇒ suy từ `runtime` là nguồn sự thật thứ hai.
+  //   - "engine này thuộc BƯỚC nào" ⇒ `kind` (`asr` = bóc băng, `mt` = dịch). ASR không dịch
+  //     câu nào nên không được nằm trong câu "… vẫn dịch được" (spec UI §4.8 tách hai câu).
+  // Ba nhóm dưới đây PHÂN HOẠCH `specs`: mỗi spec rơi vào ĐÚNG MỘT nhóm, không spec nào bị bỏ.
+  const bocBang = specs.filter((s) => s.kind === "asr");
+  const con = specs.filter((s) => s.kind === "mt" && s.capabilities.available === true);
+  const khong = specs.filter((s) => s.kind === "mt" && s.capabilities.available !== true);
 
   return (
     <section className="od" data-ollama={status.ollama}>
@@ -92,11 +112,16 @@ export function OllamaDown({ status, specs, onRetry }: OllamaDownProps) {
           ? "Chưa đo được: không có tín hiệu trả lời từ Ollama. Đây KHÁC với \"đã tắt\" — chưa đo được thì chưa kết luận được là nó tắt."
           : "Ollama không trả lời hoặc đã tắt, nên mọi engine cần nó đều không dịch được ngay bây giờ."}
       </p>
+      <p className="od__boc-bang">
+        Bóc băng vẫn chạy được: {lietKe(bocBang)} — bước phiên âm chạy ngay trên máy, không cần Ollama.
+      </p>
+      {/* Câu DỊCH chỉ nói về engine `kind === "mt"`. "Vì sao" và "cách sửa" nằm ở
+          `.od__ly-do`/`.od__sua` — ở đây KHÔNG suy lại nguyên nhân từ `runtime`. */}
       <p className="od__con">
-        Còn dùng được: {lietKe(con)} — engine in-process (không cần Ollama) vẫn dịch được.
+        Còn dùng được: {lietKe(con)} — những engine dịch này vẫn dịch được ngay bây giờ.
       </p>
       <p className="od__khong">
-        Không dùng được: {lietKe(khong)} — engine cần Ollama không dịch được.
+        Không dùng được: {lietKe(khong)} — những engine dịch này chưa dịch được ngay bây giờ.
       </p>
       <p className="od__sua">
         Cách sửa: mở terminal và chạy <code>ollama serve</code>, rồi bấm Thử lại.

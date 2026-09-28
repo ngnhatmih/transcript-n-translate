@@ -1,9 +1,12 @@
 /**
  * Khung ba vùng (spec UI §3) — vùng KÊNH, BÀN LÀM VIỆC, HÀNG ĐỢI + header + transport.
  *
- * Lưới CSS là của Task 1 (`src/styles/app.css`: hàng `head/1fr/transport`, cột
- * `214px / 1fr / 286px`, cộng MỘT lớp grain `fixed` + `pointer-events:none`). Tệp này
- * KHÔNG đổi lưới đó: nó chỉ đổ dữ liệu THẬT vào hai vùng bên.
+ * Lưới CSS là của Task 1 (`src/styles/app.css`: hàng `head / auto / 1fr / transport`, cột
+ * `214px / 1fr / 286px`, cộng MỘT lớp grain `fixed` + `pointer-events:none`). Hàng `auto`
+ * thứ hai là chỗ của panel §4.8 (`Task 10`). MỖI con của `.shell` khai `grid-row` TƯỜNG
+ * MINH — xem luật ở `.shell` trong `app.css`: auto-placement theo thứ tự DOM làm hàng `auto`
+ * "cướp chỗ" của bàn làm việc khi panel vắng. Tệp này KHÔNG đổi lưới đó: nó chỉ đổ dữ liệu
+ * THẬT vào hai vùng bên.
  *
  * `aria-hidden` trên `.grain`: lớp nhiễu là trang trí, không phải nội dung.
  */
@@ -44,10 +47,13 @@ export function App() {
   return (
     <div className="shell">
       <Header status={status.data} />
-      {/* §4.8 HẠNG NHẤT (không phải toast): panel là MỘT HÀNG RIÊNG của lưới `.shell`,
-          ngay dưới header và TRÊN bàn làm việc — nó không đè lên nội dung, và không biến
-          mất sau vài giây. `up` (hoặc chưa đọc được status) ⇒ component trả `null` ⇒ hàng
-          `auto` co lại bằng không ⇒ không có khoảng trống nào. */}
+      {/* §4.8 HẠNG NHẤT (không phải toast): panel là MỘT HÀNG RIÊNG của lưới `.shell`
+          (hàng 2, track `auto`), ngay dưới header và TRÊN bàn làm việc — nó không đè lên
+          nội dung, và không biến mất sau vài giây. `up` (hoặc chưa đọc được status) ⇒
+          component trả `null` ⇒ hàng 2 KHÔNG CÒN CON NÀO nên co lại bằng không, và bàn
+          làm việc VẪN ở hàng 3. Điều đó chỉ đúng vì CẢ BỐN con của `.shell` khai
+          `grid-row` tường minh trong `app.css`; để auto-placement chia hàng theo thứ tự
+          DOM thì hàng `auto` nuốt luôn bàn làm việc và thanh transport rơi vào `1fr`. */}
       <OllamaDown status={status.data} specs={specs} onRetry={status.reload} />
       <div className="shell__mid">
         <aside className="shell__channels">

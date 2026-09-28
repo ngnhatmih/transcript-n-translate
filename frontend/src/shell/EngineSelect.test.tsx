@@ -234,7 +234,10 @@ describe("EngineSelect: dropdown CHI liet ke engine phuc vu duoc NGAY BAY GIO", 
     const moc = "§4.8 Trạng thái Ollama (Task 10)";
     const viTri = appCss.indexOf(moc);
     assert.ok(viTri > 0, "app.css phai co KHOI LUAT cua Task 10, khong chi co class trong TSX");
-    const khoi = appCss.slice(viTri);
+    // ⚠️ Cat khối tới MỐC `/* ──` KẾ TIẾP, KHONG tới hết tệp (Minor #3b): luật của task SAU
+    // them vao cuoi tệp sẽ tự chui vào "khối Task 10" và bị đem đi kiểm token.
+    const mocKe = appCss.indexOf("/* ──", viTri + 1);
+    const khoi = mocKe === -1 ? appCss.slice(viTri) : appCss.slice(viTri, mocKe);
 
     assert.ok(khoi.includes(".eng__nhan {"), "app.css thieu luat `.eng__nhan`");
     assert.ok(khoi.includes(".eng__chon {"), "app.css thieu luat `.eng__chon`");

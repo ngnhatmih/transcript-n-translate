@@ -20,6 +20,7 @@
  */
 import { after, afterEach, before, beforeEach, describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { createServer } from "node:http";
 import type { Server, ServerResponse } from "node:http";
 import type { AddressInfo, Socket } from "node:net";
@@ -439,5 +440,49 @@ describe("App: KENH THAT + HANG DOI THAT tu server node:http trong tien trinh", 
 
     assert.deepEqual(tiengOn, [], "hien trang thai buoc khong duoc sinh tieng on console");
     unmount();
+  });
+
+  // -------------------------------------------------------------------------
+  // HINH THUC — ghim LUAT CSS cua LUOI `.shell` (ERRATA #31 muc 1 + muc 4)
+  //
+  // Vi sao DOC TEP CSS chu khong hoi DOM: jsdom KHONG co layout, KHONG tinh CSS
+  // (`getComputedStyle` khong cho biet `.shell__mid` nam o hang nao) ⇒ phep do DUY NHAT
+  // con lai la doc chinh van ban CSS. Day la chung minh TINH, khong phai mot anh chup.
+  //
+  // ⚠️ TUYET DOI KHONG ghim `grid-template-rows` (bon gia tri track): ghim nhu vay la
+  // DONG BANG chinh loi `Critical #1` — loi la KHONG CO VI TRI, khong phai con so cua track.
+  // Phai ghim VI TRI (`grid-row`) cua TUNG con.
+  // -------------------------------------------------------------------------
+
+  it("HINH THUC: luoi .shell khai VI TRI (grid-row) cho ca BON con, khong de auto-placement", () => {
+    const appCss = readFileSync(new URL("../styles/app.css", import.meta.url), "utf8");
+
+    assert.match(appCss, /\.shell \{[^}]*display: grid/,
+      "`.shell` phai la mot luoi CSS (co `display: grid`)");
+
+    // Bon con cua `.shell` theo THU TU DOM trong `App.tsx`: header, panel (co the vang),
+    // ban lam viec, transport. Moi con phai khai VI TRI TUONG MINH: bo `grid-row` di thi
+    // auto-placement dat theo thu tu DOM ⇒ khi panel vang, `.shell__mid` roi vao track `auto`
+    // va transport roi vao `1fr`, con track `--transport-h` bo trong.
+    assert.match(appCss, /\.shell__head \{[^}]*grid-row: 1\b/,
+      "`.shell__head` phai khai `grid-row: 1` (hang header, `--head-h`)");
+    assert.match(appCss, /\.od \{[^}]*grid-row: 2\b/,
+      "`.od` (panel §4.8) phai khai `grid-row: 2` — do la track `auto` co lai khi panel vang");
+    assert.match(appCss, /\.shell__mid \{[^}]*grid-row: 3\b/,
+      "`.shell__mid` phai khai `grid-row: 3` — neu khong no bi auto-placement day len hang `auto`");
+    assert.match(appCss, /\.shell__transport \{[^}]*grid-row: 4\b/,
+      "`.shell__transport` phai khai `grid-row: 4` (`--transport-h`), khong duoc roi vao `1fr`");
+  });
+
+  it("HINH THUC: .shell__head la HANG FLEX — thay doi bo cuc cua Task 10 duoc GHI RA va GHIM", () => {
+    // Diff cua Task 10 them `display:flex; align-items:center; gap; padding-inline` vao
+    // `.shell__head` (doi tu khoi sang hang flex) NHUNG khong khai trong danh sach lech, va
+    // mutation `M2` (bo `display:flex`) ⇒ 0 bai do (ERRATA #31 muc 4). Bai nay ghim no.
+    const appCss = readFileSync(new URL("../styles/app.css", import.meta.url), "utf8");
+
+    assert.match(appCss, /\.shell__head \{[^}]*display: flex/,
+      "`.shell__head` phai la HANG FLEX: dai trang thai nam CANH ten ban lam viec (khong xuong dong)");
+    assert.match(appCss, /\.shell__head \{[^}]*align-items: center/,
+      "hang flex phai can doc giua: ten ban lam viec va dai trang thai cung mot truc");
   });
 });

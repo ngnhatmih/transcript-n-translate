@@ -29,8 +29,15 @@ body {
   outline-offset: 1px;
 }
 
-/* §3 — ba vùng: KÊNH / BÀN LÀM VIỆC / HÀNG ĐỢI, cộng header và thanh transport.
-   Cột 214px / flex / 286px là số của spec §3, khai một lần ở tokens.css. */
+/* §3 — ba vùng: KÊNH / BÀN LÀM VIỆC / HÀNG ĐỢI, cộng header, hàng panel §4.8 và thanh
+   transport. Cột 214px / flex / 286px là số của spec §3, khai một lần ở tokens.css.
+   ⚠️ LUẬT (ERRATA #31 mục 1): khai BỐN track thì phải khai VỊ TRÍ (`grid-row`) cho TỪNG
+   con — auto-placement biến "hàng co lại" thành "hàng cướp chỗ". Bốn con là `.shell__head`
+   (hàng 1) · `.od` (hàng 2, track `auto` của panel §4.8) · `.shell__mid` (hàng 3, `1fr`) ·
+   `footer.shell__transport` (hàng 4). `.grain` là `position:fixed` nên KHÔNG phải grid item.
+   Vì sao phải tường minh: khi panel VẮNG (Ollama `up`, hoặc `status === null` lúc đang nạp
+   — `OllamaDown.tsx` trả `null`) DOM chỉ còn BA con; auto-placement đẩy `.shell__mid` vào
+   track `auto` và thanh transport vào `1fr`, còn track `--transport-h` bỏ trống. */
 .shell {
   display: grid;
   grid-template-rows: var(--head-h) auto 1fr var(--transport-h);
@@ -38,6 +45,7 @@ body {
 }
 
 .shell__head {
+  grid-row: 1;
   display: flex;
   align-items: center;
   gap: var(--sp-3);
@@ -46,6 +54,7 @@ body {
 }
 
 .shell__mid {
+  grid-row: 3;
   display: grid;
   grid-template-columns: var(--col-channels) 1fr var(--col-queue);
   min-height: 0;
@@ -64,6 +73,7 @@ body {
 }
 
 .shell__transport {
+  grid-row: 4;
   border-top: var(--rule-w) solid var(--rule);
 }
 
@@ -754,6 +764,17 @@ body {
   background: var(--ink-2);
 }
 
+/* Giá trị THỨ TƯ `chua-doc-duoc` (`status === null`: request còn đang bay hoặc lỗi mạng)
+   KHÁC `unknown` ("backend đã trả lời: chưa đo được") — chính docstring `OllamaDown.tsx`
+   nói hai thứ đó KHÁC nhau. Trước vòng sửa này giá trị đó không có luật nào nên rơi về
+   mặc định `--ink-2` và TRÙNG MÀU với `unknown` (Minor #1 của review Task 10).
+   Chưa đọc xong ⇒ chấm còn RỖNG (viền `--rule-w`, không tô): một chấm ĐÃ TÔ là một phép
+   đo, mà chưa đọc xong thì chưa có phép đo nào. */
+.stt[data-ollama="chua-doc-duoc"] .stt__cham {
+  background: transparent;
+  border: var(--rule-w) solid var(--ink-2);
+}
+
 .stt__vram,
 .stt__gd {
   color: var(--ink-1);
@@ -789,10 +810,12 @@ body {
   background: var(--panel-1);
 }
 
-/* Panel §4.8 — HẠNG NHẤT: một hàng của lưới `.shell`, ngay dưới header và TRÊN bàn làm việc
-   (không đè lên nội dung, không tự biến mất). Khi Ollama lên, component trả `null` ⇒ hàng
-   `auto` co lại bằng không. */
+/* Panel §4.8 — HẠNG NHẤT: hàng 2 của lưới `.shell` (track `auto`), ngay dưới header và TRÊN
+   bàn làm việc (không đè lên nội dung, không tự biến mất). `grid-row: 2` là thứ làm cho
+   "hàng co lại" THÀNH SỰ THẬT: khi Ollama lên, component trả `null`, hàng 2 không còn con
+   nào ⇒ cao 0, và `.shell__mid` vẫn ở hàng 3 vì nó cũng khai `grid-row` (xem `.shell`). */
 .od {
+  grid-row: 2;
   display: grid;
   gap: var(--sp-2);
   padding: var(--sp-3);
@@ -826,7 +849,8 @@ body {
 
 .od__ly-do,
 .od__con,
-.od__khong {
+.od__khong,
+.od__boc-bang {
   margin: 0;
   font-size: var(--fs-ui);
   color: var(--ink-1);
