@@ -42,10 +42,14 @@ export function App() {
   // `reload` của hook chính là nút `[ Thử lại ]`: nó tăng một con số, effect chạy lại, và
   // đó là một request THẬT mới (không cache, `useApi` TRẦN).
   const status = useApi(() => endpoints.status(), []);
-  // REGISTRY: MỘT lượt `GET /api/registry`. Đây là NGUỒN DUY NHẤT của `capabilities.available`
-  // — client KHÔNG suy lại từ `runtime`/`model_ref` (Global Constraints dòng 25).
-  const engines = useApi(() => endpoints.registry(), []);
-  const specs = engines.data === null ? [] : [...engines.data.asr, ...engines.data.mt];
+  // REGISTRY: MỘT lượt `GET /api/registry` cho CẢ app — đọc qua `endpoints.listEngines`
+  // (chính hàm đó LÀM PHẲNG `{asr, mt}` thành một mảng, việc mà `App` từng tự làm), nên đây
+  // cũng là NGƯỜI GỌI ĐẦU TIÊN của nó: trước W3, `listEngines` có **0** lượt gọi trong sản
+  // phẩm (`grep listEngines` chỉ ra `endpoints.ts`).
+  // Đây là NGUỒN DUY NHẤT của `capabilities.available` — client KHÔNG suy lại từ
+  // `runtime`/`model_ref` (Global Constraints dòng 25), và KHÔNG đọc lại `kind` để đoán.
+  const engines = useApi(() => endpoints.listEngines(), []);
+  const specs = engines.data ?? [];
 
   // ---------------------------------------------------------------------------
   // SUY DỮ LIỆU CHO BA MÀN (Task W1) — theo đúng comment cũ ở vùng BÀN LÀM VIỆC:
@@ -149,28 +153,20 @@ export function App() {
   }
 
   // ---------------------------------------------------------------------------
-  // NGÒI NỔ ĐỌC LẠI `/api/translations` — BẢO HIỂM THỨ TỰ (W3)
+  // ĐIỀU **KHÔNG** LÀM Ở ĐÂY — một "ngòi nổ đọc lại bảo hiểm" (đã đo, đừng thêm lại)
   //
-  // `taoBanDich` ĐÃ gọi `translations.reload()`; ngòi này KHÔNG thay nó mà bù cho một khe
-  // THẬT: `reload` chỉ tăng một con số, và nếu lần đọc lại đó kết thúc TRƯỚC khi React kịp
-  // render với `banMoiTao` mới thì hai cập nhật nằm ở hai nhịp khác nhau. Điều kiện ở đây là
-  // một TÍN HIỆU (hàng đã có trong ảnh chụp của máy chủ) — không phải một phép chờ theo đồng
-  // hồ (ERRATA #35 mục 1/2), và nó chỉ chạy khi hàng vừa tạo CHƯA có trong danh sách.
+  // Một `useEffect` gọi `translations.reload()` khi hàng vừa tạo CHƯA có trong danh sách từng
+  // nằm ở đây. Lượt mutation `W3-4b` vô hiệu hoá nó ⇒ **0 bài đỏ** (`tests 196 / pass 194 /
+  // fail 2 / cancelled 0`), tức đó là mã CHẾT chứ không phải một lưới an toàn: mỗi lần chạy,
+  // nó chỉ thấy `translations.loading === true` (ngay sau `reload()` của `taoBanDich`) rồi
+  // thoát, và tới khi lần đọc đó xong thì hàng mới ĐÃ có trong danh sách. Giữ nó lại là một
+  // lượt `GET /api/translations` thừa và một đường không ai ghim.
+  // `ponytail:` TRẦN: nếu sau này có đường ghi khác KHÔNG tự `reload`, nâng cấp bằng một hàm
+  // "ghi rồi đọc lại" dùng chung (một chỗ), chứ không phải thêm một effect đoán ý.
   // ---------------------------------------------------------------------------
   const banMoiCoTrongDanhSach =
     banMoiTao !== null
     && (translations.data ?? []).some((row) => row.id === banMoiTao.id);
-
-  useEffect(() => {
-    if (translations.loading) return;
-    if (banMoiTao === null) return;
-    if (banMoiTao.kenh !== ui.channelId) return;
-    if (banMoiCoTrongDanhSach) return;
-    translations.reload();
-    // `translations` là object MỚI mỗi lần render ⇒ đưa nó vào deps là vòng lặp vô hạn. Ba
-    // tín hiệu dưới đây mới là thứ quyết định: hàng đã có chưa, đang đọc không, kênh nào.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [banMoiCoTrongDanhSach, translations.loading, banMoiTao, ui.channelId]);
 
   /**
    * Bản dịch ĐANG XEM — câu trả lời DUY NHẤT của `App`, truyền xuống cả `CompareScreen`
@@ -178,8 +174,8 @@ export function App() {
    *
    * Ưu tiên: bản VỪA TẠO (nếu còn thuộc kênh này và còn trong danh sách) → bản `done` mới
    * nhất. ⚠️ `banMoiTao.kenh !== ui.channelId` KHÔNG phải một quyết định thứ hai: đó là điều
-   * kiện để ưu tiên này KHÔNG áp cho một kênh khác — `moiTao` là một id trần, và id trần của
-   * kênh cũ trỏ vào hư không ở kênh mới.
+   * kiện để ưu tiên này KHÔNG áp cho một kênh khác — `banMoiTao` là một id trần, và id trần
+   * của kênh cũ trỏ vào hư không ở kênh mới.
    */
   const banDangXemId =
     banMoiTao !== null && banMoiTao.kenh === ui.channelId && banMoiCoTrongDanhSach

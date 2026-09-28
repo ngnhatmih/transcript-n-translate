@@ -70,6 +70,25 @@ const SPECS: EngineSpec[] = [
   spec("qwen2.5-3b", "Qwen 2.5 3B", false),
 ];
 
+/**
+ * FIXTURE MAU THUAN cho luat "chi `kind === "mt"`" — va no la thu DUY NHAT phan biet duoc
+ * hai cach loc.
+ *
+ * ⚠️ VI SAO BAT BUOC (do duoc o luot mutation `W3-3`): `SPECS` o tren co ASR **THIEU** khoa
+ * `available`, nen `EngineSelect` (loc `available === true`, luat Task 10) da loai no SAN —
+ * bo luat `kind === "mt"` di thi ket qua Y HET, va mutant **SONG SOT 0 bai do**. Mot fixture
+ * trong do hai luat TRUNG ket qua khong phan biet duoc gi (ERRATA #31 muc 3: fixture phai
+ * dung hinh dang phan biet duoc).
+ *
+ * Hinh dang nay KHONG phai hinh dang backend sinh ra hôm nay (`_mark_availability` chi ghi
+ * `available` cho `kind == "mt"`), nen no la mot MAU THUAN CO CHU Y: no ghim rang buoc
+ * **`kind`**, chu khong ghim mot su trung hop cua du lieu hien tai.
+ */
+const SPECS_ASR_DUOC: EngineSpec[] = [
+  spec("faster-whisper-large", "Faster Whisper Large", true, "asr"),
+  spec("opus-mt", "OPUS-MT", true),
+];
+
 /** Mot doan theo dung 5 khoa LUON co cua `Segment` (`types.ts`). */
 function doan(i: number, text: string, start = i, end = i + 2, suspect = false): Segment {
   return { i, start, end, text, suspect };
@@ -510,8 +529,7 @@ describe("CompareScreen: §4.3 hai cot + cot CPS + segmented control + ghim ban 
     assert.deepEqual(tiengOn, [], "render lai cua vao khong duoc sinh tieng on console");
   });
 
-  it("CUA DICH: KHONG co engine MT nao dung duoc ⇒ nut VO HIEU + noi RO vi sao va cach sua", () => {
-    const t = banGhi([doan(1, "你好")]);
+  it("CUA DICH: KHONG co engine MT nao dung duoc ⇒ nut VO HIEU + noi RO vi sao va cach sua", () => {    const t = banGhi([doan(1, "你好")]);
 
     // Bon hinh dang deu la "khong co engine dich dung duoc": thieu han `specs`, mang rong,
     // MT `available === false`, va chi co ASR (thieu khoa `available` — ERRATA #2 muc 3).
@@ -573,7 +591,34 @@ describe("CompareScreen: §4.3 hai cot + cot CPS + segmented control + ghim ban 
     assert.equal(container.querySelectorAll('[data-testid="col-right"]').length, 2,
       "moi dong van phai co o cot phai — khong duoc bo o di");
 
-    assert.deepEqual(tiengOn, [], "trang thai queued khong duoc sinh tieng on console");
+    assert.deepEqual(tiengOn, [], "trang thai queued khong duoc sinh canh bao console");
+  });
+
+  it("CUA DICH: luat `kind === \"mt\"` LA MOT rang buoc THAT, khong phai su trung hop cua du lieu", () => {
+    // ⚠️ MUTANT `W3-3` (bo `kind === "mt"`) **SONG SOT** tren fixture `SPECS` vi ASR o do
+    // THIEU khoa `available` ⇒ `EngineSelect` loai no SAN, va bo luat `kind` di thi ket qua
+    // Y HET. Bai nay dung fixture MAU THUAN (`SPECS_ASR_DUOC`): mot ASR **co**
+    // `available: true` — khi do chi `kind` moi loai duoc no.
+    const t = banGhi([doan(1, "你好")]);
+    const goi: string[] = [];
+
+    const { container } = render(taoPhanTu(CompareScreen, {
+      transcript: t,
+      translations: [],
+      specs: SPECS_ASR_DUOC,
+      onTaoBanDich: (engine: string) => goi.push(engine),
+    }));
+
+    const loai = [...container.querySelectorAll("option")].map((x) => x.textContent ?? "");
+    assert.deepEqual(loai, ["OPUS-MT"],
+      `ASR co \`available: true\` VAN khong duoc liet ke: luat la \`kind === "mt"\`, va backend tra 422 cho ASR (routes_translations.py); do duoc ${JSON.stringify(loai)}`);
+
+    // ...va engine GUI DI cung phai la MT: bam nut phai phat ra `opus-mt`, khong bao gio ASR.
+    fireEvent.click(phanTuTu(container, '[data-testid="tao-ban-dich"]'));
+    assert.deepEqual(goi, ["opus-mt"],
+      `client KHONG duoc gui mot id ASR (backend tra 422); do duoc ${JSON.stringify(goi)}`);
+
+    assert.deepEqual(tiengOn, [], "loc engine khong duoc sinh canh bao console");
   });
 
   it("BAN DICH `queued` co vai doan DA DICH: doan chua dich moi noi trang thai (khong nuot chu that)", () => {
@@ -617,11 +662,17 @@ describe("CompareScreen: §4.3 hai cot + cot CPS + segmented control + ghim ban 
     assert.match(appCss, /\.cmp__nut-dich \{[^}]*cursor: pointer/,
       "`.cmp__nut-dich` phai la mot NUT bam duoc (co luat `cursor: pointer`), khong phai mot nhan");
 
-    // (b) o chon engine bi khoa: LUAT `:disabled` cua `.eng__chon` phai CON (Task 10 ghim no).
+    // (b) HAI CHIEU cua cung mot ve: khong chi KHONG CHON (`:disabled`) phai co luat, ma luat
+    //     do phai doi CA CON TRO — mot thay doi `cursor: pointer` ⇒ `cursor: default` cung
+    //     phai lam bai nay DO, neu khong bai chi khang dinh "co mot khoi ten nhu the".
+    assert.match(appCss, /\.cmp__nut-dich:disabled \{[^}]*cursor: default/,
+      "nut vo hieu phai doi CA CON TRO (`cursor: default`), khong chi doi mau chu");
+
+    // (c) o chon engine bi khoa: LUAT `:disabled` cua `.eng__chon` phai CON (Task 10 ghim no).
     assert.match(appCss, /\.eng__chon:disabled \{[^}]*background: var\(--panel-1\)/,
       "`.eng__chon:disabled` phai co LUAT THAT: o chon bi khoa phai doi BE MAT, khong chi doi thuoc tinh");
 
-    // (c) QUAN HE: dung luc KHONG co engine MT dung duoc thi ca hai deu VO HIEU trong DOM
+    // (d) QUAN HE: dung luc KHONG co engine MT dung duoc thi ca hai deu VO HIEU trong DOM
     //     (va ca hai deu co LUAT o tren ap cho chung) — quan he nay khong the xanh neu thieu
     //     mot trong hai ve.
     const t = banGhi([doan(1, "你好")]);
@@ -635,6 +686,15 @@ describe("CompareScreen: §4.3 hai cot + cot CPS + segmented control + ghim ban 
       "khong co engine MT dung duoc ⇒ nut 'dich' VO HIEU");
     assert.equal((phanTuTu(container, "select") as HTMLSelectElement).disabled, true,
       "cung luc do o chon engine cung VO HIEU — hai ve cua CUNG mot su that");
+
+    // (e) ⚠️ MUTANT `W3-10` (doi `className` cua NUT sang mot lop KHONG co luat nao) tung
+    //     **SONG SOT**: hai khang dinh tren KHONG he doc `className`, nen luat CSS bi mo coi ma
+    //     bai van XANH. Day la ve thu ba cua cung mot quan he: phan tu THAT trong DOM phai
+    //     mang DUNG lop ma `app.css` khai luat (dung bai hoc ERRATA #15 muc 3 — "lop" va
+    //     "luat" phai duoc ghim CUNG NHAU).
+    const lopNut = (phanTuTu(container, '[data-testid="tao-ban-dich"]').getAttribute("class") ?? "").split(/\s+/);
+    assert.ok(lopNut.includes("cmp__nut-dich"),
+      `nut phai mang lop \`cmp__nut-dich\` — do moi la lop co LUAT trong app.css; do duoc ${JSON.stringify(lopNut)}`);
   });
 
   it("HINH THUC: LUAT CSS cua man Doi chieu CO THAT trong `app.css`, va moi token deu co dinh nghia", () => {

@@ -297,6 +297,8 @@ const dem = {
   postTranslations: 0,
   /** Body JSON THAT cua lan POST gan nhat, va header `content-type` cua no. */
   bodyTao: null as Record<string, unknown> | null,
+  /** Chuoi JSON THO (nguyen van) cua lan POST gan nhat — de bao cao dan duoc BYTE client gui. */
+  rawTao: "",
   contentTypeTao: "",
   /** Bat de `POST /api/translations` tra 409 kem cau tieng Viet cua backend (ca loi THAT). */
   loiTao: false,
@@ -459,7 +461,9 @@ const server: Server = createServer((req, res) => {
       let raw = "";
       req.on("data", (chunk) => { raw += String(chunk); });
       req.on("end", () => {
-        // BODY THAT, doc tu chinh request — khong phai mot gia tri test tu nghi ra.
+        // BODY THAT, doc tu chinh request — khong phai mot gia tri test tu nghi ra. `rawTao`
+        // giu NGUYEN VAN chuoi JSON de bao cao dan duoc byte ma client gui di.
+        dem.rawTao = raw;
         let body: Record<string, unknown> = {};
         try { body = JSON.parse(raw) as Record<string, unknown>; } catch { body = {}; }
         dem.bodyTao = body;
@@ -734,6 +738,7 @@ describe("App: KENH THAT + HANG DOI THAT tu server node:http trong tien trinh", 
     dem.registry = 0;
     dem.postTranslations = 0;
     dem.bodyTao = null;
+    dem.rawTao = "";
     dem.contentTypeTao = "";
     dem.loiTao = false;
     dem.jobTao = "queued";
@@ -1510,6 +1515,14 @@ describe("App: KENH THAT + HANG DOI THAT tu server node:http trong tien trinh", 
     );
     assert.match(dem.contentTypeTao, /application\/json/,
       `POST phai gui content-type JSON; do duoc ${JSON.stringify(dem.contentTypeTao)}`);
+    // NGUYEN VAN chuoi JSON ma client gui: hai khoa, khong khoa thua nao. Khang dinh tren
+    // CHUOI (khong chi tren object da parse) vi no ghim luon thu tu khoa — thu ma mot ban sua
+    // "sap xep lai body" se doi, va do la mot thay doi hop dong dang biet.
+    assert.equal(
+      dem.rawTao,
+      `{"transcript_id":5,"engine":"opus-mt"}`,
+      `body JSON THAT client gui phai la DUNG hai khoa do; do duoc ${JSON.stringify(dem.rawTao)}`,
+    );
 
     // (d) HANG MOI XUAT HIEN tu mot lan DOC LAI danh sach (khong tu chen vao state): id 13 la
     //     hang server da ghi va `GET /api/translations` moi tra ve.
