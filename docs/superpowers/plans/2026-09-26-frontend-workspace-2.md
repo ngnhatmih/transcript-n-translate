@@ -2095,6 +2095,48 @@ nhánh đó **chết** vì `App` đã truyền **câu** xuống ⇒ `Transport` 
 - **`hash-object` mù LF↔CRLF nay đã chứng minh TRÊN MÁY:** `app.css` worktree **39 893 B** (CRLF=1171) vs blob **38 722 B** — **hash vẫn BẰNG**. (Khẳng định ở #36 mục 1 nay có số.)
 - ⚠️ **W3 có BA commit** (`9a9aa66`, `2653a52` cùng tiêu đề, `0fa362a`) — lần gộp `reset --mixed` **thất bại**; **không mất nội dung**; **không viết lại lịch sử** (đúng luật).
 
+## ⚠️ ERRATA #39 — Vá hai hazard (`ce3e47b`): **phép tiêm của tôi SAI NGUỒN**, và **chỗ hở thật là PHẦN ĐUÔI sau `act`**, không phải điều kiện thoát
+
+`ce3e47b` (cha `bf58498`, **2 tệp**, `backend/` = 0): `tests 204 · pass 202 · fail 2 · cancelled 0`, **EXIT=1**, 8 lượt sạch `13 155–13 298 ms`,
+`typecheck` 0, `build` 0, **0 lần** `not wrapped in act`. Cả hai hazard **tái lập rồi làm XANH** bằng **cùng một phép tiêm 300 ms**.
+Không làm yếu: `H1` (`rows.slice(0,1)`) ⇒ **12 bài đỏ** (có `CHON KENH`); `H2` (bỏ `datDaLuu`) ⇒ **2 bài đỏ** (có `LUU`).
+`M-LOCK` còn cho thấy phép chờ mới **mạnh hơn**: mutant chết **vì chính phép chờ**, không phải vì lỗi đọc DOM cũ.
+
+### 1. 🔴 **BRIEF CỦA TÔI SAI NGUỒN TIÊM — và sai theo kiểu nguy hiểm: nó cho một kết quả XANH trông như thành công**
+Tôi viết: *"tiêm 300 ms vào `transcript` (nguồn bài **không** chờ)"*. **Sai: `transcript` CHÍNH LÀ nguồn bài CÓ chờ.**
+Đo **cả hai vế**: tiêm vào `GET /api/transcripts/{id}` ⇒ `pass 2 · fail 0` — **XANH ở CẢ cây HEAD LẪN cây đã vá** ⇒ **phép tiêm đó không chứng minh gì**;
+tiêm vào `GET /api/translations/{id}` ⇒ **ĐỎ ở HEAD, XANH sau khi vá**. Nguồn **không** chờ là **`translations`**.
+⇒ **LUẬT: muốn tái lập bất định GIỮA HAI NGUỒN, phải tiêm vào nguồn bài test **KHÔNG** chờ — và **phải chạy CẢ HAI VẾ**,
+vì tiêm sai nguồn cho một kết quả XANH **giống hệt** thành công.** (Một phép đo không phân biệt được "đã sửa" với "tiêm nhầm chỗ" là **phép đo vô giá trị**.)
+
+### 2. 🔴 **SỐ DÒNG TRONG THÔNG BÁO LỖI KHÔNG PHẢI VỊ TRÍ CỦA CONSTRUCT SAI**
+Tôi gọi `:796` là *"chỗ thứ ba"* của lớp lỗi. **Sai: `:796` là vị trí `test at` mà node báo cho bài `LUU`** (bài `I2` node báo `:649:5`).
+⇒ **LUẬT: `test at <file>:<line>` là vị trí **BÀI TEST**, không phải vị trí **cấu trúc gây lỗi**.** Xác định bài bằng **TÊN**, xác định construct bằng **đọc mã**.
+
+### 3. 🔴 **CHỖ HỞ THẬT LÀ PHẦN ĐUÔI SAU `act` — `aea1a80` đã sửa ĐÚNG điều kiện thoát, và flake VẪN CÒN**
+Điều kiện thoát ở `:867`/`:1000` **đã là** tín hiệu máy chủ (nhờ `aea1a80`). Chỗ hở là **mã SAU `act`** (bảng nạp lại) hạ cánh vào một **`await` TRẦN** —
+và ⚠️ **RTL `waitFor` CỐ Ý tắt `IS_REACT_ACT_ENVIRONMENT`**, nên **chỉ `await` trần mới lộ** ra cảnh báo `not wrapped in act`.
+Dòng thời gian đo được: `G-POST-RES @291` → `G-SAU-ACT @309` → `G-POST-TRA @605` (**cửa sổ `act` đã đóng TRƯỚC khi response về**) → `G-ERR @608`.
+⇒ **LUẬT: "đổi điều kiện thoát" KHÔNG ĐỦ. Phải kiểm **PHẦN ĐUÔI** — mọi thứ xảy ra **sau** `act` — vì đó mới là chỗ state rơi ra ngoài.**
+
+### 4. ✅ **KHÔNG phải cửa sổ `act` nào cũng nên biến thành tín hiệu** — và đây là một quyết định CÓ LÝ, không phải bỏ sót
+Chỗ `:828` **không có điều kiện thoát nào**, và ở đó **không tồn tại tín hiệu**: bản cài **đúng** không phản ứng gì với thay đổi trên ô khoá.
+Ép nó thành tín hiệu HTTP sẽ **rút ngắn cửa sổ** và đẩy chuỗi `.then` của mutant **ra ngoài `act`** ⇒ **đổi một bất định lấy một bất định khác.**
+⇒ Họ **giữ cửa sổ KHOẢNG LẶNG** (hợp lệ theo `#35` mục 2: `Date.now() < het` **luôn có thể** trở thành đúng) và **chỉ thêm phép chờ SAU `act`**.
+⇒ **LUẬT: "chuyển sang tín hiệu" là mặc định, nhưng khi **KHÔNG TỒN TẠI** tín hiệu thì phải **nói ra** và chọn có ý thức — máy móc áp dụng sẽ tạo lỗi mới.**
+
+### 5. 🔴 **LỚP LỖI TÁI PHÁT LẦN THỨ TƯ, VÀ `grep` THEO HÌNH DẠNG KHÔNG TÌM ĐƯỢC NÓ**
+`grep` theo hai khuôn cú pháp bắt được **11** chỗ (`while (Date.now() <` = 8; `act(async` = 3), **9 chỗ để nguyên có lý do đo được**, **2 chỗ chạm**.
+⚠️ **Nhưng hazard 1 NẰM NGOÀI cả hai khuôn** — nó là khuôn **NGỮ NGHĨA**: *"chờ tín hiệu từ nguồn A, rồi đọc dữ liệu của nguồn B"* (hai `useApi` độc lập).
+⇒ **LUẬT: cú pháp chỉ bắt được cái cùng hình dạng. Cách dò ĐÁNG TIN cho lớp này là TIÊM CHẬM TỪNG NGUỒN MỘT và xem bài nào đỏ** —
+tức một **"chiến dịch delay"** nhỏ, chứ không phải đọc kỹ hơn. (Đây là lần thứ tư lớp này lọt qua soát tay: 15 chỗ khai, rồi 16, rồi lại.)
+⇒ Việc nên làm khi có dịp: một script tiêm độ trễ lần lượt vào từng route của fixture và ghi lại **bài nào đỏ** — biến việc dò thành **cơ học**.
+
+### 6. ✅ Phục hồi + đính chính
+**4/4 tệp từng bị mutate phục hồi BYTE-ĐÚNG** so backup chụp **TRƯỚC** khi mutate (`GlossaryScreen.tsx 24 131 002559ac` · `App.tsx 36 929 ddf6f205` ·
+`Transport.tsx 15 218 7dc4717c` · `app.css 39 893 8817c702 (crlf=1171)`). ⚠️ `hash-object` mù LF↔CRLF **lại được chứng minh**: `app.css` **39 893 B** vs blob **38 722 B**
+(chênh **đúng 1171**) mà **hash vẫn BẰNG**. Đính chính `App.test.tsx` = `109302 / 6f072c25…` (báo cáo W3 khai `108665 / 8ffc9efd…`, chênh **637 B**) — **băm lại từ chính tệp**.
+
 ## Quy ước thẩm mỹ — spec UI thắng, skill chỉ là checklist
 
 Spec `2026-09-25-phu-de-lab-ui-design.md` là **nguồn có thẩm quyền về hình thức** (bạn đã duyệt). Skill
