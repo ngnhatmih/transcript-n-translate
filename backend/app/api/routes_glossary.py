@@ -186,6 +186,50 @@ def get_glossary_version(repos=Depends(get_repos)):
     return {"glossary_version": repos.glossary_version()}
 
 
+@router.get("/affected")
+def affected_preview(lang: str, term: str, translation: str, approved: bool = False,
+                     repos=Depends(get_repos)):
+    """Chỉ-ĐỌC: con số mà `POST`/`PATCH` SẼ trả, để giao diện hiện TRƯỚC khi lưu.
+
+    Spec UI §12.3: *"Sửa một thuật ngữ → thấy ngay bao nhiêu bản dịch bị ảnh hưởng
+    trước khi bấm lưu."* Trước route này, `affected` chỉ có trong thân của một lần
+    GHI, nên giao diện muốn biết trước thì phải tự tính lại — đúng nguồn sự thật
+    thứ hai mà spec frontend §2 và `Global Constraints` cấm.
+
+    BỐN quyết định, cả bốn đều để đường XEM TRƯỚC không trôi khỏi đường GHI:
+
+    * **Gọi LẠI chính `_recompute_affected`** (nó gọi `affected_segments`), không
+      chép lại vòng lặp. Hai bản sao của cùng một biểu thức là hai chỗ để trôi, và
+      bài `test_affected_preview_agrees_with_the_write_when_the_term_is_UNAPPROVED`
+      ghim thẳng đẳng thức `preview == affected của lần PATCH`.
+    * **`old = repos.list_terms(lang=lang)` — KHÔNG lọc gì.** Trạng thái cũ là trạng
+      thái THẬT trước khi ghi. Bản đầu của plan loại hàng đang sửa khỏi `old`; cách
+      đó làm mất giá trị `approved` CŨ nên ca **BỎ DUYỆT** không bao giờ báo ảnh
+      hưởng (đo được ở `_recompute_affected`, và ở đây là
+      `test_affected_preview_agrees_with_the_write_when_the_term_is_UNAPPROVED`).
+    * **`neue` lọc ĐÚNG như đường ghi**: thay hàng cùng `term` bằng hàng mới. Vế
+      "cùng `lang`" là của `list_terms(lang=…)`; cùng một chữ ở hai ngôn ngữ là hai
+      danh tính.
+    * **KHÔNG ghi gì**: không `upsert_term`, không tăng `glossary_version`, không
+      xếp job dịch lại (`test_affected_preview_writes_nothing`). Version tăng bên
+      trong `upsert_term`, nên một route chỉ-đọc không có gì để bump.
+
+    ĐƠN VỊ: `affected` là id TRANSCRIPT (xem `_recompute_affected`), không phải số
+    bản dịch — bản dịch được suy từ `list_translations_for_transcript` chỉ ở đường
+    GHI, để xếp job.
+
+    THỨ TỰ KHAI BÁO LÀ MỘT PHẦN CỦA HỢP ĐỒNG: route này phải đứng TRƯỚC
+    `@router.patch("/{term_id}")`, nếu không FastAPI coi `affected` là một `term_id`
+    và `GET` trên đường dẫn này trả **405 Method Not Allowed**. Đo được: trước khi
+    thêm route, chính lời gọi đó là 405; sau khi thêm (và đứng trước) là 200.
+    """
+    old = repos.list_terms(lang=lang)
+    neue = [t for t in repos.list_terms(lang=lang) if t.term != term]
+    neue.append(Term(id=None, lang=lang, term=term, translation=translation,
+                     approved=approved))
+    return {"affected": _recompute_affected(repos, lang=lang, old=old, new=neue)}
+
+
 @router.post("", status_code=201)
 def create_term(body: TermIn, repos=Depends(get_repos)):
     """Ghi một thuật ngữ (upsert theo `(lang, term)`) — version tăng TRONG upsert."""

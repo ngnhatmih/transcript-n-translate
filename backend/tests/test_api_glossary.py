@@ -406,6 +406,122 @@ def test_a_transcript_without_any_translation_is_reported_but_enqueues_nothing(w
     assert _queued_jobs(repos) == []
 
 
+# ---------------------------------------------------------------------------
+# GET /api/glossary/affected — XEM TRƯỚC số ảnh hưởng, TRƯỚC khi ghi (Task 9 Step 0)
+# ---------------------------------------------------------------------------
+
+#: Đường xem trước của Task 9. Ba tham số BẮT BUỘC, `approved` mặc định `False`.
+PREVIEW = "/api/glossary/affected"
+
+
+def test_affected_preview_of_a_draft_term_is_empty(wired):
+    """(a) Thuật ngữ CHƯA DUYỆT không ràng buộc gì ⇒ xem trước phải rỗng.
+
+    Transcript CÓ chứa `龙`, nên `[]` ở đây không thể đến từ "không có gì để đo":
+    nó chỉ đến từ luật "bản nháp không đi vào prompt". Đây là vế thứ nhất của
+    cùng một luật mà `test_an_unapproved_term_affects_nothing` ghim ở đường GHI.
+    """
+    c, repos, _worker, _mt = wired
+    _seed_transcript(repos, text="龙")
+    r = c.get(PREVIEW, params={"lang": "zh", "term": "龙",
+                               "translation": "rồng", "approved": "false"})
+    assert r.status_code == 200, r.text
+    assert r.json() == {"affected": []}
+
+
+def test_affected_preview_reports_the_transcript_that_contains_the_term(wired):
+    """(b) Gieo transcript chứa thuật ngữ ⇒ xem trước trả ĐÚNG id ấy.
+
+    Và `approved` mặc định `False` nghĩa là lược bỏ tham số cũng phải rỗng — hai
+    lời gọi này là hai vế của cùng một hợp đồng tham số.
+    """
+    c, repos, _worker, _mt = wired
+    tid = _seed_transcript(repos, text="龙")
+    other = _seed_transcript(repos, text="mèo")          # KHÔNG chứa thuật ngữ
+
+    r = c.get(PREVIEW, params={"lang": "zh", "term": "龙",
+                               "translation": "rồng", "approved": "true"})
+    assert r.status_code == 200, r.text
+    assert r.json() == {"affected": [tid]}, "chỉ transcript chứa 龙 mới bị ảnh hưởng"
+    assert other not in r.json()["affected"]
+
+    # Bỏ `approved` ⇒ mặc định `False` ⇒ bản nháp, không ảnh hưởng gì.
+    r = c.get(PREVIEW, params={"lang": "zh", "term": "龙", "translation": "rồng"})
+    assert r.status_code == 200, r.text
+    assert r.json() == {"affected": []}
+
+
+def test_affected_preview_agrees_with_the_write_when_the_term_is_UNAPPROVED(wired):
+    """(c) Ca BỎ DUYỆT: xem trước PHẢI báo ảnh hưởng, và phải BẰNG đường ghi.
+
+    Đây đúng ca mà việc lọc hàng đang sửa khỏi `old` sẽ nuốt mất (mục hiệu chỉnh
+    `M-3`): `old` lọc rồi thì hai vế cùng mất giá trị `approved`, phép so ánh xạ
+    luôn rỗng, và người dùng bỏ duyệt một thuật ngữ đang dùng sẽ thấy "0 ảnh
+    hưởng" trong khi backend thật sự xếp job dịch lại.
+
+    Vế thứ hai mới là vế đắt: `affected` của lần PATCH phải BẰNG con số xem trước.
+    Không có nó thì hai đường có thể nói hai chuyện khác nhau mà cả hai bài đều xanh.
+    """
+    c, repos, _worker, _mt = wired
+    term_id = c.post("/api/glossary", json=_ZH).json()["id"]     # đang DUYỆT
+    tid = _seed_transcript(repos, text="龙")
+    _seed_done_translation(repos, tid)
+
+    preview = c.get(PREVIEW, params={"lang": "zh", "term": "龙",
+                                     "translation": "rồng", "approved": "false"})
+    assert preview.status_code == 200, preview.text
+    assert preview.json() == {"affected": [tid]}, (
+        "BỎ duyệt là GỠ một ràng buộc ⇒ bản dịch cũ sai ⇒ phải báo ảnh hưởng"
+    )
+
+    r = c.patch(f"/api/glossary/{term_id}", json={"approved": False})
+    assert r.status_code == 200, r.text
+    assert r.json()["affected"] == preview.json()["affected"], (
+        "con số XEM TRƯỚC phải là con số đường GHI trả — hai đường tính cùng một đại lượng"
+    )
+
+
+def test_affected_preview_writes_nothing(wired):
+    """Chỉ-ĐỌC: xem trước không được ghi hàng, không tăng version, không xếp job.
+
+    Không có bài này thì một route "xem trước" lỡ tay gọi `upsert_term` vẫn xanh:
+    câu trả lời vẫn đúng, chỉ có DB bị sửa sau lưng người dùng.
+    """
+    c, repos, _worker, _mt = wired
+    c.post("/api/glossary", json=_ZH)
+    tid = _seed_transcript(repos, text="龙")     # CÓ `龙`, CHƯA có bản dịch nào
+    before_rows = c.get("/api/glossary?lang=zh").json()
+    before_version = repos.glossary_version()
+    before_jobs = [j.id for j in repos.list_jobs()]
+
+    # Ảnh hưởng THẬT (đổi `rồng` → `long` trên một hàng đang duyệt, transcript có 龙)
+    # nhưng KHÔNG có bản dịch nào ⇒ báo id mà không xếp job nào. Nếu lời gọi này rỗng
+    # thì phép đo "không ghi gì" ở dưới là phép đo trên một route không làm gì cả.
+    r = c.get(PREVIEW, params={"lang": "zh", "term": "龙",
+                               "translation": "long", "approved": "true"})
+    assert r.status_code == 200, r.text
+    assert r.json() == {"affected": [tid]}, (
+        "đổi bản dịch của một thuật ngữ ĐANG DUYỆT mà transcript có chứa nó ⇒ phải báo"
+    )
+
+    assert c.get("/api/glossary?lang=zh").json() == before_rows, "xem trước không được ghi hàng"
+    assert repos.glossary_version() == before_version, "xem trước không được tăng version"
+    assert [j.id for j in repos.list_jobs()] == before_jobs, "xem trước không được xếp job"
+
+
+def test_affected_preview_requires_its_three_query_parameters(wired):
+    """Tên tham số truy vấn được backend PHÂN TÍCH THẬT, không rơi vào mặc định.
+
+    Thiếu `term` phải là 422 nêu ĐÚNG tên trường. 422 (chứ không phải 405/404)
+    cũng là bằng chứng route `/affected` KHÔNG bị `/{term_id}` nuốt: nếu bị nuốt
+    thì `GET` trên đường dẫn đó là 405 và không có tham số nào được kiểm.
+    """
+    c, _repos, _worker, _mt = wired
+    r = c.get(PREVIEW, params={"lang": "zh", "translation": "rồng"})
+    assert r.status_code == 422, f"{r.status_code}: {r.text}"
+    assert "term" in r.text, r.text
+
+
 def test_the_retranslate_job_is_consumed_by_the_real_handler(wired):
     """Đường THẬT đầu-cuối: HTTP → job → worker thật → `TranslateHandler` thật.
 
