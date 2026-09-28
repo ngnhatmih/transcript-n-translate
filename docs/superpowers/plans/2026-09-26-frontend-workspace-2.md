@@ -1744,6 +1744,49 @@ và **số học khớp**: `8295,76 − 8000 = 295,76 ms` ≈ **thời lượng 
   + **giá trị mà chỉ route thật mới tính được**; nó **chỉ tự chạy lại `M14`**, **17 lượt mutation còn lại là đọc `run.log`** đã publish;
   và **lượt chạy HỎNG ĐẦU của `do-treo.mjs` không có log** (chỉ xác nhận `[L3 vao]` + `L3 = 1159,99 ms > 900 ms`).
 
+## ⚠️ ERRATA #30 — Task 10: **Step 4 BẤT KHẢ và có hại**, **`EngineSelect` không có chỗ ở trong plan**, và **"Ollama đang tắt" là câu SAI**
+
+Soát Task 10 trước khi giao. **Bốn lỗi, hai trong đó là loại đã gây hại ở Giai đoạn trước.**
+
+### 1. 🔴 **Step 4 BẤT KHẢ** (chụp ảnh cần TRÌNH DUYỆT) **và chỉ dẫn "bật Ollama" là SAI + CÓ HẠI**
+
+Step 4 viết: *"mở app và chụp lại … Rồi **bật** Ollama (`ollama serve` nền), tải lại, chụp lại"*. **Ba lỗi chồng lên nhau:**
+- **Chụp ảnh BẤT KHẢ** — ERRATA #5 mục 3: Chromium chết ở Mojo named pipe; `npm run e2e` **bị cấm**. Không có ảnh nào tồn tại được.
+- **Bối cảnh dòng 2685 SAI:** *"máy này hiện **Ollama đang tắt**"*. **Đo lại: `11434 LISTENING`, PID 3408** (đo nhiều lần suốt
+  Giai đoạn 3). Ollama **ĐANG CHẠY**. Câu "đang tắt" là **dữ kiện GĐ1a đã cũ**, và chính đính chính ngay dưới (dòng 2687)
+  vẫn giữ nguyên khung "đang tắt" ⇒ **hai câu trong cùng một khối mâu thuẫn với phép đo**.
+- ⇒ **Và vì thế "bật Ollama" là một SIDE EFFECT LÊN MÁY NGƯỜI DÙNG** (tiến trình của họ, không phải của agent).
+  **LUẬT: agent KHÔNG được bật/tắt/khởi động lại/giết tiến trình Ollama của người dùng.** Đã ghi thẳng vào brief Task 10 §1(b).
+
+**Thay bằng phép đo ĐO ĐƯỢC:** gọi `/api/status` + `/api/registry` **thật** (backend thật, DB scratch ngoài repo, tự tắt),
+**dán nguyên văn thân JSON**, và **nói rõ trạng thái `ollama` ĐỔI THEO LÚC** (đã đo `unknown` **và** `up`; **`down` CHƯA TỪNG đo được**)
+⇒ **cấm kết luận từ một lần đo**. Phần *hình thức* của panel: **khai là CHƯA chứng minh** (không có trình duyệt).
+⇒ **Và đây là lần thứ TƯ một mệnh đề "bất khả" trong plan bị phép đo lật** (ba lần trước: `npm i`, jsdom + Testing Library,
+trình duyệt). **LUẬT: mọi bước "mở app và nhìn" trong plan này đều phải bị coi là CHƯA KIỂM trước khi giao.**
+
+### 2. ⚠️ **`EngineSelect` được Steps 1–3 ĐÒI nhưng KHÔNG có trong `Files` lẫn `## File Structure`**
+
+Step 1 render `<EngineSelect …>`, Step 2 *"viết `OllamaDown.tsx` **+ `EngineSelect`**"*, Step 3 mutate nó —
+nhưng mục `Files` (dòng 2694–2695) chỉ có `OllamaDown.tsx`/`.test.tsx` + `Header.tsx` + `App.tsx`,
+và bảng `## File Structure` (dòng 1870–1872) **không có `EngineSelect`**.
+⇒ **Một component không có chỗ ở là một component sẽ nằm nhờ trong tệp khác** ⇒ **mutation `O1` (bỏ lọc) sẽ chạm CÙNG tệp
+với panel** ⇒ một mutation, hai chủ đề, không quy được trách nhiệm.
+⇒ **Brief chốt: `frontend/src/shell/EngineSelect.tsx` + `.test.tsx`** (**tách tệp**), và **`ERRATA` này bổ sung nó vào `File Structure`**.
+⇒ **LUẬT: một mục `Create` trong `Files` phải phủ HẾT mọi định danh mà Steps nhắc tới; nếu Steps render `<X/>` thì `X` phải có tệp.**
+
+### 3. ✅ Điều plan làm ĐÚNG — và phải giữ: **màn phải hiện với CẢ `down` LẪN `unknown`**
+
+Đính chính dòng 2687–2691 là **đúng và quan trọng** (cổng **timeout** chứ không **refused** ⇒ `unknown`). Brief Task 10 biến nó
+thành **ba bài test cho ba trạng thái** (`up`/`down`/`unknown`) + **ba mutation tương ứng** (`O2` bỏ `unknown`, `O3` hiện cả khi `up`),
+thay vì một mutation duy nhất của Step 3. **Và cấm đổi `probe_ollama` trả `down`** — `unknown` là **giá trị THẬT** ("chưa đo được").
+
+### 4. ⚠️ **Bẫy `vitest`/`jest-dom`/`user-event` lại tái xuất** (Step 1) — và `available` là **nguồn sự thật thứ hai** nếu suy lại
+
+Step 1 dùng `expect(...).toBeInTheDocument()` ⇒ **`node:test` + `node:assert/strict`**; **`user-event` KHÔNG có trong repo** ⇒ `fireEvent`.
+Và **ràng buộc dòng 2722 (đọc thẳng `available`) phải được MÃ HOÁ THÀNH MUTATION `O6`** — một ràng buộc chữ không có mutation
+là một ràng buộc chưa được bảo vệ.
+⚠️ Và **`app.css` phải nằm trong `Files`** (ERRATA #16 mục 4) vì Task 10 **thêm hình thức** (dải trạng thái + panel).
+
 ## Quy ước thẩm mỹ — spec UI thắng, skill chỉ là checklist
 
 Spec `2026-09-25-phu-de-lab-ui-design.md` là **nguồn có thẩm quyền về hình thức** (bạn đã duyệt). Skill
@@ -1870,6 +1913,7 @@ Bốn task (T4 Step 6, T6, T7 Step 4, T10 Step 4) ra lệnh "tự kiểm bằng 
 | `src/shell/App.tsx` · `Header.tsx` · `ChannelZone.tsx` · `QueueZone.tsx` · `Transport.tsx` | khung |
 | `src/screens/EditScreen.tsx` · `CompareScreen.tsx` · `GlossaryScreen.tsx` | ba màn |
 | `src/screens/OllamaDown.tsx` | trạng thái §4.8 |
+| `src/shell/EngineSelect.tsx` | dropdown engine — **lọc theo `capabilities.available === true` đọc thẳng từ `/api/registry`** (bổ sung bởi **ERRATA #30 mục 2**) |
 | `src/keys/shortcuts.ts` | bảng phím tắt + bộ xử lý (thuần, test được) |
 | `src/api/contract.test.ts` | contract test chạy trên **backend thật** |
 | `e2e/seed.py` · `e2e/*.test.tsx` | gieo DB + **jsdom/Testing Library** bốn màn hình trên backend THẬT (Playwright **bất khả** — ERRATA #5 mục 3) |
@@ -2682,6 +2726,10 @@ it("noi ro sua thuat ngu CHUA DUYET thi khong anh huong gi", async () => {
 
 ### Task 10: §4.8 Trạng thái Ollama TẮT — hạng nhất, không phải toast
 
+> ⚠️ **ĐÍNH CHÍNH (ERRATA #30 mục 1): câu "máy này hiện Ollama đang tắt" ở trên là SAI và ĐÃ CŨ** — đo lại nhiều lần:
+> **`11434 LISTENING`, PID 3408**; Ollama **ĐANG CHẠY**. Và `ollama` trả về **đổi theo lúc** (`unknown` **và** `up`; **`down` chưa từng đo được**).
+> ⇒ **KHÔNG bật/tắt/`ollama serve`/giết PID 3408** — đó là tiến trình của NGƯỜI DÙNG.
+
 **Bối cảnh đã đo:** máy này hiện **Ollama đang tắt**, nên đây không phải tình huống giả định — nó là trạng thái thật khi bạn mở app lần đầu. Dùng luôn nó để kiểm.
 
 > 🔴 **ĐÍNH CHÍNH CỦA TASK 2 — câu "Ollama đang tắt" ở trên chỉ đúng MỘT NỬA, và màn này sẽ KHÔNG HIỆN nếu bạn làm theo trực giác.**
@@ -2692,6 +2740,8 @@ it("noi ro sua thuat ngu CHUA DUYET thi khong anh huong gi", async () => {
 
 **Files:**
 - Create: `frontend/src/screens/OllamaDown.tsx`, `frontend/src/screens/OllamaDown.test.tsx`
+- Create: `frontend/src/shell/EngineSelect.tsx`, `frontend/src/shell/EngineSelect.test.tsx` (**bổ sung bởi ERRATA #30 mục 2** — Step 1/2/3 đòi nó mà mục `Files` gốc không có)
+- Modify: `frontend/src/styles/app.css` (Task này **thêm hình thức** — ERRATA #16 mục 4)
 - Modify: `frontend/src/shell/Header.tsx`, `frontend/src/shell/App.tsx`
 
 **Interfaces:**
@@ -2723,7 +2773,11 @@ it("dropdown chi liet ke engine available", () => {
 
 - [ ] **Step 3: XANH + mutation** — cho `EngineSelect` bỏ lọc ⇒ test 2 đỏ. Phục hồi.
 
-- [ ] **Step 4: Tự kiểm trên máy thật** — Ollama đang tắt, nên mở app và chụp lại rằng panel hiện đúng. Rồi **bật** Ollama (`ollama serve` nền), tải lại, chụp lại trạng thái ngược. Dán cả hai ảnh vào `.superpowers/` và nói rõ trong báo cáo.
+- [ ] **Step 4: ĐO TRÊN MÁY THẬT — bản đã sửa (ERRATA #30 mục 1; bản gốc "chụp ảnh" là BẤT KHẢ)**
+  - Gọi `/api/status` + `/api/registry` **thật** (backend thật, DB scratch **ngoài repo**, cổng trống, **tự tắt**), **dán nguyên văn thân JSON**,
+    và **nói rõ trạng thái `ollama` đo được lúc đó** — kèm câu nói rõ **nó ĐỔI THEO LÚC** (`unknown`/`up` đều đã đo; `down` chưa từng) ⇒ **không kết luận gì từ một lần đo**.
+  - ⚠️ **KHÔNG bật/tắt/`ollama serve`/giết PID 3408.** Không có ảnh chụp nào (không có trình duyệt) ⇒ **hình thức panel khai là CHƯA chứng minh**.
+  - Ba trạng thái `up`/`down`/`unknown` được kiểm **bằng props** (ba bài test + ba mutation `O2`/`O3`), không bằng cách đổi máy.
 
 - [ ] **Step 5: Commit** — `feat(fe): trang thai Ollama tat la hang nhat + dropdown loc theo available`.
 
