@@ -86,8 +86,31 @@ export interface TransportProps {
   sourceId: number | null;
   /** Doan cua ban ghi dang mo — nguon cua "moc cuoi cua doan". */
   segments: Segment[];
-  /** Id ban dich dang xem; `null` = chua co ban dich ⇒ ba nut xuat khong co `href`. */
+  /**
+   * **BẢN DỊCH ĐANG XEM** — CÙNG MỘT BIỂU THỨC với `CompareScreen.macDinhId` (bat bien `I2`
+   * cua review W3, ERRATA #36 muc 4), do `App` tra loi MOT lan.
+   *
+   * ⚠️ Trước vòng sửa, prop này là `banDichXuat.id` (`status === "done"` mới nhất): hai
+   * vùng tiêu thụ đọc HAI biểu thức khác nhau, nên vùng Đối chiếu có thể đang xem bản `13`
+   * (`queued`) trong khi ba nút xuất trỏ bản `11` — và **không chữ nào** trên màn nói bản nào
+   * sẽ được xuất. Mutant `W3-17` (đổi prop này sang biến kia) từng cho **0 bài đỏ**.
+   */
   translationId: number | null;
+  /**
+   * Bản dịch XUẤT ĐƯỢC (`status === "done"` mới nhất) — câu trả lời cho một câu hỏi KHÁC:
+   * *"bản nào có nội dung để xuất"*.
+   *
+   * ⚠️ Đây KHÔNG phải điểm quyết định thứ hai cho "bản dịch đang xem" (điểm đó là
+   * `translationId`, và nó có bài ghim `SAME`). Nó tồn tại để ba nút xuất KHÔNG âm thầm trỏ
+   * vào một bản khác bản đang xem: khi `exportableId !== translationId`, thanh này nói thẳng
+   * ra (`.tp__xuat-cho`).
+   *
+   * ⚠️ MẶC ĐỊNH là `translationId` (không phải `null`): không truyền prop này thì hành vi
+   * **y hệt trước vòng sửa** — "bản đang xem cũng là bản xuất được". Đó là điều kiện để 12
+   * bài sẵn có của tệp này (`Transport.test.tsx`) vẫn đo đúng cái chúng đo, thay vì bị đổi
+   * nghĩa âm thầm thành "không xuất được gì".
+   */
+  exportableId?: number | null;
   /** Thoi luong that cua nguon (`Source.duration`), `null` khi backend chua do duoc. */
   duration?: number | null;
   /** `UiState.playing` — component DIEU KHIEN, khong giu ban sao. */
@@ -106,6 +129,7 @@ export function Transport({
   sourceId,
   segments,
   translationId,
+  exportableId,
   duration = null,
   playing = false,
   currentSegment = null,
@@ -113,6 +137,8 @@ export function Transport({
   onPlayingChange,
   onSegmentChange,
 }: TransportProps) {
+  // Xem ghi chu o `TransportProps.exportableId`: khong truyen ⇒ "ban dang xem la ban xuat duoc".
+  const idXuatDuoc = exportableId === undefined ? translationId : exportableId;
   const phanTuMedia = useRef<HTMLAudioElement | null>(null);
   // Vi tri phat: trang thai CUC BO (xem "Trang thai" o dau tep).
   const [viTriPhat, datViTriPhat] = useState(0);
@@ -221,19 +247,33 @@ export function Transport({
         />
       </div>
       {coNguon ? null : <p className="tp__rong">chưa chọn kênh để nghe</p>}
+      {/* ⚠️ BẢN ĐANG XEM ≠ BẢN XUẤT ĐƯỢC ⇒ phải NÓI RA (bat bien `I2`, ERRATA #36 muc 4).
+          Sau khi bấm "dịch", bản đang xem là bản VỪA TẠO (`queued`, chưa có đoạn nào) nên
+          nó KHÔNG có nội dung để xuất. Im lặng cho ba nút trỏ vào bản `done` khác chính là
+          lỗi mà `W3-17` để lọt: người dùng không có câu nào nói bản nào sẽ được xuất.
+          Không có bản `done` nào ⇒ câu này KHÔNG hiện (không có gì để giải thích). */}
+      {idXuatDuoc !== null && translationId !== null && idXuatDuoc !== translationId ? (
+        <p className="tp__xuat-cho" data-testid="xuat-cho">
+          {`bản đang xem (${translationId}) chưa dịch xong — xuất bản ${idXuatDuoc}`}
+        </p>
+      ) : null}
       <div className="tp__nhom-xuat">
         {DINH_DANG_XUAT.map(({ dinhDang, nhan: nhanXuat }) => (
           <a
             key={dinhDang}
             className="tp__xuat"
             aria-label={`xuất ${nhanXuat}`}
-            aria-disabled={translationId === null ? "true" : undefined}
+            aria-disabled={idXuatDuoc === null ? "true" : undefined}
+            // ⚠️ `data-translation-id` la `token` MAY DOC DUOC cua bat bien `I2`: no la CHINH
+            // gia tri `translationId` (ban dang xem), de bai `SAME` trong `App.test.tsx` so
+            // duoc no voi ban ma vung Doi chieu dang chon — hai con so, mot bieu thuc.
+            data-translation-id={translationId === null ? "" : String(translationId)}
             // URL do `endpoints.exportUrl` sinh ra: client KHONG tu ghep, vi `format`
             // sai ten la 422 va thu tu tham so la chuyen cua backend.
             href={
-              translationId === null
+              idXuatDuoc === null
                 ? undefined
-                : endpoints.exportUrl(translationId, dinhDang, bilingual)
+                : endpoints.exportUrl(idXuatDuoc, dinhDang, bilingual)
             }
             download
           >

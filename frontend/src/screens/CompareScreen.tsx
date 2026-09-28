@@ -90,6 +90,17 @@ interface Props {
    * khuôn với mọi màn khác của giai đoạn: dữ liệu vào qua PROP, một chỗ gọi API cho mỗi màn).
    */
   onTaoBanDich?: (engine: string) => void;
+  /**
+   * Người dùng bấm một bản dịch khác trong segmented control — **BÁO LÊN `App`**.
+   *
+   * ⚠️ VI SAO PHẢI BÁO LÊN (vòng sửa W3 #1, bất biến `I2` — ERRATA #36 mục 4): `chonId` là
+   * state CỤC BỘ, nên khi người dùng đổi bản thì VÙNG NÀY đổi theo nhưng `App.banDangXemId`
+   * thì không (nó vẫn ưu tiên bản VỪA TẠO). ĐO ĐƯỢC: chọn bản 12 (`queued`, KHÔNG có job) sau
+   * khi tạo bản 13 ⇒ cột phải của bản 12 hiện `"đang dịch… · job: chờ gom lô"` — job CỦA BẢN 13
+   * — và ba nút XUẤT cũng trỏ bản 13. Không có prop này thì "một điểm quyết định" là một lời
+   * tuyên bố SAI: có hai điểm, một ở `App` và một ở đây.
+   */
+  onChonBanDich?: (id: number) => void;
   /** Lời gọi tạo bản dịch đang bay ⇒ nút không cho bấm lần thứ hai. */
   dangTao?: boolean;
   /**
@@ -164,6 +175,7 @@ export function CompareScreen({
   macDinhId = null,
   specs = [],
   onTaoBanDich,
+  onChonBanDich,
   dangTao = false,
   loiTao = null,
   trangThaiJob = null,
@@ -204,6 +216,8 @@ export function CompareScreen({
   // Bản A: id người dùng ĐÃ CHỌN (nếu còn trong danh sách), rồi tới quyết định của BÊN GỌI
   // (`macDinhId` — cùng câu trả lời mà `Transport` dùng để xuất), rồi mới tới hàng đầu.
   // `find` trả `undefined` khi prop đổi và id cũ trỏ vào hư không — đó là lý do phải kiểm.
+  // ⚠️ `chonId` là state CỤC BỘ chỉ để ý ĐỊNH ngay trong lượt bấm; SỰ THẬT vẫn được báo lên
+  // `App` qua `onChonBanDich`, và `App` trả lại qua `macDinhId` (xem prop `onChonBanDich`).
   const chon =
     translations.find((tr) => tr.id === chonId) ??
     translations.find((tr) => tr.id === macDinhId) ??
@@ -251,7 +265,12 @@ export function CompareScreen({
             className="cmp__chon"
             data-testid={`pick-${tr.id}`}
             data-stale={String(tr.stale)}
-            onClick={() => datChonId(tr.id)}
+            onClick={() => {
+              datChonId(tr.id);
+              // BÁO LÊN `App`: lựa chọn này phải trở thành `banDangXemId` (xem prop
+              // `onChonBanDich`), nếu không thì `Transport` và nhãn job vẫn bám bản VỪA TẠO.
+              if (onChonBanDich !== undefined) onChonBanDich(tr.id);
+            }}
           >
             bản dịch {k + 1} · {tr.engine}
             {tr.stale ? " · lỗi thời" : ""}

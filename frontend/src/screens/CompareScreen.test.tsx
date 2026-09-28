@@ -697,6 +697,241 @@ describe("CompareScreen: §4.3 hai cot + cot CPS + segmented control + ghim ban 
       `nut phai mang lop \`cmp__nut-dich\` — do moi la lop co LUAT trong app.css; do duoc ${JSON.stringify(lopNut)}`);
   });
 
+  it("HINH THUC (C1): `.cmp` khai DU track cho so con CO MAT, va TUNG con co `grid-row` tro dung track", () => {
+    // ---------------------------------------------------------------------------
+    // 🔴 `Critical` C1 cua review W3 (ERRATA #36 muc 3) — DUNG LOP LOI cua `Critical #1`
+    // Task 10 (ERRATA #31 muc 1), lan thu HAI. DO DUOC truoc khi sua, o dung trang thai
+    // rong cua W3 (`translations: []`, registry toan MT `available: false`):
+    //     so con = 5 ; so track = 4 ; con = [.cmp__thanh, .cmp__tin, .cmp__rong,
+    //     .cmp__dau, .cmp__danh-sach] ; `.cmp__tin:empty` = false
+    // Nam item vao bon track ⇒ `.cmp__dau` chiem hang `1fr` va `.cmp__danh-sach` roi vao
+    // mot hang IMPLICIT `auto` ⇒ danh sach khong cuon duoc, dau cot gian ra.
+    //
+    // ⚠️ BAI NAY GHIM **QUAN HE**, KHONG GHIM NGUYEN VAN (ERRATA #34 muc 1):
+    //   (i)  so con CO MAT  ≤  so track da khai  — doc so con tu DOM THAT, so track tu
+    //        CHINH `app.css`; KHONG khang dinh "co dung sau gia tri `auto auto …`";
+    //   (ii) TUNG con co `grid-row` tro vao mot track CO THAT (1 ≤ hang ≤ so track) va
+    //        HAI con khac nhau khong dung cung mot hang khi ca hai cung co mat;
+    //   (iii) hang `1fr` — cho cuon cua danh sach — thuoc ve `.cmp__danh-sach`, khong
+    //        thuoc `.cmp__dau` (day la menh de noi dung cua C1, va no DO khi `.cmp` ve
+    //        bon track vi khi do `grid-template-rows` chi con `auto auto auto 1fr`).
+    // ⇒ Mutation "dua `.cmp` ve BON track" lam bai DO (ve (i) va ve (iii)).
+    // ---------------------------------------------------------------------------
+    const appCss = readFileSync(new URL("../styles/app.css", import.meta.url), "utf8");
+    // ⚠️ BO CHU THICH truoc khi parse: mot dau `}` nam trong chu thich se cat CUT khoi luat
+    // (do duoc: ban nhap dau tien cua khoi chu thich C1 lam phep cat tra ve `so track = 0`).
+    const cssTran = appCss.replace(/\/\*[\s\S]*?\*\//g, "");
+
+    /**
+     * MOI khoi luat khai selector nay NHU MOT selector TRON VEN.
+     *
+     * ⚠️ Vi sao khong dung `new RegExp("\\" + selector + " \\{[^}]*\\}")`: selector nay xuat
+     * hien trong nhieu luat (`.cmp__dau`, `.cmp__dau.is-pinned`, `.cmp__tin`, `.cmp__tin:empty`),
+     * nen `[^}]*` cua mot luat DUNG TRUOC no se nuot luon khoi luat that ⇒ phep do bao
+     * "khong khai `grid-row`" trong khi no CO khai. Do duoc o ban nhap dau (bai DO vi ly do sai).
+     */
+    function cacKhoi(selector: string): string[] {
+      const khoa = `\\${selector}(?![a-zA-Z0-9_-])[^{}]*\\{([^{}]*)\\}`;
+      return [...cssTran.matchAll(new RegExp(khoa, "g"))].map((m) => m[1] ?? "");
+    }
+
+    function khoi(selector: string, vi: string): string {
+      const ds = cacKhoi(selector);
+      assert.ok(ds.length > 0, `khong doc duoc khoi luat "${selector}" trong app.css (${vi})`);
+      return ds[0];
+    }
+
+    /** So track ma khoi luat `.cmp` khai, doc tu CHINH van ban CSS. */
+    function soTrack(selector: string): number {
+      const dong = /grid-template-rows:\s*([^;]+);/.exec(khoi(selector, "lay so track"));
+      assert.ok(dong !== null, `"${selector}" phai khai \`grid-template-rows\``);
+      return dong[1].trim().split(/\s+/).length;
+    }
+
+    /**
+     * `grid-row` dang so ma BAT KY khoi luat nao khai — `null` neu khong khoi nao khai.
+     *
+     * ⚠️ Phai quet MOI khoi: mot con co the co nhieu luat (`.cmp__tin` va `.cmp__tin:empty`),
+     * va `grid-row` chi can khai o MOT trong chung. Doi hoi no nam trong khoi DAU TIEN la mot
+     * phep do SAI (ban nhap dau cua bai nay DO vi dung ly do do).
+     */
+    function hangCua(selector: string): number | null {
+      for (const than of cacKhoi(selector)) {
+        const hang = /grid-row:\s*(\d+)/.exec(than);
+        if (hang !== null) return Number(hang[1]);
+      }
+      return null;
+    }
+
+    const track = soTrack(".cmp");
+    const trackCua = /grid-template-rows:\s*([^;]+);/
+      .exec(khoi(".cmp", "lay danh sach track"))?.[1].trim().split(/\s+/) ?? [];
+
+    const t = banGhi([doan(1, "你好"), doan(2, "谢谢")]);
+    // HAI trang thai THAT cua W3 cho cung mot ban ghi da chon:
+    //   (a) RONG: chua co ban dich nao + khong MT nao dung duoc ⇒ khay tin co 2 nhanh,
+    //       `.cmp__tin:empty` = FALSE (day la trang thai sinh ra C1);
+    //   (b) DAY: co hai ban dich, con thu sau `.cmp__danh-sach` cung co mat.
+    const trangThai = [
+      {
+        ten: "RONG (khay tin CO noi dung)",
+        props: { translations: [], specs: [spec("qwen2.5-3b", "Qwen 2.5 3B", false)] },
+      },
+      {
+        ten: "DAY (co ban dich)",
+        props: {
+          translations: [banDich(11, ["câu một (dịch)"], [{ i: 1, cps: 4.2, over: false }])],
+          specs: SPECS,
+        },
+      },
+    ];
+
+    const trackDaGhim = new Map<string, number>();
+    for (const tt of trangThai) {
+      const { container } = render(taoPhanTu(CompareScreen, {
+        transcript: t,
+        onTaoBanDich: () => {},
+        ...tt.props,
+      }));
+      const con = [...container.querySelectorAll(".cmp > *")];
+      // PHEP DO BAT BUOC cua brief §8: in ra SO CON CO MAT va SO TRACK.
+      console.log(`C1 ${tt.ten}: so con CO MAT = ${con.length} ; so track da khai = ${track}`);
+
+      // (i) QUAN HE: so con CO MAT ≤ so track.
+      assert.ok(
+        con.length <= track,
+        `${tt.ten}: luoi khai ${track} track nhung co ${con.length} con CO MAT — it nhat mot con `
+        + `se roi vao hang IMPLICIT (auto), va hang \`1fr\` bi con khac chiem; do duoc `
+        + `${JSON.stringify(con.map((el) => (el.getAttribute("class") ?? "").trim()))}`,
+      );
+
+      // (ii) TUNG con co `grid-row` tuong minh, tro vao mot track CO THAT.
+      for (const el of con) {
+        const lop = (el.getAttribute("class") ?? "").trim().split(/\s+/)[0] ?? "";
+        const hang = hangCua(`.${lop}`);
+        assert.ok(
+          hang !== null,
+          `\`.${lop}\` la mot con CO MAT cua \`.cmp\` nhung KHONG khai \`grid-row\` ⇒ no do `
+          + `auto-placement dat, va do la co che sinh ra C1 (ERRATA #31 muc 1)`,
+        );
+        assert.ok(
+          hang >= 1 && hang <= track,
+          `\`.${lop}\` tro vao hang ${hang} nhung \`.cmp\` chi khai ${track} track `
+          + `⇒ no roi vao mot hang IMPLICIT; do duoc ${JSON.stringify(trackCua)}`,
+        );
+        const cu = trackDaGhim.get(lop);
+        if (cu !== undefined) {
+          assert.equal(cu, hang, `\`.${lop}\` phai tro vao CUNG mot hang o moi trang thai (${cu} vs ${hang})`);
+        }
+        trackDaGhim.set(lop, hang);
+      }
+    }
+
+    // (iii) HANG `1fr` THUOC VE DANH SACH, KHONG THUOC VE DAU COT — menh de noi dung cua C1.
+    const hangDau = hangCua(".cmp__dau");
+    const hangDanhSach = hangCua(".cmp__danh-sach");
+    assert.ok(hangDau !== null && hangDanhSach !== null, "ca `.cmp__dau` lan `.cmp__danh-sach` phai khai `grid-row`");
+    assert.notEqual(hangDau, hangDanhSach, "dau cot va danh sach KHONG duoc dung CUNG mot hang");
+    assert.equal(
+      trackCua[hangDanhSach - 1],
+      "1fr",
+      `hang ${hangDanhSach} (cho \`.cmp__danh-sach\`) phai la track \`1fr\` — do la cho CUON cua danh sach; `
+      + `do duoc track[${hangDanhSach - 1}] = ${JSON.stringify(trackCua[hangDanhSach - 1])}, `
+      + `toan bo track = ${JSON.stringify(trackCua)}`,
+    );
+    assert.notEqual(
+      trackCua[hangDau - 1],
+      "1fr",
+      `hang ${hangDau} (cho \`.cmp__dau\`) KHONG duoc la track \`1fr\`: do la loi C1 (dau cot gian ra, `
+      + `danh sach khong cuon duoc); do duoc ${JSON.stringify(trackCua)}`,
+    );
+  });
+
+  it("HINH THUC (mồ côi): MOI lop `.cmp` ma `app.css` tao kieu PHAI co trong DOM THAT, va NGUOC LAI", () => {
+    // ---------------------------------------------------------------------------
+    // 🔴 LOP LO HONG DO PHU MOI cua review W3 (`Minor #1`, ERRATA #36 muc 5): ba mutant
+    // `W3-14/15/16` **DOI TEN LUAT trong `app.css` ma GIU `className` trong TSX** ⇒ 0 bai do.
+    // Class van nam trong DOM, luat van "co trong tep", nhung **KHONG CON KHOP NHAU** — luat
+    // mo coi. Bai ghim CSS cu chi khang dinh *"mot vai luat CO TON TAI"*, nen no MU voi dung
+    // lop loi nay.
+    //
+    // Bai nay ghim QUAN HE HAI CHIEU (ERRATA #34 muc 1 — quan he, khong nguyen van):
+    //   (A) MOI lop `.cmp*` ma `app.css` tao kieu PHAI xuat hien trong DOM THAT (bat `W3-14/15/16`:
+    //       doi ten luat ⇒ ten moi khong co lop nao trong DOM ⇒ DO);
+    //   (B) MOI lop `.cmp*` co trong DOM THAT PHAI duoc `app.css` tao kieu (bat `W3-10`: doi
+    //       `className` sang mot lop khong co luat ⇒ DO).
+    // ⚠️ KHONG ghim danh sach ten lop nguyen van: them mot lop moi (co luat + co dung) phai
+    // lam bai XANH, khong phai DO.
+    // ---------------------------------------------------------------------------
+    const appCss = readFileSync(new URL("../styles/app.css", import.meta.url), "utf8");
+    const cssTran = appCss.replace(/\/\*[\s\S]*?\*\//g, "");
+
+    /** Tap lop `.cmp*` ma `app.css` tao kieu — theo TUNG selector, khong theo ca danh sach. */
+    function lopTrongCss(): Set<string> {
+      const ra = new Set<string>();
+      // Chi nhan selector TOAN cuc bat dau bang `.cmp`: `[^{}]*` de khong dinh luat long nhau,
+      // va `(^|})` de khong nhan selector nam trong mot danh sach cua luat khac (vi du
+      // `.cmp__chon[aria-checked="true"]` van la cua `.cmp` — no PHAI duoc tinh).
+      for (const m of cssTran.matchAll(/(?:^|\})\s*([^{}]*?)\{/g)) {
+        for (const lop of (m[1] ?? "").matchAll(/\.(cmp[a-z0-9_-]*)/g)) ra.add(lop[1] ?? "");
+      }
+      ra.delete("");
+      return ra;
+    }
+
+    /** Tap lop `cmp*` co trong DOM that cua tat ca cac trang thai tuan tu. */
+    const lopTrongDom = new Set<string>();
+    for (const props of [
+      { transcript: null, translations: [], specs: SPECS },
+      { transcript: banGhi([doan(1, "你好")]), translations: [], specs: [spec("qwen2.5-3b", "Qwen 2.5 3B", false)] },
+      { transcript: banGhi([doan(1, "你好")]), translations: [], specs: SPECS },
+      { transcript: banGhi([doan(1, "你好")]), translations: [banDich(11, ["Xin chao"], [{ i: 1, cps: 4, over: true }])], specs: SPECS },
+      { transcript: banGhi([doan(1, "你好"), doan(2, "谢谢")]), translations: [banDich(13, [], [], { status: "queued" })], specs: SPECS, trangThaiJob: "queued" as const },
+      // ⚠️ HAI trang thai PHAI co mat o day vi chung la noi DUY NHAT sinh ra hai lop:
+      //   (a) `cmp__ghim-cot` chi co khi GHIM ban B ⇒ can >= 2 ban dich VA bam nut ghim;
+      //   (b) `cmp__loi-tao` chi co khi loi tao khac `null`.
+      // Neu thieu mot trong hai, bai (A) se bao "luat mo coi" cho mot luat CO that — do la
+      // mot phep do SAI (da do duoc o ban nhap dau: `["cmp__ghim-cot","cmp__loi-tao"]`).
+      {
+        transcript: banGhi([doan(1, "你好")]),
+        translations: [banDich(11, ["Xin chao"], [{ i: 1, cps: 4, over: false }]), banDich(12, [], [], { status: "queued" })],
+        specs: SPECS,
+        loiTao: "409: engine chua san sang",
+        bamGhim: true,
+      },
+    ] as (Record<string, unknown> & { bamGhim?: boolean })[]) {
+      const { container } = render(taoPhanTu(CompareScreen, { onTaoBanDich: () => {}, ...props }));
+      if (props.bamGhim === true) fireEvent.click(phanTuTu(container, '[data-testid="ghim"]'));
+      for (const el of container.querySelectorAll("*")) {
+        for (const lop of el.classList) if (lop.startsWith("cmp")) lopTrongDom.add(lop);
+      }
+    }
+
+    const trongCss = lopTrongCss();
+    assert.ok(trongCss.size >= 15, `phai doc duoc cac lop .cmp* tu app.css; do duoc ${trongCss.size}`);
+    assert.ok(lopTrongDom.size >= 15, `phai thu duoc cac lop .cmp* tu DOM; do duoc ${lopTrongDom.size}`);
+
+    // (A) LUAT ⇒ LOP: luat mo coi (khong lop nao mang ten do) lam bai DO.
+    const moCoi = [...trongCss].filter((lop) => !lopTrongDom.has(lop)).sort();
+    assert.deepEqual(
+      moCoi,
+      [],
+      `LUAT MO COI trong app.css: ${JSON.stringify(moCoi)} — luat nay khong lop nao trong DOM mang, `
+      + `tuc no KHONG tao kieu cho thu gi (lop W3-14/15/16: doi ten luat ma giu className). `
+      + `Lop co trong DOM: ${JSON.stringify([...lopTrongDom].sort())}`,
+    );
+
+    // (B) LOP ⇒ LUAT: lop trong DOM ma khong co luat nao ap cho no cung lam bai DO.
+    const voLuat = [...lopTrongDom].filter((lop) => !trongCss.has(lop)).sort();
+    assert.deepEqual(
+      voLuat,
+      [],
+      `LOP KHONG CO LUAT: ${JSON.stringify(voLuat)} — lop nay nam trong DOM nhung app.css khong `
+      + `tao kieu cho no (lop W3-10: doi className sang mot lop khong co luat). `
+      + `Luat co trong app.css: ${JSON.stringify([...trongCss].sort())}`,
+    );
+  });
+
   it("HINH THUC: LUAT CSS cua man Doi chieu CO THAT trong `app.css`, va moi token deu co dinh nghia", () => {
     // ERRATA #15 muc 3 (do duoc HAI CHIEU o Task 6): mot test chi khang dinh
     // `className` van XANH khi luat CSS bi xoa. Cach re nhat de ghim luat: DOC tep CSS.

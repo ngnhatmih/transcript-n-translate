@@ -27,6 +27,41 @@ import { Header } from "./Header.tsx";
 import { QueueZone } from "./QueueZone.tsx";
 import { Transport } from "./Transport.tsx";
 
+/**
+ * Trạng thái JOB `translate` của bản VỪA tạo, **GÓI KÈM HAI KHOÁ ĐỊNH DANH**.
+ *
+ * ⚠️ Vì sao không phải một `JobState` trần (vòng sửa `I1`, ERRATA #36 mục 4): một
+ * `JobState` không kèm gì là dữ liệu của MỘT bản dịch nhưng hiển thị được như của BẤT KỲ
+ * bản dịch nào đang xem. `id` + `kenh` + `tid` là ba khoá trả lời "job này là của ai":
+ * `id` (bản dịch) để không dán nhãn job sang bản khác trong cùng bản ghi; `kenh` + `tid` để
+ * id trần của kênh/bản ghi cũ không trỏ nhầm ở kênh/bản ghi mới.
+ */
+interface JobCuaBanMoi {
+  id: number;
+  kenh: number;
+  tid: number;
+  state: JobState;
+}
+
+/** Lỗi của lần tạo gần nhất, gói kèm kênh — xem `JobCuaBanMoi` ở trên về lý do. */
+interface LoiCuaBanMoi {
+  kenh: number;
+  cau: string;
+}
+
+/**
+ * Một tập job có ĐỔI so với mốc trước đó không — so HAI CHIỀU (job vào = xong; job rời =
+ * chạy lại). Một sự kiện TIẾN ĐỘ của job đang chạy không đổi tập này.
+ *
+ * `ponytail:` đây là cùng một phép so mà vòng sửa W1 đã viết cho `/api/transcripts`, nay
+ * dùng cho HAI tập (transcript và translate) — hai chỗ gọi, một định nghĩa.
+ */
+function coChuyen(truoc: Set<number>, sau: Set<number>): boolean {
+  for (const id of sau) if (!truoc.has(id)) return true;
+  for (const id of truoc) if (!sau.has(id)) return true;
+  return false;
+}
+
 export function App() {
   // TRẠNG THÁI CLIENT: MỘT reducer cho cả shell (spec/plan: `src/state/reducer.ts`).
   // Task 7 là người gọi THẬT đầu tiên của nó: thanh transport ĐỌC `playing` +
@@ -104,20 +139,50 @@ export function App() {
    * Trạng thái JOB `translate` của bản VỪA tạo, đọc từ `POST /api/translations`
    * (`TranslationCreated = { translation, job }`).
    *
+   * ⚠️ **GÓI KÈM HAI KHOÁ ĐỊNH DANH, KHÔNG PHẢI MỘT `JobState` TRẦN** — đây là vòng sửa
+   * `I1` của review W3 (ERRATA #36 mục 4). ĐO ĐƯỢC trước vòng sửa: `trangThaiJobMoi` là
+   * một `JobState` không kèm gì, nên nó được nối vào cột phải của **BẤT KỲ** bản dịch nào
+   * đang được chọn; chọn bản `11` (`done`, KHÔNG có job) ⇒ cột phải hiện
+   * `"chưa có đoạn này · job: chờ gom lô"` — **job của bản 13**.
+   *
+   * `kenh` + `tid` là hai khoá của một bản ghi/bản dịch: `id` một mình KHÔNG đủ, vì id hai
+   * kênh khác nhau có thể trùng và id trần của kênh cũ trỏ vào hư không ở kênh mới (cùng
+   * lý do đã ghi cho `banMoiTao`). `tid` chặn nốt nhánh "cùng kênh nhưng ĐỔI BẢN GHI".
+   *
    * ⚠️ Đây KHÔNG phải thanh tiến trình thứ hai: nó chỉ là TRẠNG THÁI, để cột phải nói ra
    * "đang dịch… · job: chờ gom lô" thay vì để RỖNG. Tiến trình THẬT (%) nằm ở job/SSE và
    * `useJobStream` đã hiện nó ở vùng HÀNG ĐỢI.
    */
-  const [trangThaiJobMoi, datTrangThaiJobMoi] = useState<JobState | null>(null);
+  const [trangThaiJobMoi, datTrangThaiJobMoi] = useState<JobCuaBanMoi | null>(null);
   /**
    * LỖI CỦA LẦN TẠO GẦN NHẤT — **NGUYÊN VĂN `ApiError.message`** (`"<status>: <detail>"`).
+   *
+   * ⚠️ **GÓI KÈM KÊNH** (vòng sửa `I1`, ERRATA #36 mục 4): `loiTao` cũ là một `string` trần,
+   * nên câu **409 của kênh CŨ** vẫn nằm trong `.cmp__tin` sau khi đổi kênh. Nay nó chỉ được
+   * truyền xuống khi `kenh === ui.channelId`, VÀ `useEffect` dưới đây dọn nó khi kênh đổi.
    *
    * ⚠️ Backend TỪ CHỐI TRƯỚC KHI GHI (`routes_translations.create_translation`: 422 engine
    * không có trong registry / không phải `kind == "mt"`; 409 engine chưa sẵn sàng), nên câu
    * tiếng Việt của nó là thứ DUY NHẤT đúng. Thay bằng "có lỗi xảy ra" là bỏ mất đúng thông
    * tin người dùng cần để sửa, và là UI tự đoán thay backend.
    */
-  const [loiTao, datLoiTao] = useState<string | null>(null);
+  const [loiTao, datLoiTao] = useState<LoiCuaBanMoi | null>(null);
+  /**
+   * BẢN DỊCH NGƯỜI DÙNG TỰ BẤM CHỌN — nâng lên `App` để nó là **MỘT** điểm quyết định (bat
+   * bien `I2`, ERRATA #36 muc 4).
+   *
+   * ⚠️ VI SAO KHONG THE GIU NO O `CompareScreen` (do duoc khi mutation `I1-chon-ban-12`):
+   * `CompareScreen` co state `chonId` CUC BO, nen khi nguoi dung bam mot ban khac thi VUNG DOI
+   * CHIEU doi theo nhung `App.banDangXemId` thi KHONG — no van la ban VUA TAO (`banMoiTao` duoc
+   * uu tien, xem duoi). He qua DO DUOC: chon ban 12 (`queued`, KHONG co job) sau khi tao ban 13
+   * ⇒ cot phai cua no hien `"đang dịch… · job: chờ gom lô"` (job CUA BAN 13), vi `banDangXemId`
+   * van la 13. Va vi `banDangXemId` con la `translationId` cua `Transport`, ba nut XUAT cung tro
+   * sai ban.
+   *
+   * Ghi kem `kenh` + `tid` — cung ly do nhu `banMoiTao`: id tran cua kenh/ban ghi cu tro vao hu
+   * khong o kenh/ban ghi moi.
+   */
+  const [banDaChon, datBanDaChon] = useState<{ id: number; kenh: number; tid: number } | null>(null);
 
   /**
    * Tạo một bản dịch cho bản ghi đang mở — **MỘT** hàm, gọi từ `CompareScreen`.
@@ -139,14 +204,15 @@ export function App() {
       const tao = await endpoints.createTranslation({ transcript_id: tid, engine });
       // ⚠️ Ghi KÈM kênh: ưu tiên này chỉ có nghĩa cho kênh đã tạo ra nó (xem `banDangXemId`).
       datBanMoiTao({ id: tao.translation.id, kenh: ui.channelId });
-      // Trạng thái JOB của bản vừa tạo — cũng từ HTTP, không phải màn tự đoán.
-      datTrangThaiJobMoi(tao.job.state);
+      // Trạng thái JOB của bản vừa tạo — cũng từ HTTP, không phải màn tự đoán. Kèm CẢ kênh
+      // lẫn bản ghi: một `JobState` trần là thứ đã rò rỉ sang bản dịch khác (`I1`).
+      datTrangThaiJobMoi({ id: tao.translation.id, kenh: ui.channelId, tid, state: tao.job.state });
       // Làm mới danh sách: hàng mới do MÁY CHỦ trả về ở lần đọc sau, không phải hàng ta tự chèn.
       translations.reload();
     } catch (loi: unknown) {
       // `useApi.messageOf` cũng đọc `Error.message`; ở đây đọc thẳng vì lời gọi này không đi
       // qua `useApi`. `ApiError.message` = `"<status>: <detail>"`.
-      datLoiTao(loi instanceof Error ? loi.message : String(loi));
+      datLoiTao({ kenh: ui.channelId, cau: loi instanceof Error ? loi.message : String(loi) });
     } finally {
       datDangTao(false);
     }
@@ -172,17 +238,77 @@ export function App() {
    * Bản dịch ĐANG XEM — câu trả lời DUY NHẤT của `App`, truyền xuống cả `CompareScreen`
    * (`macDinhId`) lẫn `Transport` (`translationId`).
    *
-   * Ưu tiên: bản VỪA TẠO (nếu còn thuộc kênh này và còn trong danh sách) → bản `done` mới
-   * nhất. ⚠️ `banMoiTao.kenh !== ui.channelId` KHÔNG phải một quyết định thứ hai: đó là điều
-   * kiện để ưu tiên này KHÔNG áp cho một kênh khác — `banMoiTao` là một id trần, và id trần
-   * của kênh cũ trỏ vào hư không ở kênh mới.
+   * Ưu tiên: bản NGƯỜI DÙNG TỰ BẤM CHỌN → bản VỪA TẠO (nếu còn thuộc kênh/bản ghi này và còn
+   * trong danh sách) → bản `done` mới nhất. ⚠️ Các vế `kenh`/`tid`/`trongDanhSach` KHÔNG phải
+   * những quyết định thứ hai: chúng là điều kiện để một id trần KHÔNG áp cho một kênh/bản ghi
+   * khác — id trần của kênh cũ trỏ vào hư không ở kênh mới.
+   *
+   * ⚠️ VẾ "NGƯỜI DÙNG TỰ BẤM CHỌN" ĐỨNG ĐẦU là hệ quả của một phép đo (mutation
+   * `I1-chon-ban-12`): khi nó không có, `banMoiTao` che mất lựa chọn của người dùng, và cột phải
+   * của bản họ chọn bị dán nhãn job CỦA BẢN VỪA TẠO.
    */
   const banDangXemId =
-    banMoiTao !== null && banMoiTao.kenh === ui.channelId && banMoiCoTrongDanhSach
-      ? banMoiTao.id
-      : banDichXuat === null ? null : banDichXuat.id;
+    banDaChon !== null
+    && banDaChon.kenh === ui.channelId
+    && banDaChon.tid === tid
+    && (translations.data ?? []).some((row) => row.id === banDaChon.id)
+      ? banDaChon.id
+      : banMoiTao !== null && banMoiTao.kenh === ui.channelId && banMoiCoTrongDanhSach
+        ? banMoiTao.id
+        : banDichXuat === null ? null : banDichXuat.id;
 
-  /** Trạng thái JOB của bản vừa tạo (đến từ `POST /api/translations`, không phải màn tự đoán). */
+  /**
+   * Trạng thái JOB của bản vừa tạo, **CHỈ khi nó thuộc ĐÚNG bản dịch đang xem VÀ ĐÚNG kênh**
+   * — hai khoá, không phải một (vòng sửa `I1`, ERRATA #36 mục 4).
+   *
+   * ĐO ĐƯỢC trước vòng sửa: `trangThaiJobMoi` được truyền xuống TRẦN, nên chọn bản `11`
+   * (`done`, KHÔNG có job) sau khi tạo bản `13` ⇒ cột phải hiện
+   * `"chưa có đoạn này · job: chờ gom lô"` — **job của bản 13**. Vế `id` một mình đã đủ cho
+   * ca ĐÓ, nhưng vế `kenh` là bắt buộc cho ca ĐỔI KÊNH: id hai kênh khác nhau có thể trùng,
+   * và `banMoiTao` đã phải ghim theo kênh vì đúng lý do này.
+   */
+  const trangThaiJobCuaBanDangXem =
+    trangThaiJobMoi !== null
+    && trangThaiJobMoi.kenh === ui.channelId
+    && trangThaiJobMoi.id === banDangXemId
+      ? trangThaiJobMoi.state
+      : null;
+
+  /**
+   * Lỗi tạo **CHỈ khi nó thuộc ĐÚNG kênh đang chọn**. Xem `loiTao` ở trên: câu 409 của kênh
+   * cũ từng nằm lại trong `.cmp__tin` sau khi đổi kênh.
+   */
+  const loiTaoCuaKenhDangChon =
+    loiTao !== null && loiTao.kenh === ui.channelId ? loiTao.cau : null;
+
+  /**
+   * ĐỔI KÊNH ⇒ DỌN mọi state của lần tạo thuộc kênh CŨ (vòng sửa `I1`, ERRATA #36 mục 4:
+   * *"reset `loiTao` khi đổi kênh"*).
+   *
+   * ⚠️ Vì sao vẫn cần effect này khi hai giá trị truyền xuống ĐÃ có vế `kenh`: (1) `loiTao`
+   * của kênh cũ sẽ SỐNG LẠI nếu người dùng quay về kênh đó — một câu 409 của một lần bấm đã
+   * cũ vẫn hiện như mới; (2) đó là điều kiện để hai state anh em này không tích tụ dữ liệu
+   * của kênh khác. `dangTao` KHÔNG dọn ở đây: một lời gọi POST đang bay vẫn phải khoá nút
+   * `dịch` cho tới khi nó trả về (`finally` của `taoBanDich` mới là chỗ mở khoá).
+   */
+  useEffect(() => {
+    datBanMoiTao(null);
+    datTrangThaiJobMoi(null);
+    datLoiTao(null);
+    datBanDaChon(null);
+  }, [ui.channelId]);
+
+  /**
+   * Người dùng bấm một bản dịch khác trong segmented control ⇒ `App` ghi lại lựa chọn đó.
+   *
+   * Đây là NỐI DÂY, không phải một điểm quyết định thứ hai: lựa chọn này chỉ có nghĩa trong
+   * kênh + bản ghi hiện tại, và nó đi vào CHÍNH biến `banDangXemId` ở trên.
+   */
+  function chonBanDich(id: number): void {
+    if (tid === null || ui.channelId === null) return;
+    datBanDaChon({ id, kenh: ui.channelId, tid });
+  }
+
   // ---------------------------------------------------------------------------
   // NGÒI NỔ ĐỌC LẠI `/api/transcripts` (vòng sửa W1 #1 — `Minor #3`, LỖI CHỨC NĂNG)
   //
@@ -191,20 +317,25 @@ export function App() {
   // ⇒ sau khi job `ingest`/`asr` xong, BẢN GHI MỚI KHÔNG BAO GIỜ HIỆN cho tới khi tải lại
   // cả trang. W2 (nạp tệp) và W3 (bắt đầu dịch) đụng ngay chỗ này.
   //
-  // HAI vế của một ngòi nổ, và cả hai đều phải có:
+  // BA vế của ngòi nổ, và cả ba đều phải có:
   //   (a) `ui.channelId` ĐỔI ⇒ đọc lại danh sách (bản ghi đang mở của kênh mới có thể chưa
   //       có trong ảnh chụp cũ). Ngòi này chạy một lần cho mỗi lần đổi kênh.
-  //   (b) MỘT JOB CỦA KÊNH ĐANG CHỌN chuyển sang `done` ⇒ đọc lại. Đây là vế đóng lỗi
-  //       "job xong mà danh sách không đổi".
+  //   (b) MỘT JOB `ingest`/`asr` CỦA KÊNH ĐANG CHỌN chuyển sang `done` ⇒ đọc lại. Đây là vế
+  //       đóng lỗi "job xong mà danh sách không đổi".
+  //   (c) MỘT JOB `translate` chuyển sang `done` (hoặc `failed`/`cancelled`) ⇒ đọc lại
+  //       `/api/translations`. Đây là vế đóng `I3` của review W3 (ERRATA #36 mục 4).
   //
-  // ⚠️ VẾ (b) SO VỚI BẢN ĐỒ JOB TRƯỚC ĐÓ, KHÔNG PHẢI "job nào đó đang `done`": gọi lại mỗi
-  // nhịp SSE là BÃO REQUEST (mỗi sự kiện tiến độ ⇒ một `GET /api/transcripts`), và bài test
+  // ⚠️ VẾ (b)/(c) SO VỚI BẢN ĐỒ JOB TRƯỚC ĐÓ, KHÔNG PHẢI "job nào đó đang `done`": gọi lại
+  // mỗi nhịp SSE là BÃO REQUEST (mỗi sự kiện tiến độ ⇒ một `GET`), và bài test
   // `khong bao request` đếm số request ở PHÍA SERVER để ghim đúng vế đó.
   // ⚠️ Và lần đổi kênh chỉ GHI LẠI MỐC, không tự kích: lần đọc lại của (a) xảy ra qua `deps`
   // `[ui.channelId]` của `banGhiTomTat`/`chonTranscript`. Gọi `reload()` ở đây nữa là HAI
   // request cho MỘT lần bấm kênh.
   // ---------------------------------------------------------------------------
+  /** Tập job ĐÃ-CHUYỂN-TRẠNG-THÁI-BỎ của kênh đang chọn: `done` cho ingest/asr, và
+      `done`/`failed`/`cancelled` cho translate. So HAI CHIỀU (vào/ra) như W1 đã làm. */
   const jobDoneRef = useRef<Set<number> | null>(null);
+  const translateKetThucRef = useRef<Set<number> | null>(null);
   const kenhRef = useRef(ui.channelId);
 
   useEffect(() => {
@@ -212,41 +343,47 @@ export function App() {
     kenhRef.current = ui.channelId;
 
     const doneCuaKenh = new Set<number>();
-    if (ui.channelId !== null) {
-      for (const job of jobs.values()) {
-        if (job.state !== "done") continue;
-        // `payload` là `Record<string, unknown>`: đọc bằng KHOÁ CỤ THỂ và so qua một biến
-        // `unknown` — cùng cách `ChannelZone.buocCuaKenh` đọc, không hứa gì về kiểu.
-        const idTrongPayload: unknown = job.payload["source_id"];
-        if (idTrongPayload !== ui.channelId) continue;
-        doneCuaKenh.add(job.id);
+    const ketThucDichCuaKenh = new Set<number>();
+    for (const job of jobs.values()) {
+      // `payload` là `Record<string, unknown>`: đọc bằng KHOÁ CỤ THỂ và so qua một biến
+      // `unknown` — cùng cách `ChannelZone.buocCuaKenh` đọc, không hứa gì về kiểu.
+      const idTrongPayload: unknown = job.payload["source_id"];
+      if (job.type === "translate") {
+        // ⚠️ Payload của job `translate` mang `translation_id`, KHÔNG mang `source_id`
+        // (`backend/app/domain/models.py::translation_id_of`), nên không suy được kênh từ nó.
+        // Đây là lý do vế (c) KHÔNG lọc theo kênh mà lọc theo BẢN DỊCH ĐANG XEM — xem dưới.
+        if (job.state !== "done" && job.state !== "failed" && job.state !== "cancelled") continue;
+        const idBanDich: unknown = job.payload["translation_id"];
+        if (idBanDich !== banDangXemId) continue;
+        ketThucDichCuaKenh.add(job.id);
+        continue;
       }
+      if (job.state !== "done") continue;
+      if (idTrongPayload !== ui.channelId) continue;
+      doneCuaKenh.add(job.id);
     }
 
     const truoc = jobDoneRef.current;
+    const truocDich = translateKetThucRef.current;
     jobDoneRef.current = doneCuaKenh;
+    translateKetThucRef.current = ketThucDichCuaKenh;
     // Lần chạy ĐẦU chỉ ghi mốc: không có "trước đó" thì không có chuyển trạng thái nào cả.
-    if (truoc === null || kenhDoi) return;
+    if (truoc === null || truocDich === null || kenhDoi) return;
 
     // CHUYỂN TRẠNG THÁI, không phải TRẠNG THÁI: so HAI CHIỀU (job vào `done` = xong; job rời
     // `done` = chạy lại). Một sự kiện tiến độ của job đang chạy không đổi tập này ⇒ không đọc lại.
-    let coChuyenTrangThai = false;
-    for (const id of doneCuaKenh) {
-      if (!truoc.has(id)) {
-        coChuyenTrangThai = true;
-        break;
-      }
-    }
-    if (!coChuyenTrangThai) {
-      for (const id of truoc) {
-        if (!doneCuaKenh.has(id)) {
-          coChuyenTrangThai = true;
-          break;
-        }
-      }
-    }
-    if (coChuyenTrangThai) transcripts.reload();
-  }, [jobs, ui.channelId]);
+    if (coChuyen(truoc, doneCuaKenh)) transcripts.reload();
+
+    // (c) JOB DỊCH KẾT THÚC ⇒ đọc lại `/api/translations`. CÙNG khuôn chuyển-trạng-thái ở
+    // trên, nên một nhịp TIẾN ĐỘ (`running` 0.4 → 0.6) KHÔNG keo request nào, còn
+    // `running ⇒ done` keo ĐÚNG MỘT.
+    //
+    // ⚠️ Vì sao `translations.reload()` là thứ ĐÚNG ở đây (và là thứ DUY NHẤT): bản dịch vừa
+    // xong có `segments` chỉ đến từ `GET /api/translations/{id}` — client không được tự sinh
+    // chữ dịch. Không có vế này thì hàng vẫn `queued` và cột phải vẫn nói "đang dịch…" MÃI MÃI
+    // cho tới khi người dùng đổi kênh hoặc tải lại trang (`I3`).
+    if (coChuyen(truocDich, ketThucDichCuaKenh)) translations.reload();
+  }, [jobs, ui.channelId, banDangXemId, transcripts.reload, translations.reload]);
 
   // THỜI LƯỢNG: lấy từ `Source.duration` của kênh đang chọn — KHÔNG tự đo lại (client đo
   // lại là nguồn sự thật thứ hai, và `duration` của phần tử media là `NaN` cho tới khi tải
@@ -302,15 +439,24 @@ export function App() {
               được). Nâng cấp: truyền `pinnedB`/`onPinB` xuống + thêm action bỏ ghim. */}
           {ui.mode === "compare" ? (
             /* ⚠️ `macDinhId` là QUYẾT ĐỊNH CỦA CHÍNH `App`, truyền xuống thay vì để màn tự đoán
-               lần thứ hai: `Transport` xuất đúng bản đó, và vùng Đối chiếu hiện đúng bản đó ⇒
-               hai vùng KHÔNG THỂ nói khác nhau.
-               Trước vòng sửa này, màn lấy `translations[0]` theo VỊ TRÍ MẢNG (route thật trả
-               MỚI NHẤT TRƯỚC ⇒ hàng `queued`), nên người dùng đang ĐỌC một bản rỗng trong
-               khi ba nút xuất trỏ vào bản `done` khác — đo được `SAME = false`
+               lần thứ hai. Trước vòng sửa W1, màn lấy `translations[0]` theo VỊ TRÍ MẢNG
+               (route thật trả MỚI NHẤT TRƯỚC ⇒ hàng `queued`), nên người dùng đang ĐỌC một
+               bản rỗng trong khi ba nút xuất trỏ vào bản `done` khác — đo được `SAME = false`
                (review W1 §B(8)).
                Task W3 mở rộng ĐÚNG một câu trả lời đó thêm một ưu tiên: bản VỪA TẠO đứng
                trước bản `done` mới nhất (`banDangXemId`), để bấm "dịch" xong là THẤY ngay bản
-               mới (nó `queued`, nên nếu không ưu tiên thì người dùng không thấy gì xảy ra). */
+               mới (nó `queued`, nên nếu không ưu tiên thì người dùng không thấy gì xảy ra).
+
+               ⚠️ **ĐÍNH CHÍNH `I2` (ERRATA #36 mục 4): câu "hai vùng KHÔNG THỂ nói khác
+               nhau" ở đây TỪNG SAI.** Ở `73a9a18` cả hai vùng dùng `banDichXuat.id`; ở HEAD
+               trước vòng sửa này, vùng này = `banDangXemId` còn `Transport.translationId` =
+               `banDichXuat.id` — HAI biểu thức, và mutant `W3-17` (đổi `Transport` sang biến
+               kia) cho **0 bài đỏ**, tức bất biến này KHÔNG được ghim.
+               Nay `Transport` nhận **CÙNG** `banDangXemId`, nên câu đó ĐÚNG LẠI, và bài
+               `SAME` trong `App.test.tsx` ghim nó (W3-17 nay ĐỎ). `Transport` nhận thêm
+               `exportableId` = bản `done` mới nhất — đó KHÔNG phải điểm quyết định thứ hai mà
+               là câu trả lời cho một câu hỏi KHÁC ("bản nào có nội dung để xuất"), và khi nó
+               khác `translationId` thì thanh transport phải NÓI RA. */
             <CompareScreen
               transcript={transcript.data}
               translations={translations.data ?? []}
@@ -321,8 +467,16 @@ export function App() {
               specs={specs}
               onTaoBanDich={taoBanDich}
               dangTao={dangTao}
-              loiTao={loiTao}
-              trangThaiJob={trangThaiJobMoi}
+              /* ⚠️ HAI PROP NAY ĐI QUA MỘT BỘ LỌC HAI KHOÁ (`I1`, ERRATA #36 mục 4):
+                 `trangThaiJobCuaBanDangXem` chỉ khác `null` khi job thuộc ĐÚNG bản dịch
+                 đang xem VÀ ĐÚNG kênh; `loiTaoCuaKenhDangChon` chỉ khác `null` khi câu lỗi
+                 thuộc ĐÚNG kênh đang chọn. Truyền `trangThaiJobMoi`/`loiTao` TRẦN ở đây
+                 chính là lỗi đã đo được: chọn bản 11 (`done`) ⇒ cột phải hiện job của bản 13. */
+              loiTao={loiTaoCuaKenhDangChon}
+              trangThaiJob={trangThaiJobCuaBanDangXem}
+              /* Lựa chọn của người dùng đi LÊN `App` (xem `banDaChon`): nếu giữ nó ở state cục
+                 bộ của màn thì `banDangXemId` — và do đó cả `Transport` — vẫn là bản VỪA TẠO. */
+              onChonBanDich={chonBanDich}
             />
           ) : ui.mode === "glossary" ? (
             /* §4.4 tab THUẬT NGỮ (Task 9). Màn này KHÔNG nhận prop: nó độc lập với
@@ -341,15 +495,26 @@ export function App() {
       {/* Thanh transport (§4.1): phát, timecode, track có đầu đọc, ba nút xuất — Task 7.
           Task W1 nối BA prop dữ liệu của nó vào bản ghi đang mở: `sourceId` là kênh đang
           chọn, `segments` là đoạn của bản ghi đó, `duration` là `Source.duration` của
-          CHÍNH kênh đó (backend đo — client không đo lại), và `translationId` là bản dịch
-          `done` MỚI NHẤT. Chưa chọn kênh ⇒ cả ba vẫn `null`/`[]`, và thanh transport nói
-          thật là chưa có gì để phát (nút vô hiệu, không `src`, không `href`). */}
+          CHÍNH kênh đó (backend đo — client không đo lại). Chưa chọn kênh ⇒ cả ba vẫn
+          `null`/`[]`, và thanh transport nói thật là chưa có gì để phát (nút vô hiệu,
+          không `src`, không `href`).
+
+          ⚠️ `translationId` là **CÙNG MỘT BIỂU THỨC** với `CompareScreen.macDinhId`
+          (`banDangXemId`) — đây là bất biến `I2` (ERRATA #36 mục 4), và nó có bài ghim
+          `SAME` trong `App.test.tsx`. Trước vòng sửa, chỗ này là `banDichXuat.id`: HAI biểu
+          thức, và comment nói "hai vùng KHÔNG THỂ nói khác nhau" là SAI.
+
+          ⚠️ `exportableId` là câu hỏi KHÁC, không phải điểm quyết định thứ hai: bản đang
+          xem có thể `queued` (chưa có nội dung để xuất), khi đó `translationId` (cái đang
+          xem) khác `exportableId` (cái xuất được) và `Transport` phải **NÓI RA** thay vì im
+          lặng xuất bản khác. */}
       <footer className="shell__transport">
         <Transport
           sourceId={ui.channelId}
           duration={kenhDangChon === null ? null : kenhDangChon.duration}
           segments={transcript.data?.segments ?? []}
-          translationId={banDichXuat === null ? null : banDichXuat.id}
+          translationId={banDangXemId}
+          exportableId={banDichXuat === null ? null : banDichXuat.id}
           playing={ui.playing}
           currentSegment={ui.currentSegment}
           onPlayingChange={(playing) => dispatch({ type: "setPlaying", playing })}

@@ -303,12 +303,33 @@ body {
   pointer-events: none;
 }
 
+/* BẢN ĐANG XEM ≠ BẢN XUẤT ĐƯỢC (bất biến `I2`, ERRATA #36 mục 4). Sau khi bấm "dịch", bản
+   đang xem là bản VỪA TẠO (`queued`) nên chưa có nội dung để xuất; im lặng cho ba nút trỏ
+   vào bản `done` khác chính là lỗi mà mutant `W3-17` để lọt. Không tô `--fault` (đây không
+   phải lỗi) và không tô `--signal` (amber chỉ có MỘT nghĩa: đang hoạt động — §2.2 quy tắc 1);
+   nó là một câu NÓI RÕ, cùng họ với `.tp__rong`. */
+.tp__xuat-cho {
+  margin: 0;
+  color: var(--ink-2);
+  font-size: var(--fs-note);
+}
+
 /* Khay TIN cua cua vao "bat dau dich": MOT con cua luoi `.cmp`, du trong no co 0, 1 hay 3
-   nhanh (ly do khong dich duoc · loi backend · cua vao khi chua co ban dich). `.cmp` khai
-   `grid-template-rows` cho BON con, nen hai nhanh roi se day hang `1fr` (cho cuon cua danh
-   sach) vao mot khay tin — loi giong het `Critical #1` cua ERRATA #31 muc 1. */
+   nhanh (ly do khong dich duoc · loi backend · cua vao khi chua co ban dich). No la con
+   THU HAI cua `.cmp` va LUON co mat trong JSX (`CompareScreen` render `<div className=
+   "cmp__tin">` o moi trang thai cua ban ghi), nen so con CO MAT cua luoi nay la NAM hoac
+   SAU — khong bao gio con bon. Luat `:empty` duoi day chi an no khi no khong co gi de noi,
+   va no an duoc vi hang `auto` cua no co lai bang khong. */
 .cmp__tin:empty {
   display: none;
+}
+
+/* VỊ TRÍ của khay tin: hàng 2. Khai ở luật RIÊNG (không phải luật `:empty` ở trên) vì
+   `grid-row` phải đúng ở CẢ HAI trạng thái — khay có nội dung và khay rỗng. Nếu chỉ khai
+   trong `:empty` thì lúc khay CÓ chữ, `.cmp__tin` lại do auto-placement đặt, và đó đúng là
+   cơ chế đã sinh ra C1. */
+.cmp__tin {
+  grid-row: 2;
 }
 
 /* ── §4.3 CUA VAO "BAT DAU DICH" (Task W3) — o chon engine + nut "dich" ──────────────
@@ -413,10 +434,46 @@ body {
    một test chỉ khẳng định `className` vẫn XANH khi luật CSS bị xoá ⇒ khối này được
    ghim bằng một bài ĐỌC CHÍNH TỆP NÀY (xem `CompareScreen.test.tsx`). */
 
+/* ⚠️ SÁU track, và MỖI con có `grid-row` TƯỜNG MINH — luật `Critical #1` của ERRATA #31
+   mục 1, tái phạm ở đây (ERRATA #36 mục 3).
+
+   ĐO ĐƯỢC trước vòng sửa này, ở ĐÚNG trạng thái rỗng của Task W3 (`translations: []`,
+   registry toàn MT `available: false`):
+     so con = 5 ; so track = 4 ; con = [.cmp__thanh, .cmp__tin, .cmp__rong, .cmp__dau,
+     .cmp__danh-sach] ; `.cmp__tin:empty` = false
+   Năm item vào bốn track ⇒ `.cmp__dau` (đầu cột) rơi vào hàng `1fr` và `.cmp__danh-sach`
+   (danh sách cuộn được, `overflow-y: auto`) rơi vào một hàng IMPLICIT `auto`. Với luật
+   `.cmp` khai `height: 100%` thì hàng `1fr` giãn ra — đúng cái mà comment cũ tưởng là nó
+   tránh được. Tác giả chỉ đúng ở nhánh khay tin RỖNG (`:empty` ⇒ `display: none` ⇒ 4 con),
+   mà đó lại KHÔNG phải trạng thái "chưa có bản dịch nào" của W3.
+
+   ⚠️ Trong khối chú thích này KHÔNG được viết cặp ngoặc nhọn của một luật CSS (ví dụ
+   ".cmp" rồi mở ngoặc rồi đóng ngoặc): bộ parse luật trong `CompareScreen.test.tsx` cắt
+   khối bằng `[^}]*`, nên một dấu `}` nằm trong chú thích sẽ cắt CỤT khối luật thật. Đã đo
+   được: bản nháp đầu của chú thích này làm phép cắt trả về `so track = 0`.
+
+   TIỀN LỆ ĐÚNG nằm cùng tệp: `.gl` (Thuật ngữ) khai NĂM track và nói rõ "số con của lưới
+   là CỐ ĐỊNH (thông báo nằm trong `.gl__tin`)". Khối này làm theo đúng khuôn đó, cộng
+   `grid-row` cho TỪNG con (ERRATA #31 mục 1: "khai N track thì phải khai VỊ TRÍ cho từng
+   con — auto-placement biến 'hàng co lại' thành 'hàng cướp chỗ'").
+
+   SÁU con theo thứ tự DOM (`CompareScreen.tsx`), và track tương ứng:
+     1 `.cmp__thanh`    (thanh chọn bản dịch)          → track 1 `auto`
+     2 `.cmp__tin`      (khay tin — LUÔN có mặt)        → track 2 `auto` (co lại khi `:empty`)
+     3 `.cmp__nguong`   (dòng ngưỡng)                   ┐ hai nhánh LOẠI TRỪ NHAU,
+     3 `.cmp__rong`     (trạng thái rỗng)               ┘ cùng track 3 `auto`
+     4 `.cmp__dau`      (đầu cột)                       → track 4 `auto`
+     5 `.cmp__danh-sach`(danh sách cuộn được)           → track 6 `1fr`  ← HÀNG CUỐI
+   ⚠️ `.cmp__danh-sach` trỏ vào track CUỐI (`grid-row: 6`), KHÔNG phải track 5: đây là hàng
+   `1fr` — chỗ cuộn của danh sách — và nó phải là hàng DUY NHẤT được giãn. Khai `grid-row: 5`
+   là một lỗi IM LẶNG: phép đo của bài ghim dưới đây (`track[grid-row - 1] === "1fr"`) bắt được
+   nó, và bản nháp đầu của khối này đã mắc đúng lỗi đó.
+   Khai TRACK cho cả sáu con CÓ MẶT, không phải cho số con của một nhánh: `.cmp__tin` có
+   mặt ở mọi trạng thái của một bản ghi đã chọn, nên "bốn con" là con số của một trạng thái
+   KHÔNG tồn tại. */
 .cmp {
   display: grid;
-  /* Hàng: thanh chọn bản dịch · dòng ngưỡng · đầu cột · danh sách cuộn được. */
-  grid-template-rows: auto auto auto 1fr;
+  grid-template-rows: auto auto auto auto auto 1fr;
   height: 100%;
   min-height: 0;
   background: var(--panel-0);
@@ -424,6 +481,8 @@ body {
 
 /* Trạng thái rỗng nói SỰ THẬT của lượt này, không hứa một thứ chưa có đường làm. */
 .cmp__rong {
+  /* Hàng 3 — CÙNG track với `.cmp__nguong` (hai nhánh loại trừ nhau). */
+  grid-row: 3;
   margin: 0;
   padding: var(--sp-4);
   color: var(--ink-1);
@@ -432,6 +491,7 @@ body {
 
 /* Segmented control (U7: N bản dịch là MỘT dải nút, không phải N tab). */
 .cmp__thanh {
+  grid-row: 1;
   display: flex;
   align-items: center;
   gap: var(--sp-2);
@@ -482,6 +542,8 @@ body {
 }
 
 .cmp__nguong {
+  /* Hàng 3 — CÙNG track với `.cmp__rong` (hai nhánh loại trừ nhau). */
+  grid-row: 3;
   margin: 0;
   padding: var(--sp-1) var(--sp-3);
   border-bottom: var(--rule-w) solid var(--rule);
@@ -493,10 +555,16 @@ body {
 
 /* Đầu cột và mỗi dòng dùng CÙNG một lưới cột, nên nhãn luôn đứng trên cột của nó.
    Bề mặt đầu cột nhích lên đúng MỘT bậc bằng `--surface-step` (§2.3: phân tầng bằng
-   đường kẻ 1px + chênh lệch độ sáng nền, không bằng shadow mềm). */
+   đường kẻ 1px + chênh lệch độ sáng nền, không bằng shadow mềm).
+
+   `grid-row: 4` ở đây áp cho `.cmp__dau` (con của lưới `.cmp`). Khai trong CÙNG khối với
+   `.cmp__dong` là để hai thứ dùng chung lưới cột không bị tách ra hai chỗ; `grid-row` là
+   thuộc tính của GRID ITEM, nên nó KHÔNG có tác dụng lên `.cmp__dong` (một `<li>` nằm
+   trong `.cmp__danh-sach`, không phải con của `.cmp`). */
 .cmp__dau,
 .cmp__dong {
   display: grid;
+  grid-row: 4;
   grid-template-columns: 1fr 1fr 4.5rem;
   gap: var(--sp-3);
   padding-right: var(--sp-3);
@@ -527,6 +595,10 @@ body {
 }
 
 .cmp__danh-sach {
+  /* Hàng 6 — hàng `1fr` DUY NHẤT của lưới: đây là chỗ cuộn của danh sách. Nếu nó rơi vào
+     một hàng implicit `auto` (đúng lỗi C1 của ERRATA #36 mục 3) thì danh sách không cuộn
+     được còn đầu cột lại giãn ra. */
+  grid-row: 6;
   margin: 0;
   padding: 0;
   list-style: none;
