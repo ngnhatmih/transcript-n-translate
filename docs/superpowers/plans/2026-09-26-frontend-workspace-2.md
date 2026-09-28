@@ -1342,6 +1342,14 @@ giết **đúng** bài đó.
 **`I1c` — lỗi THẬT THỨ HAI trong chính bản vá của nó:** bỏ duyệt một hàng **đang duyệt** mà **không transcript nào dùng**
 ⇒ route trả **0**, và nhánh `0` của nó **viết cùng chuỗi** *"⚠ đổi glossary → 0 bản ghi"* ⇒ **đang BỎ DUYỆT mà câu chữ nói "đổi"**.
 Đo trước khi sửa: `AssertionError: phai noi dung VIEC sap xay ra (bo duyet): ⚠ đổi glossary → 0 bản ghi…`.
+⚠️ **ĐÍNH CHÍNH (ERRATA #26 mục 3): câu này SAI — tôi đã chép nguyên một lời khai SAI của implementer.**
+Chuỗi `"⚠ đổi glossary → 0 bản ghi"` cho một lần **BỎ DUYỆT** **KHÔNG tái lập được từ revision nào ĐÃ COMMIT**;
+trên `48a84b4`, lệnh `git show 48a84b4:frontend/src/screens/GlossaryScreen.tsx` in ra
+`const viec = dangBoDuyet ? "bỏ duyệt glossary" : "đổi glossary"` ⇒ đường "đang Sửa" in **ĐÚNG**
+`"bỏ duyệt glossary → 0 bản ghi"`, còn "đổi" chỉ hiện khi **KHÔNG** bỏ duyệt.
+Chuỗi sai thuộc một **trạng thái TRUNG GIAN CHƯA COMMIT** của chính vòng #1.
+⇒ **`I1c` vẫn có giá trị** (nó bắt một lỗi trong mã **đang viết trước khi commit**) **nhưng KHÔNG được kể như
+một lời khai về CÂY ĐÃ COMMIT.** ⇒ **Luật: một lời khai về revision cũ phải TÁI LẬP ĐƯỢC TỪ REVISION ĐÃ COMMIT.**
 Sửa: `viec` tính **MỘT lần cho CẢ HAI nhánh số**. Mutation **`M11`** (bỏ điều kiện `!laBoDuyet`) giết **đúng** `I1c`.
 ⇒ **Nếu chỉ làm đúng brief thì lỗi này ĐI TIẾP.** **Luật: khi hai nhánh chia sẻ một câu chữ mô tả HÀNH ĐỘNG,
 hãy hỏi câu đó có đúng cho CẢ HAI không.**
@@ -1455,6 +1463,76 @@ nghĩa của `I1b` khi `馬` **đã duyệt sẵn lúc nạp** (chạy 2 lần t
 **"đỏ trước khi sửa" nguyên văn của `I1`/`I2`** (bản nháp trung gian **KHÔNG commit** ⇒ không tái lập được — và **review trước
 đã từng nhắc điều này**); con số `826` cho máy thiếu `ffmpeg` (**mới khớp SỐ HỌC**);
 nhánh `200` trên `data/app.db` thật (**Task 12**); `contract.test.ts:705`; và **mọi kết luận HÌNH** (không có ảnh render thật).
+
+## ⚠️ ERRATA #26 — Task 9 vòng sửa #2 (`899495d`): **một tệp MUTANT bị dùng làm BASELINE cả một vòng**, và lớp "đúng nhưng KHÔNG QUAN SÁT ĐƯỢC"
+
+Vòng sửa #2 xong (**một** commit, **2 tệp** `GlossaryScreen.tsx` + test; backend/`app.css`/`endpoints.ts`/`App.tsx`/`types.ts`
+**không đổi**): pytest `835 passed, 13 deselected` EXIT=0 · `npm test` **`tests 133 / suites 17 / pass 131 / fail 2 / cancelled 0`**
+EXIT=1 (132 → **133** = +`I1d`) · `typecheck` 0 · `build` 0. **18 lượt mutation, 15/15 giết ĐÚNG bài, 2 sống sót CÓ KHAI.**
+
+### 1. ✅ `I-1` ĐÓNG — và **HAI LỚP nay có HAI mutation RIÊNG, hai output RIÊNG**
+
+Trên cây **ĐÃ COMMIT** `185a12f`, chạy **riêng từng lớp**: `M13a` ⇒ `132/129/3` đỏ **tại `I2`** (18,4 ms);
+**`M13b` ⇒ `132/130/2` = Y HỆT lượt sạch ⇒ SỐNG SÓT** — **tái lập ĐÚNG phép đo của review**, và nó **nhận lời khai của mình bị bác bỏ**.
+**Sửa:** bài `I2` **chờ QUA ngưỡng debounce** rồi mới đọc số (`await act(async () => { await new Promise(r => setTimeout(r, 900)); })`,
+**4,5×** `CHO_GO_MS = 200 ms`).
+**Sau khi sửa, chạy RIÊNG từng lớp, CẢ HAI đều giết `I2`:**
+- `M13a` ⇒ `pass 130 / fail 3`, đỏ tại `AssertionError: dang Sua thi o 'Thuat ngu' phai la readOnly` (**18,6 ms** — khẳng định **THUỘC TÍNH**);
+- `M13b` ⇒ `pass 130 / fail 3`, đỏ tại `AssertionError: khong doc duoc con so nao trong: "Thuật ngữ CHƯA DUYỆT: …"` (**1150 ms** — khẳng định **SỐ**, **SAU debounce**).
+⇒ **`ERRATA #25` mục 1 nay được THI HÀNH**, không chỉ được viết ra.
+
+### 2. ✅ `M-2` ĐÓNG — và **LÝ DO nay đọc TỪ MÁY CHỦ**
+
+Test mới `I1d` làm ảnh chụp cũ **TẤT ĐỊNH** (gieo `魚 -> cá` **chưa duyệt**, không transcript nào dùng; màn nạp xong;
+test **TỰ DUYỆT `魚` qua route THẬT** (`POST` ⇒ `201`); rồi gõ `魚` + bỏ tick; route trả **0** vì không ai dùng `魚`).
+**ĐỎ trước khi sửa:** `hang DANG duyet thi phai hien con so 0 kem chu 'ban ghi'; do duoc: "Thuật ngữ CHƯA DUYỆT: …"`.
+**Sửa:** lý do đọc từ **`GET /api/glossary?lang=…`** — **một request ĐỌC THÊM chỉ khi ô "đã duyệt" đang TẮT** —
+**gộp vào CÙNG một lần cập nhật state** với câu trả lời xem trước (`Promise.all`) để **con số và lý do không lệch nhau**;
+ba giá trị `undefined`/`null`/`Term` phân biệt **"chưa đọc được" / "không có hàng" / "có hàng"**, và **khi CHƯA đọc được thì KHÔNG khẳng định lý do nào**.
+**Hai lỗi phụ tự lộ ra khi sửa và đã sửa:** (1) dòng xem trước **nhảy chữ** (`đổi` → `bỏ duyệt` sau khi số đã hiện) ⇒ gộp một lần render;
+(2) **con số CŨ còn nằm đó** khi input đã đổi ⇒ `datAffected(null)` đầu effect ("đang đếm…") — và **đây cũng chính là thứ**
+làm cho một bài test chờ "con số MỚI" không thể khớp con số CŨ.
+Mutation ghim: `M16` (suy lý do từ **ẢNH CHỤP** thay vì đọc lại) ⇒ `129/4`, đỏ `I1b` + `I1d`; `M11` ⇒ `129/4`, đỏ `I1c` + `I1d`.
+
+### 3. ⚠️ ĐÍNH CHÍNH: **`ERRATA #24` mục 2 đã CHÉP một lời khai SAI** (đã sửa tại chỗ)
+
+Tôi chép nguyên câu *"nhánh `0` viết cùng chuỗi `"⚠ đổi glossary → 0 bản ghi"` cho một lần bỏ duyệt"* — **SAI**:
+chuỗi đó **không tái lập được từ revision nào đã commit**; trên `48a84b4` đường "đang Sửa" in **ĐÚNG** `"bỏ duyệt glossary → 0 bản ghi"`.
+⇒ **`I1c` vẫn có giá trị** (bắt lỗi trong mã **đang viết trước commit**) nhưng **không được kể như lời khai về cây đã commit**.
+Implementer **báo lại** (không tự sửa số của tôi) — **đúng cách**. ⇒ **Luật: một lời khai về revision cũ phải TÁI LẬP ĐƯỢC TỪ REVISION ĐÃ COMMIT.**
+
+### 4. 🔴 `M-2` hiển thị ĐÓNG, và ⚠️ **SỰ CỐ LỚN: một tệp MUTANT bị dùng làm BASELINE cả một vòng**
+
+- **Ô "Ảnh hưởng" của HÀNG ĐÍCH** nay bằng con số của dòng xem trước; hàng đích = `editingId === t.id` **HOẶC** hàng khớp
+  **KHOÁ `(lang, term)`** của form. `M15` (bỏ vế khớp khoá) ⇒ `pass 130 / fail 3`, đỏ **đúng** `I1`.
+- **SỰ CỐ (implementer TỰ KHAI đầy đủ):** lượt chạy driver mutation **ĐẦU TIÊN** bị **pipe vào một `Select-String` có regex KHÔNG HỢP LỆ**;
+  bộ lọc chết, **node bị giết GIỮA mutation `G1`**, và nó **ĐỂ LẠI `GlossaryScreen.tsx` ở TRẠNG THÁI MUTANT** (mất nhánh câu "nháp").
+  **Lượt sau lấy CHÍNH TỆP MUTANT đó làm BASELINE** ⇒ `CHUA DUYET` đỏ trong **MỌI** lượt (kể cả lượt mutation `M9` trên `App.tsx`),
+  và **ba witness (`G1`/`M11`/`M14`) báo ABSENT/TỪ CHỐI** — **guard ĐÃ KÊU**, nhưng nó **đọc nó là "literal của tôi sai"
+  thay vì "TỆP đang sai"**. Phát hiện bằng **ba dòng `[TU CHOI MUTATE]` + `git diff HEAD`**, **dựng lại đoạn bị xoá**,
+  chạy lại **13/13 xanh**, rồi **đọc lại TOÀN BỘ diff (177 dòng)** để chắc không còn gì đi sẵn.
+  **Chốt chặn đã thêm:** (1) **kiểm trước fingerprint 5 đầu văn** — phải khớp **đúng 1 lần**, thiếu ⇒ **`[DUNG NGAY]`, không chạy gì**;
+  (2) lưới **`SIGINT`/`SIGTERM`/`SIGHUP`** khôi phục trước khi thoát; (3) **KHÔNG BAO GIỜ pipe driver qua một bộ lọc có thể chết** —
+  ghi ra **tệp** rồi đọc tệp.
+  ⇒ **BÀI HỌC LỚN: một witness bỗng nhiên TỪ CHỐI là tín hiệu về TỆP, không phải về LITERAL.**
+  ⇒ Đây là **lần thứ TƯ** một agent để lại tệp ở trạng thái mutant — **lần này TỰ PHÁT HIỆN + TỰ KHAI ĐẦY ĐỦ**, và nó còn
+  **audit cả diff** để bảo đảm không có "di sản" nào khác. **Đó là cách xử đúng.**
+
+### 5. ⚠️ LỚP THỨ BA CỦA "MUTATION SỐNG SÓT": **ĐÚNG nhưng KHÔNG QUAN SÁT ĐƯỢC**
+
+**`M14`** (bỏ vế **PHÒNG THỦ** `affected.length === 0`) ⇒ `131/2` **y hệt lượt sạch**. Nhưng nó **KHÔNG** phải lỗ hổng độ phủ
+thường: theo luật `affected_segments`, **`laNhapThat` SUY RA `affected === []`**, nên trạng thái *"nháp MÀ có ảnh hưởng"*
+chỉ tới được qua một **CUỘC ĐUA giữa hai lời gọi song song** ⇒ **không tồn tại phép đo tất định**.
+⇒ Khai theo **`ERRATA #7` mục 5**, **KHÔNG** tính là "đã kiểm". ⇒ **Ba lớp của "mutation sống sót" nay đã rõ:**
+(a) giết đúng bài (tốt); (b) **lỗ hổng độ phủ nâng cấp được** ⇒ sửa hoặc khai; (c) **KHÔNG QUAN SÁT ĐƯỢC do cấu trúc** ⇒ khai + nói RÕ VÌ SAO.
+`M9` (nhánh `glossary` của `App`) vẫn là lỗ hổng **không có đường tới** — đã khai từ trước.
+
+### 6. Hai Minor ghi nhận đúng mức
+
+- **`M-3`** id hàng vẫn **phụ thuộc thứ tự GIEO** (không phải thứ tự CHẠY) ⇒ **`R6` vẫn đạt**; đường nâng cấp: tra hàng theo **CHỮ** (bài `I1d` đã làm vậy).
+- **`M-4`** *"4 tệp CRLF"* chỉ đúng cho **tập 10 tệp**; **toàn cây tại HEAD này**: `CRLF=76 · LF-only=98 · TRỘN=0 · không-có-dòng-nào=5 · tổng=179`
+  (review đo `71/168` — **khác ở TẬP TỆP**; **điều cả hai khớp và là điều quan trọng: 0 tệp TRỘN**).
+- `contract.test.ts:705` **vẫn chưa chạm** (diff tệp đó **RỖNG**) ⇒ **nợ còn nguyên**.
 
 ## Quy ước thẩm mỹ — spec UI thắng, skill chỉ là checklist
 
