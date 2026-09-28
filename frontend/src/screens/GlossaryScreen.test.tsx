@@ -806,9 +806,38 @@ describe("GlossaryScreen: §4.4 tab THUAT NGU tren BACKEND THAT (DB gieo, cong r
     // `ℹ pass 130 / ℹ fail 2` y hệt lượt sạch — nghĩa là bài test chỉ ghim được LỚP MỘT.
     // ⇒ Luật (ERRATA #25 mục 1): một bài đọc trạng thái NGAY sau khi phát sự kiện là một
     // bài MÙ với debounce; và một bản vá có N lớp thì phải mutate TỪNG LỚP RIÊNG.
+    //
+    // ⚠️ ĐÂY LÀ **CHỖ THỨ BA** CỦA KHUÔN `act` TRONG TỆP NÀY (ERRATA #38 mục 3). `grep
+    // 'act(async'` toàn `frontend/src` = **3** chỗ: hai chỗ kia (`I2`-ghi và `LUU`) đã được
+    // `aea1a80` đổi điều kiện thoát sang tín hiệu QUAN SÁT ĐƯỢC BÊN TRONG `act`
+    // (`glossary_version` Ở MÁY CHỦ); chỗ này khi đó bị bỏ sót và vẫn là một **giấc ngủ cố
+    // định 900 ms KHÔNG CÓ ĐIỀU KIỆN THOÁT NÀO** (lớp ERRATA #35 mục 1).
+    //
+    // Cửa sổ `act` PHẢI Ở LẠI, và PHẢI dài hơn ngưỡng debounce `CHO_GO_MS` = 200 ms: đây là
+    // KHOẢNG LẶNG để một bản cài SAI — bản NGHE theo `change` trên ô KHOÁ — kịp phản ứng.
+    // ĐO ĐƯỢC: mutant bỏ lớp chặn `onChange` của ô "Thuật ngữ" (`GlossaryScreen.tsx:311`)
+    // làm bài này ĐỎ (`khong doc duoc con so nao trong: "Thuật ngữ CHƯA DUYỆT: …"`).
+    // Với bản cài ĐÚNG thì KHÔNG có gì đang chờ: `readOnly`/`disabled` + `onChange` bỏ qua ⇒
+    // không state nào đổi ⇒ dòng xem trước giữ NGUYÊN nội dung qua cả cửa sổ (đo được: nội
+    // dung trước `act` và giá trị đọc sau `act` là cùng một con số). Vì vậy vế "tín hiệu" ở đây
+    // là **KHOẢNG LẶNG**, đúng lớp `choNhip` mà ERRATA #35 mục 2 giữ lại: điều kiện thoát
+    // `Date.now() < het` LUÔN có thể trở thành đúng, khác hẳn điều kiện CHẾT kiểu
+    // `querySelector(...) === null` mà `aea1a80` đã gỡ (React không đẩy DOM ra khi `act` còn mở
+    // — đo lại trong vòng này: `domDoiTrongAct=false` qua 96 vòng/3 023 ms, tức DOM cũng KHÔNG
+    // quan sát được ở đây).
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 900));
     });
+
+    // ⚠️ SAU `act` PHAI CHO DUNG THU SAP DOC — đây là phần brief vòng này đòi và là bài học
+    // `I2` ở `aea1a80`: React commit cùng một vi-task, nên đọc DOM ở DÒNG KẾ TIẾP vẫn có thể
+    // rơi TRƯỚC lần commit đó. Trước vòng vá, dòng dưới đây là `const soXemTruoc =
+    // soTrong(container);` đọc TRẦN. Phép chờ này KHÔNG làm yếu khẳng định: nó chỉ đòi dòng
+    // xem trước có MỘT CON SỐ (bản cài SAI phản ứng với thay đổi trên ô khoá thì dòng ấy
+    // chuyển sang câu "không ảnh hưởng gì" — KHÔNG có chữ số nào — nên nó hết hạn và bài ĐỎ);
+    // giá trị đọc được vẫn bị khẳng định `soDaLuu == soXemTruoc` ở dưới ghim nguyên văn.
+    await choChu(container, '[data-testid="affected-preview"]', (t) => /\d/.test(t),
+      "dong xem truoc khong co con so nao sau khi qua nguong debounce");
 
     const soXemTruoc = soTrong(container);
 
@@ -987,6 +1016,31 @@ describe("GlossaryScreen: §4.4 tab THUAT NGU tren BACKEND THAT (DB gieo, cong r
       "bam Luu khong thay cau xac nhan");
     assert.match(daLuu, /\b1\b/, `thong bao phai mang so anh huong cua lan ghi: ${daLuu}`);
 
+    // ⚠️ CHO NOT PHAN DUOI CON DANG BAY — TRUOC MOI `await` TRAN (HAZARD DO DUOC O VONG NAY).
+    //
+    // ĐO ĐƯỢC (probe, tệp chạy một mình): cửa sổ `act` ở trên thoát ngay khi
+    // `glossary_version` Ở MÁY CHỦ đổi, nhưng máy chủ tăng version TRONG `upsert_term`, tức
+    // TRƯỚC khi response về tới client. Nếu ta tiêm 300 ms vào đúng ĐƯỜNG TRẢ VỀ của lệnh ghi
+    // — nguồn mà phép chờ KHÔNG bao phủ — thì bài này ĐỎ (`606 ms`) bằng
+    // `AssertionError: luu thuat ngu khong duoc sinh tieng on console` +
+    // `error: An update to %s inside a test was not wrapped in act(...)`.
+    //
+    // CƠ CHẾ (đọc mã + đo, không suy đoán): lệnh ghi kết thúc bằng `setLanNap`, và effect nạp
+    // lại bảng (`endpoints.listTerms().then(setTerms)`) chạy SAU khi React commit — tức SAU khi
+    // `act` đóng. `waitFor`/`choChu` của RTL CỐ Ý tắt `IS_REACT_ACT_ENVIRONMENT`
+    // (`@testing-library/react` `asyncWrapper`: `setReactActEnvironment(false)`), nên mọi cập
+    // nhật rơi TRONG một `choChu` là im lặng; nhưng một `await` TRẦN thì không. Đó đúng là chỗ
+    // `const sau = await (await fetch("/api/glossary/version")).json()` từng đứng: bản nạp lại
+    // của bảng hạ cánh ngay giữa hai phép chờ ⇒ React in "not wrapped in act" ⇒ bộ gác tiếng ồn
+    // của chính bài biến nó thành ĐỎ (chữ ký `302,9 ms` mà re-review W3 đo được, node báo vị trí
+    // `GlossaryScreen.test.tsx:796:5`).
+    //
+    // ⇒ Luật: sau một cửa sổ `act` của lệnh GHI, phải chờ NỐT phần đuôi đang bay (bảng nạp lại)
+    // TRƯỚC mọi `await` trần. Phép chờ dưới đây là CHÍNH phép chờ bài vốn đã có, chỉ ĐỔI CHỖ —
+    // và nó chờ đúng thứ bài sắp đọc ("bảng nạp lại"), không nới khẳng định nào.
+    await choChu(container, '[data-testid="bang"]', (t) => t.includes("dog"),
+      "sau khi luu, bang khong nap lai du lieu tu route");
+
     // Mang luoi THAT cua rang buoc "POST da tu tang version ben trong `upsert_term`":
     // sau DUNG MOT lan bam Luu, version phai +1. Neu client goi them mot duong bump nao
     // khac thi con so nay thanh +2 — va moi ban dich se trong "loi thoi" som hon thuc te.
@@ -995,10 +1049,6 @@ describe("GlossaryScreen: §4.4 tab THUAT NGU tren BACKEND THAT (DB gieo, cong r
     };
     assert.equal(sau.glossary_version, truoc.glossary_version + 1,
       `mot lan Luu phai tang version DUNG MOT lan: ${truoc.glossary_version} -> ${sau.glossary_version}`);
-
-    // Bang phai NAP LAI tu route: thuat ngu vua ghi hien ra.
-    await choChu(container, '[data-testid="bang"]', (t) => t.includes("dog"),
-      "sau khi luu, bang khong nap lai du lieu tu route");
 
     assert.deepEqual(tiengOn, [], "luu thuat ngu khong duoc sinh tieng on console");
     unmount();

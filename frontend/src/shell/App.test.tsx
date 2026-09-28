@@ -1103,6 +1103,23 @@ describe("App: KENH THAT + HANG DOI THAT tu server node:http trong tien trinh", 
       `KHONG duoc lan du lieu cua kenh khac; do duoc ${JSON.stringify(chuTrongMan)}`,
     );
 
+    // ⚠️ CHO THU 16 CUA LOP "CHO A ROI DOC B" (ERRATA #38 muc 2). Hai `choChu` o tren cho
+    // CHU cua `transcript` (doan van cua `EditScreen`), nhung ba khang dinh duoi day doc
+    // `href` cua `translations` — HAI `useApi` DOC LAP trong `App` (`transcript` va
+    // `translations`), va `translations` con la mot CHUOI hai request
+    // (`listTranslations` -> `getTranslation` cho tung hang). DO DUOC (probe cua vong nay):
+    // tiem 300 ms vao `/api/translations` — nguon bai KHONG cho — ⇒ bai DO ngay voi `href`
+    // con `null`; cham `transcript` thi khong lam bai do.
+    // ⇒ Cho DUNG tin hieu bai sap DOC: ba nut xuat CO `href`. Khong phai mot dong ho, va
+    // khong phai mot bo dem tich luy o phia server (bai hoc `F1` cua re-review W3 #2).
+    // Khang dinh ben duoi KHONG doi mot chu.
+    await choPhuHop(
+      container,
+      ".tp__xuat",
+      (el) => el.getAttribute("href") !== null,
+      "ba nut xuat chua co `href` (ban dich `done` cua ban ghi chua nap xong)",
+    );
+
     // TRANSPORT: `src` tu kenh dang chon; tong thoi luong lay tu `Source.duration` (754.2 s
     // ⇒ `12:34.20`), KHONG do lai tu phan tu media. `translationId` la ban dich `done` moi
     // nhat (id 11) ⇒ ba nut xuat CO `href`.
