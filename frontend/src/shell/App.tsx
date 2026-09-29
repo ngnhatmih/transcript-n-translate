@@ -13,7 +13,7 @@
 import { useEffect, useReducer, useRef, useState } from "react";
 
 import { endpoints } from "../api/endpoints.ts";
-import type { JobState, Segment, SourceLang } from "../api/types.ts";
+import type { JobState, Segment, SourceLang, Transcript } from "../api/types.ts";
 import { CompareScreen } from "../screens/CompareScreen.tsx";
 import { EditScreen } from "../screens/EditScreen.tsx";
 import { GlossaryScreen } from "../screens/GlossaryScreen.tsx";
@@ -61,6 +61,17 @@ function coChuyen(truoc: Set<number>, sau: Set<number>): boolean {
   for (const id of sau) if (!truoc.has(id)) return true;
   for (const id of truoc) if (!sau.has(id)) return true;
   return false;
+}
+
+/**
+ * Phím nóng cấp `window` KHÔNG được cướp ký tự của ô nhập (I3, ERRATA #44 mục 2).
+ *
+ * `closest` đi LÊN cây DOM, nên nó bắt cả `textarea`/`input`/`select`/`[contenteditable]` và mọi
+ * con của chúng. Trả `false` cho `null`/`body`/phần tử khác: đó là những ca phím nóng PHẢI chạy.
+ */
+function dangGoTrongONhap(dich: EventTarget | null): boolean {
+  return dich instanceof HTMLElement
+    && dich.closest("input, textarea, select, [contenteditable]") !== null;
 }
 
 export function App() {
@@ -308,6 +319,33 @@ export function App() {
   const [loiGhiDoan, datLoiGhiDoan] = useState<string | null>(null);
 
   /**
+   * HÀNG ĐỢI GHI — **MỘT cổng chặn cho MỌI đường ghi** (ERRATA #44 mục 1).
+   *
+   * ⚠️ VÌ SAO (C1 — mất-cập-nhật âm thầm): bốn lối vào dùng chung một đường ghi — nút `lưu`,
+   * `Enter`, hai phím `[`/`]`, hai nút nudge. Nếu chúng chạy SONG SONG thì mỗi lần ghi tính body
+   * từ `transcript.data` của **lần render của chính nó**, tức cùng một **bản ghi CŨ**; lần ghi SAU
+   * gửi giá trị cũ và **XOÁ ÂM THẦM** kết quả lần trước, `version` vẫn tăng, KHÔNG một lỗi nào.
+   * `disabled={dangLuu}` ở nút là bảo vệ **tầng giao diện** — nó không bảo vệ bàn phím, và không
+   * bảo vệ hai lối ghi khác nhau vào cùng một tài nguyên.
+   *
+   * ⇒ Mọi việc ghi đi qua `xepHangGhi` (một chuỗi promise giữ trong `useRef`), nên hai lần ghi
+   * CHỒNG LẤN được thi hành **tuần tự**, và bài `D1 CHỒNG LẤN` ghim đúng điều đó.
+   */
+  const hangDoiGhi = useRef<Promise<void>>(Promise.resolve());
+
+  /**
+   * BẢN GHI mà **chính đường ghi này** vừa gửi lên máy chủ (kèm `version` máy chủ trả về).
+   *
+   * ⚠️ VÌ SAO CẦN — và vì sao "xếp hàng rồi đọc lại `transcript.data`" là **KHÔNG ĐỦ**: `reload()`
+   * của `useApi` chỉ tăng một bộ đếm; lượt `GET` thật chạy trong **effect của lần render sau**,
+   * nên tới lượt lần ghi thứ hai thì `transcript.data` **VẪN LÀ BẢN CŨ** (hàng đợi một mình vẫn
+   * mất-cập-nhật). Đây là NỀN của lần ghi kế tiếp, dùng khi nó MỚI HƠN (`version` lớn hơn) dữ liệu
+   * đang có; khi máy chủ đã trả về bản mới hơn thì **dữ liệu máy chủ thắng** — nguồn sự thật vẫn
+   * là máy chủ, đúng như luật "không tự sửa state tại chỗ" ở dưới.
+   */
+  const banGhiVuaGhi = useRef<{ id: number; version: number; segments: Segment[] } | null>(null);
+
+  /**
    * MỘT chỗ GHI duy nhất cho cả hai thao tác của D1 (`luu` và `nudge`).
    *
    * `sua` là hàm THUẦN áp lên ĐÚNG đoạn cần sửa; mọi đoạn khác đi lên NGUYÊN VẸN.
@@ -323,18 +361,27 @@ export function App() {
   ): Promise<boolean> {
     const hienTai = transcript.data;
     if (hienTai === null || hienTai.id !== banGhiId) return false;
-    if (!hienTai.segments.some((seg) => seg.i === i)) return false;
-    const segments = hienTai.segments.map((seg) => (seg.i === i ? sua(seg) : seg));
+    const vuaGhi = banGhiVuaGhi.current;
+    const nen =
+      vuaGhi !== null && vuaGhi.id === banGhiId && vuaGhi.version > hienTai.version
+        ? vuaGhi.segments
+        : hienTai.segments;
+    if (!nen.some((seg) => seg.i === i)) return false;
+    const segments = nen.map((seg) => (seg.i === i ? sua(seg) : seg));
     datDangLuuDoan(true);
     datLoiGhiDoan(null);
+    let traVe: Transcript;
     try {
-      await endpoints.patchTranscript(banGhiId, { segments });
+      traVe = await endpoints.patchTranscript(banGhiId, { segments });
     } catch (loi: unknown) {
       datLoiGhiDoan(loi instanceof Error ? loi.message : String(loi));
       return false;
     } finally {
       datDangLuuDoan(false);
     }
+    // Nhớ ĐÚNG bản ghi máy chủ vừa trả về (`version` đã tăng) ⇒ lần ghi kế tiếp trong hàng đợi
+    // tính từ bản MỚI, không tính từ bản cũ trong closure.
+    banGhiVuaGhi.current = { id: banGhiId, version: traVe.version, segments: traVe.segments };
     // ĐỌC LẠI cả hai đường: bản ghi (chữ/mốc đã lưu) VÀ danh sách bản dịch — vì `stale` do MÁY
     // CHỦ tính lại sau khi `version` tăng, nên câu "đã lỗi thời" chỉ đúng nếu danh sách được đọc
     // lại. Không tự sửa state tại chỗ: bản sao dữ liệu máy chủ ở client là nguồn sự thật thứ hai.
@@ -344,13 +391,15 @@ export function App() {
   }
 
   /**
-   * Gọi một việc ghi mà **KHÔNG để promise rơi tự do**: mọi lỗi (kể cả lỗi lập trình) trở thành
-   * câu báo trạng thái thay vì một `unhandledRejection`. MỌI lối vào việc ghi đi qua đây — kể cả
-   * nút chuột (handler của React) và phím `[`/`]` (listener của `window`), vì cả hai đều KHÔNG
-   * `await` được.
+   * **CỔNG DUY NHẤT** của mọi việc ghi: xếp `viec` vào SAU việc đang chạy (hàng đợi), và biến mọi
+   * lỗi (kể cả lỗi lập trình) thành câu báo trạng thái thay vì một `unhandledRejection`.
+   *
+   * ⚠️ Nhận một HÀM (`() => Promise`), KHÔNG nhận một promise đã khởi động: một promise được tạo
+   * ngay tại chỗ gọi nghĩa là việc ghi **ĐÃ BẮT ĐẦU** — nó không thể xếp hàng, và đó chính là C1.
+   * `.catch` nằm TRONG mỗi mắt xích nên một lần ghi lỗi không làm đứt hàng đợi.
    */
-  function chayGhi(viec: Promise<unknown>): void {
-    void viec.catch((loi: unknown) => {
+  function xepHangGhi(viec: () => Promise<void>): void {
+    hangDoiGhi.current = hangDoiGhi.current.then(viec).catch((loi: unknown) => {
       datLoiGhiDoan(loi instanceof Error ? loi.message : String(loi));
     });
   }
@@ -367,12 +416,20 @@ export function App() {
   }
 
   /**
-   * NUDGE mốc của **dòng ĐANG SỬA** (spec UI §5.2): `[` = mốc bắt đầu −0,1s; `]` = mốc kết thúc
-   * +0,1s. Nudge cũng đi qua `patchTranscript` ⇒ **TỚI ĐƯỢC ĐĨA**, không chỉ đổi state cục bộ.
+   * NUDGE mốc của **dòng ĐANG SỬA**: `[` = mốc bắt đầu −0,1s; `]` = mốc kết thúc +0,1s. Nudge
+   * cũng đi qua `ghiDoan` ⇒ **TỚI ĐƯỢC ĐĨA**, không chỉ đổi state cục bộ.
    *
-   * ⚠️ **KHÔNG có dòng nào đang sửa ⇒ KHÔNG LÀM GÌ** (0 request). Đây là một vế CÓ CHỦ Ý, không
-   * phải một nhánh phòng thủ thừa: bỏ nó ra là mỗi lần bấm `[`/`]` lại ghi một lần vào bản ghi mà
-   * người dùng không hề mở.
+   * ⚠️ **BẢNG PHÍM NÀY LÀ CỦA BRIEF D1, KHÔNG PHẢI CỦA SPEC UI.** Spec UI §5.1 gán `[`/`]` cho
+   * *"đặt mốc start/end TẠI ĐẦU ĐỌC"*, và nudge cho `Shift+←/→` (±0,1s) / `Alt+←/→` (±1s)
+   * (ERRATA #44 mục 3 — brief VÀ plan cùng sai nguồn spec). Sản phẩm đang theo brief; việc đổi
+   * khoá thuộc **Task 11**, nên ở vòng sửa này bảng phím KHÔNG được đổi.
+   *
+   * ⚠️ **KHÔNG có dòng nào đang sửa ⇒ KHÔNG LÀM GÌ** (0 request — bài `D1 NUDGE KHÔNG CÓ DÒNG
+   * ĐANG SỬA` đếm ở PHÍA MÁY CHỦ). Guard `i === null` là **phòng thủ TRÙNG LẶP CÓ CHỦ Ý**, KHÔNG
+   * phải thứ đang chặn việc ghi: mutant bỏ nó ra (`P9`) cho **0 bài đỏ** vì `ghiDoan` CŨNG từ chối
+   * (`!nen.some(seg => seg.i === i)` không khớp đoạn nào khi `i === null`). Comment cũ ở đây khai
+   * *"bỏ guard ra là mỗi lần bấm `[`/`]` lại ghi"* — **SAI CƠ CHẾ**, đã sửa tại chỗ (ERRATA #44
+   * mục 6 / `M2`).
    *
    * ⚠️ **KHÔNG clamp** mốc: `formatTimecode` đã kẹp giây âm về 0 (và có bài ghim riêng ở
    * `timecode.test.ts`), nên kẹp lần hai ở đây là hai định nghĩa cho một luật.
@@ -391,11 +448,21 @@ export function App() {
    * `[`/`]` ở cấp `window` — hai phím này KHÔNG thuộc ô nhập nào, nên chúng phải sống ngoài ô.
    * Handler đọc bản mới nhất qua closure của effect (deps là hai thứ nó THẬT SỰ đọc) và được gỡ
    * trong cleanup: mọi hiệu ứng đều phải thu hồi được.
+   *
+   * ⚠️ **GUARD Ô NHẬP (I3, ERRATA #44 mục 2):** một listener ở `window` nhận được CẢ những phím
+   * gõ vào ô nhập. Không có guard này thì người dùng gõ ký tự `[`/`]` trong phụ đề (ví dụ
+   * `[nhạc nền]`) là **GHI vào máy chủ** mỗi ký tự: `version` tăng, bản dịch thành `stale`, mốc bị
+   * dịch 0,1s. ⚠️ Trước vòng sửa, CHÍNH bài test của commit này dispatch `[` trên `textarea` rồi
+   * khẳng định `dem.patch === 1` — tức nó ghi lại LỖI như thể là đặc tả ĐÚNG. Bài `D1 GÕ TRONG Ô
+   * SỬA` nay khẳng định điều đúng: **0 request**.
    */
   useEffect(() => {
     function khiBamPhim(suKien: KeyboardEvent): void {
       if (suKien.key !== "[" && suKien.key !== "]") return;
-      chayGhi(nudgeDoan(suKien.key === "[" ? "start" : "end"));
+      // `suKien.target` là NƠI phím được gõ; `document.activeElement` là nơi đang có tiêu điểm.
+      // Kiểm CẢ HAI: một phím phát ra từ ô nhập phải bị bỏ qua qua bất kỳ đường nào.
+      if (dangGoTrongONhap(suKien.target) || dangGoTrongONhap(document.activeElement)) return;
+      xepHangGhi(() => nudgeDoan(suKien.key === "[" ? "start" : "end"));
     }
     window.addEventListener("keydown", khiBamPhim);
     return () => window.removeEventListener("keydown", khiBamPhim);
@@ -752,9 +819,9 @@ export function App() {
                 datLoiGhiDoan(null);
                 dispatch({ type: "startEdit", i });
               }}
-              onCommitEdit={(i, text) => chayGhi(luuDoan(i, text))}
+              onCommitEdit={(i, text) => xepHangGhi(() => luuDoan(i, text))}
               onCancelEdit={() => dispatch({ type: "endEdit" })}
-              onNudge={(moc) => chayGhi(nudgeDoan(moc))}
+              onNudge={(moc) => xepHangGhi(() => nudgeDoan(moc))}
               dangLuu={dangLuuDoan}
               loiGhi={loiGhiDoan}
               cauLoiThoi={cauLoiThoi}

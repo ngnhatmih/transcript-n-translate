@@ -177,8 +177,10 @@ export interface EditScreenProps {
    */
   onCancelEdit?: () => void;
   /**
-   * Nudge mot MOC cua dong DANG SUA: `"start"` = mốc bắt đầu −0,1s, `"end"` = mốc kết thúc +0,1s
-   * (spec UI §5.2). ⚠️ Man nay KHONG tu sua mốc: nó chỉ BÁO, còn ben goi mới là người GHI
+   * Nudge mot MOC cua dong DANG SUA: `"start"` = mốc bắt đầu −0,1s, `"end"` = mốc kết thúc +0,1s.
+   * ⚠️ Bảng phím này là **của BRIEF D1**, KHÔNG phải của spec UI: spec UI §5.1 gán `[`/`]` cho
+   * *"đặt mốc tại đầu đọc"* và nudge cho `Shift/Alt+←/→` (ERRATA #44 mục 3) — việc đổi khoá thuộc
+   * **Task 11**. ⚠️ Man nay KHONG tu sua mốc: nó chỉ BÁO, còn ben goi mới là người GHI
    * (`PATCH /api/transcripts/{id}`) — và khi KHÔNG có dòng nào đang sửa thì ben goi KHÔNG LÀM GÌ.
    */
   onNudge?: (moc: "start" | "end") => void;
@@ -320,8 +322,10 @@ export function EditScreen({
                       {`${formatTimecode(seg.start)} → ${formatTimecode(seg.end)}`}
                     </p>
                     <div className="ed__sua-thanh">
-                      {/* DẤU NUDGE: `[` = mốc BẮT ĐẦU −0,1s; `]` = mốc KẾT THÚC +0,1s (spec §5.2).
-                          Hai nút này là lối CHUỘT của cùng hai phím `[`/`]`. */}
+                      {/* DẤU NUDGE: `[` = mốc BẮT ĐẦU −0,1s; `]` = mốc KẾT THÚC +0,1s (BẢNG PHÍM CỦA
+                          BRIEF D1 — spec UI §5.1 gán `[`/`]` cho "đặt mốc tại đầu đọc", xem ERRATA
+                          #44 mục 3; đổi khoá là việc của Task 11). Hai nút này là lối CHUỘT của
+                          cùng hai phím `[`/`]` — và cả hai đều đi qua CÙNG một hàng đợi ghi của `App`. */}
                       <button
                         type="button"
                         className="ed__nudge"

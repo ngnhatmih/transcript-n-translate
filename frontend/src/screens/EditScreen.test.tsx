@@ -554,7 +554,8 @@ describe("EditScreen: §4.1 danh sach doan ao hoa + GHIM dong dang sua + suspect
     }
 
     // (b) KHAI BAO THANG CUOC (khong phai "co o dau do"): `.ed__sua-boc` va `.ed__sua-thanh` la
-    //     FLEX; mot luat SAU ghi de thanh `block` lam bai nay DO (mutation `D1-M4`).
+    //     FLEX; mot luat SAU ghi de thanh `block` lam bai nay DO (mutation `D1-12` trong bang
+    //     mutation cua `task-d1-report.md`; mot so cho con goi no la `D1-M4` — CUNG mot mutation).
     assert.equal(khaiBaoCua(appCss, ".ed__sua-boc").get("display"), "flex");
     assert.equal(khaiBaoCua(appCss, ".ed__sua-thanh").get("display"), "flex");
     assert.equal(khaiBaoCua(appCss, ".ed__moc").get("display"), "flex");
