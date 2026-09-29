@@ -54,22 +54,22 @@ GPU. Nó tự ép UTF-8 cho stdout (console Windows mặc định cp1252, còn s
 tiếng Trung/Việt) và tự đặt cache model trước khi nạp `faster_whisper`.
 
 Con số nền của lần chạy mặc định, đo sau khi xoá `__pycache__` (lệnh ở mục
-"Kiểm thử" trên, chạy từ trong `backend\`). Thứ có nghĩa là **835 / 13**, không
+"Kiểm thử" trên, chạy từ trong `backend\`). Thứ có nghĩa là **865 / 13**, không
 phải số giây — thời gian trôi giữa các lần chạy (đã thấy 24,00–30,94 s) còn con
 số bài thì không:
 
 ```
-835 passed, 13 deselected, 1 warning
+865 passed, 13 deselected, 1 warning
 ```
 
 Hai con số đó là SỐ BÀI ĐƯỢC CHỌN, và chúng khớp với số mà `--collect-only` báo
 (`tests/test_backend_readme.py::test_readme_baseline_matches_the_tests_actually_
 collected` đối chiếu mỗi lần chạy).
 
-Máy này **CÓ** `ffmpeg 8.1.1` + `ffprobe` trên PATH (đã đo), nên `835/13` ở trên
+Máy này **CÓ** `ffmpeg 8.1.1` + `ffprobe` trên PATH (đã đo), nên `865/13` ở trên
 là số THẬT của nó. Máy **không có** `ffmpeg`/`ffprobe` cho một kết quả KHÁC: cả
 `tests/test_ingest.py` bị `skipif` ở cấp module — **9** bài cùng skip một lượt —
-nên dòng tổng kết của máy đó là **`826 passed, 9 skipped, 13 deselected`**. Đó là
+nên dòng tổng kết của máy đó là **`856 passed, 9 skipped, 13 deselected`**. Đó là
 con số của máy thiếu ffmpeg, **không phải** con số máy này từng in ra; đừng chép
 nó vào khối `821/13` ở trên, và đừng "sửa" số nền xuống `812` chỉ vì thiếu
 ffmpeg.
@@ -82,7 +82,14 @@ chạy báo dương tính giả.
 Lần bump gần nhất, `819/13` → `821/13`, là do đợt dọn nợ thêm
 `tests/test_schema_llm_calls_index.py` (2 bài chọn được, cả 2 chạy thật). Vì
 `ffmpeg` có mặt, không bài nào skip ở đây — nên nếu con số này "nhảy" mà không có
-bài nào được thêm hay gỡ, đó đúng là TRÔI cần điều tra.)
+bài nào được thêm hay gỡ, đó đúng là TRÔI cần điều tra.
+
+Bump của nhánh `fix-loi-dich-im-lang`: `835/13` → `865/13` (+30 bài), do ba bản
+vá `A1`/`A2`/`A3` + bản vá prompt của báo cáo
+`.superpowers/sdd/2026-09-26-frontend-workspace-2/real-pipeline-fix-report.md`:
+`test_api_sources.py` +7 (tên tệp Unicode: 6 ca hợp lệ, 1 ca cắt đường dẫn, 2 ca
+route — và `ảnh.mp4` được CHUYỂN khỏi bảng từ chối ASCII, `-2`), `test_mt_prompts.py`
++15, `test_mt_qa.py` +6, `test_translate_handler.py` +2.)
 
 Số này chỉ để phát hiện TRÔI: một thay đổi làm nó **giảm** là một bài đã bị gỡ
 hoặc bị bỏ quên, không phải "suite nhanh hơn".

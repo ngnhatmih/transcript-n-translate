@@ -681,6 +681,52 @@ def test_engine_without_glossary_and_without_terms_gets_no_flag(repos, transcrip
     assert repos.get_translation(tr_id).qa_issues == []
 
 
+# --------------------------------------------------------------------------
+# A2 ở tầng HANDLER: engine CHÉP NGUYÊN bản gốc.
+#
+# Đây đúng cái `qwen2.5-3b` qua `POST /api/translations` đã làm 9/9 lần ở lượt
+# trước: 8/8 segment trả về nguyên chữ Trung, `qa_issues=[]`, job `done`,
+# `transcript='translated'`. Bài này ghim rằng lớp QA THẬT SỰ chạy trong đường
+# nối thật nhìn thấy nó — không chỉ hàm `qa_translation` gọi tay trong unit test.
+# --------------------------------------------------------------------------
+
+def test_an_echoing_engine_is_flagged_by_the_language_check(repos):
+    zh = ["今天我们来聊一聊中文语音识别。", "这个项目的成本其实只有百分之十。"]
+    sid = repos.add_source(kind="file", origin="zh.ogg", media_path="/m/zh.ogg",
+                           lang="zh")
+    tid = repos.add_transcript(
+        source_id=sid, engine="fw-tiny", lang="zh",
+        segments=[seg(i + 1, t) for i, t in enumerate(zh)])
+    tr_id = _translation(repos, tid)
+    # `FakeMtEngine` dịch theo `mapping`; ánh xạ đồng nhất = echo từng ký tự.
+    _call(_handler(repos, FakeMtEngine(mapping={t: t for t in zh})),
+          repos, tr_id, tid)
+
+    issues = repos.get_translation(tr_id).qa_issues
+    flagged = [i for i in issues if i.startswith("lang:")]
+    assert len(flagged) == 2, (
+        f"engine chép nguyên bản gốc mà QA không nói gì: {issues}"
+    )
+    assert all("source:" in i for i in flagged), issues
+
+
+def test_a_real_vietnamese_translation_gets_no_language_flag(repos):
+    """Ca XANH ở cùng tầng: bản dịch tiếng Việt thật không được gắn cờ `lang:`."""
+    zh = ["今天我们来聊一聊中文语音识别。"]
+    sid = repos.add_source(kind="file", origin="zh.ogg", media_path="/m/zh.ogg",
+                           lang="zh")
+    tid = repos.add_transcript(
+        source_id=sid, engine="fw-tiny", lang="zh",
+        segments=[seg(1, zh[0])])
+    tr_id = _translation(repos, tid)
+    _call(_handler(repos, FakeMtEngine(
+        mapping={zh[0]: "Hôm nay chúng ta sẽ nói về nhận dạng tiếng nói tiếng Trung."})),
+        repos, tr_id, tid)
+    issues = repos.get_translation(tr_id).qa_issues
+    assert not [i for i in issues if i.startswith("lang:")], issues
+
+
+
 def test_unknown_engine_id_fails_before_touching_the_translation(repos, transcript):
     tid, _ = transcript
     tr_id = _translation(repos, tid, engine="khong-co")

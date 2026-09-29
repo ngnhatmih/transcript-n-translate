@@ -7,8 +7,8 @@ Hai chiều của cùng một mối lo:
   (`filename` của client) và handler export (`stem` trong payload job). Cắt
   đường dẫn là chưa đủ: tên trần vẫn có thể không mở được thành tệp (`CON` là
   thiết bị console và chặn vô hạn, `a*b.mp4` làm `open()` ném `OSError`), nên
-  hàm này còn TỪ CHỐI những tên như vậy — xem `_SAFE_CHARS`,
-  `_RESERVED_DEVICE_NAMES`.
+  hàm này còn TỪ CHỐI những tên như vậy — xem `_SAFE_CATEGORIES`,
+  `_ALLOWED_PUNCT`, `_RESERVED_DEVICE_NAMES`.
 * `resolve_within` dùng khi ta ĐỌC: `media_path` lấy từ DB vẫn là dữ liệu, nên
   trước khi mở tệp phải phân giải đường dẫn rồi chứng minh nó vẫn nằm trong
   thư mục gốc. So chuỗi tiền tố là không đủ: `..` và symlink/junction đều đi
@@ -17,7 +17,7 @@ Hai chiều của cùng một mối lo:
 from __future__ import annotations
 
 import pathlib
-import re
+import unicodedata
 
 #: `.name` không bao giờ trả về `"."`, nhưng nó trả `""` cho `"."` và `".."` cho
 #: `"x/.."`; cả ba đều KHÔNG phải tên tệp dùng được mà lại trỏ vào thư mục.
@@ -25,13 +25,31 @@ _INVALID = frozenset({"", ".", ".."})
 
 #: Ký tự được phép trong tên tệp do BÊN NGOÀI gửi vào.
 #:
-#: Chọn bộ HẸP (chữ, số, `.`, `-`, `_`) thay vì liệt kê cái xấu: danh sách đen
-#: luôn thiếu một ký tự — đúng thứ đã xảy ra (`* ? | < > : "` lọt qua phép cắt
-#: đường dẫn rồi làm `open()` nổ 500). Tên tệp trên Windows còn có luật riêng
-#: (thiết bị, dấu chấm cuối) mà một danh sách đen không kể hết. Bộ hẹp này đủ
-#: cho tên tệp thật và từ chối mọi thứ còn lại, kể cả khoảng trắng và chữ có
-#: dấu — người dùng đổi tên là xong, còn máy chủ thì không đoán.
-_SAFE_CHARS = re.compile(r"\A[A-Za-z0-9._-]+\Z")
+#: Chọn bộ HẸP theo LOẠI Unicode thay vì liệt kê cái xấu: danh sách đen luôn thiếu
+#: một ký tự — đúng thứ đã xảy ra (`* ? | < > : "` lọt qua phép cắt đường dẫn rồi
+#: làm `open()` nổ 500). Tên tệp trên Windows còn có luật riêng (thiết bị, dấu
+#: chấm cuối) mà một danh sách đen không kể hết.
+#:
+#: A1 (đo được): bộ cũ là `\A[A-Za-z0-9._-]+\Z`, tức CHỈ ASCII — nên
+#: `POST /api/sources/upload` trả **422** cho `Zh-请您欣赏.ogg` và `ảnh.mp4`, chặn
+#: đúng người dùng tiếng Trung/tiếng Việt ngay ở cửa vào. Bộ mới cho phép mọi
+#: LOẠI chữ/số (kể cả chữ Hán và chữ có dấu) và dấu tổ hợp, mà vẫn từ chối đúng
+#: những thứ không mở được thành tệp: ký tự điều khiển, `< > : " | ? * / \`,
+#: khoảng trắng, ngoặc, và mọi dấu câu khác.
+#:
+#: Vì sao an toàn hơn cả bộ ASCII cũ: những ký tự đi vòng qua `pathlib` trên hệ
+#: tệp này (`/`, `\`) và những ký tự Windows cấm đều thuộc nhóm dấu câu, nên bị
+#: từ chối; các bản "trông giống dấu phân cách" của Unicode (`／` U+FF0F, `：`
+#: U+FF1A) cũng là dấu câu nên cũng bị từ chối.
+_SAFE_CATEGORIES = frozenset({
+    "Lu", "Ll", "Lt", "Lm", "Lo",     # chữ (gồm chữ Hán, chữ có dấu)
+    "Nd", "Nl", "No",                 # số
+    "Mn", "Mc",                       # dấu tổ hợp: dạng NFD của tiếng Việt
+})
+
+#: Dấu câu được phép: đúng bộ `._-` mà tên tệp thật cần, không thêm gì.
+_ALLOWED_PUNCT = frozenset("._-")
+
 
 #: Thiết bị của Windows: `open()` trên tên này KHÔNG mở tệp mà mở thiết bị
 #: (console, cổng nối tiếp). `open("CON", "rb")` chặn VÔ HẠN, nên chỉ một
@@ -53,6 +71,11 @@ class InvalidBasename(ValueError):
     """
 
 
+def _is_safe_name_char(ch: str) -> bool:
+    """`True` nếu `ch` mở được thành tên tệp trên hệ tệp này."""
+    return ch in _ALLOWED_PUNCT or unicodedata.category(ch) in _SAFE_CATEGORIES
+
+
 def _reject_unsafe_name(plain: str, original: str) -> None:
     """Ném `InvalidBasename` nếu `plain` không mở được thành tệp trên Windows."""
     if plain[-1] in " .":
@@ -63,8 +86,15 @@ def _reject_unsafe_name(plain: str, original: str) -> None:
     if plain.split(".", 1)[0].upper() in _RESERVED_DEVICE_NAMES:
         raise InvalidBasename(
             f"tên tệp là thiết bị dành riêng của Windows: {original!r}")
-    if not _SAFE_CHARS.match(plain):
-        raise InvalidBasename(f"tên tệp chứa ký tự không an toàn: {original!r}")
+    bad = sorted({ch for ch in plain if not _is_safe_name_char(ch)})
+    if bad:
+        # Nêu ĐÍCH DANH ký tự bị từ chối: `'a*b.mp4'` và `'中文 音频.wav'` hỏng
+        # vì hai lý do khác hẳn nhau, và người dùng sửa được cả hai chỉ khi biết
+        # ký tự nào là thứ bị chặn.
+        raise InvalidBasename(
+            f"tên tệp chứa ký tự không an toàn: {original!r} "
+            f"(bị từ chối: {' '.join(repr(c) for c in bad)})")
+
 
 
 def safe_basename(name: str | None, fallback: str = "upload.bin") -> str:
@@ -77,8 +107,8 @@ def safe_basename(name: str | None, fallback: str = "upload.bin") -> str:
     Cắt đường dẫn là CHƯA ĐỦ: `CON` là tên trần hợp lệ với `pathlib` nhưng mở ra
     thiết bị console, còn `a*b.mp4` làm `open()` ném `OSError`. Tên như vậy là
     lỗi ĐẦU VÀO của client, nên bị từ chối ngay ở đây — trước khi bất kỳ ai
-    chạm vào đĩa. Bộ ký tự cho phép và các tên bị cấm: xem `_SAFE_CHARS` và
-    `_RESERVED_DEVICE_NAMES`.
+    chạm vào đĩa. Bộ ký tự cho phép và các tên bị cấm: xem `_SAFE_CATEGORIES`,
+    `_ALLOWED_PUNCT` và `_RESERVED_DEVICE_NAMES`.
 
     `name is None` (không có tên) dùng `fallback`. Mọi tên KHÔNG hợp lệ đều ném
     `InvalidBasename`, không âm thầm đổi thành `fallback`: nuốt lỗi ở đây thì

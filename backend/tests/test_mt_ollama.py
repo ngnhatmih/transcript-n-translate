@@ -185,14 +185,14 @@ def test_tag_fallback_still_serves_the_caller_that_has_no_id():
     và với Qwen thì nó ra ĐÚNG id registry."""
     eng = OllamaMtEngine(model="qwen2.5:3b-instruct-q4_K_M", client=_FakeClient())
     assert eng.engine_id == "qwen2.5-3b"
-    assert eng.prompt_version == "qwen-json-p1"
+    assert eng.prompt_version == "qwen-json-p2"
 
 
 def test_prompt_version_resolves_instead_of_falling_back_to_unknown():
     """`prompt_version` là thứ được đóng dấu vào `translations`/`llm_calls`; tra
     bằng chuỗi sai thì nó lặng lẽ thành "unknown" và không phân biệt được bản dịch
     cũ với mới khi prompt đổi."""
-    assert engine(_FakeClient()).prompt_version == "qwen-json-p1"
+    assert engine(_FakeClient()).prompt_version == "qwen-json-p2"
 
 
 # --- năng lực glossary là DỮ LIỆU, không phải hằng True -------------------------

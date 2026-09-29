@@ -195,7 +195,8 @@ class TranslateHandler:
 
         issues = qa_translation(source, done, glossary=glossary,
                                 supports_glossary=engine.supports_glossary(),
-                                limits=self._limits)
+                                limits=self._limits,
+                                target_lang=target_lang)
         # TỔNG của mọi lời gọi engine đã ghi cho job này, không phải
         # `engine.last_stats` (chỉ còn số của lô cuối — xem docstring đầu tệp).
         totals = self._totals_for(getattr(job, "id", None))
