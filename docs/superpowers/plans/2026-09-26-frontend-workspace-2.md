@@ -1931,6 +1931,10 @@ vẫn có thể rơi **trước** commit. **Bản cũ không bao giờ lộ cu�
 Khi bạn thay nó bằng tín hiệu thật, **hãy chờ đúng cái bạn cần đọc, Ở ĐÚNG CHỖ bạn đọc nó** — nếu không, bạn vừa đổi một test chậm lấy một test **flaky**.
 
 ### 2. ✅ **"ĐIỀU KIỆN THOÁT LÀ HÀM CỦA ĐỒNG HỒ" vs "ĐIỀU KIỆN THOÁT CHẾT"** — cách phân biệt
+⚠️ **ĐÍNH CHÍNH SỐ ĐO (bổ sung ở ERRATA #43):** ở **HEAD sau W2**, `grep 'while (Date.now() <'` = **8** chỗ
+(`contract.test.ts` dòng 94/181/616/635 + `GlossaryScreen.test.tsx` dòng 303/365/871/1004) — W2 **thêm 0**.
+Con số *"2 chỗ CHẾT / 6 chỗ ĐỂ LẠI"* dưới đây là **phân loại theo TÍNH QUAN SÁT ĐƯỢC**, không phải số lần khớp mẫu;
+**8 là con số khớp mẫu đúng ở HEAD**, và **reviewer của W2 đã đo lại nó độc lập**.
 `grep 'while (Date.now() <'` toàn `frontend/src` = **8 chỗ**. **2 chỗ CHẾT** (đã sửa); **6 chỗ ĐỂ LẠI** (`contract.test.ts` ×4,
 `GlossaryScreen.test.tsx` ×2) — ở đó `deadline` là **hàm của ĐỒNG HỒ**, tức **đúng dần theo thời gian**, dùng đúng chỗ *"chờ một tiến trình KHÁC lên/tắt"*.
 ⇒ **LUẬT: điều kiện thoát `while (Date.now() < het)` là ĐÚNG hay CHẾT tuỳ nó có THỂ trở thành đúng hay không.** Nếu vế còn lại là một
@@ -2272,6 +2276,45 @@ Bản gieo CHỐT (đã kiểm qua API): `ingest=done` · `asr=failed` · `trans
 Kế hoạch chụp dùng `waitText`. Kiểm neo: `seed-kenh-mot.wav` ✓ · `今天我們來說` ✓ · `opus-mt` ✓ · `chi phí` ✓ (đều từ dữ liệu gieo) —
 còn `chờ duyệt` **KHÔNG** có trong `seed.py` vì nó là **nhãn UI**, nên nó **chỉ** được dùng ở bước `eval` (đọc), **không** làm neo chờ.
 ⇒ **LUẬT: neo phép CHỜ phải đến từ dữ liệu (bền); neo phép ĐỌC có thể đến từ giao diện (đổi được).** Trộn hai loại ⇒ bài kiểm tự treo rồi báo động giả.
+
+## ⚠️ ERRATA #43 — **W2 ĐÓNG (`PASS` 0/0/2)**: nạp tệp §4.2 đã có và **đã được NHÌN THẤY**; bài ghim PHẢI ghim QUAN HỆ, không ghim CHỮ
+
+Chuỗi W2: `8b33c19` (**công việc ĐƯỢC CỨU** — subagent chết giữa đường, closing message rỗng, **không có báo cáo**) → review **`CONDITIONAL PASS` 0/2/6** → `78ba3c6` (vòng sửa) → re-review **`PASS` 0/0/2**. **W2 XONG.**
+Cổng cuối (tôi và reviewer đo riêng): `tests 222 · suites 24 · pass 220 · fail 2 · cancelled 0`, **EXIT=1** (đỏ đúng hai `EMPTY_DB_MSG`), **14 052 ms** một lượt máy rảnh, `typecheck` 0, `build` 0.
+
+### 1. 🔴 **PHÁT HIỆN TRUNG TÂM của W2: một tính năng có BỀ MẶT chạy được mà RUỘT KHÔNG ĐƯỢC THI HÀNH**
+Review gốc chứng minh `App.napTep` — hàm nạp **dùng chung**, trái tim của W2 — **không được bài test nào thi hành**, bằng **mutant ĐẦU ĐỘC**: chèn `throw` ở **câu đầu** của nó ⇒ suite **vẫn** `215 / fail 2`.
+⇒ **`W2-1`/`W2-2`/`W2-5b`/`W2-6` đều SỐNG SÓT** (cổng "0 sống sót" của brief **không đạt**: 5/9). Gốc: **`App.test.tsx` chưa từng được chạm** dù brief liệt kê nó — người làm chết trước khi tới đó.
+Sau vòng sửa: **`F1` giết ĐÚNG 4 bài mới** (tên đã nêu), `fail − 2 == 4`.
+⇒ **LUẬT: một bài test chỉ đáng tin nếu có một MUTANT ĐẦU ĐỘC chứng minh rằng ĐƯỜNG ĐÓ thật sự được chạy.** "Suite xanh" không nói gì về những hàm **không ai gọi tới**.
+⇒ Và ⚠️ **khi một task lớn bị chết giữa đường, hãy giả định phần CHƯA XONG nằm ở những tệp KHÔNG xuất hiện trong `git show --name-status`** — đó chính là chỗ lỗ này ẩn.
+
+### 2. 🔴 **BÀI GHIM PHẢI GHIM *QUAN HỆ*, KHÔNG GHIM *CHỮ*** — lớp lỗi này đã tái phát **LẦN THỨ TƯ**
+`P3`: đổi tên class **trong DOM** (`ch__danh-sach` → `ch__danh-sach-doi-ten`) mà **giữ nguyên luật CSS** ⇒ **0 bài đỏ**. Tức bài ghim `W2 M4` khẳng định **CHỮ CỦA LUẬT**, không khẳng định **luật ↔ class KHỚP NHAU** ⇒ luật thành **mồ côi** mà không ai thấy.
+Bốn lần cùng một họ: `X7` (#34 mục 1) · luật mồ côi khi **đổi tên luật** (#36 mục 5) · `flex: 0 0 auto` **ghi đè** `flex: 1 1 auto` mà bài chỉ khẳng định *"có `flex:1` ở đâu đó"* (#42) · và `P3` nay.
+⇒ **LUẬT: một bài ghim CSS phải khẳng định (a) KHAI BÁO THẮNG CUỘC, và (b) TÊN LỚP TRONG LUẬT === TÊN LỚP TRONG DOM.**
+**Nợ còn:** `ChannelZone.test.tsx` **KHÔNG có** bài hai chiều cho lớp `ch*` ⇒ thêm khi có dịp (đã giao cho **D2**).
+
+### 3. ⚠️ **BASELINE PHẢI LÀ TỆP CUỐI** — nếu có **DỜI KHỐI** thì phải đo lại
+Reviewer đo được: `app.css` baseline mà vòng sửa dùng (`fdbfbcc2…`, 45 762 B) **≠** tệp đã commit (`4138bec0…`, 45 762 B) — **cùng số byte**, khác **1 167 byte ở dòng 1310–1326**, và đó là **phép DỜI KHỐI THUẦN TUÝ** (nội dung y hệt, `NORM-EQ=True`).
+⇒ Hai lượt mutation (`F7`/`F14`) đo trên **chuỗi byte khác tệp cuối**; reviewer **đo lại cả hai trên byte đã commit** ⇒ vẫn đỏ đúng bài. Kết luận không đổi, nhưng khai *"6/6 byte-identical"* là **SAI nguyên văn** (**5/6**).
+⇒ **LUẬT: khi tệp bị DỜI KHỐI (không đổi nội dung), MỌI baseline cũ của tệp đó phải được chụp lại** — `sha256` khác nhau dù nội dung tương đương.
+
+### 4. ⚠️ **BẪY POWERSHELL: `$m` và `$M` là CÙNG MỘT BIẾN** (tái phát lần thứ hai)
+Driver của reviewer chạy **1** mutation thay vì **16** vì `foreach ($m in $M)` — **PowerShell không phân biệt HOA/thường**. Nó phát hiện bằng **số backup = 1** và chạy lại đủ.
+⇒ **LUẬT: hãy kiểm CHÍNH BỘ ĐO bằng một con số độc lập (ở đây: số backup) — nếu số đó không khớp kỳ vọng thì bộ đo sai, không phải thế giới sai.**
+
+### 5. ✅ **ẢNH THẬT ĐÃ CÓ** — và nó trả lời hai câu hỏi chỉ ảnh trả lời được
+`_shots/w2/30-khung-nap-4-2.png` · `31-bien-tap-co-du-lieu.png` · `32-doi-chieu-cps-hai-chieu.png` · `33-thuat-ngu.png` (ngoài repo).
+- **§4.2 lần đầu tồn tại thật:** khung **kẻ nét đứt LỚN Ở VÙNG GIỮA** (không phải thẻ nhỏ), `KÉO TỆP VÀO ĐÂY` giãn rộng, **dòng mono**, nút nạp **vô hiệu khi chưa chọn tệp**, và câu *"chưa chọn tệp nào — kéo tệp vào khung hoặc bấm chọn tệp."*
+- **Dòng mono TRUNG THỰC** (đọc nguyên văn từ DOM): *"wav · mp3 · … · ts — định dạng thường dùng; **tệp đuôi khác vẫn gửi được, cứ thử tệp của bạn**"* ⇒ phán quyết (a) của review được **xác nhận trên sản phẩm**, không chỉ trong mã.
+- **Cột CPS có CẢ HAI CHIỀU:** `23.5⚠`, `80.0⚠`, `24.7⚠` và **`17.7`, `16.0` KHÔNG cờ** ⇒ nợ CPS (mục #2 ở ERRATA #42) đóng, **thấy bằng mắt**.
+- **Vùng HÀNG ĐỢI có nội dung thật** nhờ dữ liệu gieo mới: `#1 ingest xong` · `#2 asr · FileNotFoundError` · `#3 translate · ngắt 42%` ⇒ §12.2 *"vì sao chờ"* nhìn thấy được.
+⚠️ **Vẫn KHÔNG kiểm được bằng mắt:** kéo-thả bằng **chuột thật** · hộp thoại `accept` · trạng thái `.nap__bo-qua` · **danh sách kênh NHIỀU MỤC** (ảnh chỉ có **1** mục ⇒ *"hết dấu đầu dòng"* của `M4` **không kiểm được bằng mắt**) · audio · backend FastAPI thật.
+⚠️ **Và một phép đo của TÔI sai trong lượt chụp:** `eval` đếm "tổng số dòng CPS" ra **0** vì regex giả định `"17.7 CPS"` liền chuỗi, nhưng số và chữ `CPS` ở **hai phần tử**. Ảnh cho thấy **5 dòng** ⇒ **nếu chỉ đọc con số mà không nhìn ảnh, tôi đã kết luận sai rằng cột CPS trống.**
+
+### 6. Nợ còn của W2 (không chặn)
+`P3` (bài hai chiều cho `ch*`) ⇒ **D2** · 5 lớp `.ch*` còn lại **0 luật** (nợ Task 4/W1, đã có reset cho `ul.ch__danh-sach`) · `M3` *"trình duyệt im lặng"* vẫn là **SUY LUẬN** · kéo-thả chuột thật · hình thức CSS **chỉ ảnh**.
 
 ## Quy ước thẩm mỹ — spec UI thắng, skill chỉ là checklist
 
