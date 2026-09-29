@@ -362,6 +362,34 @@ const dem = {
    * khong chi "co mot ban ghi moi xuat hien".
    */
   transcriptTheoId: {} as Record<number, number>,
+  /**
+   * BAO NHIEU LAN `POST /api/sources/upload` toi noi nhan — **BANG CHUNG DUONG THAT PHIA SERVER**
+   * cua duong NAP (vong sua W2 #1, `Important` I1).
+   *
+   * ⚠️ VI SAO PHAI DEM O PHIA SERVER: truoc vong sua nay, `App.napTep` **khong duoc bai nao thi
+   * hanh** — mutant dau doc (`throw` o cau dau cua `napTep`) cho suite VAN `fail 2`, tuc `W2-1`
+   * (bo `sources.reload()`), `W2-2` (bo `selectChannel`), `W2-5b` (nuot loi trong `App`) va `W2-6`
+   * (chon kenh ca khi MOI tep loi) deu SONG SOT. Mot loi khai "da bam nut" khong phan biet duoc
+   * "request da di" voi "du lieu den tu dau do khong phai HTTP"; bo dem nay thi phan biet duoc.
+   */
+  upload: 0,
+  /** URL NGUYEN VAN cua request nap — de khang dinh `lang` KHONG di bang query (`W2-4`). */
+  uploadUrl: "",
+  /** Header `content-type` NGUYEN VAN — phai la `multipart/form-data; boundary=…`. */
+  uploadContentType: "",
+  /** THAN REQUEST o dang BYTE THO (khong qua `JSON.parse`, khong qua mot thu vien multipart). */
+  uploadRaw: null as Buffer | null,
+  /** Ten cac PHAN multipart, boc tu byte tho — `["file","lang"]` khi hop dong dung. */
+  uploadPhan: [] as string[],
+  /** Gia tri cua phan `lang`, doc tu THAN cua phan do (khong phai tu query). */
+  uploadLang: null as string | null,
+  /** Ten tep (theo thu tu gui) va BYTE cua tung tep — de khang dinh byte di NGUYEN VEN. */
+  uploadTenTep: [] as string[],
+  uploadByteTep: [] as number[][],
+  /** Ten tep ma server TU CHOI bang 422 kem cau tieng Viet NGUYEN VAN cua backend. */
+  uploadLoiTheoTen: [] as string[],
+  /** Bat de MOI tep bi tu choi 422 — dung cho bai "MOI tep loi ⇒ KHONG doi kenh". */
+  uploadLoiToanBo: false,
 };
 
 /** Them mot ban ghi MOI vao ca hai route — dung cho ngoi no doc lai (`Minor #3`). */
@@ -371,6 +399,71 @@ function themBanGhiMoi(id: number, sourceId: number, text: string): void {
     ...TRANSCRIPT_CHI_TIET,
     [id]: { ...tomTat(id, sourceId, "faster-whisper-large", "zh", 3, "translated"), segments: [doan(0, 0, 2, text)] },
   };
+}
+
+/** So KENH cua anh chup goc — `beforeEach` cat `SOURCES` ve dung do dai nay. */
+const SO_SOURCE_GOC = SOURCES.length;
+
+/** Tep THAT cua Node (`File` la global cua Node o day) — khong phai mot object gia hinh dang tep. */
+function tepThat(ten: string, byte: number[] = [1, 2, 3], type = "audio/wav"): File {
+  return new File([new Uint8Array(byte)], ten, { type });
+}
+
+/**
+ * BOC multipart **TU BYTE THO** — khong dung thu vien, khong `JSON.parse`, khong doc query.
+ *
+ * ⚠️ VI SAO PHAI BOC TU BYTE (vong sua W2 #1, `Important` I2): mutation `W2-4` doi `lang` tu
+ * **truong FORM** sang **query** (`api.postForm("/sources/upload?lang=…")`) VI PHAM hop dong
+ * backend (`lang: str = Form(DEFAULT_LANG)`) ma suite cu **khong thay** — vi khong bai nao doc
+ * than request THAT. Phep do nay lam no DO: URL co query ⇒ khang dinh URL that bai, va danh sach
+ * phan tut ve `["file"]` ⇒ khang dinh phan that bai.
+ *
+ * Ham tra ve TEN TUNG PHAN + `filename` + THAN cua phan (dang `Buffer`, tuc byte nguyen ven).
+ */
+function bocMultipart(
+  raw: Buffer,
+  contentType: string,
+): { ten: string; filename: string | null; than: Buffer }[] {
+  const khop = /boundary=([^;]+)/.exec(contentType);
+  assert.ok(khop !== null, `content-type khong co boundary: ${JSON.stringify(contentType)}`);
+  const vach = Buffer.from(`--${khop[1] ?? ""}`, "latin1");
+  const ra: { ten: string; filename: string | null; than: Buffer }[] = [];
+  let i = raw.indexOf(vach);
+  while (i >= 0) {
+    let dau = i + vach.length;
+    const hai = raw.subarray(dau, dau + 2).toString("latin1");
+    if (hai === "--") break; // vach KET THUC
+    if (hai === "\r\n") dau += 2;
+    const vachSau = raw.indexOf(vach, dau);
+    if (vachSau < 0) break;
+    let cuoi = vachSau;
+    if (raw.subarray(cuoi - 2, cuoi).toString("latin1") === "\r\n") cuoi -= 2;
+    const ca = raw.subarray(dau, cuoi);
+    const cach = ca.indexOf(Buffer.from("\r\n\r\n", "latin1"));
+    assert.ok(cach >= 0, "mot phan multipart khong co dong trong phan cach header/than");
+    const header = ca.subarray(0, cach).toString("latin1");
+    ra.push({
+      ten: /name="([^"]*)"/.exec(header)?.[1] ?? "",
+      filename: /filename="([^"]*)"/.exec(header)?.[1] ?? null,
+      than: ca.subarray(cach + 4),
+    });
+    i = vachSau;
+  }
+  return ra;
+}
+
+/**
+ * CHU cua muc KENH dang chon (`aria-pressed="true"`), hoac `null` neu khong muc nao dang chon.
+ *
+ * ⚠️ Doc tu DOM THAT, khong tu prop/state: menh de cua cac bai W2 la "kenh nao DANG duoc chon",
+ * va `aria-pressed` chinh la thu `ChannelZone` render ra tu `selectedId`.
+ */
+function kenhDangChon(container: HTMLElement): string | null {
+  const chon = [...container.querySelectorAll(".ch__item")].filter(
+    (el) => el.getAttribute("aria-pressed") === "true",
+  );
+  assert.ok(chon.length <= 1, `chi duoc co NHIEU NHAT mot muc kenh dang chon; do duoc ${chon.length}`);
+  return chon.length === 0 ? null : (chon[0].textContent ?? "");
 }
 
 /**
@@ -536,6 +629,67 @@ const server: Server = createServer((req, res) => {
     res.end(JSON.stringify([]));
     return;
   }
+  if (url.startsWith("/api/sources/upload")) {
+    // ⚠️ DUONG NAP — phai kiem NHANH NAY TRUOC `/api/sources`, va phai phan nhanh theo METHOD.
+    // Nhanh `/api/sources` (duoi day) khong phan nhanh theo method, nen mot
+    // `POST /api/sources/upload` se bi no NUOT va tra ve MANG `SOURCES` — dung cai bay ma
+    // `App.test.tsx` da canh bao cho `/api/translations` o tren.
+    if (req.method !== "POST") {
+      res.writeHead(405, { "content-type": "application/json" });
+      res.end(JSON.stringify({ detail: "chi nhan POST" }));
+      return;
+    }
+    dem.upload += 1;
+    // URL NGUYEN VAN (ke ca query neu co): do la thu phan biet `lang` trong BODY voi `lang`
+    // trong QUERY — mutation `W2-4` lam no khac di.
+    dem.uploadUrl = url;
+    dem.uploadContentType = req.headers["content-type"] ?? "";
+    const manh: Buffer[] = [];
+    req.on("data", (chunk: Buffer) => { manh.push(chunk); });
+    req.on("end", () => {
+      // ⚠️ BYTE THO, khong qua `String(chunk)` (nhu nhanh JSON o tren): than multipart mang BYTE
+      // cua tep, va mot phep do "byte di nguyen ven" chi co nghia neu doc tu chinh buffer nhan duoc.
+      const raw = Buffer.concat(manh);
+      dem.uploadRaw = raw;
+      const phan = bocMultipart(raw, dem.uploadContentType);
+      dem.uploadPhan = phan.map((p) => p.ten);
+      const phanTep = phan.find((p) => p.ten === "file");
+      const phanLang = phan.find((p) => p.ten === "lang");
+      dem.uploadLang = phanLang === undefined ? null : phanLang.than.toString("utf8");
+      const ten = phanTep?.filename ?? "";
+      if (phanTep !== undefined) {
+        dem.uploadTenTep.push(ten);
+        dem.uploadByteTep.push([...phanTep.than]);
+      }
+      if (dem.uploadLoiToanBo || dem.uploadLoiTheoTen.includes(ten)) {
+        // 422 NGUYEN VAN cua backend (`routes_sources.upload` ⇒ `HTTPException(422, "tệp rỗng")`).
+        res.writeHead(422, { "content-type": "application/json" });
+        res.end(JSON.stringify({ detail: "tệp rỗng" }));
+        return;
+      }
+      // KENH MOI di vao CHINH mang ma `GET /api/sources` tra ve — nen "danh sach kenh duoc doc
+      // lai" la menh de DO DUOC: hang moi chi xuat hien neu co mot lan doc lai THAT.
+      const idMoi = Math.max(...SOURCES.map((s) => s.id)) + 1;
+      const moi: Source = {
+        id: idMoi,
+        kind: "file",
+        origin: ten,
+        media_path: `media/${idMoi}.bin`,
+        audio_path: null,
+        duration: null,
+        lang: dem.uploadLang === "en" ? "en" : "zh",
+        created_at: "2026-01-01T00:00:00Z",
+      };
+      SOURCES.push(moi);
+      const job = makeJob(40 + idMoi, "ingest", "queued", "ingest:-", 0, {
+        source_id: idMoi,
+        lang: moi.lang,
+      });
+      res.writeHead(201, { "content-type": "application/json" });
+      res.end(JSON.stringify({ source: moi, job }));
+    });
+    return;
+  }
   if (url.startsWith("/api/sources")) {
     dem.sources += 1;
     if (dem.loiSources) {
@@ -603,7 +757,11 @@ let waitFor: (cb: () => void, options?: { timeout?: number; interval?: number })
 /** Tim theo VAI TRO + TEN DOC DUOC — dung cach Task 12 tim control che do. */
 let getByRole: (container: HTMLElement, role: string, options?: { name?: RegExp | string }) => Element;
 /** ⚠️ `fireEvent`, KHONG `userEvent`: repo KHONG co `@testing-library/user-event`. */
-let fireEvent: { click: (el: Element) => void };
+let fireEvent: {
+  click: (el: Element) => void;
+  change: (el: Element, init: unknown) => void;
+  drop: (el: Element, init?: unknown) => boolean;
+};
 let cleanup: () => void;
 let App: () => unknown;
 /**
@@ -887,6 +1045,21 @@ describe("App: KENH THAT + HANG DOI THAT tu server node:http trong tien trinh", 
     dem.translationChiTiet = 0;
     dem.soYeuCauIdKhongHopLe = 0;
     dem.transcriptTheoId = {};
+    // DUONG NAP: moi bo dem/gia tri cua fixture phai ve 0/goc, neu khong mot luot nap cua bai
+    // TRUOC song sot sang bai SAU va lam phep do "co dung MOT lan nap" xanh (hay do) vo nghia.
+    dem.upload = 0;
+    dem.uploadUrl = "";
+    dem.uploadContentType = "";
+    dem.uploadRaw = null;
+    dem.uploadPhan = [];
+    dem.uploadLang = null;
+    dem.uploadTenTep = [];
+    dem.uploadByteTep = [];
+    dem.uploadLoiTheoTen = [];
+    dem.uploadLoiToanBo = false;
+    // ⚠️ CA MANG KENH: mot luot nap THEM mot hang THAT (`SOURCES.push`) ⇒ khong cat ve anh goc thi
+    // bai sau se thay kenh cua bai truoc, va "kenh MOI xuat hien" xanh ngay ca khi khong doc lai.
+    SOURCES.length = SO_SOURCE_GOC;
     // Fixture tra ve DUNG anh luc nap module: bai "ban ghi moi hien ra" them mot hang, va
     // mot hang song sot sang bai sau se lam moi phep do "MOT luot doc" noi doi.
     TRANSCRIPTS = TRANSCRIPTS_GOC;
@@ -2358,6 +2531,280 @@ describe("App: KENH THAT + HANG DOI THAT tu server node:http trong tien trinh", 
     );
 
     assert.deepEqual(tiengOn, [], "ngoi no doc lai ban dich khong duoc sinh tieng on console");
+    unmount();
+  });
+
+  // -------------------------------------------------------------------------
+  // TASK W2 VONG SUA #1 — `Important` I1: `App.napTep` PHAI duoc THI HANH.
+  //
+  // DO DUOC TRUOC VONG SUA (mutant dau doc): chen `throw` lam CAU DAU cua `App.napTep` ⇒ suite
+  // VAN `tests 215 / fail 2 / cancelled 0`, tuc KHONG bai nao chay qua ham do ⇒ `W2-1` (bo
+  // `sources.reload()`), `W2-2` (bo `dispatch(selectChannel)`), `W2-5b` (nuot loi trong `App`) va
+  // `W2-6` (chon kenh ca khi MOI tep loi) deu SONG SOT.
+  //
+  // Bon bai duoi day di qua DOM THAT (bam nut o khung §4.2 / doi tep o loi nap gon) toi tan
+  // `App.napTep`, voi server `node:http` THAT trong tien trinh: khong mock `endpoints.ts`/
+  // `client.ts`, khong `fetch` gia. Chung ghim BON menh de (a)(b)(c)(d) cua brief §1.
+  //
+  // ⚠️ MOI phep cho o day cho DUNG tin hieu ma khang dinh NGAY SAU do DOC (ERRATA #38 muc 2 /
+  // #39 muc 5): dong ket qua `.nap__kq`, so request o PHIA SERVER, roi hang `.ch__item` + trang
+  // thai `aria-pressed` cua no.
+  // -------------------------------------------------------------------------
+
+  it("W2 I1 (KHUNG §4.2): tệp ĐẦU LỖI + tệp SAU THÀNH CÔNG ⇒ đọc LẠI danh sách kênh (đếm ở SERVER) và chọn kênh của TỆP THÀNH CÔNG ĐẦU TIÊN", async () => {
+    // Tep DAU tien LOI (422 nguyen van cua backend), tep THU HAI thanh cong ⇒ phep do phan biet
+    // duoc "tep dau tien" voi "tep THANH CONG dau tien" (mot `find(kq => true)` se chon tep loi).
+    dem.uploadLoiTheoTen = ["hong.wav"];
+    const { container, unmount } = render(taoPhanTu(App));
+
+    await choChu(container, "kenh-mot.wav");
+    const nguonTruoc = dem.sources;
+
+    // KHUNG §4.2 o VUNG GIUA (trang thai khoi dong: chua chon kenh nao ⇒ `transcript === null`).
+    fireEvent.change(phanTu(container, '[data-testid="nap-o-tep"]'), {
+      target: { files: [tepThat("hong.wav", [1, 2]), tepThat("tot.wav", [3, 4, 5])] },
+    });
+    fireEvent.click(phanTu(container, '[data-testid="nap-nut"]'));
+
+    // (d) LOI CUA BACKEND HIEN NGUYEN VAN, va ket qua TUNG TEP hien bang CHU.
+    const dongLoi = await choPhanTu(
+      container,
+      ".nap__kq",
+      (t) => t.includes("hong.wav"),
+      "khong thay dong ket qua cua tep LOI",
+    );
+    assert.equal(
+      dongLoi,
+      "hong.wav: LỖI — 422: tệp rỗng",
+      "cau loi cua backend phai hien NGUYEN VAN (khong duoc thay bang 'co loi xay ra')",
+    );
+    const dongXong = await choPhanTu(
+      container,
+      ".nap__kq",
+      (t) => t.includes("tot.wav"),
+      "khong thay dong ket qua cua tep THANH CONG",
+    );
+    assert.match(dongXong, /^tot\.wav: đã nạp — kênh \d+$/, "ket qua tep thanh cong phai kem id KENH");
+
+    // (a) DANH SACH KENH DUOC DOC LAI — dem o PHIA SERVER. Mot loi khai "da bam nut" khong phan
+    // biet duoc "request doc lai da di" voi "du lieu den tu mot cho khac".
+    await waitFor(
+      () => {
+        assert.ok(
+          dem.sources > nguonTruoc,
+          `sau luot nap PHAI co mot lan doc lai /api/sources; do duoc ${dem.sources} (truoc ${nguonTruoc})`,
+        );
+      },
+      { timeout: 5000, interval: 20 },
+    );
+
+    // ... VA hang kenh MOI chi co the den tu lan doc lai do (fixture CHI them hang khi co request).
+    const kenhMoi = await choPhanTu(
+      container,
+      ".ch__item",
+      (t) => t.includes("tot.wav"),
+      "kenh MOI khong xuat hien trong danh sach ⇒ `sources.reload()` khong duoc goi",
+    );
+    assert.ok(!kenhMoi.includes("hong.wav"), "tep LOI khong duoc tao kenh nao");
+
+    // (b) KENH CUA TEP THANH CONG DAU TIEN duoc CHON — khong phai tep dau (no loi), va khong phai
+    // "khong chon gi".
+    await waitFor(
+      () => {
+        const chon = kenhDangChon(container);
+        assert.ok(
+          chon !== null && chon.includes("tot.wav"),
+          `kenh cua tep THANH CONG DAU TIEN phai duoc chon; do duoc ${JSON.stringify(chon)}`,
+        );
+      },
+      { timeout: 5000, interval: 20 },
+    );
+
+    // BANG CHUNG DUONG THAT: hai tep ⇒ HAI request multipart, dung thu tu nguoi dung dua vao.
+    assert.equal(dem.upload, 2, "hai tep ⇒ DUNG HAI request nap toi server");
+    assert.deepEqual(dem.uploadTenTep, ["hong.wav", "tot.wav"], "thu tu tep phai duoc giu");
+    assert.deepEqual(tiengOn, [], "mot luot nap THAT khong duoc sinh tieng on console");
+    unmount();
+  });
+
+  it("W2 I1 (MỌI TỆP LỖI): kênh ĐANG CHỌN không đổi, và KHÔNG hàng kênh nào được thêm", async () => {
+    dem.uploadLoiToanBo = true;
+    const { container, unmount } = render(taoPhanTu(App));
+    await choChu(container, "kenh-mot.wav");
+
+    // CHON kenh 1 TRUOC: phai co mot trang thai "dang chon" ma luot nap loi co the lam thay doi.
+    fireEvent.click(nutKenh(container, "kenh-mot.wav"));
+    await choChu(container, "câu 1");
+    await waitFor(
+      () => {
+        const chon = kenhDangChon(container);
+        assert.ok(
+          chon !== null && chon.includes("kenh-mot.wav"),
+          `kenh 1 phai duoc chon TRUOC luot nap; do duoc ${JSON.stringify(chon)}`,
+        );
+      },
+      { timeout: 5000, interval: 20 },
+    );
+    const soHangTruoc = container.querySelectorAll(".ch__item").length;
+    const nguonTruoc = dem.sources;
+
+    // Sau khi DA chon kenh, khung §4.2 khong con o vung giua ⇒ loi nap dung la loi NAP GON.
+    fireEvent.change(phanTu(container, '[data-testid="ch-nap-o-tep"]'), {
+      target: { files: [tepThat("hong.wav")] },
+    });
+    await choPhanTu(
+      container,
+      ".nap__kq",
+      (t) => t.includes("hong.wav: LỖI — 422: tệp rỗng"),
+      "ket qua cua luot nap loi khong tới DOM",
+    );
+    // Luot nap van PHAI doc lai danh sach (do la gia re nhat de danh sach khong lech may chu) —
+    // cho DUNG tin hieu do TRUOC khi khang dinh "khong doi kenh", neu khong phep do se RONG.
+    await waitFor(
+      () => {
+        assert.ok(
+          dem.sources > nguonTruoc,
+          `luot nap PHAI doc lai danh sach; do duoc ${dem.sources} (truoc ${nguonTruoc})`,
+        );
+      },
+      { timeout: 5000, interval: 20 },
+    );
+
+    assert.equal(
+      container.querySelectorAll(".ch__item").length,
+      soHangTruoc,
+      "MOI tep loi ⇒ KHONG duoc them hang kenh nao",
+    );
+    const chon = kenhDangChon(container);
+    assert.ok(
+      chon !== null && chon.includes("kenh-mot.wav"),
+      `MOI tep loi ⇒ kenh dang chon KHONG duoc doi (chon mot kenh CU la hanh vi SAI — ` +
+        `do la chinh mutation W2-6); do duoc ${JSON.stringify(chon)}`,
+    );
+    assert.equal(dem.upload, 1, "mot tep ⇒ MOT request nap");
+    assert.deepEqual(tiengOn, [], "luot nap loi khong duoc sinh tieng on console");
+    unmount();
+  });
+
+  it("W2 I1 (LỐI GỌN ChannelZone): CÙNG hàm nạp ⇒ đọc lại danh sách + chọn kênh của tệp THÀNH CÔNG ĐẦU TIÊN", async () => {
+    dem.uploadLoiTheoTen = ["hong.wav"];
+    const { container, unmount } = render(taoPhanTu(App));
+    await choChu(container, "kenh-mot.wav");
+    const nguonTruoc = dem.sources;
+
+    // LOI NAP GON: chon tep la nap NGAY (khong nut trung gian). Tep dau LOI, tep sau THANH CONG.
+    fireEvent.change(phanTu(container, '[data-testid="ch-nap-o-tep"]'), {
+      target: { files: [tepThat("hong.wav"), tepThat("tot.wav")] },
+    });
+    await choPhanTu(
+      container,
+      ".nap__kq",
+      (t) => t.includes("hong.wav: LỖI — 422: tệp rỗng"),
+      "loi GON: ket qua cua tep loi khong tới DOM",
+    );
+    await waitFor(
+      () => {
+        assert.ok(
+          dem.sources > nguonTruoc,
+          `loi GON cung PHAI doc lai danh sach kenh; do duoc ${dem.sources} (truoc ${nguonTruoc})`,
+        );
+      },
+      { timeout: 5000, interval: 20 },
+    );
+    await choPhanTu(
+      container,
+      ".ch__item",
+      (t) => t.includes("tot.wav"),
+      "loi GON: kenh moi khong xuat hien ⇒ khong di vao CUNG ham nap",
+    );
+    await waitFor(
+      () => {
+        const chon = kenhDangChon(container);
+        assert.ok(
+          chon !== null && chon.includes("tot.wav"),
+          `loi GON: kenh cua tep THANH CONG DAU TIEN phai duoc chon; do duoc ${JSON.stringify(chon)}`,
+        );
+      },
+      { timeout: 5000, interval: 20 },
+    );
+    assert.equal(dem.upload, 2, "loi GON: hai tep ⇒ DUNG HAI request nap");
+    assert.deepEqual(tiengOn, [], "loi GON nap tep khong duoc sinh tieng on console");
+    unmount();
+  });
+
+  it("W2 I2: `lang` là TRƯỜNG FORM trong multipart THẬT (bóc từ BYTE THÔ); URL KHÔNG query; tệp đuôi LẠ vẫn được GỬI", async () => {
+    const { container, unmount } = render(taoPhanTu(App));
+    await choChu(container, "kenh-mot.wav");
+
+    // ⚠️ Duoi LA (`.xyzla`) + content-type `application/octet-stream`: day la HANH VI ma cau
+    // "tep duoi khac van gui duoc" dua vao (`M5`). Client KHONG duoc loc dinh dang — backend
+    // cung khong chan duoi nao (doc `routes_sources.py`: `_safe_name` chi giu `suffix`).
+    const byte = [0, 1, 2, 250, 255];
+    fireEvent.change(phanTu(container, '[data-testid="nap-o-tep"]'), {
+      target: { files: [tepThat("bai-hat.xyzla", byte, "application/octet-stream")] },
+    });
+    fireEvent.change(phanTu(container, '[data-testid="nap-tep-lang"]'), { target: { value: "en" } });
+    fireEvent.click(phanTu(container, '[data-testid="nap-nut"]'));
+    await choPhanTu(
+      container,
+      ".nap__kq",
+      (t) => t.includes("bai-hat.xyzla"),
+      "ket qua nap khong tới DOM",
+    );
+
+    assert.equal(dem.upload, 1, "mot tep ⇒ MOT request multipart toi server");
+    // (1) URL: `lang` KHONG di bang query. Mutation `W2-4` (Form ⇒ query) lam dong nay DO.
+    assert.equal(
+      dem.uploadUrl,
+      "/api/sources/upload",
+      "URL nap KHONG duoc mang query — `lang` la truong FORM, khong phai query",
+    );
+    assert.equal(
+      new URL(dem.uploadUrl, origin).search,
+      "",
+      "query cua URL nap phai RONG",
+    );
+    // (2) content-type: multipart THAT, co boundary.
+    assert.match(
+      dem.uploadContentType,
+      /^multipart\/form-data; boundary=/,
+      `content-type phai la multipart co boundary; do duoc ${JSON.stringify(dem.uploadContentType)}`,
+    );
+
+    // (3) BYTE THO: khang dinh phep do doc tu CHINH buffer nhan duoc, khong phai tu mot object da
+    // duoc phan tich san.
+    const raw = dem.uploadRaw;
+    assert.ok(raw !== null, "server phai ghi lai duoc BYTE THO cua request");
+    assert.ok(raw.length > 0, `byte tho phai khac rong; do duoc ${raw === null ? 0 : raw.length}`);
+    assert.ok(
+      raw.includes(Buffer.from('name="lang"', "latin1")),
+      'byte tho PHAI chua phan `name="lang"` ⇒ `lang` nam TRONG BODY, khong o query',
+    );
+    assert.ok(raw.includes(Buffer.from('name="file"', "latin1")), 'byte tho phai chua phan `name="file"`');
+
+    // (4) BOC TU BYTE THO: dung hai phan, theo thu tu [file, lang]; `lang` la GIA TRI CUA PHAN;
+    // ten tep va BYTE di nguyen ven.
+    assert.deepEqual(
+      dem.uploadPhan,
+      ["file", "lang"],
+      "multipart PHAI co dung hai phan [file, lang]; mutation W2-4 lam no tut ve [file]",
+    );
+    assert.equal(dem.uploadLang, "en", "`lang` phai la gia tri cua MOT PHAN trong body");
+    assert.deepEqual(dem.uploadTenTep, ["bai-hat.xyzla"], "client KHONG duoc loc duoi tep");
+    assert.deepEqual(dem.uploadByteTep, [byte], "BYTE cua tep phai di NGUYEN VEN qua multipart");
+
+    // ⚠️ Cho luot DOC LAI do `napTep` phat ra di HET duong (hang kenh moi len DOM) TRUOC khi ket
+    // thuc bai. Khong cho thi mot request con dang bay ha canh SAU khi bai ket thuc — va (do duoc)
+    // runner bao *"generated asynchronous activity after the test ended"* kem
+    // `ReferenceError: window is not defined`, tuc `EXIT=1` vi mot ly do KHONG lien quan den menh de.
+    await choPhanTu(
+      container,
+      ".ch__item",
+      (t) => t.includes("bai-hat.xyzla"),
+      "kenh moi (duoi LA) khong xuat hien ⇒ danh sach kenh khong duoc doc lai",
+    );
+
+    assert.deepEqual(tiengOn, [], "nap multipart khong duoc sinh tieng on console");
     unmount();
   });
 });

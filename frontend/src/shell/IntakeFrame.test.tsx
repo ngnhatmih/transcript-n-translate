@@ -26,7 +26,8 @@
  */
 import { after, afterEach, before, beforeEach, describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync, statSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 
 import type { SourceLang } from "../api/types.ts";
 import type { KetQuaNap, NapTep } from "./IntakeFrame.tsx";
@@ -169,6 +170,57 @@ function lopTrongCss(khoi: { chon: string; than: string }[]): Set<string> {
   return ra;
 }
 
+/**
+ * Doc mot tep nguon roi **BO CHU THICH** — de phep DEM khong bi danh lua boi mot comment.
+ *
+ * ⚠️ VI SAO CAN (`M2` cua review): ban cu dem chuoi `uploadSource(` tren NGUYEN VAN, nen
+ * (a) mot comment nhac ten do lam bai **DO OAN** (chinh commit W2 co 6 dong nhu vay), va
+ * (b) mot "ban cai thu hai" goi `api.postForm("/sources/upload", …)` **LOT QUA** vi chuoi
+ * `uploadSource(` khong xuat hien. Bo chu thich roi dem **ca TEN ham LAN DUONG DAN** thi bit ca hai.
+ *
+ * ⚠️ Gioi han khai ro: chi bo `/* … *\/` va dong BAT DAU bang `//` (khong bo `//` giua dong),
+ * nen mot comment CUOI DONG con sot lai. Du cho hai mau duoc dem o day.
+ */
+function nguonKhongChuThich(u: URL): string {
+  return readFileSync(u, "utf8")
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/^[ \t]*\/\/.*$/gm, "");
+}
+
+/** Moi tep `.ts`/`.tsx` KHONG phai test trong mot thu muc — duyet de tinh bat bien toan cay. */
+function tepNguon(goc: URL): URL[] {
+  const ra: URL[] = [];
+  const di = (u: URL): void => {
+    for (const ten of readdirSync(u)) {
+      const con = new URL(ten, u);
+      if (statSync(con).isDirectory()) {
+        // ⚠️ Phai giu DAU `/` cuoi cho thu muc: `new URL("api", "file:///…/src/")` cho
+        // `…/src/api` (KHONG co `/`), va URL do khong con la mot BASE cho cac con cua no —
+        // con dau tien se duoc giai tu `src/` va ra `src/<ten>` (do duoc: ENOENT).
+        di(new URL(`${ten}/`, u));
+      } else if (/\.(ts|tsx)$/.test(ten) && !/\.test\.(ts|tsx)$/.test(ten)) {
+        ra.push(con);
+      }
+    }
+  };
+  di(goc);
+  return ra;
+}
+
+/** Cho toi khi dong `.nap__bo-qua` (hoac `.ch__nap-bo-qua`) xuat hien — TIN HIEU, khong dong ho. */
+async function choBoQua(container: HTMLElement, chon: string): Promise<string> {
+  let cuoi = "";
+  await waitFor(
+    () => {
+      const dong = textCua(container, chon);
+      assert.ok(dong.length > 0, `chua thay "${chon}" (luot chon bi bo qua phai duoc NOI RA)`);
+      cuoi = dong[0] ?? "";
+    },
+    { timeout: 5000, interval: 20 },
+  );
+  return cuoi;
+}
+
 describe("IntakeFrame + NhapGon: §4.2 cua vao NAP TEP (khung net dut + ket qua TUNG tep)", () => {
   before(async () => {
     // Chuan hoa TRUOC khi cai: khong dua vao viec tep khac da tra global hay chua.
@@ -223,12 +275,25 @@ describe("IntakeFrame + NhapGon: §4.2 cua vao NAP TEP (khung net dut + ket qua 
     const dinhDang = textCua(container, ".nap__dinh-dang").join("");
     assert.match(dinhDang, /wav/, "dong mono phai liet ke dinh dang nhan duoc");
     assert.match(dinhDang, /mp4/, "dong mono phai liet ke ca dinh dang video (ffmpeg doc duoc)");
-    // ... VA phai trung thuc ve viec backend KHONG chan duoi nao (khong phai mot loi hua).
-    // Do la su that doc tu `backend/app/api/routes_sources.py`: `_safe_name` chi giu `suffix`.
+    // ... VA phai trung thuc theo cach DO DUOC (vong sua W2 #1, `M5`).
+    //
+    // ⚠️ BAN CU ghim bang literal `/backend không chặn đuôi nào/`: do la mot loi HUA VE MOT HE
+    // THONG KHAC (`routes_sources.py`), va no duoc ghim bang CHINH BAN SAO CHU cua loi hua ⇒
+    // backend them whitelist thi cau thanh loi noi doi ma bai VAN XANH (phep do tu quy chieu).
+    // Nay cau cho nguoi dung chi noi ve thu CLIENT lam, va vao mot khang dinh DO DUOC:
+    // "tep duoi khac van gui duoc" — co bai ghim HANH VI ngay duoi day (`.xyzla` di tới ham nap)
+    // va o `App.test.tsx` (byte `.xyzla` toi server THAT).
     assert.match(
       dinhDang,
-      /backend không chặn đuôi nào/,
-      `dong mono phai noi ro no la GOI Y, khong phai phep kiem; do duoc ${JSON.stringify(dinhDang)}`,
+      /tệp đuôi khác vẫn gửi được/,
+      `dong mono phai noi ve thu CLIENT lam (va do duoc), khong phai mot loi hua ve backend; `
+      + `do duoc ${JSON.stringify(dinhDang)}`,
+    );
+    assert.ok(
+      !/backend/i.test(dinhDang),
+      `chu cho NGUOI DUNG khong duoc khang dinh ve backend: do la loi hua ve mot he thong khac, `
+      + `khong the DO o day (noi dung that cua no phai ghim bang HANH VI); `
+      + `do duoc ${JSON.stringify(dinhDang)}`,
     );
 
     assert.deepEqual(tiengOn, [], "khung rong khong duoc sinh tieng on console");
@@ -291,6 +356,12 @@ describe("IntakeFrame + NhapGon: §4.2 cua vao NAP TEP (khung net dut + ket qua 
     assert.equal(goi[0]?.lang, "zh", "gia tri la `ja` KHONG duoc thanh ngon ngu cua lan nap");
 
     // Va gia tri THAT SU chon duoc thi phai di theo: `en`.
+    // ⚠️ Phai CHON LAI tep truoc khi bam lan hai: sau mot luot nap DA CHAY, khung XOA lua chon
+    // (`M3` — neu khong thi bam lan hai la NAP TRUNG cung tep). Day KHONG phai lam yeu khang dinh:
+    // menh de cua bai (ngon ngu nguoi dung chon phai di theo lan nap) giu nguyen.
+    fireEvent.change(phanTu(container, '[data-testid="nap-o-tep"]'), {
+      target: { files: [tep("a.wav")] },
+    });
     fireEvent.change(chon, { target: { value: "en" } });
     fireEvent.click(phanTu(container, '[data-testid="nap-nut"]'));
     await waitFor(() => assert.equal(goi.length, 2), { timeout: 5000, interval: 20 });
@@ -325,6 +396,14 @@ describe("IntakeFrame + NhapGon: §4.2 cua vao NAP TEP (khung net dut + ket qua 
     await choKetQua(container, /a\.wav: đã nạp — kênh 7/);
     const loi = await choKetQua(container, /rong\.wav: LỖI/);
     assert.match(loi, /422: tệp rỗng/, "cau loi cua backend phai hien NGUYEN VAN");
+
+    // VUNG SONG (review W2 `M4`): ket qua nap phai duoc THONG BAO cho trinh doc man hinh, khong
+    // chi nam trong DOM cho ai tu di tim. Mot `role` bi go bo la mot hoi quy khong ai thay.
+    assert.equal(
+      phanTu(container, '[data-testid="nap-ket-qua"]').getAttribute("role"),
+      "status",
+      "vung ket qua nap phai la VUNG SONG (`role=status`)",
+    );
 
     assert.deepEqual(tiengOn, [], "nap tep khong duoc sinh tieng on console");
     unmount();
@@ -379,11 +458,33 @@ describe("IntakeFrame + NhapGon: §4.2 cua vao NAP TEP (khung net dut + ket qua 
     assert.equal(o.getAttribute("type"), "file");
     assert.ok(o.hasAttribute("multiple"), "loi gon cung phai nhan NHIEU tep (§12.2: tep thu 2..N)");
     assert.equal(o.getAttribute("accept"), null, "loi gon cung KHONG duoc loc dinh dang o client");
+    // NHAN cho bo chon ngon ngu (review W2 `M4`): khung giua CO nhan, loi gon TUNG khong co —
+    // hai loi vao cung mot viec ma mot loi khong doc duoc la SOT, khong phai chu y.
+    assert.ok(
+      container.querySelector('label[for="ch-nap-lang"]') !== null,
+      "loi GON phai co NHAN (`label[for]`) cho bo chon ngon ngu",
+    );
 
+    // ⚠️ `M3` ở LỐI GỌN — phải đo ở CẢ HAI lối. jsdom không tái lập được cơ chế "chọn LẠI đúng
+    // tệp đó thì trình duyệt không phát `change`", nên thứ ĐO ĐƯỢC là mệnh đề hẹp hơn — đúng mệnh
+    // đề mà bản sửa nói tới: **khi đọc xong `files`, mã RESET `value` của chính ô đó**. Đo bằng
+    // một setter thay thế (đúng cách RTL làm với `files`).
+    // ⚠️ VÌ SAO PHẢI CÓ MẶT Ở ĐÂY: lượt mutation `F9b` (chỉ bỏ dòng reset ở LỐI GỌN) đã **SỐNG
+    // SÓT** khi bài `M3` chỉ đo ô của khung giữa ⇒ một lối vào không ghim là một lối vào có thể
+    // hỏng im lặng (lối gọn KHÔNG có nút, nên một `change` bị nuốt là không có gì xảy ra).
+    let soLanXoa = 0;
+    let giaTri = "chua-dat";
+    Object.defineProperty(o, "value", {
+      configurable: true,
+      get: () => giaTri,
+      set: (v: string) => { soLanXoa += 1; giaTri = v; },
+    });
     fireEvent.change(o, { target: { files: [tep("c.wav"), tep("rong.wav", [])] } });
     // GON: khong co nut trung gian — chon tep la nap.
     await waitFor(() => assert.equal(goi.length, 1), { timeout: 5000, interval: 20 });
     assert.deepEqual(goi[0]?.ten, ["c.wav", "rong.wav"]);
+    assert.equal(soLanXoa, 1, "loi GON: doc xong `files` PHAI reset `value` (`M3`)");
+    assert.equal(giaTri, "", "loi GON: reset phai dat `value` ve CHUOI RONG");
 
     await choKetQua(container, /c\.wav: đã nạp — kênh 12/);
     const loi = await choKetQua(container, /rong\.wav: LỖI/);
@@ -391,6 +492,119 @@ describe("IntakeFrame + NhapGon: §4.2 cua vao NAP TEP (khung net dut + ket qua 
 
     assert.deepEqual(tiengOn, [], "loi gon khong duoc sinh tieng on console");
     unmount();
+  });
+
+  it("M5) HÀNH VI: tệp ĐUÔI LẠ (`.xyzla`) VẪN ĐƯỢC GỬI — câu 'đuôi khác vẫn gửi được' dựa vào chính hành vi này", async () => {
+    const goi: LanGoi[] = [];
+    const napTep = napTepGhi(goi, (files) =>
+      files.map((t) => ({ ten: t.name, ok: true, sourceId: 5 })),
+    );
+    const { container, unmount } = render(taoPhanTu(IntakeFrame, { napTep }));
+
+    // Duoi KHONG nam trong danh sach goi y cua dong mono, va content-type la octet-stream.
+    fireEvent.change(phanTu(container, '[data-testid="nap-o-tep"]'), {
+      target: { files: [tep("bai-hat.xyzla", [7, 8, 9], "application/octet-stream")] },
+    });
+    fireEvent.click(phanTu(container, '[data-testid="nap-nut"]'));
+    await choKetQua(container, /bai-hat\.xyzla: đã nạp — kênh 5/);
+    assert.deepEqual(
+      goi[0]?.ten,
+      ["bai-hat.xyzla"],
+      "client KHONG duoc loc duoi tep: tep LA phai di tới ham nap",
+    );
+
+    // Cung bat bien o LOI GON (khong nut): doi tep la nap NGAY.
+    const goiGon: LanGoi[] = [];
+    const cGon = render(
+      taoPhanTu(NhapGon, {
+        napTep: napTepGhi(goiGon, (files) =>
+          files.map((t) => ({ ten: t.name, ok: true, sourceId: 6 })),
+        ),
+      }),
+    ).container;
+    fireEvent.change(phanTu(cGon, '[data-testid="ch-nap-o-tep"]'), {
+      target: { files: [tep("la.xyzla", [4], "application/octet-stream")] },
+    });
+    await choKetQua(cGon, /la\.xyzla: đã nạp — kênh 6/);
+    assert.deepEqual(goiGon[0]?.ten, ["la.xyzla"], "loi gon cung KHONG duoc loc duoi tep");
+
+    assert.deepEqual(tiengOn, [], "tep duoi la khong duoc sinh tieng on console");
+    unmount();
+  });
+
+  it("M3) LẦN DÙNG THỨ HAI: `value` được RESET, lựa chọn được XOÁ sau lượt nạp, và lượt bị BỎ QUA được NÓI RA", async () => {
+    const goi: LanGoi[] = [];
+    const napTep = napTepGhi(goi, (files) =>
+      files.map((t) => ({ ten: t.name, ok: true, sourceId: 1 })),
+    );
+    const { container, unmount } = render(taoPhanTu(IntakeFrame, { napTep }));
+    const o = phanTu(container, '[data-testid="nap-o-tep"]');
+
+    // (i-a) ĐO ĐƯỢC: doc xong `files` thi ma RESET `value` cua chinh o do.
+    // ⚠️ Khai đúng mức: jsdom **KHÔNG tái lập được** cơ chế "chọn LẠI đúng tệp đó thì trình duyệt
+    // không phát `change`" (RTL phát thẳng sự kiện), và **không quan sát được** `value=""` qua
+    // `input.files` (RTL đặt `files` thành thuộc tính RIÊNG trên node, che setter của jsdom).
+    // Nên chỗ này đo mệnh đề HẸP HƠN — đúng mệnh đề mà bản sửa nói tới: **mã CÓ reset `value`**.
+    // Đo bằng một setter thay thế (đúng cách RTL làm với `files`): bỏ dòng `value = ""` ⇒ 0 lần gọi.
+    let soLanXoa = 0;
+    let giaTri = "chua-dat";
+    Object.defineProperty(o, "value", {
+      configurable: true,
+      get: () => giaTri,
+      set: (v: string) => { soLanXoa += 1; giaTri = v; },
+    });
+    fireEvent.change(o, { target: { files: [tep("a.wav")] } });
+    assert.equal(soLanXoa, 1, "doc xong `files` PHAI reset `value` (`M3`)");
+    assert.equal(giaTri, "", "reset phai dat `value` ve CHUOI RONG");
+
+    // (i-b) ĐO ĐƯỢC: sau lượt nạp ĐÃ CHẠY, lựa chọn bị XOÁ ⇒ nút trở lại VÔ HIỆU (đó là chỗ
+    // "nạp trùng cùng tệp" mà review đo được: giữ `chon` thì nút vẫn mở).
+    fireEvent.click(phanTu(container, '[data-testid="nap-nut"]'));
+    await choKetQua(container, /a\.wav: đã nạp — kênh 1/);
+    await waitFor(
+      () => {
+        assert.equal(
+          (phanTu(container, '[data-testid="nap-nut"]') as HTMLButtonElement).disabled,
+          true,
+          "sau luot nap DA CHAY, lua chon phai duoc XOA ⇒ nut `nap` tro lai VO HIEU",
+        );
+      },
+      { timeout: 5000, interval: 20 },
+    );
+    assert.match(
+      container.textContent ?? "",
+      /chưa chọn tệp nào/,
+      "cau 'chua chon tep nao' phai tro lai (su that cua trang thai, bang CHU)",
+    );
+
+    // (ii) ĐO ĐƯỢC: lượt chọn trong lúc ĐANG NẠP được NÓI RA (trước đây `if (dangNap) return;` —
+    // bỏ IM LẶNG: không hàng đợi, không một câu nào).
+    // ⚠️ Ở KHUNG, nút `nap` VÔ HIỆU trong lúc đang nạp, nên đường thứ hai của khung là KÉO-THẢ.
+    const cTreo = render(taoPhanTu(IntakeFrame, { napTep: () => treo() })).container;
+    fireEvent.change(phanTu(cTreo, '[data-testid="nap-o-tep"]'), { target: { files: [tep("a.wav")] } });
+    fireEvent.click(phanTu(cTreo, '[data-testid="nap-nut"]'));
+    await choCoLop(cTreo, ".nap__cho", 1);
+    fireEvent.drop(phanTu(cTreo, '[data-testid="nap-khung-keo"]'), {
+      dataTransfer: { files: [tep("b.wav")] },
+    });
+    const chuBoQua = await choBoQua(cTreo, ".nap__bo-qua");
+    assert.match(chuBoQua, /CHƯA được gửi/, "luot chon bi bo qua phai noi ro no CHUA duoc GUI");
+    assert.match(chuBoQua, /1 tệp/, "cau do phai noi luot chon do mang MAY tep");
+
+    // ... va ở LỐI GỌN (không nút): đổi tệp trong lúc đang nạp.
+    const cGonTreo = render(taoPhanTu(NhapGon, { napTep: () => treo() })).container;
+    fireEvent.change(phanTu(cGonTreo, '[data-testid="ch-nap-o-tep"]'), {
+      target: { files: [tep("a.wav")] },
+    });
+    await choCoLop(cGonTreo, ".ch__nap-cho", 1);
+    fireEvent.change(phanTu(cGonTreo, '[data-testid="ch-nap-o-tep"]'), {
+      target: { files: [tep("b.wav")] },
+    });
+    const chuGon = await choBoQua(cGonTreo, ".ch__nap-bo-qua");
+    assert.match(chuGon, /CHƯA được gửi/, "loi gon: luot chon bi bo qua cung phai noi ra");
+
+    assert.deepEqual(tiengOn, [], "bo qua mot luot chon khong duoc sinh tieng on console");
+    cleanup();
   });
 
   it("G) HÌNH THỨC: LUẬT ↔ CLASS KHỚP NHAU (hai chiều) + các QUAN HỆ hình thức của §4.2", async () => {
@@ -448,6 +662,31 @@ describe("IntakeFrame + NhapGon: §4.2 cua vao NAP TEP (khung net dut + ket qua 
     await choCoLop(cGonTreo, ".ch__nap-cho", 1);
     gom(cGonTreo);
 
+    // (4) Trang thai "LUOT CHON BI BO QUA" (`M3`): mot luot nap TREO roi mot luot chon NUA ⇒ sinh
+    // `.nap__bo-qua` / `.ch__nap-bo-qua`. Phai GOM o day, neu khong hai lop do se bi phep kiem
+    // (A) duoi day bao la "LUAT MO COI" (co luat trong `app.css` ma khong lop nao trong DOM).
+    const cBoQua = render(taoPhanTu(IntakeFrame, { napTep: () => treo() })).container;
+    fireEvent.change(phanTu(cBoQua, '[data-testid="nap-o-tep"]'), { target: { files: [tep("a.wav")] } });
+    fireEvent.click(phanTu(cBoQua, '[data-testid="nap-nut"]'));
+    await choCoLop(cBoQua, ".nap__cho", 1);
+    // O KHUNG, nut `nap` VO HIEU trong luc dang nap ⇒ duong thu hai la KEO-THA.
+    fireEvent.drop(phanTu(cBoQua, '[data-testid="nap-khung-keo"]'), {
+      dataTransfer: { files: [tep("b.wav")] },
+    });
+    await choCoLop(cBoQua, ".nap__bo-qua", 1);
+    gom(cBoQua);
+
+    const cGonBoQua = render(taoPhanTu(NhapGon, { napTep: () => treo() })).container;
+    fireEvent.change(phanTu(cGonBoQua, '[data-testid="ch-nap-o-tep"]'), {
+      target: { files: [tep("a.wav")] },
+    });
+    await choCoLop(cGonBoQua, ".ch__nap-cho", 1);
+    fireEvent.change(phanTu(cGonBoQua, '[data-testid="ch-nap-o-tep"]'), {
+      target: { files: [tep("b.wav")] },
+    });
+    await choCoLop(cGonBoQua, ".ch__nap-bo-qua", 1);
+    gom(cGonBoQua);
+
     const trongCss = lopTrongCss(khoi);
     assert.ok(trongCss.size >= 12, `phai doc duoc cac lop nap* tu app.css; do duoc ${trongCss.size}`);
     assert.ok(lopTrongDom.size >= 12, `phai thu duoc cac lop nap* tu DOM; do duoc ${lopTrongDom.size}`);
@@ -492,29 +731,88 @@ describe("IntakeFrame + NhapGon: §4.2 cua vao NAP TEP (khung net dut + ket qua 
       /var\(--font-mono\)/,
       "dong dinh dang phai la dong MONO cua §2.1",
     );
-    // *"Khong phai mot the nho giua man hinh"*: khung phai GROW de chiem vung giua. Mot the nho se
-    // la `flex: 0 0 auto` (hoac khong co `flex` nao) — mot bien the lam luat vo nghia ma bai chi
-    // khang dinh "co `border`" KHONG bat duoc.
+    // *"Khong phai mot the nho giua man hinh"*: khung phai GROW de chiem vung giua.
+    //
+    // ⚠️ (`M1` cua review, vong sua W2 #1) BAN CU CHI HOI "CO `flex: 1` O DAU DO KHONG" —
+    // `thanCua` GOP than cua MOI luat khop `.nap__khung`, nen chi can mot khai bao `flex: 1...`
+    // con sot o dau do la bai XANH. DO DUOC: them `flex: 0 0 auto;` SAU `flex: 1 1 auto;` TRONG
+    // CUNG KHOI (khai bao SAU THANG trong CSS ⇒ khung khong con gian, tuc DUNG cai the nho ma
+    // §4.2 cam) cho **0 bai do**. Do la lop `Minor #1` cua W3 (ERRATA #36 muc 5) tai phat.
+    // ⇒ Nay ghim **KHAI BAO THANG CUOC**: dung MOT khoi cho `.nap__khung`, va trong khoi do
+    // khong duoc co bat ky `flex: 0` nao (no thang khai bao `flex: 1` dat truoc no).
+    const khoiKhung = khoi.filter((k) =>
+      k.chon.split(",").some((s) => s.trim().split(/\s+/).includes(".nap__khung")),
+    );
+    assert.equal(
+      khoiKhung.length,
+      1,
+      `\`.nap__khung\` phai duoc khai o DUNG MOT khoi: nhieu khoi thi khoi SAU thang, va bai ghim `
+      + `"co flex:1" khong bat duoc; do duoc ${khoiKhung.length} khoi `
+      + `${JSON.stringify(khoiKhung.map((k) => k.chon))}`,
+    );
+    const thanKhung = khoiKhung[0]?.than ?? "";
     assert.match(
-      thanCua(khoi, "nap__khung"),
+      thanKhung,
       /flex:\s*1(\s+1\s+auto)?/,
       "khung §4.2 phai GROW trong vung giua (khong phai mot the nho giua man hinh)",
+    );
+    assert.ok(
+      !/flex:\s*0/.test(thanKhung),
+      `trong CUNG khoi \`.nap__khung\` khong duoc co khai bao \`flex: 0\` nao: no THANG khai bao `
+      + `\`flex: 1\` dat TRUOC no ⇒ khung thanh mot the nho giua man hinh (§4.2 cam); `
+      + `do duoc ${JSON.stringify(thanKhung)}`,
     );
 
     assert.deepEqual(tiengOn, [], "trang thai dang nap khong duoc sinh tieng on console");
     cleanup();
   });
 
-  it("H) MỘT hàm nạp: `uploadSource` chi duoc goi o `App.tsx` — khong co duong nap thu hai", () => {
-    // Bat bien cua brief W2 ("MỘT hàm nạp, hai lối vào — đừng viết hai lần") o dang KIEM DUOC:
-    // đếm CALL SITE trong chính mã nguồn. `IntakeFrame.tsx`/`ChannelZone.tsx` chỉ được gọi
-    // `napTep` (PROP) — chúng không được tự chạm tầng API.
-    const demGoi = (duong: string): number => {
-      const nguon = readFileSync(new URL(duong, import.meta.url), "utf8");
-      return (nguon.match(/uploadSource\(/g) ?? []).length;
-    };
-    assert.equal(demGoi("./App.tsx"), 1, "`App.tsx` phai la noi DUY NHAT goi `endpoints.uploadSource`");
-    assert.equal(demGoi("./IntakeFrame.tsx"), 0, "khung §4.2 KHONG duoc tu goi `uploadSource`");
-    assert.equal(demGoi("./ChannelZone.tsx"), 0, "loi gon o vung KENH KHONG duoc tu goi `uploadSource`");
+  it("H) MỘT hàm nạp: KHÔNG đường nạp thứ hai — đo trên MÃ ĐÃ BỎ CHÚ THÍCH, theo cả TÊN lẫn ĐƯỜNG DẪN", () => {
+    // Bat bien cua brief W2 ("MỘT hàm nạp, hai lối vào — đừng viết hai lần") o dang KIEM DUOC.
+    //
+    // ⚠️ (`M2` cua review, vong sua W2 #1) BAN CU chi dem chuoi `uploadSource(` tren NGUYEN VAN:
+    //   - mot **comment** nhac ten do lam bai **DO OAN** (chinh commit W2 co 6 dong nhu vay, chi
+    //     khac la chung viet `` `uploadSource` `` khong co `(`);
+    //   - mot "ban cai thu hai" goi `api.postForm("/sources/upload", …)` **LOT QUA** vi chuoi
+    //     `uploadSource(` khong xuat hien.
+    // ⇒ Nay do tren **MA DA BO CHU THICH**, va do **CA DUONG DAN** cua route nap.
+    const demMau = (u: URL, mau: RegExp): number =>
+      (nguonKhongChuThich(u).match(mau) ?? []).length;
+
+    assert.equal(
+      demMau(new URL("./App.tsx", import.meta.url), /uploadSource\(/g),
+      1,
+      "`App.tsx` phai la noi DUY NHAT goi `endpoints.uploadSource`",
+    );
+    assert.equal(
+      demMau(new URL("./IntakeFrame.tsx", import.meta.url), /uploadSource\(/g),
+      0,
+      "khung §4.2 KHONG duoc tu goi `uploadSource`",
+    );
+    assert.equal(
+      demMau(new URL("./ChannelZone.tsx", import.meta.url), /uploadSource\(/g),
+      0,
+      "loi gon o vung KENH KHONG duoc tu goi `uploadSource`",
+    );
+
+    // DUONG DAN cua route nap: DUNG MOT lan trong CA `src` (khong tinh test), va o `endpoints.ts`.
+    // Mot alias kieu `api.postForm("/sources/upload", …)` o bat ky tep nao khac lam bai DO ⇒ do la
+    // bien phap ma phep dem TEN khong bat duoc. (Chu thich da bi bo, nen loi nhac trong comment
+    // khong lam bai DO OAN.)
+    const goc = new URL("../", import.meta.url); // src/
+    const tienTo = fileURLToPath(goc);
+    const coDuongDan = tepNguon(goc)
+      .map((u) => ({
+        ten: fileURLToPath(u).slice(tienTo.length).replace(/\\/g, "/"),
+        so: demMau(u, /"\/sources\/upload"/g),
+      }))
+      .filter((x) => x.so > 0);
+    assert.deepEqual(
+      coDuongDan,
+      [{ ten: "api/endpoints.ts", so: 1 }],
+      "duong dan `/sources/upload` chi duoc xuat hien MOT lan trong `src` (khong tinh test), "
+      + "va o `api/endpoints.ts` — mot `api.postForm(\"/sources/upload\", …)` o tep khac la "
+      + "MOT DUONG NAP THU HAI",
+    );
   });
 });

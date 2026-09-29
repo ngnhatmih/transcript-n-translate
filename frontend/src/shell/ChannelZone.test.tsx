@@ -397,4 +397,25 @@ describe("ChannelZone: chon duoc KENH (Task W1)", () => {
     assert.match(appCss, /\.ch__dau \{[^}]*position: absolute[^}]*left: var\(--sp-2\)/,
       "glyph `▸` phai duoc dinh vi tuyet doi o le trai muc kenh");
   });
+
+  it("W2 M4: `<ul class=\"ch__danh-sach\">` phai co LUAT RESET trong `app.css` (nợ Task 4/W1 đóng kèm)", () => {
+    const appCss = readFileSync(new URL("../styles/app.css", import.meta.url), "utf8");
+
+    // DO DUOC TRUOC VONG SUA (review W2 §9.6): SAU lop cua vung KENH (`.ch`, `.ch__danh-sach`,
+    // `.ch__dong`, `.ch__rong`, `.ch__loi`, `.ch__cho`) co **0 luat** trong `app.css` (do bang
+    // `Select-String -SimpleMatch`: 0 cho ca sau; so sanh `.ch__item` = 3, `.ch__nap` = 9), va
+    // `main.tsx` chi nap `tokens.css` + `app.css` nen KHONG co stylesheet thu hai.
+    // He qua: `<ul class="ch__danh-sach">` khong duoc reset `list-style`/`padding` ⇒ trinh duyet
+    // ve DAU DAU DONG + thut le mac dinh.
+    //
+    // ⚠️ Day la NO cua Task 4/W1, KHONG phai viec cua W2 — vong sua W2 dong phan RE NHAT (reset
+    // `<ul>`) va KHAI phan con lai (`.ch`, `.ch__dong`, `.ch__rong`, `.ch__loi`, `.ch__cho` van
+    // chua co luat). ⚠️ Va jsdom KHONG co layout ⇒ "danh sach hien dau dau dong" chi chung minh
+    // duoc bang LUAT nay + mot ANH chup trong trinh duyet THAT (o day KHONG co anh nao).
+    assert.match(
+      appCss,
+      /\.ch__danh-sach \{[^}]*margin: 0[^}]*padding: 0[^}]*list-style: none/,
+      '`<ul class="ch__danh-sach">` phai duoc RESET (margin/padding/list-style)',
+    );
+  });
 });

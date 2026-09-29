@@ -28,6 +28,29 @@
  * của trình chọn tệp **và kéo-thả BỎ QUA nó hoàn toàn**, nên nó không phải một phép kiểm — chỉ
  * là một bộ lọc nửa vời không có backend nào đứng sau.
  *
+ * 🔴 **NỢ GHI Ở ĐÂY CHO NGƯỜI SỬA BACKEND (vòng sửa W2 #1, `M5` của review).** Sự thật *"backend
+ * không chặn đuôi nào"* là sự thật của **MỘT TỆP KHÁC** (`backend/app/api/routes_sources.py`), và
+ * nó **KHÔNG** được ghim bằng câu chữ cho người dùng nữa. Bản trước ghim nó bằng literal
+ * `/backend không chặn đuôi nào/` trong TSX — một literal như thế **KHÔNG THỂ đỏ khi backend đổi**,
+ * tức lời hứa về một hệ thống khác được ghim bằng **chính bản sao chữ của nó** (phép đo tự quy
+ * chiếu). Nay câu cho người dùng chỉ nói về thứ **CLIENT** làm (gửi được mọi đuôi), và điều đó có
+ * **bài ghim HÀNH VI** (tệp `.xyzla` đi tới server trong `App.test.tsx`).
+ * ⇒ **NẾU backend thêm whitelist đuôi, PHẢI sửa `DINH_DANG` dưới đây.**
+ *
+ * ## HAI CHỖ "LẦN DÙNG THỨ HAI IM LẶNG" — đã sửa (vòng sửa W2 #1, `M3` của review)
+ *
+ * 1. `<input type="file">` **không bao giờ được reset `value`** ⇒ theo cơ chế HTML, chọn LẠI
+ *    ĐÚNG tệp đó **không phát `change`**, nên lối gọn (không có nút) không có gì xảy ra. Nay cả
+ *    hai lối **xoá `value` ngay sau khi đọc `files`**.
+ *    ⚠️ **Mức bằng chứng:** *"mã không reset"* là **ĐO ĐƯỢC**; *"trình duyệt im lặng"* là **SUY
+ *    LUẬN từ cơ chế HTML** — jsdom (`fireEvent.change`) phát thẳng sự kiện nên **không tái lập
+ *    được** hành vi đó, và cũng không quan sát được `value=""` (RTL đặt `files` thành thuộc tính
+ *    riêng trên node, che setter của jsdom).
+ * 2. Khung giữa **giữ `chon`** sau lượt nạp ⇒ nút `nạp` vẫn mở ⇒ bấm lần hai **nạp trùng** cùng
+ *    tệp. Nay `chon` được **XOÁ sau lượt nạp đã chạy** (nút trở lại vô hiệu, và câu "chưa chọn tệp
+ *    nào" trở lại) — đó là vế **ĐO ĐƯỢC** của chỗ này.
+ *    Và `useNapTep` **không còn bỏ im lặng** lượt chọn trong lúc đang nạp: nó nói ra (`boQua`).
+ *
  * ## VÌ SAO `onDragOver` PHẢI `preventDefault`
  *
  * Mặc định của trình duyệt với một vùng thả là **MỞ tệp** (điều hướng sang `file://…`), và nó
@@ -79,32 +102,52 @@ export type KetQuaNap = NapThanhCong | NapThatBai;
 export type NapTep = (files: File[], lang: SourceLang) => Promise<KetQuaNap[]>;
 
 /**
- * Trạng thái nạp của MỘT lối vào: kết quả của lượt gần nhất + cờ đang nạp.
+ * Trạng thái nạp của MỘT lối vào: kết quả của lượt gần nhất + cờ đang nạp + câu nói ra khi một
+ * lượt chọn bị BỎ QUA.
  *
  * Vì sao là hook chứ không phải hai bản `useState` chép tay: hai lối vào có CÙNG luật hiển thị
  * kết quả (kể cả lỗi), và luật "một tệp lỗi phải HIỆN RA bằng chữ" chỉ nên có một định nghĩa.
+ *
+ * ⚠️ `boQua` tồn tại vì `M3` của review (vòng sửa W2 #1): guard cũ `if (files.length === 0 ||
+ * dangNap) return;` **bỏ im lặng** một lượt chọn — người dùng chọn tệp trong lúc đang nạp thì
+ * KHÔNG có gì xảy ra và KHÔNG có gì nói vì sao. Nay mọi đường bỏ qua đều để lại một CÂU.
  */
 export function useNapTep(napTep: NapTep): {
   ketQua: KetQuaNap[];
   dangNap: boolean;
-  nap: (files: readonly File[], lang: SourceLang) => Promise<void>;
+  /** Câu nói ra khi lượt chọn vừa rồi KHÔNG được gửi; `null` = không có gì bị bỏ qua. */
+  boQua: string | null;
+  /** Trả `true` nếu lượt nạp THẬT SỰ đã chạy (để nơi gọi biết có nên xoá lựa chọn hay không). */
+  nap: (files: readonly File[], lang: SourceLang) => Promise<boolean>;
 } {
   const [ketQua, datKetQua] = useState<KetQuaNap[]>([]);
   const [dangNap, datDangNap] = useState(false);
+  const [boQua, datBoQua] = useState<string | null>(null);
 
-  async function nap(files: readonly File[], lang: SourceLang): Promise<void> {
-    if (files.length === 0 || dangNap) return;
+  async function nap(files: readonly File[], lang: SourceLang): Promise<boolean> {
+    if (dangNap) {
+      datBoQua(
+        `đang nạp — ${files.length} tệp vừa chọn CHƯA được gửi; chờ lượt này xong rồi chọn lại`,
+      );
+      return false;
+    }
+    if (files.length === 0) {
+      datBoQua("chưa chọn tệp nào — không có gì để nạp");
+      return false;
+    }
+    datBoQua(null);
     datDangNap(true);
     try {
       // Kết quả của lượt NÀY thay thế lượt trước: danh sách là "vừa nạp gì", không phải một
       // nhật ký tích luỹ không bao giờ được xoá.
       datKetQua(await napTep([...files], lang));
+      return true;
     } finally {
       datDangNap(false);
     }
   }
 
-  return { ketQua, dangNap, nap };
+  return { ketQua, dangNap, boQua, nap };
 }
 
 /**
@@ -117,7 +160,10 @@ export function useNapTep(napTep: NapTep): {
  */
 export function KetQuaNapList({ ketQua }: { ketQua: KetQuaNap[] }) {
   return (
-    <ul className="nap__ket-qua" data-testid="nap-ket-qua">
+    // `role="status"` (review W2, `M4`): kết quả nạp là một VÙNG SỐNG — trình đọc màn hình phải
+    // được THÔNG BÁO khi lượt nạp xong, chứ không phải chỉ đọc được nếu người dùng tự đi tìm.
+    // Màu `--ok`/`--fault` vẫn chỉ là tín hiệu THỨ HAI: thông tin nằm ở CHỮ.
+    <ul className="nap__ket-qua" data-testid="nap-ket-qua" role="status">
       {ketQua.map((kq, i) => (
         <li
           key={`${kq.ten}-${i}`}
@@ -133,12 +179,19 @@ export function KetQuaNapList({ ketQua }: { ketQua: KetQuaNap[] }) {
 /**
  * Dòng mono của §4.2 — **thông tin**, không phải phép kiểm (xem khối đầu tệp).
  *
- * Đuôi tệp ở đây là những gì `ffmpeg` đọc được, cộng một vế NÓI RÕ rằng backend không từ chối
- * đuôi nào: người dùng có tệp `.wma` phải biết rằng cứ thả vào, chứ không tự loại mình ra.
+ * ⚠️ **CÂU NÀY CHỈ NÓI VỀ THỨ CLIENT LÀM** (vòng sửa W2 #1, `M5`): nó liệt kê những định dạng
+ * `ffmpeg` đọc được như một GỢI Ý, và nói rằng **đuôi khác vẫn gửi được**. Vế thứ hai là một
+ * khẳng định về CHÍNH ỨNG DỤNG NÀY (không có bộ lọc ở client), nên nó **đỏ được** — có bài ghim
+ * hành vi: tệp `.xyzla` đi tới server trong `App.test.tsx`.
+ *
+ * ⚠️ Bản trước viết *"backend không chặn đuôi nào"*: đúng hôm nay, nhưng đó là một lời hứa về
+ * **MỘT HỆ THỐNG KHÁC**, và nó được ghim bằng chính chuỗi chữ của mình ⇒ nếu backend thêm whitelist
+ * thì câu thành lời nói dối mà bài test **vẫn XANH**. Nợ đó nay ghi ở khối đầu tệp (chỗ người sửa
+ * backend đọc), không nằm trong chữ cho người dùng nữa.
  */
 const DINH_DANG =
   "wav · mp3 · m4a · aac · flac · ogg · opus · wma · amr · mp4 · mkv · mov · webm · avi · ts"
-  + " — backend không chặn đuôi nào, danh sách này chỉ là gợi ý";
+  + " — định dạng thường dùng; tệp đuôi khác vẫn gửi được, cứ thử tệp của bạn";
 
 /** Bộ chọn ngôn ngữ: CHỈ `zh`/`en`, đúng `ALLOWED_LANGS` của backend. */
 function ChonLang({
@@ -183,7 +236,7 @@ function ChonLang({
 export function IntakeFrame({ napTep }: { napTep: NapTep }) {
   const [lang, datLang] = useState<SourceLang>("zh");
   const [chon, datChon] = useState<File[]>([]);
-  const { ketQua, dangNap, nap } = useNapTep(napTep);
+  const { ketQua, dangNap, boQua, nap } = useNapTep(napTep);
 
   return (
     <div className="nap" data-testid="khung-nap">
@@ -214,8 +267,13 @@ export function IntakeFrame({ napTep }: { napTep: NapTep }) {
           type="file"
           multiple
           onChange={(suKien) => {
-            const tep = suKien.currentTarget.files;
-            datChon(tep === null ? [] : [...tep]);
+            // ⚠️ COPY `files` RA MẢNG TRƯỚC, rồi mới xoá `value`: xoá `value` làm `FileList` RỖNG
+            // đi (`M3` của review).
+            const tep = [...(suKien.currentTarget.files ?? [])];
+            // ⚠️ RESET `value` (M3): `<input type=file>` chỉ phát `change` khi GIÁ TRỊ ĐỔI, nên
+            // chọn LẠI đúng tệp đó sẽ KHÔNG phát sự kiện nào — người dùng không thấy gì xảy ra.
+            suKien.currentTarget.value = "";
+            datChon(tep);
           }}
         />
         <label className="nap__nhan" htmlFor="nap-tep-lang">ngôn ngữ</label>
@@ -226,7 +284,12 @@ export function IntakeFrame({ napTep }: { napTep: NapTep }) {
           data-testid="nap-nut"
           disabled={dangNap || chon.length === 0}
           onClick={() => {
-            void nap(chon, lang);
+            // ⚠️ XOÁ lựa chọn sau lượt nạp ĐÃ CHẠY (`M3`): giữ `chon` thì nút `nạp` vẫn mở và bấm
+            // lần hai là **nạp trùng** cùng tệp (đẻ kênh thứ hai). Lượt bị BỎ QUA thì giữ lại —
+            // người dùng còn bấm lại được sau khi lượt đang chạy xong.
+            void nap(chon, lang).then((daChay) => {
+              if (daChay) datChon([]);
+            });
           }}
         >
           nạp
@@ -239,6 +302,10 @@ export function IntakeFrame({ napTep }: { napTep: NapTep }) {
           ? "chưa chọn tệp nào — kéo tệp vào khung hoặc bấm «chọn tệp»"
           : `đã chọn ${chon.length} tệp: ${chon.map((t) => t.name).join(" · ")}`}
       </p>
+      {/* `M3`: lượt chọn bị BỎ QUA phải được NÓI RA, không được im lặng. */}
+      {boQua !== null ? (
+        <p className="nap__bo-qua" data-testid="nap-bo-qua">{boQua}</p>
+      ) : null}
       {dangNap ? <p className="nap__cho" data-testid="nap-dang-nap">đang nạp…</p> : null}
       <KetQuaNapList ketQua={ketQua} />
     </div>
@@ -259,7 +326,7 @@ export function IntakeFrame({ napTep }: { napTep: NapTep }) {
  */
 export function NhapGon({ napTep }: { napTep: NapTep }) {
   const [lang, datLang] = useState<SourceLang>("zh");
-  const { ketQua, dangNap, nap } = useNapTep(napTep);
+  const { ketQua, dangNap, boQua, nap } = useNapTep(napTep);
 
   return (
     <div className="ch__nap" data-testid="ch-nap">
@@ -272,11 +339,21 @@ export function NhapGon({ napTep }: { napTep: NapTep }) {
         type="file"
         multiple
         onChange={(suKien) => {
-          const tep = suKien.currentTarget.files;
-          if (tep !== null) void nap([...tep], lang);
+          // Cùng `M3` như khung giữa: COPY ra mảng TRƯỚC, rồi XOÁ `value` để mọi lần chọn đều
+          // phát `change` (lối này KHÔNG có nút, nên một lượt `change` bị nuốt là KHÔNG có gì xảy ra).
+          const tep = [...(suKien.currentTarget.files ?? [])];
+          suKien.currentTarget.value = "";
+          void nap(tep, lang);
         }}
       />
+      {/* Review W2 `M4`: lối gọn TỪNG thiếu nhãn cho bộ chọn ngôn ngữ (khung giữa có) — hai lối
+          vào cùng một việc mà một lối không đọc được là sót, không phải chủ ý. */}
+      <label className="ch__nap-nhan" htmlFor="ch-nap-lang">ngôn ngữ</label>
       <ChonLang id="ch-nap-lang" lang={lang} onLang={datLang} className="ch__nap-lang" />
+      {/* `M3`: lượt chọn bị BỎ QUA phải được NÓI RA, không được im lặng. */}
+      {boQua !== null ? (
+        <p className="ch__nap-bo-qua" data-testid="ch-nap-bo-qua">{boQua}</p>
+      ) : null}
       {dangNap ? <p className="ch__nap-cho">đang nạp…</p> : null}
       <KetQuaNapList ketQua={ketQua} />
     </div>

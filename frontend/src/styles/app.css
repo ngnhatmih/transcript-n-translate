@@ -1277,7 +1277,9 @@ body {
 
 .nap__chon-tam,
 .nap__cho,
-.ch__nap-cho {
+.ch__nap-cho,
+.nap__bo-qua,
+.ch__nap-bo-qua {
   margin: 0;
   font-family: var(--font-mono);
   font-size: var(--fs-num);
@@ -1303,6 +1305,21 @@ body {
 
 .nap__kq--loi {
   color: var(--fault);
+}
+
+/* ⚠️ NỢ Task 4/W1 — ĐÓNG KÈM Ở ĐÂY (vòng sửa W2 #1, `M4`). SÁU lớp của vùng KÊNH (`.ch`,
+   `.ch__danh-sach`, `.ch__dong`, `.ch__rong`, `.ch__loi`, `.ch__cho`) có **0 luật** trong tệp này
+   (đo được: `Select-String -SimpleMatch` = 0 cho cả sáu; so sánh `.ch__item` = 3, `.ch__nap` = 9).
+   Đây là nợ TỪ TRƯỚC W2, không thuộc diff của W2 — nhưng W2 đã chạm `ChannelZone.tsx`, nên đóng
+   phần RẺ NHẤT và RÕ NHẤT ngay đây: `<ul class="ch__danh-sach">` là một danh sách có THẬT, và
+   không được reset `list-style`/`padding` thì trình duyệt vẽ DẤU ĐẦU DÒNG + thụt lề mặc định.
+   ⚠️ NĂM lớp còn lại (`.ch`, `.ch__dong`, `.ch__rong`, `.ch__loi`, `.ch__cho`) VẪN chưa có luật
+   ⇒ khai là nợ, và **chỉ ẢNH chụp trong trình duyệt thật mới xác nhận được hình thức** (jsdom
+   không có layout). */
+.ch__danh-sach {
+  margin: 0;
+  padding: 0;
+  list-style: none;
 }
 
 /* LỐI NẠP GỌN Ở VÙNG KÊNH (§12.2 — tệp thứ 2..N): MỘT hàng, ngay TRÊN danh sách kênh, và nó

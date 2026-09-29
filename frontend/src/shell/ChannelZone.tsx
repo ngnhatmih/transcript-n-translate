@@ -165,7 +165,7 @@ export function ChannelZone({
     return (
       <div className="ch">
         {napGon}
-        <p className="ch__rong">chưa có kênh nào — nạp liệu ở màn hình Biên tập</p>
+        <p className="ch__rong">chưa có kênh nào — nạp tệp ở ô trên</p>
       </div>
     );
   }
