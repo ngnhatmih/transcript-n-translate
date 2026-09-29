@@ -1,22 +1,29 @@
 /**
  * T1 §A — do duong CRASH cua `dev-server.mjs` (`ERR_HTTP_HEADERS_SENT`, EVIDENCE §7).
  *
- * ## Trang thai DO DUOC (khong phai suy luan)
+ * ## Trang thai DO DUOC (khong phai suy luan) — BAN DA SUA O VONG SUA 1 (`I1`)
  *
- * Bon kich ban tan cong TCP that (RST sau header, chunked dut giua, 101 upgrade roi chet,
- * client huy giua body) tren **blob goc** `ccb4480` deu cho `headersSent=false` trong handler
- * `proxied.on("error")` ⇒ `writeHead(502)` KHONG nem, tien trinh KHONG thoat. (Chi tiet o bao cao
- * Task 12, muc T1.) Nghia la: duong crash la MOT CUA SO — backend phai chet DUNG LUC handler lo
- * hong chay, SAU khi header da gui va TRUOC khi response ket thuc.
+ * 🔴 **CAU CU O DAY SAI, VA NO NAM TRONG MA.** Ban truoc viet: *"Bon kich ban tan cong TCP that …
+ * deu cho `headersSent=false` ⇒ tien trinh KHONG thoat. Nghia la: duong crash la MOT CUA SO"* — va
+ * ket luan do bi khang dinh thanh *"KHONG tai lap duoc tu ngoai bang TCP"*. **Sai.** Cau dung:
  *
- * ⇒ Tep nay do ca HAI che do, va che do thu hai la MOT PHEP KICH CO CHU:
+ * > *"Loi `:97` **TAI LAP DUOC TU NGOAI BANG TCP THAT — TAT DINH 3/3 luot** khi upstream dang giu
+ * > **mot response DAI (SSE)** ma **tien trinh backend chet**: `dev-server` goc thoat `EXIT=1` voi
+ * > `ERR_HTTP_HEADERS_SENT` tai `:97`. **KHONG** tai lap duoc bang bon hinh dang **request/response
+ * > NGAN** (RST sau header, chunked dut, 101 roi chet, client huy giua body) — vi tren Node 24 mot
+ * > response ngan bi huy **khong** lam `ClientRequest` phat `'error'`; va `res.socket.destroy()`
+ * > phia server **cung khong**. App that **luon** co mot SSE dang mo (`App.useJobStream`), nen
+ * > duong crash la duong THAT, khong phai mot cua so ly thuyet."*
  *
- *  - **A1 (KHONG kich)**: backend gia bi cat giua duong theo kich ban TCP that ⇒ dev-server phai
- *    SONG (day la ve chong hoi quy: mot ban va "nem loi ra ngoai" cung lam chet tien trinh).
- *  - **A2 (CO kich)**: dev-server duoc chay voi mot CONG DIEU KHIEN RIENG (chi mo khi dat
- *    `PHUDE_DEBUG_PORT`) ⇒ bai test ra lenh lam handler loi chay DUNG LUC `headersSent` da true.
- *    Do la cua so ma §7 mo ta. Tren blob goc: `ERR_HTTP_HEADERS_SENT` ⇒ `exit 1`. Sau ban va:
- *    `res.destroy()` ⇒ tien trinh SONG, khong mot dong `ERR_HTTP_HEADERS_SENT` nao.
+ * ⇒ He qua len BAI TEST (day la ly do `A1b` ton tai): bai "TCP that" cu (`A1`) chi dung
+ * **request/response NGAN**, nen no **KHONG thi hanh duong crash** — do duoc: mutant
+ * `M1b-HANDLER-GOC` (tra nguyen khoi handler GOC) van de `A1` **XANH**. `A1b` dung dung kich ban
+ * cua EVIDENCE §7 (giu response DAI roi **GIET TIEN TRINH** backend) ⇒ no **giet duoc** ban goc va
+ * **xanh** ban va.
+ *
+ * ⚠️ Vi vay `A0` (doc ma nguon) **khong con la bai duy nhat** bat duoc `M1b`; no o lai nhu mot
+ * khang dinh bo sung ve hinh dang khoi handler (va vi mot phep do hanh vi khong thay the duoc mot
+ * khang dinh ve CAU TRUC cua ban va).
  *
  * 🔴 `PHUDE_DEBUG_PORT` KHONG dat thi khong co cong nao duoc mo — khong co be mat moi trong san pham.
  * 🔴 Cong dev-server KHONG cau hinh duoc (CORS cua backend chi whitelist 3100): tep nay dung DUNG
@@ -35,6 +42,8 @@ import { banCoCongDieuKhien } from "./dev-server-copy.mjs";
 
 const FRONTEND_DIR = fileURLToPath(new URL("../", import.meta.url));
 const DEV_SERVER = `${FRONTEND_DIR}dev-server.mjs`;
+/** Backend GIA co mot route SSE — mot TIEN TRINH rieng de `kill()` duoc (xem `A1b`). */
+const SSE_BACKEND = `${FRONTEND_DIR}test/t12-sse-backend.mjs`;
 
 /** Cong dev-server — CUNG, khong cau hinh duoc (CORS cua backend chi whitelist 3100). */
 const DEV_PORT = 3100;
@@ -251,6 +260,147 @@ describe("dev-server.mjs: khong chet khi backend mat, va cong backend cau hinh d
       await dung(child);
       await new Promise((r) => gia.server.close(r));
     }
+  });
+
+  it("A1b) TCP THAT: upstream giu mot response DAI (SSE) roi CHET ⇒ ban GOC thoat (exit 1), ban va SONG", async () => {
+    if (coCong) {
+      assert.ok(true, `cong ${DEV_PORT} dang bi chiem ⇒ bo qua phep do (khong ket luan gi)`);
+      return;
+    }
+    // 🔴 VI SAO BAI NAY TON TAI (`I1`, vong sua 1): `A1` chi dung **request/response NGAN**, va do
+    // duoc la mutant `M1b-HANDLER-GOC` (tra nguyen khoi handler GOC) van de `A1` **XANH** — tuc
+    // bai "TCP that" cu **KHONG thi hanh duong crash**. Duong crash that (EVIDENCE §7) can DUNG HAI
+    // thu, va ca hai deu khong co trong `A1`:
+    //   1. upstream dang giu **mot response DAI** (SSE) ⇒ `res.headersSent === true` tren proxy;
+    //   2. **TIEN TRINH** backend CHET (khong phai socket bi huy) ⇒ `ClientRequest` moi phat `'error'`.
+    //
+    // ⇒ Phep do: backend SSE la mot TIEN TRINH RIENG (giet duoc), va bai chay HAI luot:
+    //    - `san-pham` = **CHINH `dev-server.mjs`** (khong ban sao) ⇒ khang dinh ve SAN PHAM, va la
+    //      thu lam mutant `M1b-HANDLER-GOC` DO vi dung no do chinh tep san pham;
+    //    - `goc` = ban sao co khoi handler GOC (khong guard, khong `try/catch`) ⇒ **doi chung** rang
+    //      cua so §7 CO THAT (neu khong co ve nay thi "san pham song" khong chung minh duoc gi).
+    // ⚠️ `PHUDE_DEBUG_PORT` KHONG duoc dat o day: khong mo cong dieu khien nao — day la TCP THAT.
+    const nuotBody = (r) => {
+      if (r === null || r.body === null || typeof r.body.getReader !== "function") return;
+      const doc = r.body.getReader();
+      const vong = async () => {
+        try {
+          for (;;) {
+            const { done } = await doc.read();
+            if (done) return;
+          }
+        } catch {
+          // Backend chet giua duong ⇒ loi o day la KET QUA CAN DO, khong phai loi cua bai test.
+        }
+      };
+      vong();
+    };
+
+    const chayMotLuot = async (kieu) => {
+      let bePort = null;
+      const beVet = [];
+      const be = spawn(process.execPath, [SSE_BACKEND], {
+        cwd: FRONTEND_DIR,
+        stdio: ["ignore", "pipe", "pipe"],
+        windowsHide: true,
+        env: { ...process.env, PHUDE_T12_SSE_PORT: "0" },
+      });
+      be.stdout.on("data", (b) => {
+        const m = /PORT=(\d+)/.exec(String(b));
+        if (m !== null) bePort = Number(m[1]);
+      });
+      be.stderr.on("data", (b) => beVet.push(String(b)));
+      const dungBe = async () => {
+        if (be.exitCode === null && be.signalCode === null) be.kill();
+        await choToi(() => be.exitCode !== null || be.signalCode !== null, 8000, 50);
+      };
+
+      try {
+        assert.ok(
+          await choToi(() => bePort !== null, 10_000, 50),
+          `backend SSE khong in ra PORT=; stderr: ${beVet.join("").slice(0, 300)}`,
+        );
+
+        const dich = kieu === "san-pham" ? DEV_SERVER : `${FRONTEND_DIR}dev-server.${kieu}.mjs`;
+        if (kieu !== "san-pham") banCoCongDieuKhien(FRONTEND_DIR, dich, kieu);
+        const child = spawn(process.execPath, [dich], {
+          cwd: FRONTEND_DIR,
+          stdio: ["ignore", "ignore", "pipe"],
+          windowsHide: true,
+          env: { ...process.env, PHUDE_BACKEND_PORT: String(bePort) },
+        });
+        const vet = [];
+        child.stderr.on("data", (b) => vet.push(String(b)));
+        try {
+          const len = await choToi(async () => {
+            if (child.exitCode !== null) return true;
+            const r = await fetch(`http://127.0.0.1:${DEV_PORT}/api/status`, {
+              signal: AbortSignal.timeout(2000),
+            });
+            return r.status === 200;
+          }, 40_000);
+          assert.ok(len, `luot ${kieu} khong len; stderr: ${vet.join("").slice(0, 400)}`);
+
+          // Mo mot response DAI qua proxy. `fetch` resolve khi HEADER toi ⇒ proxy DA gui header.
+          const r = await fetch(`http://127.0.0.1:${DEV_PORT}/api/sse`, {
+            signal: AbortSignal.timeout(20_000),
+          }).catch(() => null);
+          assert.ok(
+            r !== null && r.status === 200,
+            `khong mo duoc SSE qua proxy o ${DEV_PORT} (backend ${bePort})`,
+          );
+          nuotBody(r);
+          await new Promise((res) => setTimeout(res, 300));
+
+          // 🔴 GIET TIEN TRINH UPSTREAM trong khi response CON MO — day la cua so §7.
+          be.kill();
+          await choToi(() => be.exitCode !== null || be.signalCode !== null, 8000, 50);
+          await new Promise((res) => setTimeout(res, 1500));
+
+          return {
+            kieu,
+            exit: child.exitCode,
+            coLoiHeader: vet.join("").includes("ERR_HTTP_HEADERS_SENT"),
+            stderr: vet.join("").slice(0, 500),
+          };
+        } finally {
+          await dung(child);
+        }
+      } finally {
+        await dungBe();
+      }
+    };
+
+    // 🔴 LUOT 1 — **CHINH TEP SAN PHAM** (`dev-server.mjs`) phai SONG. Day la khang dinh lam mutant
+    //    `M1b-HANDLER-GOC` (tra nguyen khoi handler GOC — khong guard, khong `try/catch`) **DO**:
+    //    do duoc tren ban GOC, cung kich ban nay cho `exit 1` + `ERR_HTTP_HEADERS_SENT`.
+    const sanPham = await chayMotLuot("san-pham");
+    assert.equal(
+      sanPham.exit,
+      null,
+      `SAN PHAM (\`dev-server.mjs\`) THOAT (exit ${sanPham.exit}) khi upstream chet giua mot response `
+        + "DAI. Day chinh la loi o dong 97 cua EVIDENCE §7 (ERR_HTTP_HEADERS_SENT). "
+        + `stderr: ${sanPham.stderr}`,
+    );
+    assert.equal(
+      sanPham.coLoiHeader,
+      false,
+      `san pham khong duoc co ERR_HTTP_HEADERS_SENT; stderr: ${sanPham.stderr}`,
+    );
+    // 🔴 LUOT 2 — DOI CHUNG: ban GOC (handler khong guard, khong `try/catch`) PHAI CHET. Khong co
+    //    ve nay thi "san pham song" khong chung minh duoc gi (co the kich ban nay khong bao gio
+    //    cham duong crash).
+    const goc = await chayMotLuot("goc");
+    assert.notEqual(
+      goc.exit,
+      null,
+      "ban GOC (handler khong guard) phai THOAT khi upstream chet giua mot response DAI — "
+        + `neu khong, phep do KHONG trung cua so §7. stderr: ${goc.stderr}`,
+    );
+    assert.ok(
+      goc.coLoiHeader,
+      `ban GOC phai nem ERR_HTTP_HEADERS_SENT; stderr: ${goc.stderr}`,
+    );
   });
 
   it("A0) TRUOC/SAU: `writeHead(502)` cua proxy PHAI nam sau mot lan kiem `headersSent`", () => {
