@@ -1,0 +1,41 @@
+{
+  "url": "http://127.0.0.1:3100",
+  "width": 1440,
+  "height": 900,
+  "ghiChu": "T7 — do CAI GIA cua ban va D4: `currentSegment` duoc them vao tap GHIM cua danh sach ao hoa (EditScreen.windowFor). Khi hai chi so GHIM xa nhau, cua so phai render TOAN BO khoang giua. Ke hoach nay do: so hang CO MAT trong DOM, va thoi gian phan hoi khi moc cach xa ~500 doan. Chay voi PHUDE_E2E_DOAN=600 (mac dinh).",
+  "steps": [
+    { "do": "nav", "url": "http://127.0.0.1:3100" },
+    { "do": "waitText", "text": "ban-ghi-dai-600.wav", "timeout": 30000 },
+
+    { "do": "clickChu", "chon": ".ch__item", "text": "ban-ghi-dai-600.wav" },
+    { "do": "waitText", "text": "doan 1", "timeout": 30000 },
+
+    { "do": "eval", "js": "document.querySelectorAll('.ed__item').length", "log": "T7-A so hang trong DOM khi CHUA ghim gi (ky vong ~ viewportH/rowH + 2*overscan)" },
+    { "do": "eval", "js": "(() => { const k = document.querySelector('.ed__khung'); return JSON.stringify({ clientHeight: k ? k.clientHeight : null, scrollHeight: k ? k.scrollHeight : null, ROW_H: 44, VIEWPORT_H: 480 }); })()", "log": "T7-A kich thuoc khung cuon" },
+
+    { "do": "eval", "js": "(() => { const b = document.querySelector('.ed__chu'); if (b === null) return 'khong thay'; b.click(); return 'da mo o sua dong dau'; })()", "log": "T7-B mo o sua o DONG DAU (editingSegment = 1)" },
+    { "do": "waitFor", "selector": "[data-testid=o-sua]", "timeout": 10000 },
+    { "do": "eval", "js": "document.querySelectorAll('.ed__item').length", "log": "T7-B so hang khi ghim 1 dong (ky vong ~22)" },
+    { "do": "shot", "name": "10-t7-ghim-mot-dong" },
+
+    { "do": "eval", "js": "(() => { const k = document.querySelector('.ed__khung'); k.scrollTop = 44 * 480; return 'da cuon toi ~doan 481'; })()", "log": "T7-C cuon xuong ~doan 481 (moc dang doc doi theo su kien scroll)" },
+    { "do": "cho", "chon": "[data-i]", "timeout": 5000 },
+    { "do": "eval", "js": "document.querySelectorAll('.ed__item').length", "log": "T7-C so hang sau khi cuon (chua co ghim thu hai)" },
+
+    { "do": "eval", "js": "(() => { const k = document.querySelector('.ed__khung'); const cu = k.scrollTop; const ds = [...document.querySelectorAll('.ed__chu')]; const cuoi = ds[ds.length - 1]; if (cuoi === undefined) return 'khong thay dong nao'; const t0 = performance.now(); cuoi.click(); requestAnimationFrame(() => requestAnimationFrame(() => { window.__t7 = { cu, t1: performance.now() - t0, soHang: document.querySelectorAll('.ed__item').length }; })); return 'da bam dong cuoi trong DOM (truoc khi render lai)'; })()", "log": "T7-D bam mot dong XA (doan ~481+) khi dang sua doan 1" },
+    { "do": "cho", "chon": "[data-testid=o-sua]", "timeout": 5000 },
+    { "do": "eval", "js": "JSON.stringify(window.__t7 ?? null)", "log": "T7-D thoi gian phan hoi (2 khung hinh) + so hang" },
+    { "do": "eval", "js": "document.querySelectorAll('.ed__item').length", "log": "T7-D SO HANG CO MAT TRONG DOM khi hai moc CACH XA (~480 doan) — day la CAI GIA cua D4" },
+    { "do": "eval", "js": "(() => { const d = document.querySelector('.ed__dem-dau'); return d === null ? 'khong thay' : getComputedStyle(d).height; })()", "log": "T7-D chieu cao dem dau (start * rowH)" },
+    { "do": "shot", "name": "11-t7-hai-moc-cach-xa" },
+
+    { "do": "eval", "js": "(() => { const k = document.querySelector('.ed__khung'); const t0 = performance.now(); k.scrollTop = k.scrollHeight; return 'da cuon xuong day'; })()", "log": "T7-E cuon xuong day (khong doi ghim)" },
+    { "do": "cho", "chon": "[data-i]", "timeout": 5000 },
+    { "do": "eval", "js": "document.querySelectorAll('.ed__item').length", "log": "T7-E so hang o day danh sach" },
+    { "do": "shot", "name": "12-t7-cuon-day" },
+
+    { "do": "eval", "js": "(() => { const ds = [...document.querySelectorAll('.ed__item')]; return JSON.stringify({ dau: ds[0] ? ds[0].getAttribute('data-i') : null, cuoi: ds[ds.length - 1] ? ds[ds.length - 1].getAttribute('data-i') : null, so: ds.length }); })()", "log": "T7-F khoang `data-i` THAT trong DOM" },
+    { "do": "eval", "js": "document.querySelectorAll('.ed__item.is-current').length", "log": "T7-F so dong dang duoc chon co mat trong DOM (menh de DOM cua D4)" },
+    { "do": "eval", "js": "document.querySelectorAll('.ed__item.is-editing').length", "log": "T7-F so dong dang sua co mat trong DOM" }
+  ]
+}

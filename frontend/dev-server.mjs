@@ -20,7 +20,18 @@ import { extname, normalize, sep } from "node:path";
 import { watch } from "rollup";
 
 const PORT = 3100;
-const BACKEND = { host: "127.0.0.1", port: 8620 };
+
+// Cong BACKEND — CAU HINH DUOC bang env, MAC DINH giu nguyen 8620.
+//
+// Vi sao can: tang Chrome that (Task 12) phai chay tren mot backend GIEO DB o cong rieng,
+// vi 8620/8621 la cong CO CHU cua `src/api/contract.test.ts` (no tu spawn backend o 8620 va
+// dua vao DB repo RONG — ERRATA #46 muc 4).
+//
+// 🔴 CHI cong backend duoc cau hinh. Cong dev-server (3100) VAN CUNG, va do la MOT QUYET DINH:
+// backend chi whitelist CORS `http://localhost:3100` va `http://127.0.0.1:3100`, nen doi cong
+// dev-server la hong CORS — ma sua CORS thi phai cham `backend/` (bi cam trong task frontend).
+const BACKEND_PORT = Number(process.env.PHUDE_BACKEND_PORT ?? 8620);
+const BACKEND = { host: "127.0.0.1", port: BACKEND_PORT };
 const ROOT = new URL("./dist/", import.meta.url);
 const TYPES = {
   ".html": "text/html; charset=utf-8",
@@ -93,8 +104,27 @@ const server = createServer(async (req, res) => {
         up.pipe(res);
       },
     );
-    proxied.on("error", () => {
-      res.writeHead(502, { "content-type": TYPES[".json"] }).end('{"error":"backend 8620 khong truy cap duoc"}');
+    // LOI UPSTREAM — KHONG duoc nem ra ngoai.
+    //
+    // 🔴 Do duoc (EVIDENCE §7): neu handler nay goi `writeHead` SAU khi header da gui (upstream
+    // gui header + nua body roi bi cat), `node:http` nem `ERR_HTTP_HEADERS_SENT` NGAY TRONG
+    // handler ⇒ mot loi `error` khong ai bat ⇒ CA TIEN TRINH dev-server thoat (`exit 1`).
+    // Nguoi dung chi thay app bien mat, khong ro ly do. Vi vay phai re NHANH theo `headersSent`:
+    //   - da gui header ⇒ chi con duong dung: cat socket (`res.destroy()`), khong viet them gi;
+    //   - chua gui ⇒ 502 doc duoc, va cau neu DUNG cong dang tro (khong hard-code 8620).
+    proxied.on("error", (error) => {
+      if (res.headersSent) {
+        res.destroy();
+        return;
+      }
+      try {
+        res.writeHead(502, { "content-type": TYPES[".json"] }).end(
+          JSON.stringify({ error: `backend ${BACKEND.host}:${BACKEND.port} khong truy cap duoc: ${error.message}` }),
+        );
+      } catch {
+        // Chan CUOI: mot loi khi tra loi khong bao gio duoc phep giet ca tien trinh.
+        res.destroy();
+      }
     });
     req.pipe(proxied);
     return;

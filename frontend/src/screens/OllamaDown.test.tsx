@@ -15,11 +15,15 @@
  * Neu man chi hien voi `down` thi tren may nay man KHONG BAO GIO hien (plan dong 2737).
  * ⇒ Ba bai, ba trang thai; va `unknown` phai noi "chua do duoc", KHONG duoc bia "da tat".
  *
- * Vi sao jsdom chu khong Playwright: trinh duyet THAT BAT KHA o moi truong nay
- * (Chromium chet o `FATAL:mojo ... platform_channel.cc:187 ... Access is denied (0x5)`
- * vi Mojo dung NAMED PIPE — ERRATA #5 muc 3). jsdom KHONG phai trinh duyet: KHONG layout,
- * KHONG CSS that. ⇒ Tep nay do duoc HANH VI (panel co hien khong, chu nao, chu nao bi
- * loai), KHONG do duoc HINH (van cheo co ve ra khong, cham do o dau, panel cao bao nhieu).
+ * Vi sao jsdom: jsdom KHONG cho bang chung HINH THUC — no KHONG co layout, KHONG co CSS that.
+ * ⇒ Tep nay do duoc HANH VI (panel co hien khong, chu nao, chu nao bi loai), KHONG do duoc
+ * HINH (van cheo co ve ra khong, cham do o dau, panel cao bao nhieu).
+ *
+ * ⚠️ DINH CHINH (Task 12, ERRATA #40 + #46 muc 5): cau cu o day noi *"trinh duyet THAT BAT KHA
+ * o moi truong nay (Chromium chet o Mojo named pipe)"* — **SAI vi QUA RONG**. Menh de dung la:
+ * *"Chromium khong mo duoc DƯỚI CÁC CHẾ ĐỘ SANDBOX HẠN CHẾ"*. ⇒ **Bang chung HINH THUC nam o
+ * tang Chrome that: `frontend/e2e/`** (`e2e/plans/bon-man.json` chup panel §4.8 voi DU LIEU
+ * THAT va ghi lai `data-ollama`). ⚠️ Tang do CHUA duoc chay trong luot Task 12 (xem bao cao).
  *
  * LUAT DOM (ERRATA #9 muc 1/6) — tep nay TU CHUA va khong dua vao thu tu:
  *   - MOI hook dat/tra global nam TRONG `describe()`: duoi `--test-isolation=none`, hook

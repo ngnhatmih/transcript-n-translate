@@ -2,11 +2,17 @@
  * Test `<EditScreen/>` THAT trong jsdom (spec UI §4.1) — danh sach doan AO HOA,
  * dong dang sua duoc GHIM, doan `suspect` co VAN + LY DO.
  *
- * Vi sao jsdom chu khong Playwright: trinh duyet THAT BAT KHA o moi truong nay
- * (Chromium chet o `FATAL:mojo\...\platform_channel.cc:187 ... Access is denied (0x5)`
- * vi Mojo dung NAMED PIPE — ERRATA #5 muc 3). jsdom KHONG phai trinh duyet: KHONG
- * layout, KHONG CSS that. ⇒ Tep nay do duoc HANH VI (cai gi nam trong DOM, lop nao,
- * chu nao), KHONG do duoc HINH (van cheo co hien ra khong, hang cao bao nhieu).
+ * Vi sao jsdom: jsdom KHONG cho bang chung HINH THUC — no KHONG co layout, KHONG co CSS
+ * that. ⇒ Tep nay do duoc HANH VI (cai gi nam trong DOM, lop nao, chu nao), KHONG do duoc
+ * HINH (van cheo co hien ra khong, hang cao bao nhieu).
+ *
+ * ⚠️ DINH CHINH (Task 12, ERRATA #40 + #46 muc 5): cau cu o day noi *"trinh duyet THAT BAT KHA
+ * o moi truong nay (Chromium chet o Mojo named pipe)"* — **SAI vi QUA RONG**. Menh de dung la:
+ * *"Chromium khong mo duoc DƯỚI CÁC CHẾ ĐỘ SANDBOX HẠN CHẾ"*; voi quyen rong thi
+ * `chrome --headless=new --dump-dom about:blank` cho **EXIT=0**, va Chrome that da duoc dung
+ * de do DOM, do computed style va phat BAN PHIM THAT nhieu lan (EVIDENCE §10–§13).
+ * ⇒ **Bang chung HINH THUC nam o tang Chrome that: `frontend/e2e/`** (docblock `EVIDENCE.md`,
+ * ERRATA #47 muc 5/6). ⚠️ Tang do CHUA duoc chay trong luot Task 12 (xem bao cao).
  *
  * LUAT DOM (ERRATA #9 muc 1/6) — tep nay TU CHUA va khong dua vao thu tu:
  *   - MOI hook dat/tra global nam TRONG `describe()`: duoi `--test-isolation=none`, hook

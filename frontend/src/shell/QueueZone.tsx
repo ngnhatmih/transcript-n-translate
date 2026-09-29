@@ -23,8 +23,11 @@
  *     (effect theo `jobs`) nên một lượt chạy MỚI quay lại đúng trạng thái cũ **không** làm câu cũ
  *     sống lại (`I3` của review D2). Bản đồ `jobs` vẫn là của `useJobStream` — vùng này chỉ ĐỌC nó.
  *
- * ⚠️ `ponytail:` TRẦN — BỐ CỤC của một hàng (nút và câu trạng thái nằm ở đâu) **chỉ ảnh chụp trong
- * trình duyệt thật mới xác nhận được**: jsdom không có layout. Luật CSS của vùng này (`.q*`) NAY
+ * ⚠️ `ponytail:` TRẦN — BỐ CỤC của một hàng (nút và câu trạng thái nằm ở đâu) **chỉ đo được
+ * bằng ẢNH hoặc `getComputedStyle` trong Chrome thật** (`frontend/e2e/plans/bon-man.json`):
+ * jsdom không có layout. (ĐÍNH CHÍNH Task 12, ERRATA #40: câu cũ *"chỉ ảnh chụp trong trình
+ * duyệt thật mới xác nhận được"* ngụ ý trình duyệt thật BẤT KHẢ — SAI; nó chỉ bất khả DƯỚI
+ * CÁC CHẾ ĐỘ SANDBOX HẠN CHẾ. ⚠️ Tầng đó CHƯA chạy trong lượt Task 12.) Luật CSS của vùng này (`.q*`) NAY
  * ĐÃ CÓ trong `app.css` (reset `<ul>` + MỘT hàng `flex`, `I1` của review D2) và có bài ghim KHAI BÁO
  * + QUAN HỆ hai chiều ở `QueueZone.test.tsx`. `.q__item` **KHÔNG** khai `grid-template-*` (cố ý
  * `flex`): một lưới track CỐ ĐỊNH thì thêm con thứ N là tái sinh ERRATA #31 mục 1.

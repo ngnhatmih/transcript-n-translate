@@ -4,10 +4,16 @@
  *
  * ## Ba thu tep nay KHONG do duoc — khai ra, khong che
  *
- *  1. **Trinh duyet THAT la BAT KHA** (ERRATA #5 muc 3: Chromium chet o Mojo named
- *     pipe) ⇒ **"seek trong trinh duyet that" CHUA CHUNG MINH**. Bang chung HTTP
+ *  1. **"seek trong trinh duyet that" CHUA CHUNG MINH trong tep nay.** Bang chung HTTP
  *     `Range` nam o BAO CAO task (backend that + DB scratch + tep media that + curl
- *     `Range: bytes=0-99`), khong nam o tep nay.
+ *     `Range: bytes=0-99`).
+ *     ⚠️ **DINH CHINH (Task 12, ERRATA #40 + #46 muc 5):** cau cu o day noi *"Trinh duyet THAT
+ *     la BAT KHA (Chromium chet o Mojo named pipe)"* — **SAI vi QUA RONG**. Menh de dung la
+ *     *"Chromium khong mo duoc DƯỚI CÁC CHẾ ĐỘ SANDBOX HẠN CHẾ"*, va Chrome that da duoc dung
+ *     nhieu lan de do DOM + phat BAN PHIM THAT (EVIDENCE §10–§13). ⇒ Bang chung HINH THUC nam
+ *     o tang Chrome that `frontend/e2e/`. ⚠️ **Rieng "seek" thi tang do CUNG CHUA do**: khong
+ *     ke hoach nao trong `e2e/plans/` do `currentTime`/`Range` trong Chrome — day la mot LO HO
+ *     CON LAI, khong phai mot viec da xong.
  *  2. **jsdom KHONG giai ma media.** Do duoc ngay trong tep nay (bai "GIOI HAN CUA
  *     JSDOM"): `HTMLMediaElement.prototype.play`/`pause` KHONG duoc hien thuc — chung
  *     log `Not implemented: HTMLMediaElement's play() method` va `play()` tra

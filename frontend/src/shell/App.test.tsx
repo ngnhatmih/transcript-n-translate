@@ -3,11 +3,14 @@
  * `node:http` THAT trong tien trinh (`listen(0)` xin cong trong — khong giam cong
  * cua ai). Khong mock module nao.
  *
- * Vi sao khong phai Playwright: trinh duyet THAT la BAT KHA o moi truong nay —
- * Chromium chet o `FATAL:mojo\public\cpp\platform_channel.cc:187 ... Access is
- * denied (0x5)` vi Mojo dung NAMED PIPE, ban tai ve va Edge/Chrome co san deu vay
- * (ERRATA #5 muc 3). jsdom KHONG phai trinh duyet: khong layout, khong CSS that.
+ * Vi sao jsdom: jsdom KHONG cho bang chung HINH THUC — no khong co layout, khong co CSS that.
  * ⇒ "khong co loi console" la dieu DUY NHAT tep nay do duoc ve phia hien thi.
+ *
+ * ⚠️ DINH CHINH (Task 12, ERRATA #40 + #46 muc 5): cau cu o day noi *"trinh duyet THAT la BAT
+ * KHA o moi truong nay"* — **SAI vi QUA RONG**. Menh de dung la: *"Chromium khong mo duoc
+ * DƯỚI CÁC CHẾ ĐỘ SANDBOX HẠN CHẾ"*; voi quyen rong thi Chrome chay duoc (do duoc).
+ * ⇒ **Bang chung HINH THUC nam o tang Chrome that: `frontend/e2e/`.** ⚠️ Tang do CHUA duoc
+ * chay trong luot Task 12 (xem bao cao).
  *
  * LUAT DOM (ERRATA #9 muc 1/6) — tep nay tu chua va khong dua vao thu tu:
  *   - MOI hook dat/tra global nam TRONG `describe()`: duoi `--test-isolation=none`,

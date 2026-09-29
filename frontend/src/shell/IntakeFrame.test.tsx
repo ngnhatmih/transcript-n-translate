@@ -17,8 +17,11 @@
  * `lang` tới dưới dạng trường FORM, câu 422 nguyên văn của backend — nằm ở `src/shell/App.test.tsx`
  * (server `node:http` thật trong tiến trình, `fetch` thật).
  *
- * ⚠️ jsdom KHÔNG phải trình duyệt: nó không có layout/CSS thật, nên "khung kẻ nét đứt" ở đây chỉ
- * được chứng minh bằng **VĂN BẢN LUẬT CSS** + quan hệ luật↔class, KHÔNG phải bằng mắt.
+ * ⚠️ jsdom KHÔNG cho bằng chứng HÌNH THỨC: nó không có layout/CSS thật, nên "khung kẻ nét đứt" ở
+ * đây chỉ được chứng minh bằng **VĂN BẢN LUẬT CSS** + quan hệ luật↔class, KHÔNG phải bằng mắt.
+ * **Bằng chứng hình thức nằm ở tầng Chrome thật: `frontend/e2e/`** (ĐÍNH CHÍNH Task 12, ERRATA
+ * #40 — mệnh đề "trình duyệt thật bất khả" trước đây đã SAI vì QUÁ RỘNG). ⚠️ Tầng đó CHƯA chạy
+ * trong lượt Task 12.
  *
  * LUAT DOM (ERRATA #9 muc 1/6): tep nay TU CHUA; hook dat/tra global nam TRONG `describe()`;
  * `console.error`/`console.warn` duoc tra lai trong `after`; KHONG dua node DOM song vao `assert`

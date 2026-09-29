@@ -590,6 +590,13 @@ const SEED_API = `${SEED_ORIGIN}/api`;
 /**
  * Chương trình gieo DB scratch — chạy bằng venv của backend, KHÔNG cần model, GPU hay mạng.
  *
+ * 🔴 `SEED_PY` LẶP với `src/screens/GlossaryScreen.test.tsx` (T6 của Task 12): **QUYẾT ĐỊNH LÀ ĐỂ
+ * LẶP**, không phải bỏ sót. Hai bản gieo HAI THỨ KHÁC NHAU (bản này: 3 đoạn + 1 bản dịch `opus-mt`
+ * để đo shape `cps`; bản kia: 5 transcript + 7 thuật ngữ để đo `affectedPreview`), và luật "mỗi
+ * file DOM tự chứa" cấm dùng chung trạng thái. Gộp vào một module sẽ biến khối HỢP ĐỒNG này thành
+ * phụ thuộc của một module khác — đổi fixture cho màn Thuật ngữ có thể làm khối hợp đồng ĐỎ hoặc
+ * (tệ hơn) XANH mà không ai thấy. ⇒ Cái giá là ~30 dòng lặp, VÀ nó phải được khai (dòng này).
+ *
  * Gieo bằng chính `SqliteRepos` (không viết SQL tay) để ràng buộc schema được giữ, đúng cách
  * mà Task 12 đã được giao. Hai đoạn được chọn để **cả hai nhánh** của route chi tiết đều chạy:
  * `i=2` có cửa sổ 0 ở CẢ nguồn lẫn bản dịch ⇒ `cps: null` (KHÁC `0.0`), còn `i=3` dịch 60 ký

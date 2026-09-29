@@ -15,8 +15,9 @@
  *   - Nam bai dau di qua HTTP THAT (backend + DB gieo): bang thuật ngữ, chuoi
  *     `go -> affectedPreview -> so hien ra`, cau "chua duyet thi khong anh huong",
  *     hop dong THAM SO cua URL, va duong LƯU.
- *   - Bai cuoi chi DOC `app.css` (HINH THUC): mot test chi khang dinh `className`
- *     van XANH khi luat CSS bi xoa (ERRATA #15 muc 3, do duoc HAI CHIEU o Task 6).
+ *   - Bai cuoi chi DOC `app.css` (LUAT CSS, KHONG phai tang HINH): mot test chi khang
+ *     dinh `className` van XANH khi luat CSS bi xoa (ERRATA #15 muc 3, do duoc HAI CHIEU
+ *     o Task 6). ⇒ Tang HINH nam o `frontend/e2e/` — xem DINH CHINH o cuoi docblock nay.
  *
  * LUAT DOM (ERRATA #9 muc 1/6) — tep nay TU CHUA va khong dua vao thu tu:
  *   - MOI hook dat/tra global nam TRONG `describe()`: duoi `--test-isolation=none`,
@@ -25,6 +26,12 @@
  *   - `setupDom`/`teardownDom` cua CHINH tep nay; khong gia dinh jsdom/backend cua
  *     tep khac con song. Phan harness backend bi LAP voi `contract.test.ts` la CO Y:
  *     luat "moi file DOM tu chua" khong cho phep dung chung trang thai.
+ *   - 🔴 `SEED_PY` LAP voi `src/api/contract.test.ts` (T6 cua Task 12): **QUYET DINH LA DE LAP**,
+ *     khong phai bo sot. Hai ban gieo HAI THU KHAC NHAU (ban kia: 3 doan + 1 ban dich `opus-mt` de
+ *     do shape `cps`; ban nay: 5 transcript + 7 thuat ngu de do `affectedPreview`), va luat "moi
+ *     file DOM tu chua" cam dung chung trang thai. Gom vao mot module se bien mot tep test thanh
+ *     PHU THUOC cua mot module khac: doi fixture cho tep nay co the lam tep kia do sai ma khong ai
+ *     thay. ⇒ Cai gia la ~30 dong lap, VA no phai duoc khai (dong nay).
  *   - `console.error`/`console.warn` bi TAM THAY de bat tieng on va duoc TRA LAI
  *     trong `after` (chung cung la global: ERRATA #7 muc 3).
  *   - MOI khang dinh tren `textContent`/`className`/`getAttribute`/SO LUONG, KHONG
@@ -42,10 +49,15 @@
  * luot day du VON DA `EXIT=1` (hai bai `EMPTY_DB_MSG` do chu y) nen EXIT KHONG phai
  * kenh thong tin (ERRATA #11 muc 1).
  *
- * ⚠️ CHUA AI NHIN THAY MAN HINH NAY TRONG TRINH DUYET THAT. jsdom KHONG phai trinh
- * duyet: KHONG layout, KHONG CSS that. ⇒ Tep nay do HANH VI (cai gi nam trong DOM,
- * lop nao, chu nao, con so nao), KHONG do HINH (bang rong bao nhieu, le amber co
- * nhin thay khong, chip `✕ trong` co dung mau khong).
+ * ⚠️ Tep nay KHONG cho bang chung HINH THUC: jsdom KHONG co layout, KHONG co CSS that.
+ * ⇒ Tep nay do HANH VI (cai gi nam trong DOM, lop nao, chu nao, con so nao), KHONG do HINH
+ * (bang rong bao nhieu, le amber co nhin thay khong, chip `✕ trong` co dung mau khong).
+ *
+ * ⚠️ DINH CHINH (Task 12, ERRATA #40): cau cu *"CHUA AI NHIN THAY MAN HINH NAY TRONG TRINH
+ * DUYET THAT"* da HET DUNG — Chrome that da duoc dung nhieu lan (EVIDENCE §10–§13), va
+ * **bang chung HINH THUC nam o tang Chrome that: `frontend/e2e/`** (`plans/bon-man.json`
+ * chup man Thuat ngu + doc `[data-testid=o-thuat-ngu]`). ⚠️ Tang do CHUA duoc chay trong luot
+ * Task 12 ⇒ trong luot nay bang chung hinh thuc VAN CHUA CO (xem bao cao).
  */
 import { after, afterEach, before, beforeEach, describe, it } from "node:test";
 import assert from "node:assert/strict";

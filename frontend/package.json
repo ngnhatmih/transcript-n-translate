@@ -8,7 +8,9 @@
     "build": "tsc --noEmit && rollup -c",
     "typecheck": "tsc --noEmit",
     "test": "node --import ./test/swc-loader.mjs --test --test-isolation=none \"**/*.test.{ts,tsx,mjs,js}\"",
-    "e2e": "playwright test"
+    "e2e": "node e2e/session.mjs e2e/plans/bon-man.json --out e2e/anh",
+    "e2e:phim": "node e2e/session.mjs e2e/plans/phim-va-12-5.json --out e2e/anh",
+    "e2e:t7": "node e2e/session.mjs e2e/plans/ban-ghi-dai-t7.json --out e2e/anh"
   },
   "keywords": [],
   "author": "",

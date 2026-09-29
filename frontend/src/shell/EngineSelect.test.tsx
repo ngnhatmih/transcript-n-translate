@@ -6,11 +6,14 @@
  * `runtime`/`model_ref` o client (Global Constraints dong 25 + ERRATA #30 muc 4:
  * suy lai la tao NGUON SU THAT THU HAI cho cung mot dai luong).
  *
- * Vi sao jsdom chu khong Playwright: trinh duyet THAT BAT KHA o moi truong nay
- * (Chromium chet o `FATAL:mojo ... platform_channel.cc:187 ... Access is denied (0x5)`
- * vi Mojo dung NAMED PIPE — ERRATA #5 muc 3). jsdom KHONG phai trinh duyet: KHONG
- * layout, KHONG CSS that. ⇒ Tep nay do duoc HANH VI (option nao co trong DOM, chu nao,
- * thuoc tinh nao), KHONG do duoc HINH (dropdown cao bao nhieu, option xep ra sao).
+ * Vi sao jsdom: jsdom KHONG cho bang chung HINH THUC — no KHONG co layout, KHONG co CSS that.
+ * ⇒ Tep nay do duoc HANH VI (option nao co trong DOM, chu nao, thuoc tinh nao), KHONG do duoc
+ * HINH (dropdown cao bao nhieu, option xep ra sao).
+ *
+ * ⚠️ DINH CHINH (Task 12, ERRATA #40 + #46 muc 5): cau cu o day noi *"trinh duyet THAT BAT KHA
+ * o moi truong nay"* — **SAI vi QUA RONG**. Menh de dung la: *"Chromium khong mo duoc DƯỚI
+ * CÁC CHẾ ĐỘ SANDBOX HẠN CHẾ"*. ⇒ **Bang chung HINH THUC nam o tang Chrome that:
+ * `frontend/e2e/`.** ⚠️ Tang do CHUA duoc chay trong luot Task 12 (xem bao cao).
  *
  * LUAT DOM (ERRATA #9 muc 1/6) — tep nay TU CHUA va khong dua vao thu tu:
  *   - MOI hook dat/tra global nam TRONG `describe()`: duoi `--test-isolation=none`, hook

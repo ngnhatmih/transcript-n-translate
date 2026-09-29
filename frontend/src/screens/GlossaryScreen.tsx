@@ -51,9 +51,13 @@
  *   (b) **Sửa một hàng** chỉ đưa hàng đó vào form rồi `PATCH`; chưa có XOÁ thuật ngữ
  *       (backend cũng không có route xoá). ĐƯỜNG NÂNG CẤP: `DELETE /api/glossary/{id}`
  *       + nút xoá trong `.gl__anh-huong`.
- *   (c) **Chưa ai nhìn thấy màn này trong trình duyệt thật**: jsdom không có layout
- *       và không có CSS thật, nên "lề amber", "chip màu lỗi" chỉ được ghim ở tầng
- *       LUẬT CSS (một bài ĐỌC `app.css`), không phải ở tầng hình.
+ *   (c) **HÌNH THỨC chưa được đo**: jsdom không có layout và không có CSS thật, nên
+ *       "lề amber", "chip màu lỗi" chỉ được ghim ở tầng LUẬT CSS (một bài ĐỌC `app.css`).
+ *       ⚠️ **ĐÍNH CHÍNH (Task 12, ERRATA #40)**: câu cũ *"Chưa ai nhìn thấy màn này trong
+ *       trình duyệt thật"* đã HẾT ĐÚNG — Chrome thật chạy được (dưới quyền rộng) và đã được
+ *       dùng để đo (EVIDENCE §10–§13). **Bằng chứng HÌNH THỨC nằm ở tầng Chrome thật:
+ *       `frontend/e2e/`**; ⚠️ tầng đó CHƯA chạy trong lượt Task 12, nên trong lượt này hình
+ *       thức VẪN CHƯA được đo.
  */
 import { useEffect, useState } from "react";
 

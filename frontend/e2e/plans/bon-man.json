@@ -1,0 +1,54 @@
+{
+  "url": "http://127.0.0.1:3100",
+  "width": 1440,
+  "height": 900,
+  "ghiChu": "Bon man + bang phim tat §11.4 + hang doi .q* — T2 cua Task 12. Moi neo CHO deu lay tu DU LIEU gieo (ERRATA #42 muc 5), khong tu nhan UI.",
+  "steps": [
+    { "do": "nav", "url": "http://127.0.0.1:3100" },
+
+    { "do": "waitText", "text": "seed-kenh-mot.wav", "timeout": 30000 },
+    { "do": "url" },
+
+    { "do": "eval", "js": "document.querySelectorAll('.ch__item').length", "log": "so kenh" },
+    { "do": "eval", "js": "document.querySelectorAll('[data-testid^=job-]').length", "log": "so hang doi" },
+    { "do": "shot", "name": "01-bon-man-va-hang-doi-truoc-khi-chon-kenh" },
+
+    { "do": "clickChu", "chon": ".ch__item", "text": "seed-kenh-mot.wav" },
+    { "do": "waitText", "text": "今天我們來說一個很重要的問題。", "timeout": 30000 },
+    { "do": "shot", "name": "02-bien-tap-nap-du-lieu-4-2" },
+
+    { "do": "eval", "js": "document.querySelectorAll('.q__item').length", "log": "so hang doi .q__item" },
+    { "do": "eval", "js": "(() => { const s = getComputedStyle(document.querySelector('.q__item')); return [s.display, s.listStyleType, s.padding, s.gap, s.flexWrap].join(' | '); })()", "log": "computed style .q__item (doi chieu ban va c575192)" },
+    { "do": "eval", "js": "(() => { const a = document.querySelector('.q__ten'), b = document.querySelector('.q__ly-do'); if (!a || !b) return 'khong thay'; const ra = a.getBoundingClientRect(), rb = b.getBoundingClientRect(); return JSON.stringify({ tenKetThuc: Math.round(ra.right), lyDoBatDau: Math.round(rb.left), cach: Math.round(rb.left - ra.right) }); })()", "log": "toa do THAT .q__ten -> .q__ly-do (het dinh chu?)" },
+    { "do": "shot", "name": "03-hang-doi-q-sau-va" },
+
+    { "do": "key", "key": "?", "shift": true },
+    { "do": "waitFor", "selector": "[data-testid=dong-bang-phim]", "timeout": 10000 },
+    { "do": "eval", "js": "document.querySelectorAll('.bp__dong').length", "log": "so hang bang phim §11.4 (bang chung ky vong 19)" },
+    { "do": "eval", "js": "[...document.querySelectorAll('.bp__dong')].filter((li) => (li.textContent || '').includes('CHƯA NỐI')).map((li) => li.getAttribute('data-testid')).join(',')", "log": "cac hang CHUA NOI (ky vong S, M, Ctrl+Enter)" },
+    { "do": "eval", "js": "(() => { const r = document.querySelector('[data-testid=dong-bang-phim]'); return r ? getComputedStyle(r).outlineStyle + ' ' + getComputedStyle(r).boxShadow : 'khong thay'; })()", "log": "focus ring cua nut DONG" },
+    { "do": "shot", "name": "04-bang-phim-tat-11-4" },
+    { "do": "key", "key": "Escape" },
+    { "do": "eval", "js": "document.querySelector('[data-testid=dong-bang-phim]') === null", "log": "Esc dong duoc bang phim (o che do Bien tap)" },
+
+    { "do": "radio", "label": "Đối chiếu" },
+    { "do": "waitText", "text": "opus-mt", "timeout": 30000 },
+    { "do": "eval", "js": "document.body.innerText.includes('max_cps') || document.body.innerText.includes('CPS')", "log": "co cot CPS" },
+    { "do": "eval", "js": "(document.body.innerText.match(/⚠/g) || []).length", "log": "so dong CPS VUOT nguong (ky vong >0)" },
+    { "do": "eval", "js": "(document.body.innerText.match(/\\d+\\.\\d/g) || []).length", "log": "so con so CPS hien ra" },
+    { "do": "shot", "name": "05-doi-chieu-cps-hai-chieu" },
+
+    { "do": "radio", "label": "Thuật ngữ" },
+    { "do": "waitText", "text": "chi phí", "timeout": 30000 },
+    { "do": "shot", "name": "06-thuat-ngu-bang" },
+    { "do": "eval", "js": "(() => { const e = document.querySelector('[data-testid=o-thuat-ngu]'); return e === null ? 'khong thay' : 'thay'; })()", "log": "co o sua thuat ngu" },
+
+    { "do": "radio", "label": "Biên tập" },
+    { "do": "waitText", "text": "今天我們來說一個很重要的問題。", "timeout": 30000 },
+    { "do": "shot", "name": "07-bien-tap-lai" },
+
+    { "do": "eval", "js": "(() => { const t = document.querySelector('.stt'); return t === null ? 'khong thay' : t.getAttribute('data-ollama'); })()", "log": "trang thai ollama that (down/unknown/up)" },
+    { "do": "eval", "js": "(() => { const p = document.querySelector('.od'); if (p === null) return 'PANEL VANG (ollama up — luat ba trang thai)'; return p.innerText.slice(0, 400); })()", "log": "panel §4.8 (neu co): noi ro cai gi CON chay duoc" },
+    { "do": "shot", "name": "08-ollama-down-neu-panel-hien" }
+  ]
+}
