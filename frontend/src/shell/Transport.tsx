@@ -35,6 +35,12 @@
  * phia MAY CHU (HTTP `Range` ⇒ 206), va no nam o bao cao task. Bon thu duoc do o day
  * la HANH VI: cai gi co trong DOM, lop nao, chu nao, va `style.left` nao.
  *
+ * ĐƯỜNG NÂNG CẤP: một bước trong `frontend/e2e/plans/` đọc `media.currentTime`/`readyState`
+ * SAU `play()` và sau một `seek`, chạy dưới quyền rộng. Tầng đó **CHẠY ĐƯỢC** (`frontend/e2e/`
+ * — `npm run e2e` trả `EXIT=0`, xem `TIEU-CHI-12.md` §4), nhưng ⚠️ **`seek`/`Range` trong
+ * Chrome thật tới nay vẫn CHƯA ĐO** (`TIEU-CHI-12.md` §3 mục 5): không được đọc dòng này thành
+ * "đã đo rồi".
+ *
  * ## Trang thai: vi sao `playing`/`currentSegment` la PROP
  *
  * Trang thai client cua ban lam viec nam trong MOT reducer (`src/state/reducer.ts`:

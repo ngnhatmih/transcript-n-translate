@@ -47,6 +47,11 @@
  *    (`backend/app/adapters/persist/schema.py`), tức rowid, nên hàng chèn sau có id lớn hơn.
  *    Hệ quả ĐO ĐƯỢC của quy ước: một kênh có `asr` #3 `done` rồi `asr` #7 `running` hiện
  *    "phiên âm: đang chạy", KHÔNG hiện "xong" — và bài test ghim đúng điều đó.
+ *
+ * ĐƯỜNG NÂNG CẤP (cho cả ba lớp trên): `App` đọc danh sách `translations`, đi
+ * `translation → transcript_id → source_id`, rồi truyền **bước dịch xuống như một PROP** —
+ * KHÔNG suy bước từ `duration`/`audio_path` (đó là nguồn sự thật thứ hai). Khi đó vùng này
+ * hiện đủ ba bước và quy ước "job có `id` lớn nhất của mỗi bước" giữ nguyên.
  */
 import type { Job, JobState, JobType, Source } from "../api/types.ts";
 import { NhapGon } from "./IntakeFrame.tsx";

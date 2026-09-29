@@ -57,8 +57,10 @@ interface LoiCuaBanMoi {
  * Một tập job có ĐỔI so với mốc trước đó không — so HAI CHIỀU (job vào = xong; job rời =
  * chạy lại). Một sự kiện TIẾN ĐỘ của job đang chạy không đổi tập này.
  *
- * `ponytail:` đây là cùng một phép so mà vòng sửa W1 đã viết cho `/api/transcripts`, nay
- * dùng cho HAI tập (transcript và translate) — hai chỗ gọi, một định nghĩa.
+ * KHÔNG có trần ở đây, và đó là lý do dấu `ponytail:` đã BỎ khỏi câu này (Task 13): đây là
+ * cùng một phép so mà vòng sửa W1 đã viết cho `/api/transcripts`, nay dùng cho HAI tập
+ * (transcript và translate) — hai chỗ gọi, một định nghĩa. Một dấu `ponytail:` không nêu trần
+ * là một món nợ không đòi được; chỗ này không nợ gì.
  */
 function coChuyen(truoc: Set<number>, sau: Set<number>): boolean {
   for (const id of sau) if (!truoc.has(id)) return true;

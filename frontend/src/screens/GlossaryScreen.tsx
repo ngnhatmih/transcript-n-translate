@@ -53,11 +53,15 @@
  *       + nút xoá trong `.gl__anh-huong`.
  *   (c) **HÌNH THỨC chưa được đo**: jsdom không có layout và không có CSS thật, nên
  *       "lề amber", "chip màu lỗi" chỉ được ghim ở tầng LUẬT CSS (một bài ĐỌC `app.css`).
- *       ⚠️ **ĐÍNH CHÍNH (Task 12, ERRATA #40)**: câu cũ *"Chưa ai nhìn thấy màn này trong
- *       trình duyệt thật"* đã HẾT ĐÚNG — Chrome thật chạy được (dưới quyền rộng) và đã được
- *       dùng để đo (EVIDENCE §10–§13). **Bằng chứng HÌNH THỨC nằm ở tầng Chrome thật:
- *       `frontend/e2e/`**; ⚠️ tầng đó CHƯA chạy trong lượt Task 12, nên trong lượt này hình
- *       thức VẪN CHƯA được đo.
+ *       ⚠️ **ĐÍNH CHÍNH LẦN HAI (Task 13)**: câu cũ ở đây (*"tầng đó CHƯA chạy trong lượt Task
+ *       12, nên trong lượt này hình thức VẪN CHƯA được đo"*) đã **HẾT ĐÚNG** — tầng đó **ĐÃ
+ *       CHẠY** và **ĐÃ CÓ SỐ ĐO** (`frontend/e2e/TIEU-CHI-12.md` §5; ảnh thô ở
+ *       `_shots/t12b/`, lượt Task 13 chạy lại được: `npm run e2e` ⇒ `EXIT=0`). Trần còn lại
+ *       **HẸP HƠN** và vẫn là sự thật: kế hoạch `e2e/plans/bon-man.json` **KHÔNG** đo
+ *       `getComputedStyle` cho lớp `.gl*` (nó chỉ chụp `06-thuat-ngu-bang.png`), nên hai khẳng
+ *       định hình thức của mục (c) — *"lề amber"*, *"chip màu lỗi"* — **vẫn** chỉ có LUẬT CSS
+ *       (một bài ĐỌC `app.css`) làm bằng chứng; ảnh **chỉ** chứng minh BỐ CỤC/VẺ.
+ *       ĐƯỜNG NÂNG CẤP: một bước đo computed style cho `.gl*` trong kế hoạch e2e.
  */
 import { useEffect, useState } from "react";
 

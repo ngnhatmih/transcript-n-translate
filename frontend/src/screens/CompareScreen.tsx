@@ -21,9 +21,17 @@
  *    (ERRATA #19 mục 7). Mốc amber ở lề **và** `data-over-cps` vẫn GIỮ vì chúng phục vụ
  *    TIẾP CẬN (§7) — một glyph là tín hiệu chỉ-có-hình, không đọc được bằng screen reader.
  *
- * ⚠️ TRẦN CỦA LƯỢT NÀY (`ponytail:`): trong app, `App` truyền `transcript={null}` và
- * `translations={[]}` vì chưa có đường CHỌN KÊNH, nên màn chỉ render TRẠNG THÁI RỖNG
- * NÓI THẬT. Mọi khẳng định về hai cột đến từ test truyền prop.
+ * ⚠️ TRẦN CÒN LẠI (`ponytail:`) — **ĐÍNH CHÍNH (Task 13)**: câu cũ ở đây (*"trong app, `App`
+ * truyền `transcript={null}` và `translations={[]}` vì chưa có đường CHỌN KÊNH, nên màn chỉ
+ * render TRẠNG THÁI RỖNG"*) đã **HẾT ĐÚNG** từ Task W1 — `App.tsx:1196-1199` ghi đúng điều đó,
+ * và mã hiện truyền `transcript={transcript.data}` / `translations={translations.data ?? []}`
+ * (`App.tsx:1224-1225`). Trần còn lại là của **TẦNG ĐO**, không phải của sản phẩm: **chưa có
+ * phép đo HÌNH THỨC nào cho `.cmp*` trên dữ liệu thật** — kế hoạch `frontend/e2e/plans/`
+ * (`bon-man.json`, `ban-ghi-dai-t7.json`) chỉ đo computed style cho `.q__item`/`.q__ten` và
+ * `.ed__khung`; ảnh `05-doi-chieu-cps-hai-chieu.png` **chỉ chứng minh BỐ CỤC/VẺ**, không
+ * chứng minh nội dung. Mọi khẳng định về **NỘI DUNG** hai cột đến từ test truyền prop.
+ * ĐƯỜNG NÂNG CẤP: thêm một bước đo `getComputedStyle` cho `.cmp*` (kèm một `khangDinh` cho số
+ * dòng vượt ngưỡng) vào kế hoạch e2e, rồi khai nó vào `frontend/e2e/TIEU-CHI-12.md`.
  *
  * `ponytail:` GHIM là state CỤC BỘ của màn này. `UiState.pinnedB` + action `pinB` đã có
  * sẵn trong `state/reducer.ts` nhưng **thiếu action BỎ GHIM**, nên nối vào reducer là
