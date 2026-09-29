@@ -222,12 +222,18 @@ let TRANSCRIPT_CHI_TIET: Record<number, Transcript> = {
    * ⚠️ Va day chinh la GIA DOI ma D1 phai tra: `TranscriptPatch.segments` buoc gui TOAN BO mang
    * (backend `min_length=1`), nen mot ban dung lai `Segment` chi voi `{i,start,end,text}` se XOA
    * AM THAM `suspect`/`qa` cua MOI dong. Doan thu tu la cho do duoc dieu do.
+   *
+   * ⚠️ HAI dong `suspect` (i = 1 VA i = 3) — vong sua 1, `M-3`: fixture cu chi co MOT dong nghi ngo
+   * (i = 3, dong CUOI), nen "N khong vong" KHONG falsify duoc (tai dong cuoi thi ban VONG va ban
+   * KHONG VONG deu dung yen). Dong thu hai o GIUA bien menh de do thanh mot menh de co mutant lam no
+   * sai duoc: ban VONG se nhay nguoc ve i = 1. i = 1 chi mang `suspect` (khong `qa`/`events`/...):
+   * doan thu tu van la doan DUY NHAT do duoc "giu nguyen moi truong tuy chon".
    */
   3: {
     ...tomTat(3, 2, "sensevoice-small", "en", 1, "draft"),
     segments: [
       doan(0, 0, 2, "bản kênh hai"),
-      doan(1, 2, 4, "dòng hai"),
+      { ...doan(1, 2, 4, "dòng hai"), suspect: true },
       doan(2, 4, 6, "dòng ba"),
       {
         i: 3,
@@ -523,6 +529,17 @@ const dem = {
   /** Bat de PATCH tra 422 kem cau tieng Viet NGUYEN VAN cua backend (nhanh LOI GHI). */
   patchLoi: false,
   /**
+   * Task 11 / vòng sửa 1 (`I-3`) — SỐ LỜI GỌI `play()` và `pause()` trên `HTMLMediaElement`.
+   *
+   * ⚠️ VÌ SAO ĐẾM ĐƯỢC DÙ JSDOM KHÔNG CÓ ÂM THANH: `before` đã bịt hai hàm đó bằng hàm rỗng (jsdom
+   * không hiện thực chúng, và chúng log `Not implemented` ra `console.error` — thứ tệp này ghim là
+   * không được có). Bịt một hàm KHÔNG phải là làm nó không đo được: lời gọi vẫn ĐI QUA đây, nên bộ
+   * đếm là bằng chứng trực tiếp cho mệnh đề "nudge ⇒ nghe lại". Lý do TRẦN cũ (*"jsdom không hiện
+   * thực `play()` ⇒ không ghim được nghe lại"*) lẫn hai thứ: nó chặn việc NGHE, không chặn việc GHIM.
+   */
+  play: 0,
+  pause: 0,
+  /**
    * Bat de fixture dong dien MOT NGUOI GHI KHAC ngay SAU khi tra loi PATCH: may chu len
    * `version` them MOT va doi chu cua doan 0.
    *
@@ -620,6 +637,12 @@ function xoaDemGhi(): void {
   dem.patchTre = 0;
   dem.versionTruocPatch = {};
   dem.patchLoi = false;
+}
+
+/** Xoa hai bo dem cua duong MEDIA (`play`/`pause` — vong sua 1, `I-3`). */
+function xoaDemMedia(): void {
+  dem.play = 0;
+  dem.pause = 0;
 }
 
 /** Them mot ban ghi MOI vao ca hai route — dung cho ngoi no doc lai (`Minor #3`). */
@@ -1197,6 +1220,12 @@ let fireEvent: {
   drop: (el: Element, init?: unknown) => boolean;
 };
 let cleanup: () => void;
+/**
+ * `act` của chính React (RTL re-export) — cần cho phép đo DUY NHẤT của tệp này phát một
+ * `KeyboardEvent` THÔ (không qua `fireEvent`) để đọc được `defaultPrevented`: `fireEvent` chỉ
+ * trả `!defaultPrevented`, còn mệnh đề của guard control native nói về chính cờ đó.
+ */
+let act: (cb: () => void) => void;
 let App: () => unknown;
 /**
  * `createElement`, KHONG goi thang `App()`: goi ham component ngoai chu trinh render
@@ -1516,6 +1545,7 @@ describe("App: KENH THAT + HANG DOI THAT tu server node:http trong tien trinh", 
     getByRole = api.getByRole;
     fireEvent = api.fireEvent;
     cleanup = api.cleanup;
+    act = api.act;
     const reactModule: any = await import("react");
     const react = reactModule.createElement === undefined ? reactModule.default : reactModule;
     taoPhanTu = react.createElement;
@@ -1529,9 +1559,12 @@ describe("App: KENH THAT + HANG DOI THAT tu server node:http trong tien trinh", 
     playGoc = w.HTMLMediaElement.prototype.play;
     pauseGoc = w.HTMLMediaElement.prototype.pause;
     w.HTMLMediaElement.prototype.play = function (): unknown {
+      dem.play += 1;
       return undefined;
     };
-    w.HTMLMediaElement.prototype.pause = function (): void {};
+    w.HTMLMediaElement.prototype.pause = function (): void {
+      dem.pause += 1;
+    };
     batTiengOn();
     const shell: any = await import("./App.tsx");
     App = shell.App;
@@ -1574,6 +1607,8 @@ describe("App: KENH THAT + HANG DOI THAT tu server node:http trong tien trinh", 
     xoaDemGhi();
     // BA LENH GHI MOI (D2): cung ly do — MOT helper, khong liet ke tay.
     xoaDemLenh();
+    // DUONG MEDIA (vong sua 1, I-3): hai bo dem nay cung la bo dem TICH LUY ⇒ phai ve 0 moi bai.
+    xoaDemMedia();
     dem.nguoiGhiKhac = false;
     // ⚠️ CA MANG KENH: mot luot nap THEM mot hang THAT (`SOURCES.push`) ⇒ khong cat ve anh goc thi
     // bai sau se thay kenh cua bai truoc, va "kenh MOI xuat hien" xanh ngay ca khi khong doc lai.
@@ -4781,6 +4816,98 @@ describe("App: KENH THAT + HANG DOI THAT tu server node:http trong tien trinh", 
     unmount();
   });
 
+  it("T11 NGHE LẠI SAU NUDGE: mốc mới ⇒ TUA + `play()`, dừng sau 300 ms; ĐANG PHÁT thì KHÔNG cắt; KHÔNG nudge thì KHÔNG nghe lại (I-3)", async () => {
+    const { container, unmount } = render(taoPhanTu(App));
+    await toiBienTapBonDoan(container);
+    await moOSua(container, 1);
+    const media = phanTu(container, "audio.tp__media") as HTMLAudioElement;
+    xoaDemGhi();
+    xoaDemMedia();
+
+    // (1) MẶT TRÁI, đo TRƯỚC vế dương: `]` = **ĐẶT MỐC TẠI ĐẦU ĐỌC**, KHÔNG phải nudge (spec §5.1
+    //     dòng 296 vs §5.2 dòng 309) ⇒ KHÔNG được nghe lại. Một bản cài "mọi lượt ghi đều nghe lại"
+    //     đi qua được hết các vế dưới và ĐỔ ở đây.
+    datDauDoc(container, 3.2);
+    fireEvent.keyDown(document.body, { key: "]" });
+    await choChu(container, "0:02.00 → 0:03.20");
+    assert.equal(dem.patch, 1, "`]` phải TỚI ĐƯỢC ĐĨA (đếm ở phía máy chủ)");
+    assert.equal(dem.play, 0, "`]` KHÔNG được nghe lại (spec gán việc nghe lại cho NUDGE)");
+    assert.equal(dem.pause, 0, "`]` KHÔNG được mở/đóng một cửa sổ nghe nào");
+    assert.ok(media.getAttribute("data-nghe-lai") === null, "không cửa sổ nghe nào được mở");
+
+    // (2) NUDGE ⇒ TUA tới MỐC MỚI rồi PHÁT. Chờ theo TÍN HIỆU (`data-nghe-lai` MỞ), KHÔNG theo đồng
+    //     hồ: `bamNudge` chỉ xếp hàng ghi, nên yêu cầu nghe lại tới SAU khi máy chủ nhận.
+    xoaDemGhi();
+    xoaDemMedia();
+    bamNudge("end", 0.1);
+    await choPhuHop(
+      container,
+      "audio.tp__media",
+      (el) => el.getAttribute("data-nghe-lai") === "1",
+      "một cú nudge phải MỞ cửa sổ nghe lại",
+    );
+    assert.equal(dem.play, 1, "nudge phải YÊU CẦU `play()` (đếm được vì `play()` bị bịt để ĐẾM)");
+    const mocMoi = 3.3; // = 3,2 (mốc `]` vừa đặt ở vế (1)) + 0,1 (bước nudge)
+    assert.ok(
+      Math.abs(media.currentTime - mocMoi) < 1e-9,
+      `đầu đọc phải TUA tới MỐC MỚI ${mocMoi}; đo được ${media.currentTime}`,
+    );
+    await choChu(container, "0:02.00 → 0:03.30");
+
+    // (3) CỬA SỔ ĐÓNG sau 300 ms. TÍN HIỆU là thuộc tính biến mất; deadline của `waitFor` chỉ là
+    //     TRẦN (ERRATA #35 mục 2: một `sleep` có điều kiện thoát là hàm của ĐỒNG HỒ thì luôn đúng).
+    await choPhuHop(
+      container,
+      "audio.tp__media",
+      (el) => el.getAttribute("data-nghe-lai") === null,
+      "hết `NGHE_LAI_MS` cửa sổ nghe lại phải ĐÓNG",
+    );
+    assert.equal(dem.pause, 1, "hết cửa sổ phải `pause()` — nghe một đoạn rồi DỪNG");
+    assert.ok(
+      Math.abs(media.currentTime - mocMoi) < 1e-9,
+      "đóng cửa sổ KHÔNG được đổi vị trí đã tua",
+    );
+
+    // (4) ĐANG PHÁT ⇒ nudge chỉ TUA, KHÔNG CẮT việc đang nghe. ⚠️ Khẳng định PHỦ ĐỊNH ("không
+    //     `pause()` nào") chỉ có nghĩa khi có một MỐC THỜI GIAN để đứng lên ⇒ chờ tín hiệu cửa sổ
+    //     ĐÓNG trước, rồi mới đếm. Đây chính là chỗ một bản cài "luôn `pause()` sau 300 ms" ĐỎ.
+    fireEvent.keyDown(document.body, { key: " " });
+    await choPhuHop(
+      container,
+      ".tp__phat",
+      (el) => el.getAttribute("aria-pressed") === "true",
+      "`Space` phải phát",
+    );
+    xoaDemMedia();
+    bamNudge("end", 0.1);
+    await choPhuHop(
+      container,
+      "audio.tp__media",
+      (el) => el.getAttribute("data-nghe-lai") === "1",
+      "đang phát: cửa sổ nghe lại vẫn phải MỞ (tua tới mốc mới)",
+    );
+    await choPhuHop(
+      container,
+      "audio.tp__media",
+      (el) => el.getAttribute("data-nghe-lai") === null,
+      "đang phát: cửa sổ nghe lại vẫn phải ĐÓNG (mốc thời gian để khẳng định vế phủ định)",
+    );
+    assert.equal(dem.pause, 0, "ĐANG PHÁT ⇒ nudge KHÔNG được `pause()` (không cắt việc đang nghe)");
+    assert.equal(dem.play, 1, "ĐANG PHÁT ⇒ chỉ có `play()` của chính cửa sổ nghe lại");
+    assert.equal(
+      phanTu(container, ".tp__phat").getAttribute("aria-pressed"),
+      "true",
+      "nút phát vẫn phải nói ĐÚNG trạng thái đang phát sau một cú nudge",
+    );
+    assert.ok(
+      Math.abs(media.currentTime - 3.4) < 1e-9,
+      `đang phát: đầu đọc vẫn phải ở MỐC MỚI 3,4; đo được ${media.currentTime}`,
+    );
+
+    assert.deepEqual(tiengOn, [], "nghe lai sau nudge khong duoc sinh tieng on console");
+    unmount();
+  });
+
   it("T11 PHÁT / TẠM DỪNG: `Space` đổi `aria-pressed` false → true → false (vế THỨ HAI mới là vế ghim)", async () => {
     const { container, unmount } = render(taoPhanTu(App));
     // Có kênh đang chọn ⇒ thanh transport có nguồn, tức đường `play()`/`pause()` được thi hành THẬT.
@@ -4882,22 +5009,51 @@ describe("App: KENH THAT + HANG DOI THAT tu server node:http trong tien trinh", 
     unmount();
   });
 
-  it("T11 N: `N` nhảy tới đoạn NGHI NGỜ kế tiếp (bỏ qua các dòng không nghi ngờ)", async () => {
+  it("T11 N: `N` nhảy tới đoạn NGHI NGỜ kế tiếp (bỏ qua dòng không nghi ngờ) — và KHÔNG VÒNG khi hết", async () => {
     const { container, unmount } = render(taoPhanTu(App));
     await toiBienTapBonDoan(container);
 
-    // Bản ghi #3 chỉ có MỘT dòng nghi ngờ (`i = 3`). Một bản cài "đi tuần tự" sẽ dừng ở dòng 0 ⇒ ĐỎ.
+    // Bản ghi #3 có HAI dòng nghi ngờ: `i = 1` và `i = 3` (xem fixture). Vòng sửa 1 (`M-3`): fixture
+    // cũ chỉ có MỘT dòng (`i = 3`, dòng CUỐI) ⇒ cả bản VÒNG lẫn bản KHÔNG VÒNG đều đứng yên ở đó,
+    // tức mệnh đề "không vòng" không có gì làm nó sai được. Với dòng thứ hai ở GIỮA, bản VÒNG nhảy
+    // ngược về `i = 1` sau khi đã ở `i = 3` ⇒ bài này ĐỎ.
+
+    // (1) Chưa chọn dòng nào ⇒ dòng nghi ngờ ĐẦU TIÊN (`i = 1`), nhảy QUA dòng 0 (không nghi ngờ).
+    fireEvent.keyDown(document.body, { key: "n" });
+    await choPhuHop(
+      container,
+      '[data-i="1"]',
+      (el) => (el.getAttribute("class") ?? "").includes("is-current"),
+      "`N` phải nhảy tới dòng NGHI NGỜ ĐẦU TIÊN (i=1), không phải dòng kế tiếp",
+    );
+    assert.equal(
+      container.querySelector('[data-i="0"].is-current'),
+      null,
+      "`N` KHÔNG được dừng ở một dòng không nghi ngờ",
+    );
+
+    // (2) `N` lần hai ⇒ dòng nghi ngờ KẾ TIẾP (`i = 3`), bỏ qua `i = 2`.
     fireEvent.keyDown(document.body, { key: "n" });
     await choPhuHop(
       container,
       '[data-i="3"]',
       (el) => (el.getAttribute("class") ?? "").includes("is-current"),
-      "`N` phải nhảy tới dòng NGHI NGỜ (i=3), không phải dòng kế tiếp",
+      "`N` phải nhảy tới dòng NGHI NGỜ KẾ TIẾP (i=3), bỏ qua i=2",
     );
+    assert.equal(
+      container.querySelector('[data-i="2"].is-current'),
+      null,
+      "`N` KHÔNG được dừng ở dòng không nghi ngờ i=2",
+    );
+
+    // (3) HẾT dòng nghi ngờ ⇒ ĐỨNG YÊN. Vế phân biệt "soát XUÔI" với "đi vòng": bản VÒNG sẽ nhảy về
+    //     `i = 1` (một cú nhảy NGƯỢC, làm người đang soát mất chỗ). Đọc NGAY sau `fireEvent`: RTL bọc
+    //     nó trong `act`, nên lượt commit của React đã xong (cùng cách các khẳng định phủ định khác).
+    fireEvent.keyDown(document.body, { key: "n" });
     assert.equal(
       container.querySelector(".ed__item.is-current")?.getAttribute("data-i"),
       "3",
-      "chỉ ĐÚNG MỘT dòng được đang chọn",
+      "`N` tại dòng nghi ngờ CUỐI phải ĐỨNG YÊN (KHÔNG vòng về dòng nghi ngờ đầu)",
     );
 
     assert.deepEqual(tiengOn, [], "nhay toi doan nghi ngo khong duoc sinh tieng on console");
@@ -4942,9 +5098,21 @@ describe("App: KENH THAT + HANG DOI THAT tu server node:http trong tien trinh", 
       "bảng §11.4 phải in ĐÚNG số hàng của bảng dữ liệu (một nguồn, không chép tay)",
     );
     assert.deepEqual(
-      hang.map((el) => el.querySelector(".bp__to-hop")?.textContent ?? ""),
-      BANG_PHIM.map((pt) => pt.toHop),
-      "từng nhãn phím trong DOM phải là nhãn của bảng dữ liệu, cùng thứ tự",
+      hang.map((el) => [
+        el.querySelector(".bp__to-hop")?.textContent ?? "",
+        el.querySelector(".bp__viec")?.textContent ?? "",
+        el.querySelector(".bp__chua-noi") === null ? "đã nối" : "chưa nối",
+      ]),
+      BANG_PHIM.map((pt) => [
+        pt.toHop,
+        pt.viec,
+        DA_NOI.has(pt.action.type) ? "đã nối" : "chưa nối",
+      ]),
+      // ⚠️ VÒNG SỬA 1 (`M-2`): chỗ này TRƯỚC ĐÂY chỉ so CỘT NHÃN PHÍM (`.bp__to-hop`) ⇒ mutant đổi
+      // cột VIỆC (`P8b`: chép tay lệch một hàng) cho **0 bài đỏ ở tầng `App`** — biên phủ chỉ nằm ở
+      // `BangPhim.test.tsx`. Nay so CẢ HÀNG: nhãn + VIỆC + dấu `chưa nối`. Ba cột đó là toàn bộ thứ
+      // bảng §11.4 in ra, nên một hàng lệch ở BẤT KỲ cột nào cũng là "hai nguồn sự thật".
+      "từng HÀNG của DOM phải là một HÀNG của bảng dữ liệu (nhãn + việc + dấu `chưa nối`), cùng thứ tự",
     );
 
     // (2) BẢNG ĐANG MỞ ⇒ nó CHẶN các phím khác. `[` lúc này có một dòng đang sửa, nên nếu nó lọt
@@ -4973,6 +5141,67 @@ describe("App: KENH THAT + HANG DOI THAT tu server node:http trong tien trinh", 
     );
 
     assert.deepEqual(tiengOn, [], "bang phim khong duoc sinh tieng on console");
+    unmount();
+  });
+
+  it("T11 ĐÓNG BẢNG Ở MỌI CHẾ ĐỘ: `?` mở ở `glossary` ⇒ `Esc` ĐÓNG bảng; nút `đóng` đang có tiêu điểm KHÔNG bị nuốt `Enter`/`Space` (I-1)", async () => {
+    // HAI VẾ của `I-1`, đo trên ĐẦU RA ĐÃ RENDER (không phải trên `resolveKey`):
+    //  (a) bảng §11.4 mở được ở MỌI chế độ (`?` không có `mode`), nên `Esc` phải ĐÓNG được ở mọi
+    //      chế độ. Phiên chính đo trong Chrome thật: ở `edit` thì đóng, ở `glossary` thì VẪN MỞ
+    //      (hàng `Escape` khi đó còn `mode: "edit"` ⇒ `resolveKey` trả `null`).
+    //  (b) nút `đóng` của chính bảng có `autoFocus`; ở `mode === "edit"` app gọi `preventDefault()`
+    //      cho MỌI phím tra được, kể cả `Enter`/`Space` — phím KÍCH HOẠT của `<button>`.
+    const { container, unmount } = render(taoPhanTu(App));
+    await toiBienTapBonDoan(container);
+
+    // Sang chế độ THUẬT NGỮ (chế độ mà vế (a) hỏng).
+    fireEvent.keyDown(document.body, { key: "3", ctrlKey: true });
+    await choPhuHop(container, ".gl", () => true, "`Ctrl+3` phải hiện tab Thuật ngữ");
+    assert.ok(container.querySelector(".ed") === null, "màn Biên tập phải biến mất");
+
+    fireEvent.keyDown(document.body, { key: "?", shiftKey: true });
+    await choPhuHop(container, ".bp", () => true, "`?` phải mở bảng phím tắt Ở MỌI chế độ");
+    const nut = phanTu(container, '[data-testid="dong-bang-phim"]');
+    // ⚠️ KHẲNG ĐỊNH BOOLEAN, không `assert.equal(nodeA, nodeB)`: `assert` định dạng `actual`/
+    // `expected` KHÔNG giới hạn độ sâu, và một node DOM của React là một đồ thị khổng lồ ⇒ đo được
+    // ở mutant `MODE-ESCAPE-BACK` (lượt này): bài ĐỎ ⇒ 90 s rồi `RangeError: Array buffer
+    // allocation failed`, và cú OOM đó làm bài SAU hỏng theo (`fetch failed` ⇒ một bài đỏ GIẢ).
+    // Đây đúng lớp ERRATA #14 mục 3.
+    assert.ok(document.activeElement === nut, "tiêu điểm phải ở TRONG bảng (autoFocus) ngay khi mở");
+
+    // (b) NÚT ĐANG CÓ TIÊU ĐIỂM ⇒ `Enter`/`Space` thuộc về NÓ. Phát `KeyboardEvent` THÔ để đọc
+    //     `defaultPrevented` (cơ chế trình duyệt dùng để quyết định kích hoạt nút hay không) và
+    //     để `target` là CHÍNH nút — đúng đường một người dùng bàn phím đi.
+    const eEnter = new window.KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true });
+    act(() => {
+      nut.dispatchEvent(eEnter);
+    });
+    assert.equal(eEnter.defaultPrevented, false, "`Enter` trên nút `đóng` KHÔNG được bị chặn mặc định");
+    const eSpace = new window.KeyboardEvent("keydown", { key: " ", bubbles: true, cancelable: true });
+    act(() => {
+      nut.dispatchEvent(eSpace);
+    });
+    assert.equal(eSpace.defaultPrevented, false, "`Space` trên nút `đóng` KHÔNG được bị chặn mặc định");
+    // ⚠️ jsdom KHÔNG tự sinh cú `click` từ `keydown` trên `<button>` (đó là việc của trình duyệt
+    // thật) ⇒ vế "nút ĐƯỢC kích hoạt" chỉ Chrome thật trả lời được (TRẦN, chủ: Task 12). Vế ĐO
+    // ĐƯỢC ở đây là hai hệ quả của việc app NUỐT phím: `defaultPrevented` và việc app làm một
+    // VIỆC KHÁC — `Space` là phát/dừng, nên nếu nó lọt tới handler thì `aria-pressed` đổi.
+    assert.equal(
+      phanTu(container, ".tp__phat").getAttribute("aria-pressed"),
+      "false",
+      "`Space` trên nút `đóng` KHÔNG được làm app phát/tạm dừng",
+    );
+    assert.ok(container.querySelector(".bp") !== null, "chưa bấm gì để đóng thì bảng phải CÒN");
+
+    // (a) `Esc` ĐÓNG bảng ở chế độ Thuật ngữ — phát từ chính nút đang có tiêu điểm (như người dùng).
+    fireEvent.keyDown(nut, { key: "Escape" });
+    assert.ok(
+      container.querySelector(".bp") === null,
+      "`Esc` phải đóng bảng phím tắt ở chế độ Thuật ngữ",
+    );
+    assert.ok(container.querySelector(".gl") !== null, "`Esc` chỉ đóng BẢNG, không đổi chế độ");
+
+    assert.deepEqual(tiengOn, [], "dong bang o che do Thuat ngu khong duoc sinh tieng on console");
     unmount();
   });
 

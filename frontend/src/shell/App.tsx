@@ -398,6 +398,23 @@ export function App() {
   const dauDocRef = useRef(0);
 
   /**
+   * YÊU CẦU **NGHE LẠI** quanh mốc vừa nudge (spec UI §5.2 dòng 309) — `Transport` là nơi thi hành
+   * (nó giữ phần tử media).
+   *
+   * ⚠️ VÌ SAO CÓ `lan` (số thứ tự) chứ không chỉ `giay`: hai lần nudge LIÊN TIẾP về cùng một mốc
+   * (ví dụ `Shift+→` rồi `Alt+←`... hoặc gõ lại cùng phím khi mốc đã ở biên) là HAI yêu cầu KHÁC
+   * NHAU, và một `useEffect` phụ thuộc `[giay]` sẽ bỏ qua yêu cầu thứ hai vì giá trị không đổi.
+   * `lan` làm mỗi yêu cầu một ĐỐI TƯỢNG MỚI ⇒ hiệu ứng chạy lại, không cần so sánh nội dung.
+   *
+   * ⚠️ VÌ SAO `useState` (một lượt render) mà không phải `useRef`: đây là ĐẦU VÀO của một hiệu ứng
+   * trong component KHÁC; `ref` là dữ liệu không kích hoạt render, nên `Transport` sẽ không bao giờ
+   * thấy nó.
+   */
+  const [ngheLai, datNgheLai] = useState<{ giay: number; lan: number } | null>(null);
+  /** Số thứ tự yêu cầu nghe lại — xem `datNgheLai` phía trên. */
+  const demNgheLai = useRef(0);
+
+  /**
    * BẢNG PHÍM TẮT §11.4 đang MỞ hay không. Mặc định ĐÓNG (nó che màn hình).
    *
    * ⚠️ Khi mở, `xuLyPhim` CHẶN mọi phím khác trừ chính nó và `Esc`: một lớp phủ `aria-modal` đang
@@ -410,7 +427,14 @@ export function App() {
    * MỘT chỗ GHI duy nhất cho cả hai thao tác của D1 (`luu` và `nudge`).
    *
    * `sua` là hàm THUẦN áp lên ĐÚNG đoạn cần sửa; mọi đoạn khác đi lên NGUYÊN VẸN.
-   * Trả `true` khi máy chủ đã nhận, `false` khi không có gì để ghi hoặc khi ghi lỗi.
+   * Trả về **ĐOẠN ĐÃ GỬI** (`Segment`) khi máy chủ đã nhận, `null` khi không có gì để ghi hoặc khi
+   * ghi lỗi.
+   *
+   * ⚠️ VÌ SAO TRẢ `Segment` CHỨ KHÔNG PHẢI `boolean` (vòng sửa 1, `I-3`): "nghe lại 300 ms" của
+   * §5.2 cần **ĐÚNG giá trị đã ghi** để tua đầu đọc tới. Tính lại mốc ở ngoài là **định nghĩa thứ
+   * hai** của cùng một phép cộng — và nó sẽ lệch đúng ở ca `banGhiMoiNhat`/`banGhiVuaGhi` mới hơn
+   * (nền của lệnh ghi không phải ảnh chụp của lượt render). Đoạn trả về là đoạn SUY RA TỪ CHÍNH
+   * `nen` mà lệnh ghi đã dùng, nên hai con số không thể lệch.
    *
    * ⚠️ `hienTai.segments.length === 0` / không tìm thấy đoạn ⇒ **KHÔNG gửi gì**: backend từ chối
    * mảng rỗng (`min_length=1`), và một PATCH rỗng là một lỗi 422 vô nghĩa với người dùng.
@@ -423,9 +447,9 @@ export function App() {
     banGhiId: number,
     i: number,
     sua: (seg: Segment) => Segment,
-  ): Promise<boolean> {
+  ): Promise<Segment | null> {
     const hienTai = transcript.data;
-    if (hienTai === null || hienTai.id !== banGhiId) return false;
+    if (hienTai === null || hienTai.id !== banGhiId) return null;
     // NỀN = ảnh chụp MỚI NHẤT cùng id. `hienTai` chỉ là đường lùi khi ảnh chụp mới nhất thuộc một
     // BẢN GHI KHÁC (người dùng vừa đổi kênh/bản ghi) — lấy chữ của bản ghi khác làm nền là một
     // cách ghi-đè khác, không phải một cách chữa.
@@ -436,8 +460,10 @@ export function App() {
       vuaGhi !== null && vuaGhi.id === banGhiId && vuaGhi.version > nenMayChu.version
         ? vuaGhi.segments
         : nenMayChu.segments;
-    if (!nen.some((seg) => seg.i === i)) return false;
-    const segments = nen.map((seg) => (seg.i === i ? sua(seg) : seg));
+    const doanHienTai = nen.find((seg) => seg.i === i);
+    if (doanHienTai === undefined) return null;
+    const doanMoi = sua(doanHienTai);
+    const segments = nen.map((seg) => (seg.i === i ? doanMoi : seg));
     datDangLuuDoan(true);
     datLoiGhiDoan(null);
     let traVe: Transcript;
@@ -445,7 +471,7 @@ export function App() {
       traVe = await endpoints.patchTranscript(banGhiId, { segments });
     } catch (loi: unknown) {
       datLoiGhiDoan(loi instanceof Error ? loi.message : String(loi));
-      return false;
+      return null;
     } finally {
       datDangLuuDoan(false);
     }
@@ -457,7 +483,7 @@ export function App() {
     // lại. Không tự sửa state tại chỗ: bản sao dữ liệu máy chủ ở client là nguồn sự thật thứ hai.
     transcript.reload();
     translations.reload();
-    return true;
+    return doanMoi;
   }
 
   /**
@@ -687,8 +713,8 @@ export function App() {
   async function luuDoan(i: number, text: string): Promise<void> {
     const hienTai = transcript.data;
     if (hienTai === null) return;
-    const xong = await ghiDoan(hienTai.id, i, (seg) => ({ ...seg, text }));
-    if (xong) dispatch({ type: "endEdit" });
+    const daGui = await ghiDoan(hienTai.id, i, (seg) => ({ ...seg, text }));
+    if (daGui !== null) dispatch({ type: "endEdit" });
   }
 
   /**
@@ -712,15 +738,27 @@ export function App() {
    *
    * ⚠️ **KHÔNG clamp** mốc: `formatTimecode` đã kẹp giây âm về 0 (và có bài ghim riêng ở
    * `timecode.test.ts`), nên kẹp lần hai ở đây là hai định nghĩa cho một luật.
+   *
+   * 🔊 **NGHE LẠI 300 ms** (spec UI §5.2 dòng 309: *"mỗi lần nudge phát lại 300ms quanh mốc mới để
+   * nghe ngay"*): sau khi máy chủ ĐÃ NHẬN, `App` phát một YÊU CẦU nghe lại xuống `Transport`, nơi
+   * duy nhất chạm được phần tử media. Vị trí tua = **mốc của CHÍNH đoạn mà lệnh ghi vừa gửi**
+   * (`daGui[moc]` — cùng một phép cộng, cùng một nền), không phải một phép tính lại ở ngoài.
+   * ⚠️ Hai quyết định, nói ra: (i) yêu cầu đi SAU khi ghi xong, nên nó không bao giờ phát một mốc
+   * chưa được lưu; (ii) nudge bằng CHUỘT (hai nút ở `EditScreen`) đi qua đúng hàm này ⇒ cũng nghe
+   * lại — spec gán nudge cho bàn phím, nhưng "nghe lại" là hệ quả của HÀNH ĐỘNG nudge, không của
+   * phím.
    */
   async function nudgeDoan(moc: "start" | "end", by: number): Promise<void> {
     const i = ui.editingSegment;
     if (i === null) return;
     const hienTai = transcript.data;
     if (hienTai === null) return;
-    await ghiDoan(hienTai.id, i, (seg) =>
+    const daGui = await ghiDoan(hienTai.id, i, (seg) =>
       moc === "start" ? { ...seg, start: seg.start + by } : { ...seg, end: seg.end + by },
     );
+    if (daGui !== null) {
+      datNgheLai({ giay: daGui[moc], lan: demNgheLai.current++ });
+    }
   }
 
   /**
@@ -771,9 +809,10 @@ export function App() {
    * backend tính) — client KHÔNG suy lại từ `no_speech_prob`/`avg_logprob` (Global Constraints).
    *
    * ⚠️ Hết dòng nghi ngờ ⇒ **KHÔNG LÀM GÌ** (không vòng về dòng nghi ngờ đầu): đây là phép soát
-   * XUÔI, một cú nhảy ngược là mất chỗ đang đọc. ⚠️ TRẦN: vế "không vòng" KHÔNG có bài ghim phân
-   * biệt được với bản cài vòng (fixture chỉ có MỘT dòng nghi ngờ, và khi đã ở dòng đó thì cả hai
-   * cách đều đứng yên) — xem danh sách TRẦN trong báo cáo task-11.
+   * XUÔI, một cú nhảy ngược là mất chỗ đang đọc. Vế "không vòng" nay **CÓ BÀI GHIM** (vòng sửa 1,
+   * `M-3`): fixture bản ghi #3 có HAI dòng nghi ngờ (`i = 1` và `i = 3`), nên bản cài VÒNG sẽ nhảy
+   * ngược về `i = 1` và bài `T11 N` ĐỎ. Trước vòng sửa, fixture chỉ có MỘT dòng nghi ngờ ở dòng
+   * CUỐI, và ở đó cả hai bản cài đều đứng yên — một mệnh đề không có gì làm nó sai được.
    */
   function nhayNghiNgo(): void {
     const doan = transcript.data?.segments ?? [];
@@ -1295,6 +1334,10 @@ export function App() {
           onDauDoc={(giay) => {
             dauDocRef.current = giay;
           }}
+          /* TASK 11 (vòng sửa 1, `I-3`): MỘT YÊU CẦU NGHE LẠI sau mỗi lần nudge (spec §5.2 dòng
+             309). `Transport` mới là nơi thi hành được (nó giữ phần tử media) — `App` chỉ nói
+             "tua tới mốc này và nghe 300 ms". */
+          ngheLai={ngheLai}
         />
       </footer>
       <div className="grain" aria-hidden />

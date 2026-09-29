@@ -130,11 +130,25 @@ describe("resolveKey: bảng phím tắt §5.1 (hàm thuần)", () => {
       assert.equal(resolveKey(phim("["), cheDo, false), null, `\`[\` không được bắn ở chế độ ${cheDo}`);
       assert.equal(resolveKey(phim("]"), cheDo, false), null);
       assert.equal(resolveKey(phim("Enter"), cheDo, false), null);
-      assert.equal(resolveKey(phim("Escape"), cheDo, false), null);
       assert.equal(resolveKey(phim("ArrowLeft", { shiftKey: true }), cheDo, false), null);
       assert.equal(resolveKey(phim("ArrowRight", { altKey: true }), cheDo, false), null);
       assert.equal(resolveKey(phim("s"), cheDo, false), null);
       assert.equal(resolveKey(phim("m"), cheDo, false), null);
+    }
+    // 🔴 ĐÍNH CHÍNH (vòng sửa 1, `I-1`): chỗ này TRƯỚC ĐÂY có thêm
+    // `assert.equal(resolveKey(phim("Escape"), cheDo, false), null)` — và dòng đó **GHIM CHÍNH
+    // LỖI** (đúng lớp ERRATA #44 mục 2: một bài test khẳng định một hành vi ĐÁNG NGỜ thì nó biến
+    // lỗi thành đặc tả). `?` mở bảng §11.4 ở **MỌI** chế độ (hàng `?` không có `mode`), nên một
+    // `Esc` không tra ra ở `compare`/`glossary` nghĩa là **lớp phủ `aria-modal` không đóng được
+    // bằng bàn phím ở 2/3 chế độ** (đo trong Chrome thật của phiên chính: ở `edit` thì đóng, ở
+    // `glossary` thì vẫn mở). Việc "đóng bảng" nằm ở `App.xuLyPhim` (`case "endEdit"`), nên hàng
+    // dữ liệu chỉ cần tra ra ở mọi chế độ — vế "chỉ màn Biên tập" của `Esc` là SAI nguồn.
+    for (const cheDo of ["edit", "compare", "glossary"] as const) {
+      assert.deepEqual(
+        resolveKey(phim("Escape"), cheDo, false),
+        { type: "endEdit" },
+        `\`Esc\` phải tra ra ở MỌI chế độ (bảng §11.4 mở được ở mọi chế độ) — ĐO ĐƯỢC ở ${cheDo}`,
+      );
     }
     // Và vế ngược: phím CHỌN ĐOẠN / CHẾ ĐỘ / PHÁT là của cả ba màn (chúng không ghi gì).
     for (const cheDo of ["edit", "compare", "glossary"] as const) {

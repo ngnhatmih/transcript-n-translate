@@ -75,7 +75,7 @@ export interface PhimTat {
   alt?: boolean;
   /** Bắt buộc có `Shift` (spec: `Shift+←/→`). Bỏ trống với phím KÝ TỰ DẤU — xem đầu tệp. */
   shift?: boolean;
-  /** Chỉ có hiệu lực ở CHẾ ĐỘ này. Bỏ trống = mọi chế độ (Space, chọn đoạn, đổi chế độ, bảng phím). */
+  /** Chỉ có hiệu lực ở CHẾ ĐỘ này. Bỏ trống = mọi chế độ (Space, chọn đoạn, đổi chế độ, bảng phím, `Esc`). */
   mode?: Mode;
   /** NHÃN in ra bảng §11.4 — chữ người dùng đọc, không phải `key` của trình duyệt. */
   toHop: string;
@@ -100,6 +100,15 @@ export interface PhimTat {
  * Hàng `?` KHÔNG có trong bảng §5.1: spec §11.4 đòi bảng phím tắt phải TỒN TẠI nhưng không ghi
  * phím nào mở nó. `?` là lựa chọn của task này (quy ước chung của công cụ), và nó nằm ngay trong
  * bảng để bảng tự khai mình.
+ *
+ * 🔴 HÀNG `Esc` KHÔNG CÓ `mode` (vòng sửa 1, `I-1`) — và đây là một ĐÍNH CHÍNH, không phải một
+ * nới lỏng: `?` mở bảng §11.4 ở **MỌI** chế độ, nên `Esc` phải tra ra ở **MỌI** chế độ, nếu không
+ * thì lớp phủ `aria-modal` **không đóng được bằng bàn phím ở 2/3 chế độ** (đo trong Chrome thật:
+ * ở `edit` thì đóng, ở `glossary` thì vẫn mở). Việc `Esc` làm gì khi bảng đang mở do `App` quyết
+ * (`case "endEdit"`: đóng bảng trước, `Esc` lần hai mới thoát ô sửa), nên hàng DỮ LIỆU chỉ cần
+ * tra ra; nhãn `viec` phải nói cả hai việc, vì bảng §11.4 in chính nhãn đó.
+ * ⚠️ Vế "phím của màn Biên tập không bắn ở màn khác" VẪN ĐÚNG cho `[`, `]`, `Enter`, nudge, `S`,
+ * `M` — chúng chỉ có nghĩa khi có một dòng ĐANG SỬA.
  */
 export const BANG_PHIM: readonly PhimTat[] = [
   { key: " ", toHop: "Space", viec: "phát / dừng", action: { type: "togglePlay" } },
@@ -114,9 +123,8 @@ export const BANG_PHIM: readonly PhimTat[] = [
   },
   {
     key: "Escape",
-    mode: "edit",
     toHop: "Esc",
-    viec: "thoát sửa",
+    viec: "thoát sửa / đóng bảng phím tắt",
     action: { type: "endEdit" },
   },
   {
@@ -267,10 +275,12 @@ function khop(pt: PhimTat, suKien: PhimBam, mode: Mode): boolean {
  * đọc `document.activeElement` ở đây — phép đọc đó thuộc `useShortcuts`, và hai vế đó có hai
  * mutant ĐỘC LẬP (`P1`: bỏ nhánh `inField`; `P2`: bỏ lần đọc `activeElement`).
  *
- * `mode` là một phần của KHOÁ TRA: phím của màn Biên tập (`Enter`, `Esc`, `[`, `]`, nudge, `S`, `M`)
+ * `mode` là một phần của KHOÁ TRA: phím của màn Biên tập (`Enter`, `[`, `]`, nudge, `S`, `M`)
  * chỉ có hiệu lực ở `mode === "edit"` — `setMode` KHÔNG xoá `editingSegment`, nên một listener
  * không lọc `mode` vẫn còn "một dòng đang sửa" trong state khi người dùng đã sang màn khác, và một
  * phím `[` ở đó là một lượt GHI mà màn hình không hề hiện ô sửa nào.
+ * ⚠️ `Esc` là NGOẠI LỆ CÓ CHỦ Ý (vòng sửa 1, `I-1`): bảng §11.4 mở được ở mọi chế độ nên `Esc`
+ * phải tra ra ở mọi chế độ — xem docblock của `BANG_PHIM`.
  */
 export function resolveKey(suKien: PhimBam, mode: Mode, inField: boolean): KeyAction | null {
   // Ô NHẬP ĐƯỢC ƯU TIÊN TUYỆT ĐỐI: người dùng đang gõ phụ đề, không phải đang điều khiển app.

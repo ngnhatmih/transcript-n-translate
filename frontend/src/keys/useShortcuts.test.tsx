@@ -59,6 +59,28 @@ function Khung({
   return coONhap ? taoPhanTu("input", { "data-testid": "o-nhap" }) : taoPhanTu("div", null);
 }
 
+/**
+ * Khung có **CONTROL NATIVE THẬT**: `<button>`, `<a href>` (đúng hai loại mà app dùng — bảng
+ * phím tắt có nút `đóng`, `Transport` có ba nút XUẤT là `<a download>`) và một `<div tabindex>`
+ * **KHÔNG phải** control (vế ngược: phím nóng vẫn phải chạy khi tiêu điểm ở một phần tử khác).
+ */
+function KhungControl({
+  xuLy,
+  mode,
+}: {
+  xuLy: (hd: KeyAction) => void;
+  mode: "edit" | "compare" | "glossary";
+}): unknown {
+  useShortcuts(xuLy, mode);
+  return taoPhanTu(
+    "div",
+    null,
+    taoPhanTu("button", { type: "button", "data-testid": "nut" }, "nút"),
+    taoPhanTu("a", { href: "#x", "data-testid": "lien-ket" }, "liên kết"),
+    taoPhanTu("div", { tabIndex: 0, "data-testid": "khong-phai-control" }, "khung"),
+  );
+}
+
 /** Đếm số listener `keydown` đang sống trên `document` (thêm trừ bớt). */
 function demListener(): { song: () => number; tra: () => void } {
   const themGoc = document.addEventListener;
@@ -191,6 +213,65 @@ describe("useShortcuts: MỘT listener ở `document`, guard HAI VẾ, và dọn
     assert.equal(trongO.defaultPrevented, false, "gõ dấu cách trong ô sửa KHÔNG được bị chặn");
 
     assert.deepEqual(tiengOn, [], "preventDefault khong duoc sinh tieng on console");
+    unmount();
+  });
+
+  it("CONTROL NATIVE đang có tiêu điểm: `Enter`/`Space` KHÔNG bị cướp và KHÔNG bị `preventDefault` (I-1)", () => {
+    const daGoi: KeyAction[] = [];
+    const { container, unmount } = render(
+      taoPhanTu(KhungControl, { xuLy: (hd: KeyAction) => daGoi.push(hd), mode: "edit" }),
+    );
+    const nut = container.querySelector('[data-testid="nut"]') as HTMLButtonElement;
+    const lienKet = container.querySelector('[data-testid="lien-ket"]') as HTMLAnchorElement;
+    const khung = container.querySelector('[data-testid="khong-phai-control"]') as HTMLDivElement;
+    assert.ok(nut !== null && lienKet !== null && khung !== null, "khung phải có đủ ba phần tử");
+
+    // (1) `<BUTTON>`: `Enter` và `Space` là phím KÍCH HOẠT của nút (mặc định của trình duyệt).
+    //     `preventDefault()` biến `KeyboardEvent.defaultPrevented` thành `true`, và đó CHÍNH LÀ cơ
+    //     chế trình duyệt dùng để quyết định có kích hoạt nút hay không ⇒ nút đang có tiêu điểm
+    //     (kể cả nút `đóng` của bảng §11.4) bấm bằng bàn phím KHÔNG được.
+    nut.focus();
+    // ⚠️ BOOLEAN, không `assert.equal(nodeA, nodeB)`: `assert` in node DOM KHÔNG giới hạn độ sâu
+    // (ERRATA #14 mục 3: 218 697 ms rồi OOM) — và ở đây nó chỉ ĐỎ khi guard hỏng, tức đúng lúc
+    // thông điệp cần đọc được.
+    assert.ok(document.activeElement === nut, "ca này chỉ có nghĩa khi tiêu điểm Ở TRÊN nút");
+    const eEnter = bamPhim(nut, { key: "Enter" });
+    assert.equal(eEnter.defaultPrevented, false, "`Enter` trên <button> KHÔNG được bị chặn mặc định");
+    const eSpace = bamPhim(nut, { key: " " });
+    assert.equal(eSpace.defaultPrevented, false, "`Space` trên <button> KHÔNG được bị chặn mặc định");
+    assert.deepEqual(daGoi, [], "phím KÍCH HOẠT của control native KHÔNG được tới handler của app");
+
+    // (2) `<A HREF>`: `Enter` là phím kích hoạt của liên kết (ba nút XUẤT trong `Transport` là
+    //     `<a download>`), nên nó thuộc cùng một lớp.
+    lienKet.focus();
+    const eLienKet = bamPhim(lienKet, { key: "Enter" });
+    assert.equal(eLienKet.defaultPrevented, false, "`Enter` trên <a href> KHÔNG được bị chặn mặc định");
+    assert.deepEqual(daGoi, [], "`Enter` trên <a href> KHÔNG được tới handler của app");
+
+    // (3) PHÍM BỔ TRỢ không phải cú kích hoạt của control: `Ctrl+Enter` (hàng "chạy job") vẫn
+    //     thuộc về APP dù tiêu điểm đang ở nút. Vế này ghim điều kiện "không có Ctrl/Alt/Meta".
+    nut.focus();
+    daGoi.length = 0;
+    const eCtrl = bamPhim(nut, { key: "Enter", ctrlKey: true });
+    assert.deepEqual(daGoi, [{ type: "runJob" }], "`Ctrl+Enter` trên một nút vẫn phải tới handler của app");
+    assert.equal(eCtrl.defaultPrevented, true, "`Ctrl+Enter` (phím nóng của app) vẫn phải chặn mặc định");
+
+    // (4) VẾ NGƯỢC (đối chứng dương) — tiêu điểm ở một phần tử KHÔNG phải control: phím nóng PHẢI
+    //     chạy y như trước, và phím đã xử lý vẫn phải chặn mặc định. Thiếu vế này thì một hook
+    //     "nuốt TẤT CẢ `Enter`/`Space`" cũng qua được hai vế trên.
+    khung.focus();
+    daGoi.length = 0;
+    const eKhung = bamPhim(khung, { key: "Enter" });
+    assert.deepEqual(daGoi, [{ type: "startEdit" }], "`Enter` NGOÀI control native vẫn phải mở ô sửa");
+    assert.equal(eKhung.defaultPrevented, true, "phím ĐÃ XỬ LÝ (ngoài control) vẫn phải chặn mặc định");
+
+    khung.blur();
+    daGoi.length = 0;
+    const eBody = bamPhim(document.body, { key: " " });
+    assert.deepEqual(daGoi, [{ type: "togglePlay" }], "`Space` ngoài control native vẫn là phát/dừng");
+    assert.equal(eBody.defaultPrevented, true, "`Space` ngoài control vẫn phải chặn cuộn trang");
+
+    assert.deepEqual(tiengOn, [], "guard control native không được sinh tiếng ồn console");
     unmount();
   });
 

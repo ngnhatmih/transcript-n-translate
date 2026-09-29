@@ -152,7 +152,28 @@ export interface TransportProps {
    * đúng `currentTime` ban đầu của phần tử.
    */
   onDauDoc?: (giay: number) => void;
+  /**
+   * YÊU CẦU **NGHE LẠI QUANH MỐC VỪA NUDGE** (spec UI §5.2 dòng 309: *"mỗi lần nudge phát lại
+   * 300ms quanh mốc mới để nghe ngay"*) — do `App` phát ra SAU khi lệnh ghi đã được máy chủ nhận.
+   *
+   * ⚠️ VÌ SAO LÀ PROP chứ không phải một hàm `App` gọi vào: phần tử media sống Ở ĐÂY, và `App`
+   * không được giữ một tham chiếu thứ hai tới nó (hai đường vào cùng một dữ liệu). `App` nói
+   * *"nghe lại quanh mốc này"*, `Transport` quyết CÁCH (tua + `play()` + dừng sau 300 ms).
+   *
+   * ⚠️ `lan` (số thứ tự yêu cầu) là một phần của HỢP ĐỒNG, không phải trang trí: hai yêu cầu cùng
+   * `giay` vẫn phải là hai yêu cầu (xem `App.datNgheLai`).
+   */
+  ngheLai?: { giay: number; lan: number } | null;
 }
+
+/**
+ * ĐỘ DÀI cửa sổ nghe lại sau một lần nudge — **300 ms**, nguyên văn spec UI §5.2 dòng 309.
+ *
+ * Xuất ra để bài test nói được "300 ms" bằng CHÍNH hằng số của sản phẩm thay vì chép lại con số
+ * (hai bản chép tay sẽ trôi khỏi nhau). Bài test KHÔNG chờ bằng `sleep`: nó chờ TÍN HIỆU
+ * (`data-nghe-lai` mở rồi đóng + `pause()` được gọi), deadline chỉ là TRẦN — ERRATA #35/#38/#39.
+ */
+export const NGHE_LAI_MS = 300;
 
 export function Transport({
   sourceId,
@@ -167,6 +188,7 @@ export function Transport({
   onPlayingChange,
   onSegmentChange,
   onDauDoc,
+  ngheLai = null,
 }: TransportProps) {
   // Xem ghi chu o `TransportProps.exportableId`: khong truyen ⇒ "ban dang xem la ban xuat duoc".
   const idXuatDuoc = exportableId === undefined ? translationId : exportableId;
@@ -177,6 +199,22 @@ export function Transport({
   // `pause()` tren phan tu vua dung la mot loi im lang, va duoi jsdom no do
   // "Not implemented" ra `console.error` — thu ma `App.test.tsx` ghim la khong duoc co.
   const daPhat = useRef(false);
+
+  /**
+   * CỬA SỔ NGHE LẠI đang MỞ hay không (sau một lần nudge) — trạng thái CỤC BỘ, và nó được PHƠI RA
+   * DOM (`data-nghe-lai` trên phần tử media) vì đây là **tín hiệu kết thúc** của một khoảng thời
+   * gian: bài test cần một TÍN HIỆU để chờ, không phải một `sleep` (ERRATA #35 mục 2: điều kiện
+   * thoát là hàm của ĐỒNG HỒ thì luôn trở thành đúng, nên nó không chứng minh gì).
+   */
+  const [dangNgheLai, datDangNgheLai] = useState(false);
+  /**
+   * `playing` của LƯỢT RENDER NÀY, đọc được từ trong một callback của `setTimeout`.
+   *
+   * ⚠️ Gán trong THÂN render, KHÔNG trong effect: callback của hẹn giờ chạy ở một lượt SAU, và giá
+   * trị nó cần là giá trị MỚI NHẤT (cùng lý do `App.banGhiMoiNhat` — ERRATA #46 mục 10b).
+   */
+  const playingRef = useRef(playing);
+  playingRef.current = playing;
 
   const coNguon = sourceId !== null;
   /** Thoi luong dung duoc: `null`/`0`/khong huu han deu la "chua biet" (xem `readheadPercent`). */
@@ -216,6 +254,45 @@ export function Transport({
   }, [playing, sourceId, onPlayingChange]);
 
   /**
+   * **NGHE LẠI QUANH MỐC MỚI SAU MỘT LẦN NUDGE** — spec UI §5.2 dòng 309: *"mỗi lần nudge phát lại
+   * 300ms quanh mốc mới để nghe ngay"*. Vòng sửa 1 của Task 11 HIỆN THỰC nó (`I-3`): trước đó hành
+   * vi này được khai TRẦN với lý do SAI (*"jsdom không hiện thực `play()`"* — điều đó chặn việc
+   * NGHE, không chặn việc GHIM: chính `App.test.tsx` đã bịt `play()`/`pause()` để tắt tiếng ồn,
+   * nên một spy đếm được lời gọi).
+   *
+   * Ba vế của một cửa sổ nghe lại:
+   *  1. **TUA** đầu đọc tới mốc mới (mốc do `App` chốt từ CHÍNH đoạn nó đã gửi lên máy chủ);
+   *  2. **PHÁT** (`play()`);
+   *  3. **DỪNG sau `NGHE_LAI_MS`** — nhưng CHỈ khi người dùng không đang phát: một cú nudge trong
+   *     lúc đang nghe không được CẮT việc đang nghe (`ui.playing` vẫn `true`, và nút phát vẫn nói
+   *     đúng). Yêu cầu mới (nudge tiếp) huỷ hẹn giờ CŨ và mở lại cửa sổ từ mốc MỚI NHẤT.
+   *
+   * ⚠️ HAI ĐIỀU NÓI RA THAY VÌ GIẤU: (a) ĐÂY KHÔNG PHẢI nguồn sự thật thứ hai của `playing`: cửa
+   * sổ nghe lại KHÔNG đi qua reducer, vì đưa nó qua đó nghĩa là mỗi cú nudge `dispatch(setPlaying)`
+   * — và ở vế "đang phát" nó sẽ DỪNG việc người dùng đang nghe, còn ở vế "đang dừng" nút phát sẽ
+   * nhấp nháy theo một đoạn 300 ms. Hệ quả đã biết: trong 300 ms đó phần tử media đang phát trong
+   * khi `ui.playing === false` — một lệch TẠM THỜI, có chủ ý, và nó tự hết ở vế (3). (b) `jsdom`
+   * không có âm thanh: thứ đo được ở đây là `play()`/`pause()`/`currentTime`, không phải TIẾNG.
+   */
+  useEffect(() => {
+    if (ngheLai === null) return;
+    const el = phanTuMedia.current;
+    if (el === null) return;
+    const giay = giayAnToan(ngheLai.giay);
+    el.currentTime = giay;
+    datViTriPhat(giay);
+    datDangNgheLai(true);
+    // `play()` trả Promise ở trình duyệt THẬT và `undefined` ở jsdom ⇒ cùng cách xử lý như effect
+    // phát/tạm dừng ở trên; lỗi từ chối (autoplay) không được thành một `unhandledRejection`.
+    Promise.resolve(el.play()).catch(() => {});
+    const hen = setTimeout(() => {
+      if (!playingRef.current) el.pause();
+      datDangNgheLai(false);
+    }, NGHE_LAI_MS);
+    return () => clearTimeout(hen);
+  }, [ngheLai]);
+
+  /**
    * `timeupdate` cua phan tu media — DAY NOI duy nhat cua "tu nhay doan".
    *
    * Quyet dinh nam o `nextSegmentAfter` (ham thuan); o day chi con ba buoc: doc vi tri
@@ -252,6 +329,9 @@ export function Transport({
         className="tp__media"
         src={sourceId === null ? undefined : endpoints.mediaUrl(sourceId)}
         onTimeUpdate={khiThoiGian}
+        /* TÍN HIỆU KẾT THÚC của cửa sổ nghe lại (xem `dangNgheLai`): bài test chờ nó ĐÓNG, không
+           chờ đồng hồ. Vắng mặt khi không có cửa sổ nào đang mở (`undefined` ⇒ React bỏ thuộc tính). */
+        data-nghe-lai={dangNgheLai ? "1" : undefined}
       />
       <button
         type="button"

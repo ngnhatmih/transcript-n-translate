@@ -25,7 +25,7 @@
  * đích cuối của phép bong bóng. Và `document` là chỗ đo được: một sự kiện phát ra Ở `window` không
  * tới được listener ở `document` (bài `MỘT listener … KHÔNG ở window` trong tệp test).
  *
- * ## Vì sao deps là `[xuLy, mode]` — và đây là một RÀNG BUỘC, không phải một lựa chọn phong cách
+ * ## Vì sao deps là `[xuLy, mode]` — và vì sao KHÔNG có `useRef` giữ handler
  *
  * `App` truyền một hàm MỚI ở mỗi lượt render (nó đóng trên state của lượt đó), nên effect chạy lại
  * mỗi lượt render: **gỡ listener cũ rồi gắn listener mới**. Điều đó giữ nguyên cửa sổ một-lượt-commit
@@ -33,9 +33,28 @@
  * CŨ vẫn còn gắn (passive effect chưa flush), nên NỀN của lệnh ghi phải đọc từ ảnh chụp mới nhất
  * (`App.banGhiMoiNhat` — `useRef` gán ngay trong thân render).
  *
- * ⚠️ Nếu thay bằng "gắn MỘT lần với deps `[]` + giữ handler trong một `useRef`", cửa sổ đó biến mất
- * và mutant `G1-BASE-CLOSURE` (đọc closure thay vì ref) **hết ĐỎ** — tức bản refactor làm mất độ
- * phủ của chính bài ghim mà `#46` mục 11 giao cho task này giữ xanh. Đừng đổi.
+ * 🔴 **ĐÍNH CHÍNH (vòng sửa 1, `I-2`).** Chỗ này TRƯỚC ĐÂY khai: *"nếu thay bằng ref + deps `[]` thì
+ * mutant `G1-BASE-CLOSURE` hết ĐỎ — tức bản refactor làm MẤT ĐỘ PHỦ của bài ghim"*. **SAI với chính
+ * hình dạng được mô tả**, và tôi đã TỰ ĐO LẠI cả hai chiều trên cây này (`npm test` không cần —
+ * `src/shell/App.test.tsx`, 66 bài; `G1-BASE-CLOSURE` = `const nenMayChu = hienTai;`):
+ *   - `E11A` = `useRef` gán **trong THÂN render** + deps `[mode]` ⇒ **0 bài đỏ**;
+ *   - `E11A + G1-BASE-CLOSURE` ⇒ **0 bài đỏ** (tái lập đúng con số cũ);
+ *   - `E11B` = `useRef` gán **trong EFFECT** + **GIỮ** deps `[xuLy, mode]` + `G1-BASE-CLOSURE`
+ *     ⇒ **1 bài đỏ**: `D1 NỀN MỚI HƠN (CỬA SỔ CHƯA GẮN LẠI)…`.
+ * **Cơ chế:** với ref gán trong thân render, tại thời điểm phím thứ hai rơi (sau commit DOM, TRƯỚC
+ * khi passive effect flush) `xuLyRef.current` **ĐÃ** là handler của lượt render mới ⇒ closure
+ * `hienTai` = `transcript.data` **MỚI** ⇒ "đọc closure thay vì ref" **không còn khác biệt hành vi**.
+ * Vậy `E11A` là **MUTANT TƯƠNG ĐƯƠNG** (một bản vá KHÁC cùng chữa một lỗi), **KHÔNG** phải "mất độ
+ * nhạy": vế ngược được chứng minh bằng `E11B`, nơi handler THẬT SỰ cũ và bài ghim **vẫn đỏ**.
+ *
+ * ⇒ **Quyết định:** giữ `[xuLy, mode]` — nó là đường ĐƠN GIẢN NHẤT (không cần ref), và nó không
+ * phải một ràng buộc sống-còn như câu cũ khai. ⚠️ **NỢ `#46` mục 10b:** vế (i) ("trên cây CHƯA sửa,
+ * mutant cũ giết được bài") đã được tôi đo lại TRÊN CÂY `dedad0c` trong một worktree scratch:
+ * `PREFIX-D1-DEPS-NUDGE-STALE` (bỏ `transcript.data` khỏi deps) ⇒ **1 tên đỏ**:
+ * `D1 NỀN MỚI HƠN: bản ghi MÁY CHỦ mới hơn nền …` (`tests 54 / pass 53 / fail 1`); trên cây ĐÃ sửa
+ * cùng hình dạng mutant đó **trơ** (nền đọc từ `useRef`), còn `G1-BASE-CLOSURE` mới là thứ ĐỎ.
+ * Đo trên MỘT tệp (`App.test.tsx`), không phải toàn suite — ERRATA #46 mục 10b ghi **3 tên đỏ** cho
+ * lượt toàn suite; hai tên còn lại không thuộc phạm vi đo này.
  */
 import { useEffect } from "react";
 
@@ -58,6 +77,49 @@ function dangGoTrongONhap(dich: EventTarget | null): boolean {
 }
 
 /**
+ * **HAI PHÍM KÍCH HOẠT của control native** (spec HTML): `Enter` và `Space`. Đây không phải "phím
+ * nóng của app" mà là **cơ chế bấm của trình duyệt** cho `<button>`/`<a href>`/`<select>`/…
+ * (`Enter` kích hoạt liên kết, `Space` kích hoạt nút).
+ */
+const PHIM_KICH_HOAT_CONTROL: ReadonlySet<string> = new Set(["Enter", " "]);
+
+/**
+ * Những phần tử mà TRÌNH DUYỆT kích hoạt bằng `Enter`/`Space`. `closest` đi LÊN cây nên nó bắt cả
+ * `<span>` bên trong một `<button>` (nơi `keydown` thật sự nhắm tới).
+ */
+const CONTROL_NATIVE =
+  'button, a[href], select, summary, input[type="button"], input[type="submit"], '
+  + 'input[type="reset"], input[type="checkbox"], input[type="radio"]';
+
+/**
+ * Phím này có thuộc về một CONTROL NATIVE đang có tiêu điểm không (vòng sửa 1, `I-1`).
+ *
+ * 🔴 VÌ SAO CẦN (lỗi SẢN PHẨM đo được, không phải một lo ngại): `useShortcuts` gọi
+ * `preventDefault()` cho **MỌI** phím tra được, và `Enter`/`Space` đều tra được ở `mode === "edit"`
+ * (`startEdit`/`togglePlay`). `preventDefault()` trên `keydown` của một `<button>` **chặn chính cú
+ * bấm của trình duyệt** ⇒ nút đang có tiêu điểm KHÔNG kích hoạt được — kể cả nút `đóng` của bảng
+ * §11.4 (nó có `autoFocus`, nên tiêu điểm LUÔN ở đó khi bảng vừa mở). Probe hai chiều: bỏ guard ⇒
+ * `defaultPrevented === true` và handler nhận `["startEdit","togglePlay"]`; có guard ⇒ `false`.
+ *
+ * Ba vế, mỗi vế có lý do riêng:
+ *  - **`target`**, không `document.activeElement`: `keydown` của một cú bấm THẬT luôn được gửi tới
+ *    phần tử đang có tiêu điểm, nên `target` là chỗ duy nhất cú bấm đó tồn tại. (Guard Ô NHẬP thì
+ *    cần CẢ HAI vế — `#45` mục 1(b) — vì ở đó có ca ĐO ĐƯỢC: một sự kiện phát ra từ `body` trong
+ *    khi tiêu điểm ở trong ô nhập. Với control native, ca tương ứng là một sự kiện TỔNG HỢP không
+ *    có trong trình duyệt thật, nên thêm nửa đó chỉ tạo một mệnh đề không falsify được.)
+ *  - **`closest`, không `===`**: `keydown` nhắm tới phần tử SÂU NHẤT, nên một chữ `<span>` trong
+ *    nút vẫn là một cú bấm vào nút.
+ *  - **Không có `Ctrl`/`Alt`/`Meta`**: phím nóng của app có phím bổ trợ (`Ctrl+Enter` = chạy job)
+ *    và tổ hợp đó KHÔNG phải cú kích hoạt của control ⇒ nó vẫn thuộc về app.
+ */
+function phimCuaControlNative(suKien: KeyboardEvent): boolean {
+  if (suKien.ctrlKey || suKien.altKey || suKien.metaKey) return false;
+  if (!PHIM_KICH_HOAT_CONTROL.has(suKien.key)) return false;
+  const dich = suKien.target;
+  return dich instanceof HTMLElement && dich.closest(CONTROL_NATIVE) !== null;
+}
+
+/**
  * Gắn bảng phím tắt (§5.1) cho cả app.
  *
  * `mode` được truyền xuống `resolveKey` như một phần của KHOÁ TRA: `setMode` không xoá
@@ -68,6 +130,10 @@ function dangGoTrongONhap(dich: EventTarget | null): boolean {
 export function useShortcuts(xuLy: XuLyPhim, mode: Mode): void {
   useEffect(() => {
     function khiBamPhim(suKien: KeyboardEvent): void {
+      // (0) CONTROL NATIVE ĐANG CÓ TIÊU ĐIỂM ⇒ `Enter`/`Space` là cú bấm CỦA NÓ, không phải phím
+      //     nóng của app. Phải đứng TRƯỚC `resolveKey` và trước `preventDefault` — xem docblock
+      //     của `phimCuaControlNative` (`I-1`).
+      if (phimCuaControlNative(suKien)) return;
       // HAI VẾ của guard ô nhập — xem docblock đầu tệp. `resolveKey` vẫn nhận `inField` như một
       // THAM SỐ (nó thuần, không đọc DOM); phép đọc DOM nằm ở đúng một chỗ là đây.
       const trongONhap =
@@ -75,8 +141,9 @@ export function useShortcuts(xuLy: XuLyPhim, mode: Mode): void {
       const hanhDong = resolveKey(suKien, mode, trongONhap);
       if (hanhDong === null) return;
       // Phím ĐÃ XỬ LÝ thì chặn mặc định: `Space` cuộn trang, `[`/`]` không có mặc định nhưng
-      // `Ctrl+1/2/3` thì có. KHÔNG chặn khi hành động là `null` (phím của trình duyệt/extension)
-      // và KHÔNG chặn khi đang gõ trong ô nhập (dấu cách phải là dấu cách của phụ đề).
+      // `Ctrl+1/2/3` thì có. KHÔNG chặn khi hành động là `null` (phím của trình duyệt/extension),
+      // KHÔNG chặn khi đang gõ trong ô nhập (dấu cách phải là dấu cách của phụ đề), và KHÔNG chặn
+      // khi phím thuộc một control native đang có tiêu điểm (vế (0) ở trên).
       suKien.preventDefault();
       xuLy(hanhDong);
     }
