@@ -9,6 +9,13 @@ frontend/.next/
 frontend/out/
 frontend/dist/
 frontend/test-results/
+# Ảnh của tầng Chrome thật (`npm run e2e` không truyền `--out` thì ghi vào đây).
+# Thiếu dòng này thì MỘT lượt chạy e2e là `git status` hết RỖNG — re-review Task 12 (Minor m-e) đo được.
+frontend/e2e/anh/
+# DB gieo của tầng e2e (scratch cạnh repo là mặc định, nhưng chốt chặn cho phép đổi chỗ;
+# nếu ai đó trỏ nó vào trong repo thì đừng để nó làm bẩn cây).
+frontend/_seed-e2e/
+_seed-e2e/
 
 # Dữ liệu chạy — không commit
 data/media/
