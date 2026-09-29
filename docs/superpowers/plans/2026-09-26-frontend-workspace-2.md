@@ -2316,6 +2316,58 @@ Driver của reviewer chạy **1** mutation thay vì **16** vì `foreach ($m in 
 ### 6. Nợ còn của W2 (không chặn)
 `P3` (bài hai chiều cho `ch*`) ⇒ **D2** · 5 lớp `.ch*` còn lại **0 luật** (nợ Task 4/W1, đã có reset cho `ul.ch__danh-sach`) · `M3` *"trình duyệt im lặng"* vẫn là **SUY LUẬN** · kéo-thả chuột thật · hình thức CSS **chỉ ảnh**.
 
+## ⚠️ ERRATA #44 — Review D1: **MẤT-CẬP-NHẬT âm thầm trên đường GHI**, và **`[`/`]` KHÔNG phải nudge — brief VÀ plan của tôi cùng sai nguồn spec**
+
+Review độc lập `5e4717d`: **`CONDITIONAL PASS` — 1 Critical / 4 Important / 5 Minor.** Cây RỖNG trước/sau; `git show --stat` = **1 commit, 5 tệp**; phục hồi **byte-exact 16/16**; `cancelled 0` mọi lượt.
+
+### 1. 🔴 `Critical` C1 — **lần ghi SAU xoá lần ghi TRƯỚC** (mất-cập-nhật), và nó **im lặng**
+`ghiDoan` đọc `transcript.data` từ **closure** (`App.tsx:324`). Nút chuột bị `disabled={dangLuu}` (`EditScreen.tsx:330/340/349`) **nhưng ĐƯỜNG PHÍM thì KHÔNG** (`App.tsx:395-403`)
+⇒ hai lần ghi chồng lấn, lần sau tính từ **bản ghi cũ** ⇒ **ghi đè, xoá** kết quả lần trước, **`version` vẫn tăng**, **không lỗi nào**.
+**Chứng minh TẤT ĐỊNH (không phải suy luận):** làm chậm fixture **250 ms** + bỏ phép chờ giữa hai lần bấm, rồi bắt **body thật của lần ghi thứ hai**:
+`{"i":1,"start":1.9,"end":4,…}` — `end:4` là giá trị **TRƯỚC** nudge `]` (đã thành 4.1) ⇒ **nudge thứ nhất bị xoá âm thầm**.
+⇒ **Hệ quả kèm theo (I1):** cổng `fail 2` **KHÔNG tái lập được** — **3/18** lượt suite đầy đủ có `fail 3`, bài đỏ thêm **luôn** là `D1 NUDGE` (5 050 ms). Lượt sạch: `230/228/2/0`, EXIT=1, **15 136 ms**. ⇒ **báo cáo khai `fail 2` như một sự thật tất định là SAI**; gốc là C1.
+⇒ **LUẬT: mọi đường GHI phải dùng CHUNG một hàng đợi (hoặc cùng một cổng chặn).** `disabled` trên nút là **bảo vệ ở TẦNG GIAO DIỆN**; nó **không** bảo vệ đường bàn phím, và cũng không bảo vệ hai lối ghi khác nhau vào cùng một tài nguyên.
+⇒ **LUẬT: mất-cập-nhật là loại lỗi KHÔNG có triệu chứng** — không exception, không 4xx, `version` vẫn tăng. Nó chỉ lộ ra khi ai đó **chồng hai lần ghi rồi so BYTE đã lưu**. Phải thử **có chủ ý**.
+
+### 2. 🟠 `Important` I3 — **gõ `[`/`]` trong ô sửa là GHI vào máy chủ**
+Listener ở `window` **không có guard `activeElement`** ⇒ phím rơi vào **cả** ô nhập. Chính bài test của commit **dispatch `[` trên `textarea` rồi khẳng định `dem.patch === 1`** — tức **hành vi đó đang xảy ra và đã được ghi lại như thể là ĐÚNG**.
+Báo cáo gọi nó là *"xung đột tiềm tàng"* — **nó không tiềm tàng, nó đang xảy ra**. Plan Task 11 Step 3 **đã** đòi guard này.
+⇒ **LUẬT: khi một bài test khẳng định một hành vi ĐÁNG NGỜ mà không ai chất vấn, bài test đó đang BIẾN LỖI THÀNH ĐẶC TẢ.** Người review phải hỏi *"hành vi này có đúng không?"*, không chỉ *"có được ghim không?"*.
+
+### 3. 🔴 **`[`/`]` KHÔNG PHẢI NUDGE — brief tôi SAI, và PLAN cũng SAI y hệt**
+Spec UI: **`:296`/`:310`** — `[`/`]` = **đặt mốc start/end TẠI ĐẦU ĐỌC**; **`:300-301`/`:309`** — nudge = **`Shift+←/→` (±0,1s)** và **`Alt+←/→` (±1s)**.
+Brief D1 §2 gán `[`/`]` cho nudge (dòng 21) ⇒ **sai nguồn**. Người làm **bác đúng** và ghi hai hành vi spec vào nợ.
+⚠️ **VÀ PLAN SAI Y HỆT:** Task 11 Step 1 ghim `resolveKey(k("[")) → {type:"nudge", edge:"start", by:-1}` ⇒ nếu không sửa thì **Task 11 sẽ tái sinh đúng lỗi này**.
+⇒ **ĐÃ SỬA** tại chỗ trong plan (Step 1 nay ghim `setEdgeAtPlayhead` cho `[`/`]`, và nudge cho `Shift/Alt+←/→`).
+**Sản phẩm hiện ĐẠT 1/4 vế spec:** nudge ±0,1s **có thật** + tới được **đĩa** + **0 request** khi không có dòng đang sửa + **không clamp lần hai**; **THIẾU** `Shift/Alt+←/→`, **THIẾU** `[`/`]` đặt mốc tại đầu đọc, **THIẾU** nghe lại 300 ms. ⇒ **Task 11 phải làm đủ bốn vế + render bảng phím §11.4** (là **YÊU CẦU**).
+⇒ **LUẬT: trước khi gán một phím cho một hành vi, hãy ĐỌC bảng phím trong spec** — tôi đã suy từ ký ức về "nudge ±0,1s" rồi gán đại phím.
+
+### 4. ✅ **Lập luận của người làm về `action nudge` là ĐÚNG** (brief tôi sai lần thứ hai trong cùng task)
+`UiState` (`reducer.ts:18-31`) có **7 trường phẳng**, **không** trường nào chứa mốc thời gian; mốc sống ở `transcript.data.segments`.
+⇒ `{type:"nudge"}` là action **VÔ ĐÍCH** (đúng ERRATA #33 mục 1), và muốn có đích thì phải **chép dữ liệu máy chủ vào client** — đúng thứ brief cấm và `Global Constraints` cấm.
+⇒ **"Action thật" của tôi phải đọc là "thao tác thật nối tới ĐƯỜNG GHI thật"** (handler + phím + 2 nút + `patchTranscript`) — và điều đó **được chứng minh** bằng số request ở máy chủ (`D1-3` đỏ, `P2` đỏ).
+⚠️ **Nhưng CHƯA AN TOÀN vì thiếu hàng đợi** ⇒ C1.
+
+### 5. ✅ **Bẫy mất dữ liệu: người review ĐO ĐỘC LẬP trên backend THẬT** (không tin fixture)
+Gieo DB mới bằng chính mã backend, API thật cổng **8777**, `GET→PATCH→GET` + **đọc SQLite `mode=ro` trên đĩa**:
+- mảng **ĐẦY ĐỦ** ⇒ `i=4` giữ `suspect:true, qa:["nhạc nền"]` (**cả HTTP lẫn đĩa**) ✔ — khớp phép đo của tôi qua **trình duyệt thật**;
+- mảng **THIẾU TRƯỜNG** ⇒ **200 OK** và `suspect:false, qa:null` ⇒ **MẤT THẬT trên đĩa** ⇒ **bẫy là THẬT**, và sản phẩm **tránh được nó**;
+- `PATCH {segments:[]}` ⇒ **422**; `translations` id 1&2 `transcript_version` 1→1, `stale` false→**true** (cả list lẫn detail).
+⇒ Kết luận: **`PATCH` LUÔN tăng `version`** ⇒ câu *"bản dịch đã lỗi thời"* là **BẮT BUỘC**, không phải tuỳ chọn (brief tôi viết "nếu PATCH tăng version" — nay là chắc chắn).
+
+### 6. ⚠️ `Minor` M2 — **một comment khai SAI CƠ CHẾ** (phát hiện bằng mutant tương đương)
+`P9` (bỏ guard `if (i === null) return;`) ⇒ **0 bài đỏ** — **mutant TƯƠNG ĐƯƠNG**, vì `ghiDoan` **cũng** từ chối.
+⇒ Comment `App.tsx:373-375` (*"bỏ guard ra là mỗi lần bấm `[`/`]` lại ghi"*) **khai sai cơ chế**. ⇒ **LUẬT: comment giải thích cơ chế phải được kiểm bằng một mutant — nếu mutant tương đương thì comment đang nói sai.**
+
+### 7. ✅ Điều được XÁC NHẬN (đáng ghi vì nó là bằng chứng hai chiều)
+- **ERRATA #43 mục 2 ĐẠT:** `D1-11` (**đổi tên class trong DOM mà giữ luật**) ⇒ **ĐỎ** đúng bài `HINH THUC (D1)`; `D1-12` (**luật sau ghi đè**) ⇒ **ĐỎ**. Tức luật mới *"ghim QUAN HỆ + khai báo thắng cuộc"* **đã có hiệu lực**.
+- **`CONTROL-inert` = 0 đỏ**; witness = 1 ở **mọi** sửa đổi (khớp ≠1 ⇒ driver **tự TỪ CHỐI ghi tệp** — tự chứng minh).
+- **Người review tự mắt đọc ảnh của tôi** (`read_image`): `41` = ô nhập + hai mốc + 4 nút; `42` = ô sửa đã đóng, chữ đã lưu, **nguyên văn `BẢN DỊCH ĐÃ LỖI THỜI SO VỚI BẢN GHI`**, và **khung danh sách KHÔNG bị nuốt** ⇒ **ERRATA #31 mục 1 xác nhận BẰNG MẮT** (lần đầu một bản sửa bố cục được người khác nhìn thấy, không chỉ tôi).
+- ⚠️ **Phép đo của họ độc lập với ảnh của tôi** (DB mới ở cổng 8777, không cùng lượt) — **nợ đã khai**.
+
+### 8. Nợ còn của D1 (không chặn)
+`Shift/Alt+←/→` + `[`/`]` đặt mốc tại đầu đọc + nghe lại 300 ms (**Task 11**) · *"Esc hỏi lại khi có thay đổi chưa lưu"* (§5.2) · `TranscriptPatch.status` chưa dùng · ảnh `đang lưu…` và nhánh rỗng chưa có · bàn phím/**`Esc` THẬT** chưa đo (I3 mới ở tầng `fireEvent`) · tỉ lệ flake ~17% là **của máy này**, không suy ra cho CI — nhưng **cơ chế C1 đã chứng minh tất định**.
+
 ## Quy ước thẩm mỹ — spec UI thắng, skill chỉ là checklist
 
 Spec `2026-09-25-phu-de-lab-ui-design.md` là **nguồn có thẩm quyền về hình thức** (bạn đã duyệt). Skill
@@ -3397,8 +3449,15 @@ describe("bang phim tat", () => {
   });
 
   it("[ va ] nudge moc thoi gian", () => {
-    expect(resolveKey(k("["), "edit", false)).toEqual({ type: "nudge", edge: "start", by: -1 });
-    expect(resolveKey(k("]"), "edit", false)).toEqual({ type: "nudge", edge: "end", by: 1 });
+    // 🔴 ĐÍNH CHÍNH (ERRATA #44 mục 3): hai dòng dưới đây SAI NGUỒN SPEC và đã bị sửa.
+    // Spec UI §5.1/:296 + :310: `[`/`]` = ĐẶT MỐC start/end TẠI ĐẦU ĐỌC (cần currentTime của media).
+    // Spec UI :300-301 + :309: nudge = `Shift+←/→` (±0,1s) và `Alt+←/→` (±1s).
+    expect(resolveKey(k("["), "edit", false)).toEqual({ type: "setEdgeAtPlayhead", edge: "start" });
+    expect(resolveKey(k("]"), "edit", false)).toEqual({ type: "setEdgeAtPlayhead", edge: "end" });
+    expect(resolveKey(k("ArrowLeft", { shiftKey: true }), "edit", false)).toEqual({ type: "nudge", edge: "start", by: -1 });
+    expect(resolveKey(k("ArrowRight", { shiftKey: true }), "edit", false)).toEqual({ type: "nudge", edge: "end", by: 1 });
+    expect(resolveKey(k("ArrowLeft", { altKey: true }), "edit", false)).toEqual({ type: "nudge", edge: "start", by: -10 });
+    expect(resolveKey(k("ArrowRight", { altKey: true }), "edit", false)).toEqual({ type: "nudge", edge: "end", by: 10 });
   });
 
   it("1/2/3 doi mode", () => {
