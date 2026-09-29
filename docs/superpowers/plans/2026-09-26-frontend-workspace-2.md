@@ -2368,6 +2368,47 @@ Gieo DB mới bằng chính mã backend, API thật cổng **8777**, `GET→PATC
 ### 8. Nợ còn của D1 (không chặn)
 `Shift/Alt+←/→` + `[`/`]` đặt mốc tại đầu đọc + nghe lại 300 ms (**Task 11**) · *"Esc hỏi lại khi có thay đổi chưa lưu"* (§5.2) · `TranscriptPatch.status` chưa dùng · ảnh `đang lưu…` và nhánh rỗng chưa có · bàn phím/**`Esc` THẬT** chưa đo (I3 mới ở tầng `fireEvent`) · tỉ lệ flake ~17% là **của máy này**, không suy ra cho CI — nhưng **cơ chế C1 đã chứng minh tất định**.
 
+## ⚠️ ERRATA #45 — Re-review D1: **MỆNH ĐỀ KHÔNG CÓ GÌ LÀM NÓ SAI ĐƯỢC** (lớp cũ nay ở cấp MỆNH ĐỀ), và **`G8` bị dán nhãn "tương đương" SAI**
+
+Re-review `6ada5df`: **`CONDITIONAL PASS` — 0 Critical / 1 Important / 4 Minor.** **C1, I1, I3 ĐẠT.**
+**C1 được tái lập ĐỘC LẬP BỐN CHIỀU:** (i) mã cũ `75c2423` vật chất hóa (`blob d979426b`, 50 678 B, **0 CR**) + bài ghim mới ⇒ `đo được 4`;
+(ii) mã hiện tại ⇒ `tests 1 / pass 1 / fail 0`; (iii) **bỏ HÀNG ĐỢI** ⇒ FAIL; (iv) **giữ hàng đợi, bỏ NỀN** ⇒ FAIL
+⇒ **"hàng đợi một mình KHÔNG ĐỦ" ĐÃ ĐƯỢC CHỨNG MINH**, không còn là lời khai. **`fail 3` = 0/7 lượt** suite đầy đủ.
+
+### 1. 🔴 TỔNG QUÁT HOÁ MỚI — lớp lỗi cũ nay ở **CẤP MỆNH ĐỀ**, không phải cấp bài test
+Vòng sửa thêm ba **mệnh đề** mà **KHÔNG có gì làm chúng sai được** (bỏ đi ⇒ **0 bài đỏ**, cả **232** bài vẫn xanh):
+- **(a)** vế `vuaGhi.version > hienTai.version` của nền "bản ghi vừa gửi";
+- **(b)** **nửa `document.activeElement`** của guard I3 (bài mới chỉ phát phím **TRÊN `textarea`** nên chỉ chạm nửa `target`; ⚠️ bỏ **nửa `target`** thì **ĐỎ đúng bài đó** ⇒ chỉ nửa sau là không được phủ);
+- **(c)** bộ đếm chứng nhân `dem.patchXong` — bài chỉ khẳng định `=== 0` (**một chiều**) ⇒ làm nó **hằng 0** ⇒ 0 đỏ.
+⇒ **LUẬT (mạnh hơn các luật trước): sau khi thêm một GUARD/CONDITION, hãy hỏi NGAY: "MUTANT NÀO làm sự VẮNG MẶT của mệnh đề này trở nên QUAN SÁT ĐƯỢC?"**
+Nếu không có mutant nào ⇒ mệnh đề đó **KHÔNG THỂ SAI ĐƯỢC** ⇒ hoặc **ghim nó**, hoặc **khai nó là TRẦN** — chứ **không** được kể nó vào "0 mutant sống sót".
+⇒ Phân biệt ba cấp của cùng một họ: **bài test không thi hành đường** (`napTep`/W2) · **bài ghim sai thứ** (`X7`, `P3`, `flex` bị ghi đè) · **mệnh đề không falsify được** (ở đây).
+
+### 2. ⚠️ `G8` bị dán nhãn SAI — nó là **MUTANT SỐNG SÓT**, không phải "tương đương"
+§0 báo cáo gọi *"hai mutant tương đương"* (`G7`+`G8`) trong khi **cột bảng của chính nó** ghi *"TRẦN KHAI RA"* — **mâu thuẫn nội bộ**.
+Re-review đo: `G8` **đổi hành vi THẬT** (bỏ sót **7 bộ đếm** ở mốc reset giữa bài) và **không bị quan sát** vì các `assert` sau chỉ đọc `dem.patch` ⇒ **LỖ HỔNG ĐỘ PHỦ**, không phải tương đương. **Chỉ `G7` là tương đương thật.**
+⇒ **LUẬT: "tương đương" là mệnh đề TOÁN HỌC trên MIỀN GIÁ TRỊ (ERRATA #34 mục 3).** Một mutant **đổi hành vi mà không ai quan sát** là **lỗ hổng**, và dán nhãn "tương đương" cho nó là **che lỗ hổng bằng từ ngữ**.
+⇒ Kèm: bảng mutation chỉ nên trích **bài đỏ TRỰC TIẾP**; các bài đỏ do **NHIỄM** không tái lập theo hàng. Và dải thời lượng *"15 680–16 132 ms"* **không phải cận** (lượt của reviewer: **16 240 ms**).
+
+### 3. ✅ ĐIỂM MẠNH của vòng này (khác hẳn W2) — **có ĐỐI CHỨNG DƯƠNG**
+`POISON-A` (**hàng đợi luôn bỏ việc ghi**) ⇒ **KHÔNG bài mới nào xanh**: cả `D1 CHỒNG LẤN` **và** `D1 GÕ TRONG Ô SỬA` đều **ĐỎ** (nhờ đối chứng dương).
+⇒ Đây là **đối lập trực tiếp** với W2, nơi `throw` ở đầu hàm dùng chung để lại suite **xanh**. Tức vòng D1 đã học đúng bài: **mỗi đường mới có cả vế dương lẫn vế âm**.
+⚠️ Nhưng **POISON-B** (bỏ vế `version`), **POISON-C** (chứng nhân hằng 0), **POISON-D** (nửa `activeElement`) ⇒ **cả 232 bài xanh** ⇒ **ba lỗ hổng ở mục 1**.
+
+### 4. 🔴 ĐÓNG D1 LÀ **CÓ ĐIỀU KIỆN** — ba vế ghim chuyển cho **D2**
+`Important` là lỗ hổng **ĐỘ PHỦ**, không phải khiếm khuyết hành vi (hành vi đã đúng, chính reviewer chứng minh bằng bốn chiều). Ba vế ghim nằm trong **cùng những tệp** mà D2 sẽ chạm ⇒ **giao cho D2** để không mở **vòng review thứ ba** cho D1:
+1. **Ghim nửa `activeElement`**: ca có **tiêu điểm trong ô nhập mà `target` ở NGOÀI ô** ⇒ bỏ nửa đó phải **ĐỎ**.
+2. **Ghim vế `version >`**: ca "**bản ghi máy chủ mới hơn nền**" ⇒ bỏ vế đó phải **ĐỎ**.
+3. **Chứng nhân hai chiều**: khẳng định `patchXong >= 1` ở **cuối** bài (không chỉ `=== 0`) ⇒ làm nó hằng 0 phải **ĐỎ**.
++ **Đính chính nhãn `G8`** trong báo cáo thành *"sống sót / trần khai ra"* (mục 2).
+⇒ **D1 chỉ được coi là ĐÓNG khi D2 đóng xong ba vế này** (ghi vào sổ; **D2 phải khai rõ "nợ D1 đóng kèm"**).
+⚠️ **Và `jev_gate` đã đúng khi `escalate` khẳng định "đóng D1 an toàn"** — sáu khẳng định cụ thể `verified`, còn khẳng định *cả-task* thì `not_addressed`. **Đó là hành vi đúng của một cái cổng.**
+
+### 5. Nợ còn (không đổi)
+`Shift/Alt+←/→` + `[`/`]` đặt mốc tại đầu đọc + nghe lại 300 ms + **bảng phím §11.4** (**Task 11**, plan Step 1 **đã sửa**) · *"Esc hỏi lại"* · `TranscriptPatch.status` ·
+ảnh `đang lưu…`/nhánh rỗng · **bàn phím/`Esc` THẬT chưa đo** (⇒ sẽ đo bằng **`browser-harness`** gắn vào Chrome của người dùng, `Input.dispatchKeyEvent`) ·
+**C1 mới chứng minh trên fixture `node:http` + jsdom**, chưa trên backend/trình duyệt thật.
+
 ## Quy ước thẩm mỹ — spec UI thắng, skill chỉ là checklist
 
 Spec `2026-09-25-phu-de-lab-ui-design.md` là **nguồn có thẩm quyền về hình thức** (bạn đã duyệt). Skill
