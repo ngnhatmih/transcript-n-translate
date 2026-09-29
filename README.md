@@ -239,6 +239,49 @@ Mục này **không tô hồng**. Câu nào chưa đo thì ghi **CHƯA ĐO**.
 
 ### CHƯA BIẾT / CHƯA ĐO (trung thực)
 
+#### Engine dịch: mặc định là `opus-mt`; `qwen2.5-3b` CHỈ dịch được chữ SẠCH
+
+**Ghi ở đây vì đây là mục "cái chưa biết" của repo, và đây là điều người dùng phải biết trước khi chọn engine.**
+
+**Engine dịch mặc định = `opus-mt`.** Trên máy này `qwen2.5-3b` (Ollama) **chỉ dịch được chữ SẠCH**: với
+chữ ASR THẬT (vỡ câu · lẫn Phồn thể · sai từ) nó **CHÉP NGUYÊN VĂN bản gốc** — đo được **43/44 đoạn**
+trên một clip tiếng Trung thật (fw-tiny → 44 đoạn → `qwen2.5-3b` qua `POST /api/translations`), và bản
+"dịch" đó vẫn được ghi `status=done` + `transcript=translated`.
+
+- **Prompt mạnh hơn KHÔNG cứu được.** Prompt `qwen-json-p2` (thêm một câu cấm chép nguyên văn, tổng quát
+  hoá theo ngôn ngữ đích) làm **chữ sạch** chuyển từ chép sang dịch thật (**8/8** qua đường API thật),
+  nhưng chữ ASR thật **vẫn** bị chép (43/44). Một prompt mạnh gấp đôi cũng không đổi kết quả.
+- **KHÔNG phải lỗi hạ tầng/API.** Với `temperature=0.1` kết quả **tất định theo nội dung prompt** (cùng
+  chuỗi byte ⇒ cùng kết quả; `seed=7` không đổi gì; bỏ `format:json` vẫn chép y hệt). Giả thuyết
+  *prompt-cache* và *model vừa nạp lại* đã bị **bác bỏ bằng phép đo** (cache HIT toàn phần + prompt khác
+  ⇒ dịch; đổ model rồi gọi đúng prompt của app ⇒ vẫn chép). Nên đây là hành vi của **model + nội dung chữ
+  nguồn**, không phải của một tầng nào trong repo.
+- **KHÔNG phải "engine hỏng hoàn toàn"**: `qwen2.5-3b` **dịch được** chữ Trung well-formed (8/8 câu sạch
+  qua API thật; 40/40 mục sạch trong một lô đo riêng). Mô tả đúng là *"không dùng được cho đường ASR"*,
+  không phải *"hỏng"*.
+
+**Hệ quả cho người dùng:** muốn có bản dịch dùng được cho **đường ASR** ⇒ **dùng `opus-mt`**. Trên cùng
+clip đó `opus-mt` cho **44/44 đoạn tiếng Việt, 0/118 ký tự Hán** (đo ở lượt trước).
+
+**Cờ QA nay QUAN SÁT ĐƯỢC, nhưng vẫn CHƯA phải CỬA CHẶN.** QA tất định bắt ca chép bằng tiền tố `lang:`
+(`lang:<i>=source:han<n>` khi dòng vẫn là chữ Hán; `lang:<i>=residue:han<n>` khi dòng đã tiếng Việt mà còn
+sót Hán), và nay `GET /api/translations/{id}` + `GET /api/translations?transcript_id=` trả thêm
+**`qa_issues`** (mảng) cùng **`tokens_in`/`tokens_out`/`duration_ms`**. Hai điều cố ý **KHÔNG** làm ở đây:
+
+- **`status` KHÔNG đổi ngữ nghĩa**: một bản dịch còn cờ `lang:...=source:` **vẫn** `done`. Chặn/đổi
+  `status` theo cờ là **quyết định sản phẩm**, chưa làm (nó sẽ làm đỏ bài ghim
+  `backend/tests/test_api_translations.py::test_a_created_translation_is_consumed_by_the_real_handler`,
+  bài ghim `status == "done"` cho một engine giả).
+- **Hiển thị cờ trong giao diện CHƯA làm** — đó là việc **frontend**, phải làm trên **nhánh frontend**;
+  `frontend/` ở nhánh backend này không được sửa một byte. Cờ ra tới HTTP nghĩa là **có đường**, chưa
+  phải là **có người đọc nó**.
+
+⚠️ **ĐÍNH CHÍNH một câu đã cũ trong chính mục này** (nó có trước lượt này, không phải do lượt này làm
+sai): câu *"chưa có bản dịch nào chạy qua engine thật trong các vòng này"* ở gạch đầu dòng đầu tiên
+**không còn đúng** — `opus-mt` và `qwen2.5-3b` **đã chạy thật** trên một clip tiếng Trung thật ở hai lượt
+gần nhất (xem `backend/README.md` và hai báo cáo trong `.superpowers/sdd/2026-09-26-frontend-workspace-2/`).
+Thứ **vẫn** đúng là chưa có BLEU/MQM và chưa có người đọc duyệt.
+
 - 🔴 **Chất lượng bản dịch tiếng Việt CHƯA TỪNG ĐƯỢC ĐÁNH GIÁ.** Chưa có điểm BLEU/MQM, chưa có
   người đọc duyệt, và **chưa có bản dịch nào chạy qua engine thật trong các vòng này**
   (`backend/README.md:199-205`, `frontend/e2e/TIEU-CHI-12.md:13`). Không có tuyên bố nào về chất

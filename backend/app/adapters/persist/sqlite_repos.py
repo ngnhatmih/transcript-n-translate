@@ -345,11 +345,23 @@ class SqliteRepos:
         Cố tình không `SELECT *`: cột `segments` là cả một bản dịch đã giải mã
         JSON, mà route chỉ cần biết bản dịch dịch từ version nào để tính `stale`.
         Danh sách này còn bị gọi cho TỪNG transcript ở route danh sách.
+
+        V1 (lượt 3): kéo thêm `qa_issues` + `tokens_in`/`tokens_out`/`duration_ms`
+        — BỐN CỘT, không phải `segments`. Cờ QA phải nhìn thấy được ngay ở danh
+        sách (một cờ chỉ lộ ra khi mở từng bản dịch thì không phải một cờ), và đó
+        là lý do chúng nằm trên `TranslationSummary` chứ không phải trên
+        `Translation` mà thôi. Chi phí vẫn là bốn cột vô hướng; thứ bị bỏ lại
+        vẫn đúng là `segments`.
+
+        `qa_issues` NULL đọc lên thành `[]` chứ không `None`: cùng quy ước với
+        `_row_to_translation`, và là hình dạng DUY NHẤT mà `qa_issues` có ở tầng
+        này — client không phải phân biệt "vắng cờ" với "không có cờ".
         """
         with self._connect() as conn:
             rows = conn.execute(
                 "SELECT id, transcript_id, transcript_version, engine, target_lang,"
-                " prompt_version, status, created_at FROM translations"
+                " prompt_version, status, created_at, qa_issues, tokens_in,"
+                " tokens_out, duration_ms FROM translations"
                 " WHERE transcript_id=? ORDER BY id DESC",
                 (transcript_id,),
             ).fetchall()
@@ -358,6 +370,9 @@ class SqliteRepos:
             transcript_version=r["transcript_version"], engine=r["engine"],
             target_lang=r["target_lang"], prompt_version=r["prompt_version"],
             status=r["status"], created_at=r["created_at"],
+            qa_issues=json.loads(r["qa_issues"] or "[]"),
+            tokens_in=r["tokens_in"], tokens_out=r["tokens_out"],
+            duration_ms=r["duration_ms"],
         ) for r in rows]
 
     # ---------- jobs ----------

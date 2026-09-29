@@ -54,19 +54,19 @@ GPU. Nó tự ép UTF-8 cho stdout (console Windows mặc định cp1252, còn s
 tiếng Trung/Việt) và tự đặt cache model trước khi nạp `faster_whisper`.
 
 Con số nền của lần chạy mặc định, đo sau khi xoá `__pycache__` (lệnh ở mục
-"Kiểm thử" trên, chạy từ trong `backend\`). Thứ có nghĩa là **865 / 13**, không
+"Kiểm thử" trên, chạy từ trong `backend\`). Thứ có nghĩa là **868 / 13**, không
 phải số giây — thời gian trôi giữa các lần chạy (đã thấy 24,00–30,94 s) còn con
 số bài thì không:
 
 ```
-865 passed, 13 deselected, 1 warning
+868 passed, 13 deselected, 1 warning
 ```
 
 Hai con số đó là SỐ BÀI ĐƯỢC CHỌN, và chúng khớp với số mà `--collect-only` báo
 (`tests/test_backend_readme.py::test_readme_baseline_matches_the_tests_actually_
 collected` đối chiếu mỗi lần chạy).
 
-Máy này **CÓ** `ffmpeg 8.1.1` + `ffprobe` trên PATH (đã đo), nên `865/13` ở trên
+Máy này **CÓ** `ffmpeg 8.1.1` + `ffprobe` trên PATH (đã đo), nên `868/13` ở trên
 là số THẬT của nó. Máy **không có** `ffmpeg`/`ffprobe` cho một kết quả KHÁC: cả
 `tests/test_ingest.py` bị `skipif` ở cấp module — **9** bài cùng skip một lượt —
 nên dòng tổng kết của máy đó là **`856 passed, 9 skipped, 13 deselected`**. Đó là
@@ -89,7 +89,14 @@ vá `A1`/`A2`/`A3` + bản vá prompt của báo cáo
 `.superpowers/sdd/2026-09-26-frontend-workspace-2/real-pipeline-fix-report.md`:
 `test_api_sources.py` +7 (tên tệp Unicode: 6 ca hợp lệ, 1 ca cắt đường dẫn, 2 ca
 route — và `ảnh.mp4` được CHUYỂN khỏi bảng từ chối ASCII, `-2`), `test_mt_prompts.py`
-+15, `test_mt_qa.py` +6, `test_translate_handler.py` +2.)
++15, `test_mt_qa.py` +6, `test_translate_handler.py` +2.
+
+Bump của lượt 3 cùng nhánh: `865/13` → `868/13` (+3 bài), do **V1** — phơi cờ QA
+và số đo ra HTTP (`qa_issues` + `tokens_in`/`tokens_out`/`duration_ms`) trong
+`.superpowers/sdd/2026-09-26-frontend-workspace-2/real-pipeline-expose-report.md`:
+`test_api_translations.py` +3 (route phơi cờ cho ca echo + đối chứng âm `opus-mt`;
+vắng cờ ⇒ `[]` chứ không `null`; danh sách cùng hình dạng với chi tiết). Hai lượt
+bump này là **cùng một nhánh**, nên `865/13` ở trên không phải số của `gd3-frontend`.
 
 Số này chỉ để phát hiện TRÔI: một thay đổi làm nó **giảm** là một bài đã bị gỡ
 hoặc bị bỏ quên, không phải "suite nhanh hơn".
@@ -210,6 +217,18 @@ riêng, model đã nạp sẵn trong tiến trình), **KHÔNG** phải của `sm
    * `opus-mt` **cắt cụt câu** (bản dịch chỉ phủ phần đầu của câu nguồn) và dịch
      成本 thành `"10%"`.
    * `qwen2.5-3b` **để sót chữ Hán** trong bản dịch: `dịch字`, `việc字幕`.
+   * 🔴 **`opus-mt` là engine cho đường ASR; `qwen2.5-3b` CHỈ dịch được chữ SẠCH.** Với chữ ASR
+     thật (vỡ câu · lẫn Phồn thể · sai từ) `qwen2.5-3b` **CHÉP NGUYÊN VĂN bản gốc**: **43/44 đoạn**
+     trên một clip tiếng Trung thật (`fw-tiny` → 44 đoạn → `POST /api/translations`), vẫn ghi
+     `status=done` + `transcript=translated`. Prompt `qwen-json-p2` làm **chữ sạch** dịch thật
+     (**8/8** qua API) mà **không** cứu được chữ ASR (43/44); `temperature=0.1` cho kết quả **tất
+     định theo nội dung prompt**, và giả thuyết *prompt-cache* / *model vừa nạp lại* đã bị **bác bỏ
+     bằng phép đo** — nên đây là hành vi của model + nội dung chữ nguồn, **KHÔNG** phải lỗi API.
+     Cùng clip đó `opus-mt` cho **44/44 đoạn tiếng Việt, 0/118 ký tự Hán**. Cờ QA (`lang:`) nay ra
+     tới HTTP (`qa_issues` + `tokens_in`/`tokens_out`/`duration_ms` trên `GET /api/translations/{id}`
+     và trên danh sách), nhưng `status` **không** đổi ngữ nghĩa — chặn theo cờ vẫn là quyết định mở.
+     Số đo đầy đủ: `.superpowers/sdd/2026-09-26-frontend-workspace-2/real-pipeline-fix-report.md`
+     (§3) và `real-pipeline-expose-report.md`.
 3. **Chưa làm:** HY-MT1.5 (`hy-mt-1.5-7b` có trong registry nhưng chưa lần nào
    chạy), **chế độ Chimera**, và **toàn bộ frontend**. Backend là thứ đang chạy
    được; giao diện thì chưa có.

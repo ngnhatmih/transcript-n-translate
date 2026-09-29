@@ -38,9 +38,10 @@ from fastapi.testclient import TestClient
 from app.adapters.clock_system import SystemClock
 from app.adapters.persist.sqlite_repos import SqliteRepos
 from app.domain.job_state import phase_of
-from app.domain.models import Segment, Word
+from app.domain.models import CallStats, Segment, Word
 from app.domain.mt_qa import qa_translation
 from app.registry import by_id, of_kind
+from tests.fakes_mt import FakeMtEngine
 
 #: Model KHÔNG có trong `/api/tags` của bất kỳ máy nào — tên này chỉ tồn tại ở
 #: đây. Dùng nó để dựng nhánh "engine không sẵn sàng" một cách TẤT ĐỊNH thay vì
@@ -1021,3 +1022,296 @@ def test_the_detail_route_describes_the_translation_exactly_like_the_list(wired)
         "route chi tiết và route danh sách mô tả CÙNG một hàng bằng hai hình dạng "
         f"khác nhau:\n  chi tiết: {sorted(from_detail)}\n  danh sách: {sorted(from_list)}"
     )
+
+
+# ---------------------------------------------------------------------------
+# V1 (nhánh `fix-loi-dich-im-lang`, lượt 3) — PHƠI CỜ QA + SỐ ĐO RA HTTP
+#
+# ĐO ĐƯỢC ở lượt 2 (`real-pipeline-fix-report.md` §3): một bản "dịch" của
+# `qwen2.5-3b` trên chữ ASR thật CHÉP NGUYÊN 43/44 đoạn chữ Trung, vẫn
+# `status=done` + `transcript=translated`, và `GET /api/translations/{id}` trả
+# ĐÚNG 11 khoá — `qa_issues` (nơi 44 cờ `lang:` sống) KHÔNG có đường nào ra tới
+# màn hình. Cờ QA là SÀN, chưa phải CỬA: giao diện không thể biết bản dịch là echo.
+#
+# Bốn khoá ở đây chỉ ĐƯỢC THÊM. Không khoá cũ nào đổi tên, đổi kiểu, hay bị bỏ;
+# `status` KHÔNG đổi ngữ nghĩa (một bản dịch có cờ QA vẫn `done` — đó là quyết
+# định sản phẩm, không phải việc của lượt này). Việc của lượt này là làm cho cờ
+# QUAN SÁT ĐƯỢC.
+#
+# ⚠️ TRẦN có chủ: `qa_issues` ra tới HTTP nghĩa là CÓ ĐƯỜNG, KHÔNG phải là có
+# người đọc nó. Hiển thị cờ trong màn Đối chiếu là việc FRONTEND, phải làm trên
+# nhánh frontend (`frontend/` ở nhánh này không được sửa một byte).
+# ---------------------------------------------------------------------------
+
+#: Chữ ASR THẬT của lượt 2 (fw-tiny trên `Zh-请您欣赏.ogg`, 44 đoạn). Ba đoạn này
+#: là ĐOẠN THẬT, chép từ `_realpipe2/data/app.db` (translation 2 của `qwen2.5-3b`):
+#: `i=0,4,18` với số ký tự Hán/Latinh của chính chúng. Cỡ lô ở đây là 3 mục, nên
+#: phép đo KHÔNG phụ thuộc việc model có chép được cả lô 44 hay không — hiện tượng
+#: echo đo được ở MỌI cỡ lô (1, 3, 8, 16, 22, 44 — bảng §3 lượt 2).
+_ASR_ZH = [
+    (0, "文章名请您欣赏出自为几百科"),                      # han 13 / latin 0
+    (4, "陆的电视台和广播电台的一类节目在前一节目一节数而后一节目还没有开始"),  # han 33 / latin 0
+    (18, "期,一些电视台的请您先上,被各类电视台形象片取代第二节,"),  # han 25 / latin 6
+]
+
+#: Đầu ra THẬT của `opus-mt` trên ĐÚNG ba đoạn nguồn trên, chép từ
+#: `_realpipe2/data/app.db` (translation 1, `engine=opus-mt`) — lượt 2 đo được
+#: bản dịch này 44/44 đoạn tiếng Việt, **0/118 ký tự Hán**. Đây là ĐỐI CHỨNG ÂM:
+#: nếu phép phơi cờ sinh cờ giả cho engine ĐẠT thì nó đỏ ngay.
+_OPUS_VI = [
+    (0, "Tôi yêu cầu anh xem danh sách này là danh sách hàng trăm chuyên gia."),
+    (4, "Một chương trình truyền hình trên mặt đất và đài radio vẫn chưa bắt đầu."),
+    (18, "Một vài kênh truyền hình thay thế cho giai đoạn 2."),
+]
+
+#: Chín khoá CŨ của `translation_summary_json` + kiểu của chúng. Bảng này là ĐỐI
+#: CHỨNG HỒI QUY của V1: thêm bốn khoá mới không được làm một khoá cũ đổi kiểu
+#: hay biến mất. `is` chứ không `==`: `True == 1` trong Python, nên một `stale`
+#: bị đổi thành `1` sẽ lọt qua phép so bằng.
+_LEGACY_TYPES = {
+    "id": int,
+    "transcript_id": int,
+    "transcript_version": int,
+    "engine": str,
+    "target_lang": str,
+    "prompt_version": str,
+    "status": str,
+    "stale": bool,
+    "created_at": str,
+}
+
+
+def _assert_legacy_keys_unchanged(row: dict, where: str) -> None:
+    for key, want in _LEGACY_TYPES.items():
+        assert key in row, f"{where}: khoá cũ {key!r} đã BIẾN MẤT khỏi hình dạng"
+        got = row[key]
+        assert type(got) is want, (
+            f"{where}: khoá cũ {key!r} đổi KIỂU: {type(got).__name__} "
+            f"(giá trị {got!r}), phải là {want.__name__}"
+        )
+
+
+def _pin_new_keys(row: dict, where: str) -> None:
+    """Hình dạng của bốn khoá MỚI — V1 chỉ được THÊM, không được đổi nghĩa."""
+    assert "qa_issues" in row, f"{where}: thiếu khoá `qa_issues` (cờ QA không ra được HTTP)"
+    assert isinstance(row["qa_issues"], list), (
+        f"{where}: `qa_issues` phải là MẢNG, nhận {type(row['qa_issues']).__name__} "
+        f"({row['qa_issues']!r}) — vắng khoá phải quy về `[]`, KHÔNG phải `null`"
+    )
+    for key in ("tokens_in", "tokens_out", "duration_ms"):
+        assert key in row, f"{where}: thiếu khoá `{key}`"
+        assert row[key] is None or type(row[key]) is int, (
+            f"{where}: `{key}` phải là SỐ hoặc null (chưa đo được), nhận {row[key]!r}"
+        )
+
+
+class _StatsMtEngine(FakeMtEngine):
+    """Engine giả CÓ `last_stats` như adapter thật (`OllamaMtEngine` ghi nó mỗi lô).
+
+    Không có nó thì `_record_call` ghi `None` cho token/thời gian, và bài ghim số
+    đo sẽ chỉ chứng minh được "khoá tồn tại" chứ không phải "con số đi đúng đường".
+    """
+
+    def __init__(self, *args, **kw):
+        super().__init__(*args, **kw)
+        self.last_stats = CallStats(tokens_in=123, tokens_out=45, duration_ms=678)
+
+    def translate(self, batch, glossary, opts):
+        out = super().translate(batch, glossary, opts)
+        self.last_stats = CallStats(tokens_in=123, tokens_out=45, duration_ms=678)
+        return out
+
+
+def _asr_segments():
+    return [Segment(i=i, start=float(i), end=float(i) + 2.0, text=zh)
+            for i, zh in _ASR_ZH]
+
+
+def _seed_asr_transcript(repos) -> int:
+    sid = repos.add_source(kind="file", origin="Zh-请您欣赏.ogg",
+                           media_path="/m/asr.ogg", lang="zh")
+    return repos.add_transcript(source_id=sid, engine="fw-tiny", lang="zh",
+                                segments=_asr_segments())
+
+
+def _run_engine_over(worker, c, repos, tid, engines, mt_engines) -> int:
+    """Xếp MỘT job dịch qua HTTP rồi chạy nó bằng worker THẬT, engine giả.
+
+    `POST` đi trước lúc cắm engine: route chỉ hỏi engine có trong registry và
+    `available` hay không, còn engine được tra lúc HANDLER chạy. Engine giả nằm
+    trong đúng khe `opus-mt` mà registry đã ship.
+    """
+    r = c.post("/api/translations", json={"transcript_id": tid,
+                                          "engine": INPROCESS_ENGINE_ID})
+    assert r.status_code == 201, r.text
+    tr_id = r.json()["translation"]["id"]
+    mt_engines[INPROCESS_ENGINE_ID] = engines
+    while worker.tick():
+        pass
+    return tr_id
+
+
+def test_the_route_exposes_the_qa_flags_and_the_real_metrics(wired):
+    """(a)+(d) cùng một ca: engine CHÉP ⇒ cờ RA TỚI HTTP; engine ĐẠT ⇒ KHÔNG cờ giả.
+
+    Hai đối chứng chạy trên CÙNG một transcript chữ ASR thật, cùng đường
+    HTTP -> worker -> handler:
+
+    * **echo** (`mapping` đồng nhất = chép từng ký tự, đúng thứ `qwen2.5-3b` làm với
+      43/44 đoạn ở lượt 2) ⇒ `qa_issues` phải KHÁC RỖNG và có cờ `lang:`.
+    * **opus-mt** (đầu ra THẬT của lượt 2, 0/118 Hán) ⇒ `qa_issues` KHÔNG được có
+      một cờ `lang:` nào.
+
+    Số đo `tokens_in/out` + `duration_ms` được ghim trên ca echo: engine giả khai
+    `123/45/678` cho MỖI lô, và tổng của một bản dịch 3 đoạn (một lô) phải đi qua
+    `llm_calls` rồi ra tới route NGUYÊN VẸN.
+    """
+    c, repos, _specs, worker, _broker, mt_engines = wired
+    tid = _seed_asr_transcript(repos)
+
+    echo_engine = _StatsMtEngine(mapping={zh: zh for _, zh in _ASR_ZH})
+    echo_id = _run_engine_over(worker, c, repos, tid, echo_engine, mt_engines)
+
+    stored = repos.get_translation(echo_id)
+    assert stored.status == "done", (
+        f"V1 KHÔNG đổi ngữ nghĩa `status`: engine chép vẫn `done` (quyết định sản "
+        f"phẩm), chỉ cờ là phải quan sát được. Nhận {stored.status!r}"
+    )
+    assert [s.text for s in stored.segments] == [zh for _, zh in _ASR_ZH], (
+        "engine giả phải CHÉP nguyên chữ nguồn, nếu không thì ca này không phải ca echo"
+    )
+    assert [i for i in stored.qa_issues if i.startswith("lang:")], (
+        f"handler không gắn cờ `lang:` cho ca echo: {stored.qa_issues}"
+    )
+
+    detail = c.get(f"/api/translations/{echo_id}").json()
+    _pin_new_keys(detail, f"chi tiết {echo_id}")
+    issues = detail["qa_issues"]
+    assert issues, (
+        f"(a) route phải phơi `qa_issues` KHÁC RỖNG cho bản dịch có cờ; nhận {issues!r}"
+    )
+    lang_flags = [i for i in issues if i.startswith("lang:")]
+    assert len(lang_flags) == len(_ASR_ZH), (
+        f"phải có đúng một cờ `lang:` cho mỗi đoạn echo, nhận {lang_flags}"
+    )
+    assert all("source:" in i for i in lang_flags), (
+        f"ba đoạn này VẪN là chữ Trung gốc nên cờ phải là `source:`, nhận {lang_flags}"
+    )
+    assert issues == stored.qa_issues, (
+        "route và DB phải nói CÙNG một danh sách cờ:\n"
+        f"  route: {issues}\n  DB:    {stored.qa_issues}"
+    )
+    assert (detail["tokens_in"], detail["tokens_out"], detail["duration_ms"]) == (123, 45, 678), (
+        "số đo của `llm_calls` phải ra tới route: "
+        f"{detail['tokens_in']}/{detail['tokens_out']}/{detail['duration_ms']}"
+    )
+    _pin_new_keys(detail, f"chi tiết {echo_id}")
+    _assert_legacy_keys_unchanged(detail, f"chi tiết {echo_id}")
+
+    opus_engine = _StatsMtEngine(mapping={zh: vi for (_, zh), (_, vi) in
+                                          zip(_ASR_ZH, _OPUS_VI)})
+    opus_id = _run_engine_over(worker, c, repos, tid, opus_engine, mt_engines)
+    stored_opus = repos.get_translation(opus_id)
+    assert [s.text for s in stored_opus.segments] == [vi for _, vi in _OPUS_VI], (
+        "ca ĐẠT phải là đầu ra opus-mt THẬT của lượt 2"
+    )
+
+    opus_body = c.get(f"/api/translations/{opus_id}").json()
+    assert [i for i in opus_body["qa_issues"] if i.startswith("lang:")] == [], (
+        f"(d) engine ĐẠT không được có cờ ngôn ngữ: {opus_body['qa_issues']}"
+    )
+    assert opus_body["qa_issues"] == stored_opus.qa_issues, opus_body["qa_issues"]
+    assert opus_body["status"] == "done", opus_body["status"]
+
+
+def test_the_row_without_a_qa_column_is_exposed_as_an_empty_list(wired):
+    """(b) VẮNG khoá ⇒ `[]`, KHÔNG phải `null`.
+
+    ⚠️ VÌ SAO BÀI NÀY ĐO Ở BUILDER chứ không chỉ qua HTTP (đo được ở lượt 3, khi
+    mutation M2 `return getattr(row, "qa_issues", None)` XANH 38/38): adapter
+    SQLite đã quy `NULL` thành `[]` TRƯỚC khi hàng tới builder, nên một hàng đọc
+    từ ĐĨA không bao giờ chạm tới nhánh dự phòng. Nhánh đó chỉ chạy khi hàng
+    KHÔNG CÓ trường `qa_issues` — đúng ca `TranslationSummary` cũ, và đúng ca một
+    hiện thực khác của cổng `Repos`. Nên phép đo phải đi qua `translation_summary_json`
+    với một hàng THIẾU trường: đó là hình dạng duy nhất chạm được nhánh này.
+
+    Hai điều được ghim cùng lúc:
+
+    * vắng trường ⇒ `[]` (không `None`, không `AttributeError` giữa request);
+    * `None` ghi thẳng vào trường cũng ⇒ `[]` — client chỉ có MỘT hình dạng để đọc.
+
+    Ca thứ ba (có cờ thật) là đối chứng dương: nhánh dự phòng không được ăn mất
+    dữ liệu thật.
+    """
+    from types import SimpleNamespace
+
+    from app.domain.staleness import translation_summary_json
+
+    def row(**overrides):
+        base = dict(id=7, transcript_id=3, transcript_version=2,
+                    engine=INPROCESS_ENGINE_ID, target_lang="vi",
+                    prompt_version="raw-p1", status="done", created_at="2026-01-01T00:00:00Z")
+        base.update(overrides)
+        return SimpleNamespace(**base)
+
+    absent = translation_summary_json(row(), stale=False)
+    _pin_new_keys(absent, "hàng THIẾU trường qa_issues")
+    assert absent["qa_issues"] == [], (
+        f"(b) hàng vắng trường ⇒ `[]`, KHÔNG phải `null`; nhận {absent['qa_issues']!r}"
+    )
+    _assert_legacy_keys_unchanged(absent, "hàng THIẾU trường qa_issues")
+
+    # `None` ghi thẳng vào trường: cùng một kết quả, cùng một hình dạng.
+    nulled = translation_summary_json(row(qa_issues=None), stale=False)
+    assert nulled["qa_issues"] == [], (
+        f"(b) trường `None` ⇒ `[]`, KHÔNG phải `null`; nhận {nulled['qa_issues']!r}"
+    )
+
+    # Đối chứng dương: cờ THẬT phải đi qua nguyên vẹn.
+    flagged = translation_summary_json(
+        row(qa_issues=["lang:0=source:han13/latin0"], tokens_in=1433,
+            tokens_out=1336, duration_ms=9037), stale=False)
+    assert flagged["qa_issues"] == ["lang:0=source:han13/latin0"], flagged["qa_issues"]
+    assert (flagged["tokens_in"], flagged["tokens_out"], flagged["duration_ms"]) == (
+        1433, 1336, 9037), flagged
+
+    # Và vế HTTP: một hàng có cột QA TRỐNG đọc từ đĩa cũng ra `[]` (bằng chứng
+    # rằng nhánh dự phòng ở trên không phải chỗ DUY NHẤT đúng).
+    c, repos, _specs, _worker, _broker, _mt = wired
+    tid, tr_id = _seed(repos)
+    repos.set_translation_status(tr_id, "queued")
+    assert repos.get_translation(tr_id).qa_issues == [], (
+        "fixture: hàng này phải có cột QA TRỐNG, nếu không thì nó không phải ca (b)"
+    )
+
+    body = c.get(f"/api/translations/{tr_id}").json()
+    _pin_new_keys(body, f"chi tiết {tr_id}")
+    assert body["qa_issues"] == [], (
+        f"(b) cột QA trống ⇒ `[]`, KHÔNG phải `null`; nhận {body['qa_issues']!r}"
+    )
+    assert body["tokens_in"] is None and body["tokens_out"] is None, (
+        "chưa gọi engine lần nào thì số đo là `null` (khác `0`: chưa ĐO được), "
+        f"nhận {body['tokens_in']!r}/{body['tokens_out']!r}"
+    )
+    _assert_legacy_keys_unchanged(body, f"chi tiết {tr_id}")
+
+
+def test_the_list_route_carries_the_same_qa_flags_and_metrics(wired):
+    """(c) DANH SÁCH và CHI TIẾT phải cùng hình dạng cho bốn khoá mới.
+
+    Một builder chung là thứ duy nhất giữ hai route khỏi trôi; bài này ghim rằng
+    bốn khoá mới đi qua ĐÚNG builder đó thay vì chỉ được vá vào route chi tiết.
+    """
+    c, repos, _specs, _worker, _broker, _mt = wired
+    tid, tr_id = _seed(repos)
+    repos.set_translation_status(tr_id, "done", qa_issues=["cps:1=30.0>21.0"],
+                                 tokens_in=10, tokens_out=20, duration_ms=30)
+
+    from_list = c.get(f"/api/translations?transcript_id={tid}").json()[0]
+    from_detail = c.get(f"/api/translations/{tr_id}").json()
+
+    for row, where in ((from_list, "danh sách"), (from_detail, "chi tiết")):
+        _pin_new_keys(row, where)
+        _assert_legacy_keys_unchanged(row, where)
+        assert row["qa_issues"] == ["cps:1=30.0>21.0"], (where, row["qa_issues"])
+        assert (row["tokens_in"], row["tokens_out"], row["duration_ms"]) == (10, 20, 30), where
