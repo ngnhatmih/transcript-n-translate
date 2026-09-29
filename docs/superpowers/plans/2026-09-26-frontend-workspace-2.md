@@ -2409,6 +2409,78 @@ Re-review đo: `G8` **đổi hành vi THẬT** (bỏ sót **7 bộ đếm** ở 
 ảnh `đang lưu…`/nhánh rỗng · **bàn phím/`Esc` THẬT chưa đo** (⇒ sẽ đo bằng **`browser-harness`** gắn vào Chrome của người dùng, `Input.dispatchKeyEvent`) ·
 **C1 mới chứng minh trên fixture `node:http` + jsdom**, chưa trên backend/trình duyệt thật.
 
+## ⚠️ ERRATA #46 — Vòng sửa D2 + **đo bằng CHROME THẬT**: ba lời khai của tôi bị chính phép đo bác
+
+Bối cảnh: review độc lập D2 (`0c23e7c`) trả về **`CONDITIONAL PASS` 0 Critical / 5 Important / 5 Minor**. Vòng sửa = commit **`dedad0c`** (8 tệp, `539+/38−`, tất cả trong `frontend/`): `tests 260 / pass 258 / fail 2 / cancelled 0 / 19,0 s`, `typecheck` 0, `build` 0; **danh sách TÊN bài đỏ = đúng 2 guard `EMPTY_DB_MSG`**; 19 backup BYTE = 19 mutation; cây RỖNG. D2 **chưa đóng** cho tới khi re-review có phạm vi trả về `PASS`.
+
+## 1. 🔴 Cổng `fail 2` **KHÔNG hermetic** — `fail − 2` bị KHAI TỬ
+Nền là **2 đỏ ở 10 lượt** nhưng **0 đỏ ở 8 lượt** của reviewer. Nền **không phải thuộc tính của commit** mà của **MÔI TRƯỜNG**: 2 guard hợp đồng chỉ đỏ khi **DB repo RỖNG và 8620 trống**. ⇒ **Lời khai cũ của tôi "hai bài đỏ CỐ Ý" là SAI.**
+**Phép đo hợp lệ từ nay:** **DANH SÁCH TÊN BÀI ĐỎ**. Mutation "giết được bài T" ⟺ T có trong danh sách tên đỏ **và** T không thuộc cặp `EMPTY_DB_MSG`. **Không dùng phép trừ nào nữa.**
+**Đã vá tận gốc:** `contract.test.ts` thêm `backendHasEmptyDb()` — server ở 8620 **chỉ** được nhận nếu DB của nó RỖNG; probe `GUARD-FOREIGN-DB` (backend thật + DB **gieo** ở cổng 8699) ⇒ **`EXIT=1 / cancelled 10`** kèm câu *"8620 đang trả lời nhưng DB của nó KHÔNG rỗng…"*. Tức chế độ "server lạ gieo DB" nay **ỒN ÀO**, không còn **âm thầm dịch nền** như khi tôi gây ô nhiễm.
+
+## 2. ⚠️ `~13 s` là SAI (đã hai lần)
+Đo thật: **17,25–18,25 s** trước vòng sửa; **19,0 s** sau (độ trễ tiêm có chủ ý 750 ms + 250 ms và 6 bài mới). Con số `~13 s` nằm trong `task-d2-brief.md` và trong bản 2 của brief Task 11 — **đừng chép lại**.
+
+## 3. ⚠️ "Chỉ `app.css` là CRLF" là SAI
+`frontend/src/api/contract.test.ts` **cũng CRLF**. **Luật đúng: ĐO dạng xuống dòng của TỪNG tệp trước khi mutate/so byte.** Câu sai còn nằm trong các brief cũ: `task-d2-brief.md`, `task-d1-brief.md`, `task-w2-fix-round-1-brief.md`, `task-w3-*`.
+
+## 4. 🔴 8620/8621 là **cổng CÓ CHỦ**, không phải cổng của ai muốn dùng
+`contract.test.ts` **tự spawn backend THẬT ở 8620** và dựa vào DB repo RỖNG (nhánh 200 dùng backend thứ hai ở **8621**). **Chứng minh ô nhiễm (đo được):** khi tôi để server gieo DB ở 8620 ⇒ `pass 254 / fail 0 / EXIT=0`; sau khi dọn ⇒ `pass 252 / fail 2 / EXIT=1` (5 lượt). ⇒ **LUẬT: mọi harness e2e/tầng Chrome phải dùng cổng ≠ 8620/8621.**
+
+## 5. 🟢 Chrome THẬT chạy được — mệnh đề "bất khả" trong **4-5 comment** nay SAI
+**Đo lại lần nữa** (không chỉ suy từ ERRATA #40): `browser-harness 0.1.13` gắn vào **Chrome đang chạy của người dùng** qua remote debugging, mở tab app, chụp ảnh, đo DOM, và **phát phím THẬT** bằng `Input.dispatchKeyEvent`.
+- **Bảng phím tắt §11.4 KHÔNG tồn tại** (đo: `innerText` không có `"Phím tắt"`/`"Shift"`/`"Alt"`).
+- **`.q*` = 0 luật CSS**; `li.q__item--running` = `display:list-item`, `list-style-type:disc`, `padding:0`, `row-gap:normal` ⇒ chữ dính (`qwen2.5-3bđang chạy`).
+- 🔴 **`I3` được chứng minh bằng BÀN PHÍM THẬT (lần đầu tiên):**
+
+| Vế | Tiêu điểm | Phím | Bằng chứng phím vào thật | `version` server |
+|---|---|---|---|---|
+| A (âm) | `[data-testid=o-sua]` | `[` + `Shift+←` | ô sửa **15 → 16** | `v1 → v1` = **không ghi** |
+| B (đối chứng dương) | `BODY` | y hệt | — | `v1 → v2` = **có ghi** |
+
+Vế A một mình **không** kết luận được (handler có thể chết); **vế B chứng minh handler sống** ⇒ kết luận đứng vững. `jev_gate` (jev-1.13.0) chấm cả 3 claim: **`verified`** (0.990 / 0.910 / 0.980), action `auto`.
+⇒ **Comment trong `EditScreen.test.tsx`, `OllamaDown.test.tsx`, `GlossaryScreen.test.tsx`, `GlossaryScreen.tsx` khẳng định trình duyệt thật bất khả** phải được **đính chính** (Task 12).
+
+## 6. `.q*` — chốt ở vòng sửa D2
+Thêm `.q__danh-sach{margin:0;padding:0;list-style:none}` + `.q__item{display:flex;flex-wrap:wrap;gap:…}` — 🔴 **cố ý FLEX, KHÔNG GRID** (không tái sinh ERRATA #31); bộ ghim hai chiều nay **đã phủ `q*`** (trước đó lọc `/^lenh/` nên họ `q*` nằm ngoài). ⚠️ **`listStyleType` KHÔNG ghim được trong jsdom** ⇒ **bằng chứng hình thức DUY NHẤT vẫn là ẢNH CHỤP CHROME THẬT** (trước: có dấu đầu dòng + dính chữ; sau: không dấu + tách).
+
+## 7. `frontend/dev-server.mjs` — hai khuyết điểm, giao Task 12
+1. 🔴 **Giết cả tiến trình khi backend mất:** `ERR_HTTP_HEADERS_SENT` tại `dev-server.mjs:97` (handler lỗi của proxy gọi `writeHead` sau khi header đã gửi) ⇒ chết với `exit 1`.
+2. Cứng `PORT = 3100` + `BACKEND = {port: 8620}` (`:22-23`). 🔴 **CHỈ được đổi cổng BACKEND**: `:131-132` ghi backend chỉ whitelist CORS `http://localhost:3100`/`http://127.0.0.1:3100` ⇒ đổi cổng dev-server là **hỏng CORS**, mà sửa CORS thì phải chạm `backend/` (**cấm**).
+
+## 8. Task 12 **lỗi thời cả bốn tiền đề** (đo được, xem `_shots/bh/TASK12-REFRAME.md`)
+1. *"Playwright bất khả"* — lật (#40 + mục 5 trên).
+2. *"thay `page.click` bằng jsdom"* — không còn là **thay thế**: jsdom = **hành vi/DOM**; Chrome thật = **hình thức**.
+3. *"thêm jsdom + `@testing-library/react`"* — **đã có từ `bc0dcae`**; `test/dom.ts` đã có `setupDom(origin)`.
+4. *"mỗi test phải `fetch` tới 8620"* — 🔴 **nguy hiểm**, xem mục 4.
+Và bốn màn **đã có test jsdom trên backend THẬT có gieo DB**: `EditScreen/CompareScreen/GlossaryScreen/OllamaDown.test.tsx` (tệp Thuật ngữ tự ghi `seed.py` rồi spawn). ⇒ Task 12 **không được tạo bản trùng**, mà là: **bảng tiêu chí §12 kèm LỚP BẰNG CHỨNG từng dòng** + **tầng Chrome thật** + đính chính comment + vá `dev-server.mjs` + bỏ script chết `"e2e": "playwright test"`.
+
+## 9. Nợ MỚI ghi sổ (chưa sửa)
+- **`retry_job` không xoá `cancel_requested`** (`sqlite_repos.py:525-534`) trong khi `worker._run_one` huỷ job ở ranh giới nếu cờ còn ⇒ job đã xin huỷ → `failed` → `chạy lại` có thể bị `cancelled` ở lượt mới. **Cùng họ "trạng thái sống sót qua một lần chạy lại" với I3**, nhưng ở `backend/` và **có TRƯỚC D2**.
+- **`attempts` ở client là CŨ:** `Job.to_event()` không mang `attempts`, `applyJobEvent` cố ý không đụng ⇒ **không thể khoá trạng thái giao diện theo `{state, attempts}`** (đo được: mutant đúng thiết kế đó vẫn ĐỎ). Khoá theo `attempts` chỉ đúng khi `to_event()` mang nó.
+- **`loiDuyet` về MUỘN** sau khi đổi kênh vẫn hiện cạnh bản ghi mới (không ghim được tất định trong jsdom).
+- **`D1 NỀN MỚI HƠN` — 🔴 ĐÃ PHÂN XỬ: KHÔNG phải flake, mà là LỖI GHI ĐÈ ÂM THẦM (họ C1), và nó FALSIFY ĐƯỢC.** Vòng sửa 1 khai nó là flake 1/33 và xếp TRẦN; re-review độc lập bác bằng mutant `D1-DEPS-NUDGE-STALE` ⇒ **ĐỎ** đúng bài đó, thông điệp nguyên văn *"gửi bản CŨ là XOÁ ÂM THẦM thay đổi của người khác"* (`actual 'bản kênh hai'` vs `expected 'bản kênh hai (người khác sửa)'`). `banGhiVuaGhi` **không** cứu được vì bản mới hơn đến từ **reload**, không qua đường ghi này. ⇒ **Việc khai TRẦN ở đây vi phạm chính ERRATA #45 mục 1** (mệnh đề *có* mutant làm nó sai được). Sửa ở vòng 2: nền của lệnh ghi = **ảnh chụp MỚI NHẤT trong `useRef`**, đích vẫn chốt lúc GỬI.
+  ⇒ **LUẬT RÚT RA: trước khi khai một hiện tượng là "flake", phải thử CHỨNG MINH nó là lỗi tất định** (dựng mutant/probe làm nó đỏ theo một cơ chế đặt tên được). "Hiếm khi xảy ra" **không** đồng nghĩa với "không tất định".
+- `TranscriptPatch.status` chưa dùng · *"`Esc` hỏi lại khi có thay đổi chưa lưu"* (§5.2) · `Shift/Alt+←/→` + `[`/`]` đặt mốc tại đầu đọc + nghe lại 300 ms (**Task 11**).
+
+## 10. 🔴 MỘT MUTANT KHÔNG ĐỔI HÀNH VI THÌ KHÔNG CHỨNG MINH GÌ — và một phán quyết bị lật
+Review D2 khai mutant `APPROVE-LATE-BIND` (*"duyệt đọc bản ghi lúc thi hành"*) ⇒ **0 bài đỏ** = lỗ hổng độ phủ. Re-review độc lập **lật lại**: mutant đó là **NO-OP thật**, vì `useApi` trả **object literal mới mỗi render**, nên `transcript.data` trong closure của cú bấm là **CÙNG MỘT BINDING** với `hienTai` ⇒ hai vế đọc cùng giá trị. Đo được: mutant của reviewer ⇒ **0 tên đỏ thêm**; mutant **thật** (đọc id lúc thi hành qua `useRef`) ⇒ **ĐỎ** đúng bài ghim mới.
+**Trả lời câu hỏi bắt buộc** (*bấm DUYỆT rồi đổi kênh trước khi hàng đợi thi hành ⇒ ghi vào bản ghi NÀO?*): **bản ghi ĐÃ BẤM (#3)**, không phải bản ghi mới mở ⇒ ghim *"chốt đích lúc GỬI"* hiện có là **đủ**; **F7 không có lỗi**.
+⇒ **LUẬT (mở rộng ERRATA #45 mục 1 sang chính MUTANT):** trước khi kết luận "lỗ hổng độ phủ" từ một mutant sống sót, phải **chứng minh mutant đó ĐỔI HÀNH VI**. Một mutant tương đương về ngữ nghĩa sống sót là **đúng**, không phải lỗ hổng. Cách kiểm: dựng **hai** mutant — bản "tự nhiên" và bản **cưỡng bức khác biệt** (ở đây: `useRef`) — nếu chỉ bản cưỡng bức mới đỏ thì vế ghim **đã đủ**.
+⇒ Hệ quả cho kỷ luật của tôi: lời khai *"mutant X sống sót ⇒ lỗ hổng"* **chỉ có giá trị sau khi** đã chứng minh X khác biệt về hành vi. Vòng trước tôi đã suýt giao một "bản sửa" cho một **lỗi không tồn tại**.
+
+### 10b. 🔴 Chính MUTANT BRIEF BẮT BUỘC cũng trở nên TRƠ sau khi vá — và đó là dấu hiệu bản vá ĐÚNG
+Vòng sửa 2 báo: mutant mà brief tôi **bắt buộc** (`D1-DEPS-NUDGE-STALE` — bỏ `transcript.data` khỏi deps của listener) nay **0 tên đỏ trên cây ĐÃ sửa**. Nguyên nhân: nền ghi đọc từ `useRef` ⇒ việc effect có gắn lại listener hay không **không còn đổi hành vi** — tức bản vá đã **xoá đúng thứ mà mutant ấy khai thác**.
+- Mutant **mô tả đúng bản vá** (`G1-BASE-CLOSURE` — đọc lại closure thay vì ref) ⇒ **ĐỎ đúng bài mới**.
+- Trên cây **CHƯA** sửa, chính mutant cũ (`PREFIX-D1-DEPS-NUDGE-STALE`) ⇒ **đỏ 3 tên**, gồm `D1 NỀN MỚI HƠN` ⇒ **tái lập nguyên vẹn phép falsify** của re-review.
+⇒ **LUẬT:** một mutant **trơ đi sau khi vá** KHÔNG phải là "mất độ phủ" — nó là **hệ quả tất yếu** của một bản vá đúng. Nhưng phải **chứng minh cả hai chiều**: (i) trên cây chưa sửa nó giết được bài, (ii) trên cây đã sửa có **mutant khác** mô tả đúng bản vá và giết được bài. Thiếu (i) thì không có falsify; thiếu (ii) thì không có ghim.
+
+## 11. Trạng thái vòng sửa 2 — `c575192`
+`frontend/src/shell/App.tsx` (G1+G2) · `App.test.tsx` (3 bài ghim + bộ đếm fixture) · `api/contract.test.ts` (G3+M-3). Cổng: **`tests 263 / pass 261 / fail 2 / cancelled 0 / EXIT=1`**, `typecheck` 0, `build` 0, 0 pytest, **20,7–21,4 s**; **danh sách TÊN bài đỏ = đúng 2 guard `EMPTY_DB_MSG`** (tôi tự chạy lại một lượt và tự đếm `✖`: **đúng 2 tên**). Mutation: 10 backup BYTE, `drift_after_restore` = 0; EOL đo theo từng tệp.
+Bản vá G1 (đọc thẳng diff): `banGhiMoiNhat` là `useRef` **gán trong THÂN render** (không trong effect — đúng cái cửa sổ đang hở); nền = ảnh chụp mới nhất **cùng id**, nếu ảnh mới nhất thuộc bản ghi KHÁC thì lùi về `hienTai`; **đích vẫn là tham số** ⇒ bất biến F7 *"chốt đích lúc GỬI"* không bị phá. G2: `}, [jobs, daYeuCauHuy]);`. G3: guard kiểm tính rỗng của **chính DB mà tiến trình tự spawn sẽ dùng**, tách **ba ca** thay vì boolean, và câu nêu đúng cơ chế (`spawn` không truyền `env` ⇒ con thừa hưởng `PHUDE_DATA`/`PHUDE_DB`).
+⚠️ **Việc xác minh độc lập vòng sửa 2 được GỘP vào review của Task 11** (quyết định có chủ ý để tiết kiệm một vòng): reviewer Task 11 phải xác minh **3 mục Important này trên đúng `c575192`** trước, rồi mới chấm Task 11 — và bài ghim G1 được thiết kế **không phụ thuộc cấu trúc** để còn giết được mutant sau khi Task 11 viết lại listener thành `src/keys/useShortcuts.ts`.
+**TRẦN mới khai:** ca "job **biến mất** khỏi bản đồ" của phép dọn G2 chưa có bài ghim.
+
 ## Quy ước thẩm mỹ — spec UI thắng, skill chỉ là checklist
 
 Spec `2026-09-25-phu-de-lab-ui-design.md` là **nguồn có thẩm quyền về hình thức** (bạn đã duyệt). Skill
