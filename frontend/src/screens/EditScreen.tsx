@@ -132,7 +132,8 @@ function soDong(text: string): number {
 }
 
 /**
- * Cua so hang can render: `visibleRange` + GHIM dong dang sua, ROI KEP `end` theo SO DOAN.
+ * Cua so hang can render: `visibleRange` + GHIM (dong dang sua VA dong dang chon), ROI KEP `end`
+ * theo SO DOAN.
  *
  * ⚠️ Vi sao phai kep (no `M4` cua review Task 5): `withPinned` **KHONG** kep theo `count`
  * — do duoc `withPinned({start: 100, end: 120}, 500)` ⇒ `end = 501`. Chi so ghim lon hon
@@ -141,6 +142,21 @@ function soDong(text: string): number {
  * chieu cao cuon co lai (va trong trinh duyet mot chieu cao am bi CSS loai bo, nen danh
  * sach mat doan cuon). `window.ts` da duoc review `PASS` va KHONG duoc sua trong task nay,
  * nen phep kep nam o DAY, tai cho goi, va co bai test ghim rieng.
+ *
+ * 🔴 `pinnedThem` (vong gom no Task 11, `D4`): `J`/`K`/`N` doi `currentSegment`, va menh de
+ * *"dong vua chon co MAT trong DOM"* la menh de **DOM** — truoc luot nay chi `editingSegment`
+ * duoc ghim, nen voi danh sach dai (ao hoa THAT SU cat dong do ra) dong vua chon **khong co
+ * trong DOM**. Ghim CA HAI chi so bang `withPinned` HAI LAN: moi lan ghim chi MO RONG khoang
+ * (`withPinned` khong bao gio thu hep), nen khoang cuoi chua ca hai dong — dung bat bien
+ * `start <= pinned < end` cua no.
+ *
+ * ⚠️ GIA PHAI TRA (khai ra, khong che): khi hai dong duoc ghim nam XA nhau, khoang render la
+ * khoang giua chung ⇒ so hang trong DOM lon hon `viewportH / rowH` (do dai = khoang cach). Do la
+ * danh doi CO Y de giu bat bien "dong dang thao tac luon co MAT trong DOM"; duong nang cap la
+ * CUON theo dong duoc chon (`scrollIntoView`, TRẦN cua Task 12 — ve "NHIN THAY duoc" can Chrome)
+ * thay vi noi rong khoang. ⚠️ Cach sua nay KHONG them mot CON nao vao luoi cua `.ed`
+ * (`grid-template-rows` + `grid-row` giu nguyen) — do la loi bo cuc ERRATA #31 muc 1, va no
+ * khong bi tai sinh o day.
  */
 export function windowFor(
   scrollTop: number,
@@ -149,9 +165,18 @@ export function windowFor(
   soDoan: number,
   overscan: number,
   pinned: number | null,
+  pinnedThem: number | null = null,
 ): { start: number; end: number; pinned: boolean } {
-  const cuaSo = withPinned(visibleRange(scrollTop, viewportH, rowH, soDoan, overscan), pinned);
-  return { start: cuaSo.start, end: Math.min(cuaSo.end, soDoan), pinned: cuaSo.pinned };
+  const dau = withPinned(visibleRange(scrollTop, viewportH, rowH, soDoan, overscan), pinned);
+  // Kep theo `soDoan` TRUOC lan ghim thu hai: `withPinned` doi hoi `start <= pinned < end`, va mot
+  // `end` vuot so doan se lam lan ghim sau do sai (va tra `pinned` sai).
+  const giua = { start: dau.start, end: Math.min(dau.end, soDoan) };
+  const cuoi = withPinned(giua, pinnedThem);
+  return {
+    start: cuoi.start,
+    end: Math.min(cuoi.end, soDoan),
+    pinned: dau.pinned || cuoi.pinned,
+  };
 }
 
 export interface EditScreenProps {
@@ -265,7 +290,9 @@ export function EditScreen({
   }
 
   const soDoan = transcript.segments.length;
-  const cuaSo = windowFor(cuon, viewportH, rowH, soDoan, overscan, editingSegment);
+  // HAI chi so duoc ghim: dong DANG SUA (U6 — thao no ra khoi DOM la MAT FOCUS) va dong DANG CHON
+  // (`J`/`K`/`N` — menh de "dong vua chon co MAT trong DOM"); xem docblock `windowFor`.
+  const cuaSo = windowFor(cuon, viewportH, rowH, soDoan, overscan, editingSegment, currentSegment);
   const hang = transcript.segments.slice(cuaSo.start, cuaSo.end);
 
   return (

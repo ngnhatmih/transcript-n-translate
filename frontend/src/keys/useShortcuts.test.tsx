@@ -248,6 +248,26 @@ describe("useShortcuts: MỘT listener ở `document`, guard HAI VẾ, và dọn
     assert.equal(eLienKet.defaultPrevented, false, "`Enter` trên <a href> KHÔNG được bị chặn mặc định");
     assert.deepEqual(daGoi, [], "`Enter` trên <a href> KHÔNG được tới handler của app");
 
+    // (2b) 🔴 `Space` thì NGƯỢC LẠI: một liên kết `a[href]` **KHÔNG** được trình duyệt kích hoạt
+    //      bằng `Space` (spec HTML: cú kích hoạt của liên kết là `Enter`; `Space` chỉ cuộn trang).
+    //      Nếu guard nhường theo MỘT danh sách selector chung cho cả hai phím thì khi tiêu điểm ở
+    //      một `<a download>` — đúng BA NÚT XUẤT của `Transport` — phím `Space` toàn cục (phát/dừng)
+    //      **IM LẶNG MẤT TÁC DỤNG**. Vế (2) ở trên và vế này phải ĐỎ được với hai mutant NGƯỢC CHIỀU
+    //      (nhường quá rộng / quá hẹp) — một vế âm một mình không phân biệt được.
+    assert.ok(document.activeElement === lienKet, "ca (2b) chỉ có nghĩa khi tiêu điểm Ở TRÊN liên kết");
+    daGoi.length = 0;
+    const eLienKetSpace = bamPhim(lienKet, { key: " " });
+    assert.deepEqual(
+      daGoi,
+      [{ type: "togglePlay" }],
+      "`Space` trên <a href> PHẢI tới handler của app (liên kết không kích hoạt bằng `Space`)",
+    );
+    assert.equal(
+      eLienKetSpace.defaultPrevented,
+      true,
+      "`Space` trên <a href> vẫn phải chặn mặc định (cuộn trang) vì app ĐÃ xử lý nó",
+    );
+
     // (3) PHÍM BỔ TRỢ không phải cú kích hoạt của control: `Ctrl+Enter` (hàng "chạy job") vẫn
     //     thuộc về APP dù tiêu điểm đang ở nút. Vế này ghim điều kiện "không có Ctrl/Alt/Meta".
     nut.focus();

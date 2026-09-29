@@ -44,8 +44,12 @@
  * **Cơ chế:** với ref gán trong thân render, tại thời điểm phím thứ hai rơi (sau commit DOM, TRƯỚC
  * khi passive effect flush) `xuLyRef.current` **ĐÃ** là handler của lượt render mới ⇒ closure
  * `hienTai` = `transcript.data` **MỚI** ⇒ "đọc closure thay vì ref" **không còn khác biệt hành vi**.
- * Vậy `E11A` là **MUTANT TƯƠNG ĐƯƠNG** (một bản vá KHÁC cùng chữa một lỗi), **KHÔNG** phải "mất độ
+ * Vậy `E11A` là **MUTANT SỐNG SÓT** (một ĐƯỜNG VÁ KHÁC cùng chữa một lỗi), **KHÔNG** phải "mất độ
  * nhạy": vế ngược được chứng minh bằng `E11B`, nơi handler THẬT SỰ cũ và bài ghim **vẫn đỏ**.
+ * 🔴 **ĐÍNH CHÍNH NHÃN (ERRATA `#47` mục 2):** chỗ này TRƯỚC ĐÂY viết *"MUTANT TƯƠNG ĐƯƠNG"* —
+ * **SAI**: `E11A` KHÔNG tương đương về ngữ nghĩa (trong cửa sổ một-lượt-commit nó chạy handler MỚI
+ * với `mode` CŨ, còn mã hiện tại chạy handler CŨ, khác nhau ở **mọi** state mà `xuLyPhim` đọc). Gọi
+ * một mutant sống sót là "tương đương" là **che một lỗ hổng bằng từ ngữ** (`#45` mục 2).
  *
  * ⇒ **Quyết định:** giữ `[xuLy, mode]` — nó là đường ĐƠN GIẢN NHẤT (không cần ref), và nó không
  * phải một ràng buộc sống-còn như câu cũ khai. ⚠️ **NỢ `#46` mục 10b:** vế (i) ("trên cây CHƯA sửa,
@@ -79,17 +83,46 @@ function dangGoTrongONhap(dich: EventTarget | null): boolean {
 /**
  * **HAI PHÍM KÍCH HOẠT của control native** (spec HTML): `Enter` và `Space`. Đây không phải "phím
  * nóng của app" mà là **cơ chế bấm của trình duyệt** cho `<button>`/`<a href>`/`<select>`/…
- * (`Enter` kích hoạt liên kết, `Space` kích hoạt nút).
+ *
+ * 🔴 **VÀ HAI PHÍM ĐÓ KHÔNG KÍCH HOẠT CÙNG MỘT TẬP PHẦN TỬ** (đính chính vòng gom nợ, `#47` mục 4):
+ * một danh sách selector CHUNG cho cả hai phím là SAI, và sai đó **làm mất một phím toàn cục** —
+ * `a[href]` **không** được kích hoạt bằng `Space` (cú kích hoạt của liên kết là `Enter`; `Space`
+ * cuộn trang), còn `input[type=radio|checkbox]` **không** được kích hoạt bằng `Enter`. Với danh
+ * sách chung, tiêu điểm ở một `<a download>` (đúng BA NÚT XUẤT của `Transport`) làm `Space`
+ * toàn cục (phát/dừng) **im lặng mất tác dụng** dù trình duyệt chẳng làm gì với phím đó.
+ *
+ * CƠ SỞ của hai tập dưới đây (spec HTML, mục "activation behavior" của từng phần tử):
+ *  - `<button>` — `Enter` VÀ `Space` (cả hai đều là cú bấm);
+ *  - `input[type=button|submit|reset]` — `Enter` VÀ `Space` (chúng là nút);
+ *  - `a[href]` — **chỉ `Enter`**;
+ *  - `input[type=checkbox|radio]` — **chỉ `Space`** (`Enter` không đổi trạng thái tick/chọn);
+ *  - `<summary>` — `Enter` VÀ `Space` (đóng/mở `<details>`);
+ *  - `<select>` — có trong CẢ HAI tập để giữ nguyên phạm vi cũ, nhưng ⚠️ **vô hại về hành vi**:
+ *    `select` đã nằm trong guard Ô NHẬP (`dangGoTrongONhap`) nên phím trên một `<select>` không
+ *    bao giờ tới đây. Cùng lý do đó, nửa `input[type=radio|checkbox] × Enter` của đính chính này
+ *    **KHÔNG quan sát được ở tầng hook** (guard ô nhập thắng trước) — vế DUY NHẤT quan sát được,
+ *    và cũng là vế gây hại thật, là **`a[href] × Space`**; bài ghim `(2b)` trong
+ *    `useShortcuts.test.tsx` đo đúng vế đó.
  */
-const PHIM_KICH_HOAT_CONTROL: ReadonlySet<string> = new Set(["Enter", " "]);
+const KICH_HOAT_ENTER =
+  'button, a[href], select, summary, input[type="button"], input[type="submit"], '
+  + 'input[type="reset"]';
+
+/** Tập kích hoạt của `Space` — xem CƠ SỞ ở docblock `KICH_HOAT_ENTER` (KHÔNG có `a[href]`). */
+const KICH_HOAT_SPACE =
+  'button, select, summary, input[type="button"], input[type="submit"], '
+  + 'input[type="reset"], input[type="checkbox"], input[type="radio"]';
 
 /**
- * Những phần tử mà TRÌNH DUYỆT kích hoạt bằng `Enter`/`Space`. `closest` đi LÊN cây nên nó bắt cả
- * `<span>` bên trong một `<button>` (nơi `keydown` thật sự nhắm tới).
+ * Tập phần tử mà phím này kích hoạt, hoặc `null` nếu phím không phải phím kích hoạt control native.
+ * `closest` đi LÊN cây nên nó bắt cả `<span>` bên trong một `<button>` (nơi `keydown` thật sự
+ * nhắm tới).
  */
-const CONTROL_NATIVE =
-  'button, a[href], select, summary, input[type="button"], input[type="submit"], '
-  + 'input[type="reset"], input[type="checkbox"], input[type="radio"]';
+function selectorKichHoat(key: string): string | null {
+  if (key === "Enter") return KICH_HOAT_ENTER;
+  if (key === " ") return KICH_HOAT_SPACE;
+  return null;
+}
 
 /**
  * Phím này có thuộc về một CONTROL NATIVE đang có tiêu điểm không (vòng sửa 1, `I-1`).
@@ -111,12 +144,16 @@ const CONTROL_NATIVE =
  *    nút vẫn là một cú bấm vào nút.
  *  - **Không có `Ctrl`/`Alt`/`Meta`**: phím nóng của app có phím bổ trợ (`Ctrl+Enter` = chạy job)
  *    và tổ hợp đó KHÔNG phải cú kích hoạt của control ⇒ nó vẫn thuộc về app.
+ *
+ * 🔴 **TẬP KÍCH HOẠT PHỤ THUỘC PHÍM** (đính chính `#47` mục 4): hàm này hỏi `selectorKichHoat`
+ * theo TỪNG phím, không dùng một danh sách chung — xem CƠ SỞ ở docblock của `KICH_HOAT_ENTER`.
  */
 function phimCuaControlNative(suKien: KeyboardEvent): boolean {
   if (suKien.ctrlKey || suKien.altKey || suKien.metaKey) return false;
-  if (!PHIM_KICH_HOAT_CONTROL.has(suKien.key)) return false;
+  const selector = selectorKichHoat(suKien.key);
+  if (selector === null) return false;
   const dich = suKien.target;
-  return dich instanceof HTMLElement && dich.closest(CONTROL_NATIVE) !== null;
+  return dich instanceof HTMLElement && dich.closest(selector) !== null;
 }
 
 /**

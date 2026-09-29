@@ -4846,13 +4846,19 @@ describe("App: KENH THAT + HANG DOI THAT tu server node:http trong tien trinh", 
       (el) => el.getAttribute("data-nghe-lai") === "1",
       "một cú nudge phải MỞ cửa sổ nghe lại",
     );
+    // 🔴 MỐC MỞ, đọc NGAY SAU tín hiệu DOM vừa thấy (không phải một `sleep`): nó dùng để GHIM ĐỘ
+    //    DÀI cửa sổ ở vế (3). Đây là `#47` mục 3 — lỗ hổng ở cấp **GIÁ TRỊ**: đổi `NGHE_LAI_MS`
+    //    300 → 4000 (tôi tự đo lại trên cây TRƯỚC lượt này: `292/290/2`, **0 bài đỏ**, lượt chạy
+    //    dài 31,1 s so với 23,3 s của nền — cửa sổ THẬT SỰ dài 4 s mà không bài nào bắt) cho 0 đỏ,
+    //    vì bài cũ chỉ hỏi *"cuối cùng thì cửa sổ có ĐÓNG không"* ⇒ nó ghim SỰ TỒN TẠI của lời gọi,
+    //    không ghim GIÁ TRỊ.
+    const tMo = Date.now();
     assert.equal(dem.play, 1, "nudge phải YÊU CẦU `play()` (đếm được vì `play()` bị bịt để ĐẾM)");
     const mocMoi = 3.3; // = 3,2 (mốc `]` vừa đặt ở vế (1)) + 0,1 (bước nudge)
     assert.ok(
       Math.abs(media.currentTime - mocMoi) < 1e-9,
       `đầu đọc phải TUA tới MỐC MỚI ${mocMoi}; đo được ${media.currentTime}`,
     );
-    await choChu(container, "0:02.00 → 0:03.30");
 
     // (3) CỬA SỔ ĐÓNG sau 300 ms. TÍN HIỆU là thuộc tính biến mất; deadline của `waitFor` chỉ là
     //     TRẦN (ERRATA #35 mục 2: một `sleep` có điều kiện thoát là hàm của ĐỒNG HỒ thì luôn đúng).
@@ -4862,11 +4868,29 @@ describe("App: KENH THAT + HANG DOI THAT tu server node:http trong tien trinh", 
       (el) => el.getAttribute("data-nghe-lai") === null,
       "hết `NGHE_LAI_MS` cửa sổ nghe lại phải ĐÓNG",
     );
+    // 🔴 GHIM ĐỘ DÀI (`#47` mục 3): `t_close − t_open` phải nằm giữa HAI TRẦN, và KHÔNG đọc hằng
+    //    số của sản phẩm (đọc hằng số chỉ ghim lại chính lời khai, không ghim giá trị). Điều kiện
+    //    thoát của phép đo là hai TÍN HIỆU DOM ở trên; đồng hồ chỉ làm CỰC ĐẠI/CỰC TIỂU, nên đây
+    //    KHÔNG phải một `sleep` (ERRATA #35/#38/#39 — đã cắn bốn lần).
+    //    ⚠️ SÀN 150 ms là RỘNG, không phải con số của spec: `tMo` được đọc SAU khi tín hiệu mở được
+    //    phát hiện (độ trễ phát hiện ≤ một nhịp `interval` của `waitFor`), nên phép đo có thể NHỎ
+    //    hơn 300 ms một chút. Sàn chỉ để bắt một cửa sổ NGẮN HƠN HẲN (mutant 30 ms: đo được ≤ ~50 ms,
+    //    hoặc tín hiệu mở không bao giờ thấy ⇒ ĐỎ).
+    const tDong = Date.now();
+    const doDai = tDong - tMo;
+    assert.ok(
+      doDai >= 150 && doDai <= 1500,
+      `cửa sổ nghe lại phải dài ~300 ms (spec UI §5.2 dòng 309); `
+      + `đo được ${doDai} ms — ngoài khoảng [150, 1500]`,
+    );
     assert.equal(dem.pause, 1, "hết cửa sổ phải `pause()` — nghe một đoạn rồi DỪNG");
     assert.ok(
       Math.abs(media.currentTime - mocMoi) < 1e-9,
       "đóng cửa sổ KHÔNG được đổi vị trí đã tua",
     );
+    // Mốc mới đã tới được ĐĨA và hiện ra trong DOM. Khẳng định này để SAU phép đo độ dài: một phép
+    // chờ vì chữ khác không được phép làm nhiễu khoảng thời gian đang đo.
+    await choChu(container, "0:02.00 → 0:03.30");
 
     // (4) ĐANG PHÁT ⇒ nudge chỉ TUA, KHÔNG CẮT việc đang nghe. ⚠️ Khẳng định PHỦ ĐỊNH ("không
     //     `pause()` nào") chỉ có nghĩa khi có một MỐC THỜI GIAN để đứng lên ⇒ chờ tín hiệu cửa sổ
@@ -5057,6 +5081,93 @@ describe("App: KENH THAT + HANG DOI THAT tu server node:http trong tien trinh", 
     );
 
     assert.deepEqual(tiengOn, [], "nhay toi doan nghi ngo khong duoc sinh tieng on console");
+    unmount();
+  });
+
+  it("T11 J/K/N trong danh sách DÀI (ảo hoá CẮT dòng ra): dòng vừa chọn phải có MẶT trong DOM", async () => {
+    // 🔴 MỆNH ĐỀ DOM (re-review §7 mục ③, vế (a)). `J`/`K`/`N` đổi `currentSegment`, và dòng vừa
+    // được chọn phải có MẶT trong DOM. Trước lượt gom nợ này `EditScreen` CHỈ ghim `editingSegment`
+    // (`windowFor(..., editingSegment)`), nên với một danh sách đủ dài để ảo hoá THẬT SỰ cắt dòng đó
+    // ra, mệnh đề này **SAI** — đó là lỗi SẢN PHẨM, không phải một bài ghim yếu.
+    // ⚠️ Cửa sổ mặc định (`VIEWPORT_H` 480 / `ROW_H` 44 / `OVERSCAN` 5) chỉ chứa các dòng 0..15;
+    // dòng nghi ngờ thứ hai ở i = 40 nằm NGOÀI cửa sổ. Vế "NHÌN THẤY được" (cuộn/layout) mới cần
+    // Chrome — jsdom không có layout, nên ở đây ghim ĐÚNG vế DOM-presence.
+    const dai: Segment[] = Array.from(
+      { length: 60 },
+      (_, i) => doan(i, i * 2, i * 2 + 2, `đoạn dài ${i}`),
+    );
+    dai[1] = { ...dai[1], suspect: true };
+    dai[40] = { ...dai[40], suspect: true };
+    TRANSCRIPT_CHI_TIET = {
+      ...TRANSCRIPT_CHI_TIET,
+      3: { ...TRANSCRIPT_CHI_TIET_GOC[3], segments: dai },
+    };
+
+    const { container, unmount } = render(taoPhanTu(App));
+    await choChu(container, "kenh-hai");
+    fireEvent.click(nutKenh(container, "kenh-hai"));
+    await choChu(container, "đoạn dài 0");
+
+    // ⚠️ HAI NHỊP DỌN TRONG BÀI (cùng kỹ thuật đã dùng để đóng rò async ở `c575192`): `useShortcuts`
+    // gắn lại listener mỗi lượt render (deps `[xuLy, mode]`), nên listener CŨ trong "cửa sổ
+    // một-lượt-commit" đọc `transcript.data` của lượt TRƯỚC (`null`) ⇒ một phím rơi ĐÚNG cửa sổ đó
+    // bị NUỐT IM LẶNG (cùng lớp với `D1 NỀN MỚI HƠN (CỬA SỔ CHƯA GẮN LẠI)`; tôi đã gặp đúng ca này
+    // khi bài còn thiếu hai nhịp). Đây là `waitFor` — một phép cho theo NHỊP, không phải `sleep`.
+    await waitFor(() => { assert.ok(true, "nhịp dọn 1"); }, { timeout: 2000, interval: 10 });
+    await waitFor(() => { assert.ok(true, "nhịp dọn 2"); }, { timeout: 2000, interval: 10 });
+    assert.equal(
+      document.activeElement,
+      document.body,
+      "ca này chỉ có nghĩa khi tiêu điểm ở BODY (guard ô nhập sẽ nuốt phím toàn cục)",
+    );
+
+    // ĐỐI CHỨNG DƯƠNG của chính phép đo: khi CHƯA chọn dòng 40 thì ảo hoá phải cắt nó RA. Thiếu vế
+    // này thì "có mặt" có thể đúng một cách vô nghĩa (một danh sách không hề ảo hoá).
+    assert.equal(
+      container.querySelector('[data-i="40"]'),
+      null,
+      "chưa chọn thì dòng 40 phải NGOÀI cửa sổ (nếu không, danh sách này không ảo hoá thật)",
+    );
+
+    // (1) `N` lần đầu ⇒ dòng nghi ngờ ĐẦU (i=1, vẫn TRONG cửa sổ).
+    fireEvent.keyDown(document.body, { key: "n" });
+    await choPhuHop(
+      container,
+      '[data-i="1"]',
+      (el) => (el.getAttribute("class") ?? "").includes("is-current"),
+      "`N` phải chọn dòng nghi ngờ đầu (i=1)",
+    );
+
+    // (2) `N` lần hai ⇒ dòng NGHI NGỜ KẾ TIẾP (i=40) — và nó phải được GHIM vào DOM.
+    fireEvent.keyDown(document.body, { key: "n" });
+    await choPhuHop(
+      container,
+      '[data-i="40"]',
+      (el) => (el.getAttribute("class") ?? "").includes("is-current"),
+      "`N` chọn dòng 40 NGOÀI cửa sổ ⇒ dòng đó phải có MẶT trong DOM",
+    );
+
+    // (3) `K` (dòng sau) ra khỏi cửa sổ ⇒ cũng phải có mặt; rồi `J` (dòng trước) quay lại.
+    fireEvent.keyDown(document.body, { key: "k" });
+    await choPhuHop(
+      container,
+      '[data-i="41"]',
+      (el) => (el.getAttribute("class") ?? "").includes("is-current"),
+      "`K` chọn dòng 41 (ngoài cửa sổ mặc định) ⇒ dòng đó phải có MẶT trong DOM",
+    );
+    fireEvent.keyDown(document.body, { key: "j" });
+    await choPhuHop(
+      container,
+      '[data-i="40"]',
+      (el) => (el.getAttribute("class") ?? "").includes("is-current"),
+      "`J` phải quay lại dòng 40 (và dòng đó vẫn phải có MẶT trong DOM)",
+    );
+
+    assert.deepEqual(
+      tiengOn,
+      [],
+      "di chuyen dong bang ban phim trong danh sach dai khong duoc sinh tieng on console",
+    );
     unmount();
   });
 

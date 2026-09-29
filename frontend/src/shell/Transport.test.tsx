@@ -76,6 +76,14 @@ let fireEvent: {
   timeUpdate: (el: Element) => void;
 };
 let cleanup: () => void;
+/**
+ * `waitFor` cua Testing Library — phep cho THEO TIN HIEU DOM (khong phai `sleep`).
+ *
+ * ⚠️ Vi sao can o tep nay (vong gom no, `D3`): cua so NGHE LAI (`data-nghe-lai`) mo ra roi dong lai
+ * theo MOT khoang thoi gian, nen "da dong chua" la mot TIN HIEU phai CHO — va deadline cua `waitFor`
+ * chi la TRAN, khong phai dieu kien thoat (`#35` muc 2).
+ */
+let waitFor: (cb: () => void, opts?: { timeout?: number; interval?: number }) => Promise<void>;
 /** `createElement` — goi ham component NGOAI chu trinh render se nem `useState` dispatcher null. */
 let taoPhanTu: (type: unknown, props?: unknown) => unknown;
 let Transport: (props: unknown) => unknown;
@@ -123,6 +131,7 @@ describe("Transport: nut phat, timecode mono, track co dau doc, ba nut xuat", ()
     render = api.render;
     fireEvent = api.fireEvent;
     cleanup = api.cleanup;
+    waitFor = api.waitFor;
     const reactModule: any = await import("react");
     const react = reactModule.createElement === undefined ? reactModule.default : reactModule;
     taoPhanTu = react.createElement;
@@ -495,6 +504,74 @@ describe("Transport: nut phat, timecode mono, track co dau doc, ba nut xuat", ()
       );
     } finally {
       w.HTMLMediaElement.prototype.play = playGia;
+    }
+  });
+
+  it("NGHE LAI: `play()` bị TỪ CHỐI (autoplay) ⇒ cửa sổ vẫn mở rồi đóng, KHÔNG `unhandledRejection`", async () => {
+    // 🔴 TRẦN #7 của báo cáo vòng trước khai *"không dựng được ca `play()` bị từ chối trong jsdom"*
+    // — **SAI**: chính TỆP NÀY sở hữu stub `play()` (xem `before`), nên ca từ chối là MỘT DÒNG
+    // (`return Promise.reject(...)`), và jsdom KHÔNG cần âm thanh để đo HÀNH VI của nhánh bắt lỗi.
+    // Vế được ghim: nhánh `.catch` trong effect nghe lại của `Transport` — bỏ nó đi thì promise bị
+    // từ chối thành `unhandledRejection`, mà trên cây TRƯỚC lượt này **0 bài đỏ** (tôi tự đo: bỏ
+    // `.catch(() => {})` ⇒ `292/290/2`, đúng hai guard nền `EMPTY_DB_MSG`).
+    const w: any = (globalThis as any).window;
+    const roi: unknown[] = [];
+    const batRoi = (ly: unknown): void => {
+      roi.push(ly);
+    };
+    let soLanGoi = 0;
+    process.on("unhandledRejection", batRoi);
+    w.HTMLMediaElement.prototype.play = function (): unknown {
+      soLanGoi += 1;
+      return Promise.reject(new Error("autoplay bị từ chối (NotAllowedError)"));
+    };
+    try {
+      const { container, unmount } = render(
+        taoPhanTu(Transport, {
+          sourceId: 3,
+          segments: BA_DOAN,
+          translationId: 7,
+          duration: 120,
+          ngheLai: { giay: 3.3, lan: 1 },
+        }),
+      );
+      const media = phanTu(container, "audio") as HTMLAudioElement;
+
+      // (1) Cửa sổ MỞ: yêu cầu nghe lại vẫn phải chạy tới cùng — một cú `play()` bị từ chối KHÔNG
+      //     được nuốt luôn cửa sổ (người dùng vẫn phải thấy trạng thái đang nghe lại).
+      await waitFor(
+        () => {
+          assert.equal(
+            media.getAttribute("data-nghe-lai"),
+            "1",
+            "yêu cầu nghe lại phải MỞ cửa sổ dù `play()` bị từ chối",
+          );
+        },
+        { timeout: 5000, interval: 20 },
+      );
+      assert.equal(soLanGoi, 1, "cửa sổ nghe lại phải YÊU CẦU `play()`");
+      assert.ok(
+        Math.abs(media.currentTime - 3.3) < 1e-9,
+        `cửa sổ nghe lại phải TUA tới mốc 3,3; đo được ${media.currentTime}`,
+      );
+
+      // (2) Cửa sổ ĐÓNG theo TÍN HIỆU DOM. Đây cũng là khoảng thời gian mà một `unhandledRejection`
+      //     (nếu có) PHẢI được phát ra ⇒ khẳng định ở (3) không cần một `sleep` riêng.
+      await waitFor(
+        () => {
+          assert.equal(media.getAttribute("data-nghe-lai"), null, "hết cửa sổ phải ĐÓNG");
+        },
+        { timeout: 5000, interval: 20 },
+      );
+      assert.equal(daGoi.pause, 1, "hết cửa sổ (đang không phát) phải `pause()`, không cắt gì khác");
+
+      // (3) VẾ GHIM: từ chối KHÔNG được thành `unhandledRejection`, và không được sinh tiếng ồn.
+      assert.deepEqual(roi, [], "`play()` bị từ chối KHÔNG được thành `unhandledRejection`");
+      assert.deepEqual(tiengOn, [], "từ chối autoplay không được sinh tiếng ồn console");
+      unmount();
+    } finally {
+      w.HTMLMediaElement.prototype.play = playGia;
+      process.off("unhandledRejection", batRoi);
     }
   });
 
