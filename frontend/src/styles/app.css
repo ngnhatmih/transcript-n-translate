@@ -1169,3 +1169,159 @@ body {
 .ch__tieng {
   font-size: var(--fs-note);
 }
+
+/* ── §4.2 CỬA VÀO CỦA WORKSPACE 1: NẠP TỆP (Task W2) ─────────────────────────────
+   HAI lối vào, MỘT luật: khung kẻ nét đứt (`.nap__khung`) ở VÙNG GIỮA khi chưa có bản ghi, và
+   một lối GỌN (`.ch__nap`) ở VÙNG KÊNH cho tệp thứ 2..N (§12.2 *"nạp 3 tệp cùng lúc"*).
+   `KÉO TỆP VÀO ĐÂY` là nhãn KHẮC của §2.1 (`--font-label` + `--track-label` giãn rộng); dòng
+   định dạng là mặt SỐ LIỆU/GHI CHÚ của §2.1 (`--font-mono`) — hai mặt chữ khác nhau, có chủ ý.
+
+   ⚠️ BỐ CỤC BẰNG FLEX, KHÔNG BẰNG `grid-template-rows` CỐ ĐỊNH: số con của khung này ĐỔI theo
+   trạng thái (dòng "đang nạp…" và vùng kết quả chỉ có khi cần), và thêm một con vào một lưới có
+   số track cố định là một thay đổi BỐ CỤC (ERRATA #31 mục 1 / #36 mục 3). Flex không có "trần
+   track" để trôi. */
+
+/* Vùng giữa của TRẠNG THÁI RỖNG: câu sự thật ở trên, khung §4.2 chiếm PHẦN CÒN LẠI. */
+.ed__rong-boc {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+  height: 100%;
+  min-height: 0;
+}
+
+.nap {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  gap: var(--sp-3);
+  min-height: 0;
+  /* `--sp-6` là token CUỐI CÙNG còn mồ côi; khung này là người dùng đầu tiên của nó. */
+  padding: var(--sp-6);
+}
+
+/* KHUNG KẺ NÉT ĐỨT của §4.2 — *"Không phải một thẻ nhỏ giữa màn hình"*: nó chiếm trọn phần còn
+   lại của vùng giữa, và đường kẻ là `dashed` (một nét ĐỨT thật, không phải một viền mờ). */
+.nap__khung {
+  display: grid;
+  flex: 1 1 auto;
+  align-content: center;
+  justify-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-6);
+  border: var(--rule-w) dashed var(--rule);
+  border-radius: var(--radius);
+}
+
+/* `KÉO TỆP VÀO ĐÂY` — nhãn khắc: mặt chữ Archivo Expanded, giãn rộng (§2.1). */
+.nap__keo {
+  margin: 0;
+  font-family: var(--font-label);
+  font-size: var(--fs-read);
+  line-height: var(--lh-tight);
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  color: var(--ink-0);
+}
+
+/* Dòng mono: ĐỊNH DẠNG — THÔNG TIN, không phải phép kiểm (backend không chặn đuôi nào). */
+.nap__dinh-dang {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: var(--fs-num);
+  color: var(--ink-2);
+  text-align: center;
+}
+
+.nap__chon {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-3);
+}
+
+.nap__nhan,
+.nap__nut,
+.ch__nap-nhan {
+  font-family: var(--font-label);
+  font-size: var(--fs-label);
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  color: var(--ink-1);
+}
+
+.nap__o-tep,
+.nap__lang,
+.ch__nap-o,
+.ch__nap-lang {
+  font-family: var(--font-mono);
+  font-size: var(--fs-num);
+  color: var(--ink-1);
+  background: var(--panel-2);
+  border: var(--rule-w) solid var(--rule);
+  border-radius: var(--radius);
+}
+
+.nap__nut {
+  padding: var(--sp-1) var(--sp-3);
+  color: var(--ink-0);
+  cursor: pointer;
+}
+
+/* Nút `nạp` khi CHƯA chọn tệp nào: chữ mờ đi — nhưng trạng thái đó cũng được NÓI RA bằng chữ
+   (`.nap__chon-tam`), nên nó không phải tín hiệu duy nhất. */
+.nap__nut:disabled {
+  color: var(--ink-2);
+  cursor: default;
+}
+
+.nap__chon-tam,
+.nap__cho,
+.ch__nap-cho {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: var(--fs-num);
+  color: var(--ink-2);
+}
+
+/* KẾT QUẢ TỪNG TỆP — bằng CHỮ, không phải bằng màu: mỗi dòng là một câu đọc được, kể cả câu lỗi
+   NGUYÊN VĂN của backend. Hai lớp dưới đây chỉ là tín hiệu THỨ HAI (ERRATA #15 mục 3 / §7). */
+.nap__ket-qua {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.nap__kq {
+  font-family: var(--font-mono);
+  font-size: var(--fs-num);
+}
+
+.nap__kq--xong {
+  color: var(--ok);
+}
+
+.nap__kq--loi {
+  color: var(--fault);
+}
+
+/* LỐI NẠP GỌN Ở VÙNG KÊNH (§12.2 — tệp thứ 2..N): MỘT hàng, ngay TRÊN danh sách kênh, và nó
+   LUÔN có mặt (kể cả khi danh sách rỗng hay đang lỗi). */
+.ch__nap {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  border-bottom: var(--rule-w) solid var(--rule);
+}
+
+.ch__nap-o,
+.ch__nap-lang {
+  font-size: var(--fs-label);
+}
+
+/* Kết quả trong lối gọn xuống HÀNG RIÊNG: một khối chữ nằm cạnh ô chọn tệp sẽ bị bóp méo. */
+.ch__nap .nap__ket-qua {
+  flex-basis: 100%;
+}

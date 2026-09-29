@@ -99,10 +99,19 @@ const consoleGoc = { error: console.error, warn: console.warn };
 const tiengOn: string[] = [];
 
 let render: (ui: unknown) => { container: HTMLElement; unmount: () => void };
-let fireEvent: { click: (el: Element) => void };
+let waitFor: (cb: () => void, options?: { timeout?: number; interval?: number }) => Promise<void>;
+let fireEvent: { click: (el: Element) => void; change: (el: Element, init: unknown) => void };
 let cleanup: () => void;
 let taoPhanTu: (type: unknown, props?: unknown) => unknown;
 let ChannelZone: (props: unknown) => unknown;
+
+/**
+ * Hàm nạp TIÊM cho các bài KHÔNG đo đường nạp (bài cũ của W1 phải giữ nguyên mệnh đề).
+ *
+ * ⚠️ Đây là chính cái seam mà brief W2 định nghĩa (`napTep(files, lang)`), không phải mock
+ * `endpoints.ts`; đường HTTP THẬT nằm ở `App.test.tsx` (server `node:http` thật).
+ */
+const khongNap: (files: File[], lang: "zh" | "en") => Promise<[]> = async () => [];
 
 /** Mục kênh (nút) của một kênh, tra theo CHỮ trong mục — không theo thứ tự mảng. */
 function mucCua(container: HTMLElement, chuoi: string): HTMLButtonElement {
@@ -118,6 +127,30 @@ function dauCua(muc: Element): string {
   return (muc.querySelector(".ch__dau")?.textContent ?? "").trim();
 }
 
+/**
+ * Cho tới khi một phần tử khớp `chon` thỏa `dieuKien` — **TÍN HIỆU**, không phải đồng hồ.
+ *
+ * ⚠️ Và tín hiệu phải là **ĐÚNG thứ bài sắp ĐỌC** (ERRATA #38 mục 2 / #39 mục 5): ở đây là chính
+ * dòng kết quả nạp trong `.nap__kq`.
+ */
+async function choDong(
+  container: HTMLElement,
+  chon: string,
+  dieuKien: (text: string) => boolean,
+): Promise<string> {
+  let cuoi = "";
+  await waitFor(
+    () => {
+      const dong = [...container.querySelectorAll(chon)].map((el) => el.textContent ?? "");
+      const thay = dong.find(dieuKien);
+      assert.ok(thay !== undefined, `chua thay dong ${chon}; do duoc ${JSON.stringify(dong)}`);
+      cuoi = thay;
+    },
+    { timeout: 5000, interval: 20 },
+  );
+  return cuoi;
+}
+
 describe("ChannelZone: chon duoc KENH (Task W1)", () => {
   before(async () => {
     teardownDom();
@@ -126,6 +159,7 @@ describe("ChannelZone: chon duoc KENH (Task W1)", () => {
     const rtl: any = await import("@testing-library/react");
     const api = rtl.render === undefined ? rtl.default : rtl;
     render = api.render;
+    waitFor = api.waitFor;
     fireEvent = api.fireEvent;
     cleanup = api.cleanup;
     const reactModule: any = await import("react");
@@ -165,6 +199,7 @@ describe("ChannelZone: chon duoc KENH (Task W1)", () => {
         error: null,
         selectedId: null,
         onSelect: () => {},
+        onNapTep: khongNap,
       }),
     );
 
@@ -195,6 +230,7 @@ describe("ChannelZone: chon duoc KENH (Task W1)", () => {
         error: null,
         selectedId: 1,
         onSelect: () => {},
+        onNapTep: khongNap,
       }),
     );
 
@@ -224,6 +260,7 @@ describe("ChannelZone: chon duoc KENH (Task W1)", () => {
         onSelect: (id: number): void => {
           daChon.push(id);
         },
+        onNapTep: khongNap,
       }),
     );
 
@@ -237,6 +274,83 @@ describe("ChannelZone: chon duoc KENH (Task W1)", () => {
     assert.equal(dauCua(mucCua(container, "vid.example/kenh-hai")), "", "chua doi prop thi dau khong duoc nhay");
 
     assert.deepEqual(tiengOn, [], "bam muc kenh khong duoc sinh tieng on console");
+    unmount();
+  });
+
+  // -------------------------------------------------------------------------
+  // TASK W2 — LỐI NẠP GỌN Ở VÙNG KÊNH (§12.2: nạp tệp thứ 2..N khi ĐÃ có kênh)
+  //
+  // VÌ SAO NÓ TỒN TẠI: khi đã có bản ghi, vùng giữa hiện danh sách đoạn nên khung §4.2 KHÔNG còn
+  // ở đó ⇒ nếu vùng KÊNH không có cửa nạp thì tệp thứ 2..N **không có cửa nào** vào app. Đó là
+  // lý do lối này phải **LUÔN tới được** — kể cả khi danh sách rỗng, đang đọc, hay đang lỗi.
+  // -------------------------------------------------------------------------
+
+  it("W2 LỐI GỌN: LUÔN tới được (có kênh · rỗng · đang đọc · lỗi), và nhận NHIỀU tệp", () => {
+    for (const ca of [
+      { ten: "DA CO KENH", props: { sources: SOURCES, loading: false, error: null } },
+      { ten: "RONG", props: { sources: [], loading: false, error: null } },
+      { ten: "DANG DOC", props: { sources: null, loading: true, error: null } },
+      { ten: "LOI", props: { sources: null, loading: false, error: "500: nguồn dữ liệu hỏng" } },
+    ]) {
+      const { container, unmount } = render(
+        taoPhanTu(ChannelZone, {
+          ...ca.props,
+          jobs: JOBS,
+          selectedId: null,
+          onSelect: () => {},
+          onNapTep: khongNap,
+        }),
+      );
+      const o = container.querySelector('[data-testid="ch-nap-o-tep"]');
+      assert.ok(o !== null, `ca ${ca.ten}: loi nap gon KHONG toi duoc (khong co o chon tep)`);
+      assert.equal(
+        (o as HTMLInputElement).getAttribute("type"),
+        "file",
+        `ca ${ca.ten}: o nap gon phai la o chon tep`,
+      );
+      assert.ok(
+        (o as HTMLInputElement).hasAttribute("multiple"),
+        `ca ${ca.ten}: thieu \`multiple\` ⇒ khong nap duoc 3 tep cung luc (§12.2)`,
+      );
+      unmount();
+    }
+  });
+
+  it("W2 LỐI GỌN: chọn tệp ⇒ đi vào CÙNG hàm nạp (seam), và kết quả hiện bằng CHỮ", async () => {
+    const goi: string[][] = [];
+    const { container, unmount } = render(
+      taoPhanTu(ChannelZone, {
+        sources: SOURCES,
+        jobs: JOBS,
+        loading: false,
+        error: null,
+        selectedId: null,
+        onSelect: () => {},
+        onNapTep: async (files: File[]) => {
+          goi.push(files.map((t) => t.name));
+          return [
+            { ten: files[0]?.name ?? "", ok: true, sourceId: 21 },
+            { ten: files[1]?.name ?? "", ok: false, loi: "422: tệp rỗng" },
+          ];
+        },
+      }),
+    );
+
+    // `fireEvent.change` với `File` THAT; jsdom khong co layout nen day la duong DUY NHAT do duoc.
+    const a = new File([new Uint8Array([1, 2, 3])], "moi.wav", { type: "audio/wav" });
+    const b = new File([new Uint8Array([])], "rong.wav", { type: "audio/wav" });
+    fireEvent.change(container.querySelector('[data-testid="ch-nap-o-tep"]') as Element, {
+      target: { files: [a, b] },
+    });
+
+    // ⚠️ Cho DUNG tin hieu ma bai sap doc: DONG KET QUA. Do la dau ra cua cung mot luot nap.
+    const xong = await choDong(container, ".nap__kq", (t) => t.includes("moi.wav"));
+    const loi = await choDong(container, ".nap__kq", (t) => t.includes("rong.wav"));
+    assert.match(xong, /đã nạp — kênh 21/, "ket qua TUNG tep phai hien bang CHU (kem id kenh)");
+    assert.match(loi, /422: tệp rỗng/, "cau loi cua backend phai hien NGUYEN VAN");
+    assert.deepEqual(goi, [["moi.wav", "rong.wav"]], "loi gon phai goi DUNG ham nap voi DUNG tep");
+
+    assert.deepEqual(tiengOn, [], "loi nap gon khong duoc sinh tieng on console");
     unmount();
   });
 

@@ -82,6 +82,7 @@ let fireEvent: {
   keyDown: (el: Element, init: unknown) => void;
   click: (el: Element) => void;
   scroll: (el: Element) => void;
+  drop: (el: Element, init?: unknown) => boolean;
 };
 let cleanup: () => void;
 /** `createElement` — goi ham component NGOAI chu trinh render se nem `useState` dispatcher null. */
@@ -357,12 +358,53 @@ describe("EditScreen: §4.1 danh sach doan ao hoa + GHIM dong dang sua + suspect
   });
 
   it("TRANG THAI RONG: chua co ban ghi ⇒ khong hang nao, va noi ro dang rong", () => {
-    const { container, unmount } = render(taoPhanTu(EditScreen, { transcript: null }));
+    const { container, unmount } = render(
+      taoPhanTu(EditScreen, { transcript: null, onNapTep: async () => [] }),
+    );
 
     assert.equal(container.querySelectorAll("[data-i]").length, 0, "khong duoc render hang nao");
     assert.match(container.textContent ?? "", /chưa có bản ghi/);
 
     assert.deepEqual(tiengOn, [], "trang thai rong khong duoc sinh tieng on console");
+    unmount();
+  });
+
+  // -------------------------------------------------------------------------
+  // TASK W2 — TRANG THAI RONG LA KHUNG §4.2 (spec UI: *"Vung giua la khung ke net dut"*)
+  //
+  // DO DUOC TRUOC W2: `uploadSource` **0 luot goi** va `frontend/src` **khong co**
+  // `type="file"`/`onDrop` ⇒ ve khung "KÉO TỆP VÀO ĐÂY" ma tha tep vao khong co gi xay ra la
+  // mot giao dien NOI DOI, nen Task 6 CO Y khong ve no (xem docstring cua man). Nay duong NAP
+  // CO THAT, nen loi hua do phai duoc giu — va no phai nam o VUNG GIUA, khong phai mot the nho.
+  // -------------------------------------------------------------------------
+
+  it("W2 TRANG THAI RONG: vung giua la KHUNG §4.2 (khung + dong mono), va keo-tha di DUNG vao ham nap cua App", async () => {
+    const daTha: string[][] = [];
+    const { container, unmount } = render(
+      taoPhanTu(EditScreen, {
+        transcript: null,
+        onNapTep: async (files: File[]) => {
+          daTha.push(files.map((t) => t.name));
+          return [];
+        },
+      }),
+    );
+
+    // (a) Khung §4.2 NAM TRONG VUNG GIUA cua man Bien tap — va cau "chua co ban ghi" van con
+    //     (no la SU THAT cua trang thai nay, khong phai thu bi thay the).
+    assert.ok(container.querySelector(".ed .nap__khung") !== null, "khung §4.2 phai nam trong `.ed`");
+    assert.match(container.textContent ?? "", /KÉO TỆP VÀO ĐÂY/);
+    assert.match(container.textContent ?? "", /chưa có bản ghi/);
+
+    // (b) Duong NAP di qua CHINH `onNapTep` (mot ham cua `App`, khong phai mot duong thu hai
+    //     trong man nay) — do bang `fireEvent.drop`, tuc dung su kien ma trinh duyet phat ra.
+    const tep = new File([new Uint8Array([1, 2, 3])], "a.wav", { type: "audio/wav" });
+    fireEvent.drop(container.querySelector('[data-testid="nap-khung-keo"]') as Element, {
+      dataTransfer: { files: [tep] },
+    });
+    assert.deepEqual(daTha, [["a.wav"]], "`drop` phai goi ham nap cua ben goi voi DUNG tep");
+
+    assert.deepEqual(tiengOn, [], "trang thai rong cua W2 khong duoc sinh tieng on console");
     unmount();
   });
 });

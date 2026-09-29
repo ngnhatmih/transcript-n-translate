@@ -13,7 +13,7 @@
 import { useEffect, useReducer, useRef, useState } from "react";
 
 import { endpoints } from "../api/endpoints.ts";
-import type { JobState } from "../api/types.ts";
+import type { JobState, SourceLang } from "../api/types.ts";
 import { CompareScreen } from "../screens/CompareScreen.tsx";
 import { EditScreen } from "../screens/EditScreen.tsx";
 import { GlossaryScreen } from "../screens/GlossaryScreen.tsx";
@@ -24,6 +24,7 @@ import { useApi } from "../state/useApi.ts";
 import { useJobStream } from "../state/useJobStream.ts";
 import { ChannelZone } from "./ChannelZone.tsx";
 import { Header } from "./Header.tsx";
+import type { KetQuaNap, NapThanhCong } from "./IntakeFrame.tsx";
 import { QueueZone } from "./QueueZone.tsx";
 import { Transport } from "./Transport.tsx";
 
@@ -216,6 +217,69 @@ export function App() {
     } finally {
       datDangTao(false);
     }
+  }
+
+  // ---------------------------------------------------------------------------
+  // TASK W2 — NẠP TỆP §4.2: **MỘT** hàm, **HAI** lối vào (đường vào của workspace 1)
+  //
+  // ĐO ĐƯỢC TRƯỚC W2: `endpoints.uploadSource` **0 lượt gọi trong sản phẩm**, và trong
+  // `frontend/src` **không có** `type="file"`, **không có** `onDrop`/`dataTransfer` ⇒ workspace 1
+  // (audio → text) KHÔNG CÓ CỬA VÀO: người dùng không có cách nào đưa tệp của họ vào app.
+  //
+  // ⚠️ VÌ SAO HÀM NẰM Ở ĐÂY, KHÔNG Ở HAI COMPONENT: `App` là nơi DUY NHẤT giữ `sources` (danh
+  // sách kênh) và `dispatch`, nên cũng là nơi duy nhất biết phải LÀM MỚI cái gì và CHỌN kênh nào.
+  // `IntakeFrame` (khung giữa §4.2) và `NhapGon` (lối gọn ở vùng KÊNH, cho §12.2 *"nạp 3 tệp cùng
+  // lúc"*) chỉ HIỂN THỊ; cả hai gọi CHÍNH hàm này. Viết lần thứ hai ở một component là hai nguồn
+  // sự thật cho cùng một luật — và có bài ghim cấu trúc: `uploadSource` chỉ được gọi ở ĐÂY.
+  // ---------------------------------------------------------------------------
+  /**
+   * Nạp TỆP **LẦN LƯỢT** rồi làm mới danh sách kênh và chọn kênh của tệp **THÀNH CÔNG ĐẦU TIÊN**.
+   *
+   * ⚠️ **LẦN LƯỢT, KHÔNG `Promise.all`**: với `Promise.all`, một tệp lỗi làm cả lô thành một lỗi
+   * gộp, và kết quả của các tệp KHÁC trở nên mơ hồ — người dùng không biết tệp nào đã vào. §12.2
+   * đòi thấy rõ **từng** tệp, nên từng tệp phải có kết quả riêng.
+   *
+   * ⚠️ **`loi` là `ApiError.message` NGUYÊN VĂN** (`"<status>: <detail>"` — câu tiếng Việt của
+   * backend, ví dụ `422 "tệp rỗng"`). Thay bằng "có lỗi xảy ra" là bỏ mất đúng thông tin người
+   * dùng cần để sửa. Nhánh `instanceof Error` giữ luôn lỗi mạng.
+   *
+   * ⚠️ **KHÔNG tự chèn hàng vào state**: hàng kênh mới chỉ đến từ `sources.reload()` (lần đọc
+   * `/api/sources` kế tiếp do MÁY CHỦ trả về). Một bản sao dữ liệu máy chủ ở client là **nguồn sự
+   * thật thứ hai** (Global Constraints của plan).
+   *
+   * ⚠️ **MỌI tệp lỗi ⇒ KHÔNG đổi kênh.** Kênh hiện tại là ngữ cảnh người dùng đang làm việc; một
+   * lượt nạp thất bại không có quyền dịch chuyển nó. (Và nếu chọn "kênh đầu tiên" trong trường
+   * hợp đó thì màn hình nhảy sang một kênh CŨ mà người dùng không hề yêu cầu — đó là hành vi sai
+   * đã có mutation `W2-6` ghim.)
+   *
+   * ⚠️ **BẢN GHI THÌ CHƯA CÓ**: route nạp chỉ xếp job `ingest`, nên ngay sau lượt nạp này kênh mới
+   * hiện `nạp: đang chờ` (từ job, qua `ChannelZone`) và vùng giữa vẫn là trạng thái rỗng — giao
+   * diện nói ĐÚNG sự thật trạng thái, không hứa một bản ghi đã có.
+   */
+  async function napTep(files: File[], lang: SourceLang): Promise<KetQuaNap[]> {
+    const ketQua: KetQuaNap[] = [];
+    for (const tep of files) {
+      try {
+        const tao = await endpoints.uploadSource(tep, lang);
+        // Id kênh mới = `created.source.id` (`SourceCreated = { source, job }`), KHÔNG phải
+        // `job.id`: job là hàng của bảng jobs, hai bảng không được đảm bảo trùng id.
+        ketQua.push({ ten: tep.name, ok: true, sourceId: tao.source.id });
+      } catch (loi: unknown) {
+        ketQua.push({
+          ten: tep.name,
+          ok: false,
+          loi: loi instanceof Error ? loi.message : String(loi),
+        });
+      }
+    }
+    // LÀM MỚI danh sách kênh — kể cả khi mọi tệp lỗi (lượt lỗi không tạo hàng nào, và một lần
+    // đọc lại là giá rẻ nhất để danh sách không lệch khỏi máy chủ).
+    sources.reload();
+    // TỆP THÀNH CÔNG ĐẦU TIÊN (theo thứ tự người dùng đưa vào), không phải "kết quả đầu tiên":
+    // vị từ phải là `ok`, nếu không thì một tệp lỗi sẽ được "chọn" và màn hình đứng yên.
+    const dauTien = ketQua.find((kq): kq is NapThanhCong => kq.ok);
+    if (dauTien !== undefined) dispatch({ type: "selectChannel", id: dauTien.sourceId });
+    return ketQua;
   }
 
   // ---------------------------------------------------------------------------
@@ -464,6 +528,10 @@ export function App() {
             error={sources.error}
             selectedId={ui.channelId}
             onSelect={(id) => dispatch({ type: "selectChannel", id })}
+            /* W2: lối nạp GỌN ở vùng KÊNH — CÙNG hàm `napTep` với khung §4.2 ở vùng giữa.
+               Nó tồn tại vì khi ĐÃ có kênh thì vùng giữa hiện danh sách đoạn, nên khung §4.2
+               không còn ở đó (§12.2 cần nạp được tệp thứ 2..N). */
+            onNapTep={napTep}
           />
         </aside>
         {/* BÀN LÀM VIỆC: màn hiện theo `ui.mode` (xem khối dưới). Dữ liệu của CẢ BA màn
@@ -531,7 +599,13 @@ export function App() {
                `CompareScreen` ở trên — hai màn kia đọc bản ghi đang mở. */
             <GlossaryScreen />
           ) : (
-            <EditScreen transcript={transcript.data} currentSegment={ui.currentSegment} />
+            /* W2: `onNapTep` di xuong `EditScreen` ⇒ khung §4.2 o TRANG THAI RONG cua vung giua.
+               Cung MOT ham voi loi nap gon o vung KENH — xem `napTep` o tren. */
+            <EditScreen
+              transcript={transcript.data}
+              currentSegment={ui.currentSegment}
+              onNapTep={napTep}
+            />
           )}
         </main>
         <aside className="shell__queue">

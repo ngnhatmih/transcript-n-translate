@@ -35,13 +35,14 @@
  * ## Nhung gi man nay KHONG lam (khai ra, khong che)
  *
  *  - **Khong do `clientHeight`** cua khung cuon: xem `VIEWPORT_H`.
- *  - **Khong nap du lieu**: `transcript` la PROP (brief §1a). Task 6 chua co duong CHON
- *    KENH (vung KENH cua Task 4 moi chi hien), nen `App` truyen `null` — tran da khai
- *    trong bao cao task.
- *  - **Khong hua KEO-THA tep**: trang thai rong cua spec UI §4.2 ve khung net dut
- *    "KÉO TỆP VÀO ĐÂY", nhung Task 6 khong co duong NAP tep nao (`uploadSource` chua duoc
- *    goi o dau). Hien loi hua do khi tha tep vao khong co gi xay ra la mot giao dien NOI
- *    DOI; nen trang thai rong o day noi dung su that cua no. Xem bao cao task.
+ *  - **Khong nap du lieu**: `transcript` la PROP (brief §1a) — man nay khong tu `fetch`.
+ *  - **TRANG THAI RONG nay LA KHUNG §4.2** (Task W2): truoc W2, `uploadSource` co **0 luot
+ *    goi** va `frontend/src` **khong co** `type="file"`/`onDrop` nao ⇒ ve khung "KÉO TỆP VÀO
+ *    ĐÂY" ma tha tep vao khong co gi xay ra la mot giao dien **NOI DOI**, nen Task 6 co y
+ *    khong ve no. Nay duong NAP CO THAT (`App.napTep`), nen loi hua do duoc giu: vung giua
+ *    cua trang thai rong la `<IntakeFrame/>` — khung ke net dut + dong mono §4.2.
+ *    ⚠️ Man nay **KHONG** tu goi API: no chi TRUYEN `onNapTep` xuong (MOT ham nap o `App`,
+ *    dung cho ca hai loi vao — xem `src/shell/IntakeFrame.tsx`).
  *  - **Khong xu ly ban phim** (`J`/`K`/`Enter`/`Esc`, spec UI §5.1): do la Task 11. O day
  *    chi co duong CHUOT (bam dong ⇒ xin mo o sua).
  */
@@ -50,6 +51,8 @@ import { useState } from "react";
 import type { Segment, Transcript } from "../api/types.ts";
 import { formatTimecode } from "../lib/timecode.ts";
 import { visibleRange, withPinned } from "../lib/window.ts";
+import { IntakeFrame } from "../shell/IntakeFrame.tsx";
+import type { NapTep } from "../shell/IntakeFrame.tsx";
 
 /** Cao mot hang (spec UI §2.3: 32px mot dong, 44px hai dong — mac dinh hai dong). */
 export const ROW_H = 44;
@@ -147,6 +150,14 @@ export function windowFor(
 export interface EditScreenProps {
   /** Ban ghi dang bien tap; `null` = chua co ban ghi nao (xem TRANG THAI RONG o dau tep). */
   transcript: Transcript | null;
+  /**
+   * HÀM NẠP TỆP dùng chung — do `App` cài đặt và truyền xuống (brief W2: **MỘT** hàm, hai lối
+   * vào). Màn này KHÔNG tự nạp: nó chỉ đặt khung §4.2 vào vùng giữa của trạng thái rỗng.
+   *
+   * ⚠️ BẮT BUỘC, không phải tuỳ chọn: một khung kéo-thả không có gì để gọi là một lời hứa suông
+   * (đúng thứ Task 6 đã từ chối vẽ), nên không có nhánh "khung rỗng ruột" nào ở đây.
+   */
+  onNapTep: NapTep;
   /** Doan dang phat (`UiState.currentSegment`) — le trai amber, spec UI §4.1. */
   currentSegment?: number | null;
   /** Doan dang sua (`UiState.editingSegment`) — duoc GHIM, spec UI §5.3/U6. */
@@ -167,6 +178,7 @@ export interface EditScreenProps {
 
 export function EditScreen({
   transcript,
+  onNapTep,
   currentSegment = null,
   editingSegment = null,
   onStartEdit,
@@ -184,10 +196,21 @@ export function EditScreen({
   const [banNhap, setBanNhap] = useState<{ i: number; text: string } | null>(null);
 
   if (transcript === null) {
+    // TRẠNG THÁI RỖNG = KHUNG §4.2 Ở VÙNG GIỮA (spec UI §4.2: *"Vùng giữa là khung kẻ nét
+    // đứt… Không phải một thẻ nhỏ giữa màn hình"*).
+    //
+    // ⚠️ `.ed` khai `grid-template-rows: 1fr` và nhánh này vẫn có **ĐÚNG MỘT** con
+    // (`.ed__rong-boc`) — thêm một con thứ hai vào một lưới có số track cố định là một thay đổi
+    // BỐ CỤC (ERRATA #31 mục 1 / #36 mục 3), và chỗ đó không có bài ghim nào. Câu "chưa có bản
+    // ghi để biên tập" Ở LẠI (nó là sự thật của trạng thái này), nhưng nó không còn là thứ duy
+    // nhất trong vùng giữa.
     return (
       <div className="ed">
-        {/* SU THAT, khong phai loi hua: xem "Khong hua KEO-THA tep" o dau tep. */}
-        <p className="ed__rong">chưa có bản ghi để biên tập</p>
+        <div className="ed__rong-boc">
+          {/* SU THAT, khong phai loi hua: duong NAP CO THAT (xem `IntakeFrame`). */}
+          <p className="ed__rong">chưa có bản ghi để biên tập</p>
+          <IntakeFrame napTep={onNapTep} />
+        </div>
       </div>
     );
   }

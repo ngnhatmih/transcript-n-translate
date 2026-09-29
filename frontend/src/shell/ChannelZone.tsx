@@ -49,6 +49,8 @@
  *    "phiên âm: đang chạy", KHÔNG hiện "xong" — và bài test ghim đúng điều đó.
  */
 import type { Job, JobState, JobType, Source } from "../api/types.ts";
+import { NhapGon } from "./IntakeFrame.tsx";
+import type { NapTep } from "./IntakeFrame.tsx";
 
 export interface ChannelZoneProps {
   /** `null` = chưa có dữ liệu (đang đọc, hoặc lỗi — xem `loading`/`error`). */
@@ -67,6 +69,15 @@ export interface ChannelZoneProps {
   selectedId: number | null;
   /** Yêu cầu chọn kênh — BEN GOI ghi lại (`dispatch({type:"selectChannel"})`). */
   onSelect: (id: number) => void;
+  /**
+   * HÀM NẠP TỆP dùng chung với khung §4.2 — xem `NhapGon` ở cuối vùng này và
+   * `src/shell/IntakeFrame.tsx`.
+   *
+   * ⚠️ Vì sao vùng KÊNH cũng có cửa nạp (§12.2 *"nạp 3 tệp cùng lúc"*): **khi ĐÃ có kênh**,
+   * vùng giữa đang hiện danh sách đoạn nên khung §4.2 KHÔNG còn ở đó — không có lối này thì
+   * tệp thứ 2..N **không có cửa nào** vào app.
+   */
+  onNapTep: NapTep;
 }
 
 /** `duration` là GIÂY (số thực) do backend đo — client chỉ ĐỊNH DẠNG, không đo lại. */
@@ -115,19 +126,36 @@ export function buocCuaKenh(sourceId: number, type: JobType, jobs: Job[]): strin
   return CHU_STATE[moiNhat.state];
 }
 
-export function ChannelZone({ sources, jobs, loading, error, selectedId, onSelect }: ChannelZoneProps) {
+export function ChannelZone({
+  sources,
+  jobs,
+  loading,
+  error,
+  selectedId,
+  onSelect,
+  onNapTep,
+}: ChannelZoneProps) {
+  // ⚠️ LỐI NẠP GỌN ĐỨNG NGOÀI MỌI NHÁNH NỘI DUNG — đó là điều kiện để nó **LUÔN tới được**:
+  // đang đọc, lỗi, chưa có kênh, và ĐÃ có kênh (§12.2 cần đúng ca cuối: khung §4.2 ở vùng giữa
+  // đã biến mất khi có bản ghi).
+  //
+  // ⚠️ Nó dùng CÙNG `napTep` của `App` với khung giữa — không có bản sao thứ hai của đường nạp.
+  const napGon = <NhapGon napTep={onNapTep} />;
+
   if (error !== null) {
     return (
       <div className="ch">
+        {napGon}
         <p className="ch__loi" role="alert">{`không đọc được kênh: ${error}`}</p>
       </div>
     );
   }
 
   if (sources === null) {
+    // `loading` luôn đúng ở nhánh này với `useApi`; nhánh còn lại là phòng thủ.
     return (
       <div className="ch">
-        {/* `loading` luôn đúng ở nhánh này với `useApi`; nhánh còn lại là phòng thủ. */}
+        {napGon}
         <p className="ch__cho">{loading ? "đang đọc kênh…" : "chưa có dữ liệu kênh"}</p>
       </div>
     );
@@ -136,6 +164,7 @@ export function ChannelZone({ sources, jobs, loading, error, selectedId, onSelec
   if (sources.length === 0) {
     return (
       <div className="ch">
+        {napGon}
         <p className="ch__rong">chưa có kênh nào — nạp liệu ở màn hình Biên tập</p>
       </div>
     );
@@ -145,6 +174,8 @@ export function ChannelZone({ sources, jobs, loading, error, selectedId, onSelec
 
   return (
     <div className="ch">
+      {/* Khi ĐÃ có kênh thì đây là lối nạp DUY NHẤT còn tới được — xem `onNapTep`. */}
+      {napGon}
       <ul className="ch__danh-sach">
         {sources.map((source) => {
           const dangChon = source.id === selectedId;
