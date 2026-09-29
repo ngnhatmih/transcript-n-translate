@@ -63,7 +63,13 @@ sandbox bị hạn chế — ERRATA **#40**).
 - **Bảng phím §11.4:** mở bằng **`Shift+?`**, **19 hàng**, đúng **3 hàng `CHƯA NỐI`** (`S`, `M`, `Ctrl+Enter`);
   `[` = *"đặt mốc start tại đầu đọc"*, `]` = *"đặt mốc end tại đầu đọc"*. Ảnh `04/20`.
 - **`.q*`:** `ul.q__danh-sach{list-style:none}`, `li.q__item{display:flex;flex-wrap:wrap;gap:4px/8px}`;
-  **khoảng cách** giữa `span.q__ten` và `span.q__ly-do` = **8 px** (= `column-gap`), đo bằng toạ độ ở **hai**
-  bề rộng khung nhìn khác nhau (kết thúc 856 → bắt đầu 864; và 1218 → 1226 — **khoảng cách 8 khớp**).
-  ⚠️ **Toạ độ TUYỆT ĐỐI phụ thuộc bề rộng khung nhìn ⇒ KHÔNG tái lập được**; chỉ **khoảng cách** là bất biến,
-  nên đây mới là thứ được ghi. Ảnh `03`.
+  **khoảng cách** giữa `span.q__ten` và `span.q__ly-do` = **8 px** (= `column-gap`), đo được
+  `{"tenKetThuc":1218,"lyDoBatDau":1226,"cach":8}` — **nguồn trên đĩa:** `_shots/t13/ket-qua.json`
+  (và `_shots/t12/ket-qua.json` cho **cùng** con số).
+  ⚠️ **Toạ độ TUYỆT ĐỐI phụ thuộc bề rộng khung nhìn ⇒ KHÔNG tái lập được** (kế hoạch e2e ghim
+  `width 1440` — `plans/bon-man.json`, `cdp.mjs` áp bằng `Emulation.setDeviceMetricsOverride`); chỉ
+  **khoảng cách** là bất biến, nên đây mới là thứ được ghi. Ảnh `03`.
+  ⚠️ **ĐÍNH CHÍNH (review cuối Task 13, `I2`):** bản trước của dòng này viết *"đo ở **hai** bề rộng khung
+  nhìn khác nhau (856→864; 1218→1226)"* — **câu chống lưng đó SAI**: không artefact nào chứa 856/864
+  (cặp số ấy chỉ tồn tại trong hội thoại của phiên chính, không có tệp), và mỗi lượt e2e chỉ chạy **một**
+  bề rộng. **Kết luận 8 px vẫn đúng**; chỉ câu dẫn chứng là sai và đã bị thay bằng nguồn trên đĩa.

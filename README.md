@@ -195,8 +195,13 @@ minh hành vi, và **không** chứng minh một cú bấm phím VẬT LÝ.
 
 `frontend/node_modules/` **đã có sẵn** trong cây làm việc hiện tại. Trên một máy sạch thì bước đầu
 là `cd frontend; npm install` — nhưng ở môi trường dựng hiện tại lệnh đó **có thể chết `EPERM`** ở
-cache npm, nên đừng chạy lại khi `node_modules/` đã có. `package-lock.json` đang cũ (nó mô tả cây
-Vite cũ), vì vậy `npm ci` sẽ fail cho tới khi có người `npm install` lại ở môi trường bình thường.
+cache npm, nên đừng chạy lại khi `node_modules/` đã có.
+⚠️ **ĐÍNH CHÍNH (review cuối Task 13, `I1`):** câu cũ ở đây nói *"`package-lock.json` đang cũ (nó mô tả
+cây Vite cũ), vì vậy `npm ci` sẽ fail"* — **SAI**. Đo được: lock (1 963 dòng) có **0** hit
+`vite`/`vitest`/`playwright`; khối gốc `:7-24` **trùng khít** `package.json`; lock **đã tái sinh** khi bỏ
+Vite (`ffe8613` có 4 hit → `bc0dcae` có 0). Và `npm ci` **đã chạy THÀNH CÔNG** trong chính phiên này —
+`npm ci --prefer-offline --no-audit --no-fund` ⇒ **EXIT=0, 71 gói, 12,5 s** — sau khi `node_modules` bị
+xoá nhầm; `npm ls --depth=0` sau đó cho **đúng 9 gói**, không thiếu/không lạ.
 
 Cấu hình frontend: `frontend/rollup.config.mjs` (build) · `frontend/dev-server.mjs` (cổng, proxy,
 watch) · `frontend/tsconfig.json` (kiểu) · `frontend/test/swc-loader.mjs` (loader test) · token
