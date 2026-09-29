@@ -102,7 +102,11 @@ body {
 
 .ed {
   display: grid;
-  grid-template-rows: 1fr;
+  /* ⚠️ HAI track, không phải MỘT: D1 thêm CON THỨ HAI (`.ed__loi-thoi` — câu "bản dịch đã lỗi
+     thời") vào lưới này. Một lưới `1fr` với hai con thì con thứ hai rơi vào hàng IMPLICIT `auto`
+     và khung danh sách bị co lại — đúng lớp lỗi `Critical #1` của Task 10 / ERRATA #31 mục 1.
+     Đổi lại: MỌI con phải khai `grid-row` tường minh (xem `.ed__loi-thoi`, `.ed__khung`). */
+  grid-template-rows: auto 1fr;
   height: 100%;
   min-height: 0;
 }
@@ -113,8 +117,10 @@ body {
   color: var(--ink-1);
 }
 
-/* Khung cuộn: ảo hoá chỉ có nghĩa khi chính khung này cuộn được. */
+/* Khung cuộn: ảo hoá chỉ có nghĩa khi chính khung này cuộn được.
+   `grid-row: 2` là VỊ TRÍ TƯỜNG MINH trong lưới hai track của `.ed` (track `1fr`). */
 .ed__khung {
+  grid-row: 2;
   height: 100%;
   min-height: 0;
   overflow-y: auto;
@@ -200,6 +206,116 @@ body {
 
 .ed__item.is-current:hover {
   border-left-color: var(--signal);
+}
+
+/* ── §5.2 SỬA DÒNG + NUDGE MỐC (Task D1) ────────────────────────────────────────
+   Ô sửa tại chỗ, nút `lưu`/`huỷ`, hai dấu nudge, và hai câu NÓI RA trạng thái (§7: thông tin
+   không được chỉ nằm ở màu — nên `đang lưu…` và câu lỗi là CHỮ, màu chỉ là tín hiệu thứ hai).
+
+   ⚠️ VÌ SAO CẢ CỤM NẰM TRONG MỘT CON (`.ed__sua-boc`): `.ed__item` là lưới BA cột
+   (`var(--rail) 1fr auto`) với hai con luôn có (rail + ô sửa). Thêm nút và câu trạng thái thành
+   con trực tiếp là con thứ tư rơi vào CỘT ẩn — thay đổi bố cục (ERRATA #31 mục 1). Một con bọc
+   giữ nguyên số con của lưới. */
+
+.ed__sua-boc {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  min-width: 0;
+}
+
+/* HAI MỐC của dòng đang sửa: nudge phải NHÌN THẤY được kết quả, và `formatTimecode` kẹp giây
+   âm về 0 nên mốc âm hiện ra là `0:00.00` chứ không phải một chuỗi vô nghĩa. */
+.ed__moc {
+  display: flex;
+  gap: var(--sp-2);
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: var(--fs-num);
+  color: var(--ink-2);
+}
+
+.ed__sua-thanh {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+/* DẤU NUDGE (`[` mốc bắt đầu −0,1s · `]` mốc kết thúc +0,1s) và hai nút lưu/huỷ: cùng một mặt
+   chữ nhãn khắc với các nút khác của app (`--font-label` + `--track-label`), chữ mono cho phần số. */
+.ed__nudge,
+.ed__nut {
+  padding: var(--sp-1) var(--sp-2);
+  font-family: var(--font-label);
+  font-size: var(--fs-label);
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  color: var(--ink-1);
+  background: var(--panel-2);
+  border: var(--rule-w) solid var(--rule);
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+
+.ed__nudge {
+  font-family: var(--font-mono);
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+/* `lưu` là hành động CHÍNH (chữ sáng nhất trong cụm), `huỷ` lùi lại một bậc — hai nút cạnh nhau
+   mà cùng độ sáng thì mắt không biết cái nào là mặc định. */
+.ed__nut--luu {
+  color: var(--ink-0);
+}
+
+.ed__nut--huy {
+  color: var(--ink-1);
+}
+
+.ed__nudge:hover,
+.ed__nut--luu:hover,
+.ed__nut--huy:hover {
+  border-color: var(--ink-2);
+}
+
+/* Nút vô hiệu trong lúc ĐANG GHI: trạng thái đó cũng được NÓI RA bằng chữ (`.ed__ghi`). */
+.ed__nut:disabled,
+.ed__nudge:disabled {
+  color: var(--ink-2);
+  cursor: default;
+}
+
+/* TRẠNG THÁI GHI — `đang lưu…` và câu LỖI NGUYÊN VĂN của máy chủ. */
+.ed__ghi {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: var(--fs-num);
+  color: var(--ink-2);
+}
+
+.ed__ghi--loi {
+  color: var(--fault);
+}
+
+/* CÂU "BẢN DỊCH ĐÃ LỖI THỜI" — con ĐẦU của lưới `.ed` (track `auto`), nên khi vắng nó thì track
+   co lại bằng không và khung danh sách vẫn ở track `1fr` nhờ `grid-row: 2`. */
+.ed__loi-thoi {
+  grid-row: 1;
+  margin: 0;
+  padding: var(--sp-2) var(--sp-3);
+  font-family: var(--font-label);
+  font-size: var(--fs-label);
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  color: var(--fault);
+}
+
+/* Dòng đang sửa: lề trái sáng lên (cùng ngôn ngữ với `is-current`, nhưng KHÁC nghĩa — amber là
+   "đang hoạt động", còn đây là "đang mở để gõ" ⇒ dùng `--ink-0`, không dùng amber). */
+.ed__item.is-editing {
+  border-left-color: var(--ink-0);
 }
 
 /* ── §4.1 Thanh TRANSPORT (Task 7) — nút phát, timecode mono, track có đầu đọc, ba nút xuất ──
@@ -1181,8 +1297,11 @@ body {
    số track cố định là một thay đổi BỐ CỤC (ERRATA #31 mục 1 / #36 mục 3). Flex không có "trần
    track" để trôi. */
 
-/* Vùng giữa của TRẠNG THÁI RỖNG: câu sự thật ở trên, khung §4.2 chiếm PHẦN CÒN LẠI. */
+/* Vùng giữa của TRẠNG THÁI RỖNG: câu sự thật ở trên, khung §4.2 chiếm PHẦN CÒN LẠI.
+   `grid-row: 1 / -1`: nhánh này là con DUY NHẤT của `.ed`, và nó phải trải HẾT cả hai track
+   (`auto 1fr`) — không khai thì nó nằm ở track `auto` và khung kéo-thả không còn chỗ. */
 .ed__rong-boc {
+  grid-row: 1 / -1;
   display: flex;
   flex-direction: column;
   gap: var(--sp-4);

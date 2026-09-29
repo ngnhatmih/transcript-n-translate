@@ -13,7 +13,7 @@
 import { useEffect, useReducer, useRef, useState } from "react";
 
 import { endpoints } from "../api/endpoints.ts";
-import type { JobState, SourceLang } from "../api/types.ts";
+import type { JobState, Segment, SourceLang } from "../api/types.ts";
 import { CompareScreen } from "../screens/CompareScreen.tsx";
 import { EditScreen } from "../screens/EditScreen.tsx";
 import { GlossaryScreen } from "../screens/GlossaryScreen.tsx";
@@ -283,6 +283,126 @@ export function App() {
   }
 
   // ---------------------------------------------------------------------------
+  // TASK D1 — ĐƯỜNG GHI ĐẦU TIÊN CỦA WORKSPACE 1: **SỬA DÒNG** + **NUDGE MỐC**
+  //
+  // ĐO ĐƯỢC TRƯỚC D1: `endpoints.patchTranscript` **0 lượt gọi trong sản phẩm**;
+  // `startEdit`/`endEdit` **0 lượt dispatch** (chỉ có trong `reducer.ts` và `reducer.test.ts`);
+  // `nudge` **0 handler** (chỉ có trong hai comment của `lib/timecode*`); `EditScreen`
+  // **không nhận callback ghi nào**. ⇒ `patchTranscript` chưa có người gọi, `nudge` chưa có đích.
+  //
+  // ⚠️ **BẪY MẤT DỮ LIỆU (vế quan trọng nhất của task này):** `PATCH /api/transcripts/{id}` nhận
+  // `{segments: Segment[]}` và backend **TỪ CHỐI mảng rỗng** (`min_length=1`) ⇒ muốn sửa MỘT dòng
+  // thì phải gửi **TOÀN BỘ** mảng. `Segment` còn có `suspect`/`qa`/`events`/`words`/`t`. Một bản
+  // dựng lại `Segment` chỉ với `{i,start,end,text}` sẽ **XOÁ ÂM THẦM** các trường đó của MỌI dòng.
+  // ⇒ Luật ở đây: **đọc bản ghi HIỆN TẠI, chỉ sửa TRƯỜNG CẦN SỬA trên ĐÚNG MỘT phần tử, giữ
+  // nguyên mọi trường khác, rồi gửi CẢ mảng.**
+  //
+  // ⚠️ Và **nguồn sự thật là MÁY CHỦ**: ghi xong KHÔNG tự sửa state tại chỗ — chỉ `reload()`.
+  // ---------------------------------------------------------------------------
+  const [dangLuuDoan, datDangLuuDoan] = useState(false);
+  /**
+   * LỖI GHI — **NGUYÊN VĂN `ApiError.message`** (`"<status>: <detail>"`, câu tiếng Việt của
+   * backend, ví dụ `422 "segment không hợp lệ: …"`). Thay bằng "có lỗi xảy ra" là bỏ mất đúng
+   * thông tin người dùng cần để sửa (cùng lý do `loiTao` của W3 và `loi` của `napTep`).
+   */
+  const [loiGhiDoan, datLoiGhiDoan] = useState<string | null>(null);
+
+  /**
+   * MỘT chỗ GHI duy nhất cho cả hai thao tác của D1 (`luu` và `nudge`).
+   *
+   * `sua` là hàm THUẦN áp lên ĐÚNG đoạn cần sửa; mọi đoạn khác đi lên NGUYÊN VẸN.
+   * Trả `true` khi máy chủ đã nhận, `false` khi không có gì để ghi hoặc khi ghi lỗi.
+   *
+   * ⚠️ `hienTai.segments.length === 0` / không tìm thấy đoạn ⇒ **KHÔNG gửi gì**: backend từ chối
+   * mảng rỗng (`min_length=1`), và một PATCH rỗng là một lỗi 422 vô nghĩa với người dùng.
+   */
+  async function ghiDoan(
+    banGhiId: number,
+    i: number,
+    sua: (seg: Segment) => Segment,
+  ): Promise<boolean> {
+    const hienTai = transcript.data;
+    if (hienTai === null || hienTai.id !== banGhiId) return false;
+    if (!hienTai.segments.some((seg) => seg.i === i)) return false;
+    const segments = hienTai.segments.map((seg) => (seg.i === i ? sua(seg) : seg));
+    datDangLuuDoan(true);
+    datLoiGhiDoan(null);
+    try {
+      await endpoints.patchTranscript(banGhiId, { segments });
+    } catch (loi: unknown) {
+      datLoiGhiDoan(loi instanceof Error ? loi.message : String(loi));
+      return false;
+    } finally {
+      datDangLuuDoan(false);
+    }
+    // ĐỌC LẠI cả hai đường: bản ghi (chữ/mốc đã lưu) VÀ danh sách bản dịch — vì `stale` do MÁY
+    // CHỦ tính lại sau khi `version` tăng, nên câu "đã lỗi thời" chỉ đúng nếu danh sách được đọc
+    // lại. Không tự sửa state tại chỗ: bản sao dữ liệu máy chủ ở client là nguồn sự thật thứ hai.
+    transcript.reload();
+    translations.reload();
+    return true;
+  }
+
+  /**
+   * Gọi một việc ghi mà **KHÔNG để promise rơi tự do**: mọi lỗi (kể cả lỗi lập trình) trở thành
+   * câu báo trạng thái thay vì một `unhandledRejection`. MỌI lối vào việc ghi đi qua đây — kể cả
+   * nút chuột (handler của React) và phím `[`/`]` (listener của `window`), vì cả hai đều KHÔNG
+   * `await` được.
+   */
+  function chayGhi(viec: Promise<unknown>): void {
+    void viec.catch((loi: unknown) => {
+      datLoiGhiDoan(loi instanceof Error ? loi.message : String(loi));
+    });
+  }
+
+  /**
+   * `Enter`/nút `lưu` ⇒ GHI chữ mới. Xong thì `endEdit` (đóng ô sửa) — nhưng **chỉ khi ghi được**:
+   * một lượt ghi LỖI phải để người dùng Ở LẠI trong ô sửa với nguyên bản nháp của họ.
+   */
+  async function luuDoan(i: number, text: string): Promise<void> {
+    const hienTai = transcript.data;
+    if (hienTai === null) return;
+    const xong = await ghiDoan(hienTai.id, i, (seg) => ({ ...seg, text }));
+    if (xong) dispatch({ type: "endEdit" });
+  }
+
+  /**
+   * NUDGE mốc của **dòng ĐANG SỬA** (spec UI §5.2): `[` = mốc bắt đầu −0,1s; `]` = mốc kết thúc
+   * +0,1s. Nudge cũng đi qua `patchTranscript` ⇒ **TỚI ĐƯỢC ĐĨA**, không chỉ đổi state cục bộ.
+   *
+   * ⚠️ **KHÔNG có dòng nào đang sửa ⇒ KHÔNG LÀM GÌ** (0 request). Đây là một vế CÓ CHỦ Ý, không
+   * phải một nhánh phòng thủ thừa: bỏ nó ra là mỗi lần bấm `[`/`]` lại ghi một lần vào bản ghi mà
+   * người dùng không hề mở.
+   *
+   * ⚠️ **KHÔNG clamp** mốc: `formatTimecode` đã kẹp giây âm về 0 (và có bài ghim riêng ở
+   * `timecode.test.ts`), nên kẹp lần hai ở đây là hai định nghĩa cho một luật.
+   */
+  async function nudgeDoan(moc: "start" | "end"): Promise<void> {
+    const i = ui.editingSegment;
+    if (i === null) return;
+    const hienTai = transcript.data;
+    if (hienTai === null) return;
+    await ghiDoan(hienTai.id, i, (seg) =>
+      moc === "start" ? { ...seg, start: seg.start - 0.1 } : { ...seg, end: seg.end + 0.1 },
+    );
+  }
+
+  /**
+   * `[`/`]` ở cấp `window` — hai phím này KHÔNG thuộc ô nhập nào, nên chúng phải sống ngoài ô.
+   * Handler đọc bản mới nhất qua closure của effect (deps là hai thứ nó THẬT SỰ đọc) và được gỡ
+   * trong cleanup: mọi hiệu ứng đều phải thu hồi được.
+   */
+  useEffect(() => {
+    function khiBamPhim(suKien: KeyboardEvent): void {
+      if (suKien.key !== "[" && suKien.key !== "]") return;
+      chayGhi(nudgeDoan(suKien.key === "[" ? "start" : "end"));
+    }
+    window.addEventListener("keydown", khiBamPhim);
+    return () => window.removeEventListener("keydown", khiBamPhim);
+    // eslint khong co trong repo; deps duoi day la HAI gia tri ma `nudgeDoan` doc.
+  }, [ui.editingSegment, transcript.data]);
+
+  // ---------------------------------------------------------------------------
   // ĐIỀU **KHÔNG** LÀM Ở ĐÂY — một "ngòi nổ đọc lại bảo hiểm" (đã đo, đừng thêm lại)
   //
   // Một `useEffect` gọi `translations.reload()` khi hàng vừa tạo CHƯA có trong danh sách từng
@@ -392,6 +512,22 @@ export function App() {
     loiTao !== null && loiTao.kenh === ui.channelId ? loiTao.cau : null;
 
   /**
+   * CÂU NÓI RA khi bản dịch của bản ghi đang mở đã **LỖI THỜI** so với bản ghi (spec UI §5.2:
+   * *"Mọi thay đổi làm `transcripts.version` tăng → bản dịch cũ thành `stale`"*).
+   *
+   * ⚠️ Cờ `stale` là của **MÁY CHỦ** (`domain/staleness.is_stale`, TÍNH LẠI mỗi lần đọc vì nó
+   * không được lưu ở đâu) — `App` **KHÔNG** tự so `transcript_version` với `version`: hai nơi
+   * tính cùng một đại lượng là đúng thứ Global Constraints cấm.
+   *
+   * ⚠️ Và câu này **KHÔNG được im lặng**: người dùng vừa sửa một dòng, nên mọi bản dịch đã có
+   * không còn khớp bản ghi nữa. `App` quyết CÂU rồi truyền xuống (cùng khuôn `Transport.xuatCho`),
+   * `EditScreen` chỉ render.
+   */
+  const cauLoiThoi = (translations.data ?? []).some((row) => row.stale)
+    ? "bản dịch đã lỗi thời so với bản ghi"
+    : null;
+
+  /**
    * ĐỔI KÊNH ⇒ DỌN mọi state của lần tạo thuộc kênh CŨ (vòng sửa `I1`, ERRATA #36 mục 4:
    * *"reset `loiTao` khi đổi kênh"*).
    *
@@ -406,6 +542,9 @@ export function App() {
     datTrangThaiJobMoi(null);
     datLoiTao(null);
     datBanDaChon(null);
+    // LỖI GHI của D1 cũng thuộc BẢN GHI đang mở: để nó sống qua một lần đổi kênh là một câu 422
+    // của bản ghi KHÁC hiện như mới (cùng lý do `loiTao` ở trên).
+    datLoiGhiDoan(null);
   }, [ui.channelId]);
 
   /**
@@ -600,11 +739,25 @@ export function App() {
             <GlossaryScreen />
           ) : (
             /* W2: `onNapTep` di xuong `EditScreen` ⇒ khung §4.2 o TRANG THAI RONG cua vung giua.
-               Cung MOT ham voi loi nap gon o vung KENH — xem `napTep` o tren. */
+               Cung MOT ham voi loi nap gon o vung KENH — xem `napTep` o tren.
+               D1: `editingSegment` (state TRUOC DAY CHET — 0 dispatch, 0 nguoi doc) nay co nguoi
+               dung that, va BON callback ghi di xuong. Man nay KHONG goi API: no chi BAO. */
             <EditScreen
               transcript={transcript.data}
               currentSegment={ui.currentSegment}
               onNapTep={napTep}
+              editingSegment={ui.editingSegment}
+              onStartEdit={(i) => {
+                // Mo mot luot sua MOI ⇒ cau loi cua luot truoc khong con thuoc ve no.
+                datLoiGhiDoan(null);
+                dispatch({ type: "startEdit", i });
+              }}
+              onCommitEdit={(i, text) => chayGhi(luuDoan(i, text))}
+              onCancelEdit={() => dispatch({ type: "endEdit" })}
+              onNudge={(moc) => chayGhi(nudgeDoan(moc))}
+              dangLuu={dangLuuDoan}
+              loiGhi={loiGhiDoan}
+              cauLoiThoi={cauLoiThoi}
             />
           )}
         </main>

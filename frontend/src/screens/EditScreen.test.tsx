@@ -26,6 +26,7 @@
  */
 import { after, afterEach, before, beforeEach, describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 
 import type { Segment, Transcript } from "../api/types.ts";
 import { withPinned } from "../lib/window.ts";
@@ -124,6 +125,58 @@ function lop(container: HTMLElement, chon: string): string {
  */
 function khongCo(container: HTMLElement, chon: string, msg: string): void {
   assert.equal(container.querySelectorAll(chon).length, 0, msg);
+}
+
+/** Phan tu DAU TIEN khop `chon` — tra NODE de doc thuoc tinh/bam, KHONG bao gio dua vao `assert`. */
+function phanTu(container: HTMLElement, chon: string): Element {
+  const el = container.querySelector(chon);
+  assert.ok(el !== null, `khong thay phan tu "${chon}" trong DOM`);
+  return el;
+}
+
+/**
+ * MOI khai bao cua MOT selector trong `app.css`, theo DUNG thu tu trong tep.
+ *
+ * ⚠️ VI SAO KHONG dung `RegExp(selector + "\\{[^}]*\\}")` nhu cac bai CSS truoc (ERRATA #42 muc 5 /
+ * ERRATA #43 muc 2): `[^}]*` chi doc khoi luat DAU TIEN khop selector, nen mot luat SAU ghi DE
+ * (`display:flex` roi `display:block`) di qua XANH trong khi khai bao THANG CUOC la `block`.
+ * Ham nay doc HET cac khoi khop roi tra ve khai bao CUOI CUNG cua tung thuoc tinh — dung luat
+ * "khai bao sau thang" cua CSS khi do dac hieu bang nhau.
+ */
+function khaiBaoCua(css: string, chon: string): Map<string, string> {
+  const ra = new Map<string, string>();
+  // ⚠️ BO COMMENT TRUOC KHI PHAN TICH. Do duoc HAI lan trong luot nay: (1) comment tieng Viet co
+  // DAU PHAY nen `split(",")` ra nhung manh khong phai selector; (2) comment co DAU HAI CHAM
+  // ("Đổi lại: …") nen `indexOf(":")` bat nham key va khai bao THAT (`grid-template-rows`) bi mat
+  // ⇒ bai ghim doc ra `[]` va bao sai rang luat khong ton tai. Comment khong phai khai bao.
+  const sach = css.replace(/\/\*[\s\S]*?\*\//g, "");
+  for (const phan of sach.split("}")) {
+    const i = phan.lastIndexOf("{");
+    if (i < 0) continue;
+    const danhSachChon = phan
+      .slice(0, i)
+      .split(",")
+      .map((s) => s.trim())
+      .filter((s) => s !== "");
+    if (!danhSachChon.includes(chon)) continue;
+    for (const khai of phan.slice(i + 1).split(";")) {
+      const hai = khai.indexOf(":");
+      if (hai < 0) continue;
+      ra.set(khai.slice(0, hai).trim(), khai.slice(hai + 1).trim());
+    }
+  }
+  return ra;
+}
+
+/** Tap LOP co THAT trong cay da render — nua "TEN LOP TRONG DOM" cua phep ghim QUAN HE. */
+function lopTrongDom(container: HTMLElement): Set<string> {
+  const ra = new Set<string>();
+  for (const el of container.querySelectorAll("*")) {
+    const c = el.getAttribute("class");
+    if (c === null) continue;
+    for (const ten of c.split(/\s+/)) if (ten !== "") ra.add(ten);
+  }
+  return ra;
 }
 
 describe("EditScreen: §4.1 danh sach doan ao hoa + GHIM dong dang sua + suspect co VAN va LY DO", () => {
@@ -405,6 +458,143 @@ describe("EditScreen: §4.1 danh sach doan ao hoa + GHIM dong dang sua + suspect
     assert.deepEqual(daTha, [["a.wav"]], "`drop` phai goi ham nap cua ben goi voi DUNG tep");
 
     assert.deepEqual(tiengOn, [], "trang thai rong cua W2 khong duoc sinh tieng on console");
+    unmount();
+  });
+
+  // -------------------------------------------------------------------------
+  // TASK D1 — O SUA co NUT + DAU NUDGE + CAU TRANG THAI (man la NOI RA, khong chi doi mau)
+  // -------------------------------------------------------------------------
+
+  it("D1 O SUA: nut luu/huy + hai dau nudge + cau trang thai/loi co mat; `huy`/`Esc` KHONG ghi gi", () => {
+    const daLuu: Array<[number, string]> = [];
+    let soHuy = 0;
+    const { container, unmount } = render(
+      taoPhanTu(EditScreen, {
+        transcript: banGhi([doan(0, 0, 2, "câu không sửa"), doan(1, 2, 4, "câu một")]),
+        editingSegment: 1,
+        onCommitEdit: (i: number, text: string): void => {
+          daLuu.push([i, text]);
+        },
+        onCancelEdit: (): void => {
+          soHuy += 1;
+        },
+      }),
+    );
+
+    // (1) DONG DANG SUA: lop `is-editing`, o nhap la `textarea`, va chu trong o la chu HIEN CO.
+    assert.match(lop(container, '[data-i="1"]'), /is-editing/);
+    const o = phanTu(container, '[data-testid="o-sua"]') as HTMLTextAreaElement;
+    assert.equal(o.value, "câu một", "o nhap phai mang DUNG chu hien co cua dong");
+    // Hai MOC cua dong dang sua phai NHIN THAY duoc: nudge ma khong thay ket qua la mot phep do mu.
+    assert.equal(chu(container, '[data-testid="moc-doan"]'), "0:02.00 → 0:04.00");
+
+    // (2) HAI DAU NUDGE: `[` cho moc BAT DAU, `]` cho moc KET THUC — chu tren nut NOI RA chieu.
+    assert.match(chu(container, '[data-testid="nudge-start"]'), /\[/);
+    assert.match(chu(container, '[data-testid="nudge-start"]'), /0,1s/);
+    assert.match(chu(container, '[data-testid="nudge-end"]'), /\]/);
+    assert.match(chu(container, '[data-testid="nudge-end"]'), /0,1s/);
+
+    // (3) NUT HUY: goi `onCancelEdit`, va TUYET DOI khong goi `onCommitEdit`.
+    fireEvent.click(phanTu(container, '[data-testid="huy-doan"]'));
+    assert.equal(soHuy, 1, "nut huy phai bao cho ben goi biet la HUY");
+    assert.deepEqual(daLuu, [], "`huy` KHONG duoc ghi gi");
+
+    // (4) `Enter` tra chu MOI cho ben goi...
+    fireEvent.change(o, { target: { value: "chữ mới" } });
+    fireEvent.keyDown(o, { key: "Enter" });
+    assert.deepEqual(daLuu, [[1, "chữ mới"]], "`Enter` phai tra chu MOI (ban nhap) cho ben goi");
+    // ...va `Esc` HUY, khong ghi them lan nao.
+    fireEvent.keyDown(o, { key: "Escape" });
+    assert.equal(soHuy, 2, "`Esc` phai bao HUY");
+    assert.deepEqual(daLuu, [[1, "chữ mới"]], "`Esc` KHONG duoc ghi gi");
+
+    assert.deepEqual(tiengOn, [], "o sua cua D1 khong duoc sinh tieng on console");
+    unmount();
+  });
+
+  it("HINH THUC (D1): luat CSS KHOP TEN LOP trong DOM + `.ed` khai DU track va `grid-row` cho tung con", () => {
+    // Render DAY DU trang thai cua D1 trong MOT lan: dang sua + dang luu + co cau loi + co cau
+    // "loi thoi" ⇒ tap lop trong DOM la tap lop ma bon luat moi phai phuc vu.
+    const { container, unmount } = render(
+      taoPhanTu(EditScreen, {
+        transcript: banGhi([doan(0, 0, 2, "câu 1"), doan(1, 2, 4, "câu 2")]),
+        editingSegment: 1,
+        dangLuu: true,
+        loiGhi: "422: segment không hợp lệ: thiếu khoá 'text'",
+        cauLoiThoi: "bản dịch đã lỗi thời so với bản ghi",
+      }),
+    );
+
+    const appCss = readFileSync(new URL("../styles/app.css", import.meta.url), "utf8");
+    const coTrongDom = lopTrongDom(container);
+
+    // (a) QUAN HE: moi lop cua D1 phai vua co LUAT (co khai bao THANG CUOC, khong rong) vua co
+    //     THAT trong DOM. Mutation hai chieu: xoa luat giu class ⇒ do; doi ten class trong DOM
+    //     giu luat ⇒ do. Khong ve nao khang dinh CHU cua luat (lop loi da tai phat bon lan).
+    const lopD1 = [
+      ".ed__sua-boc",
+      ".ed__sua",
+      ".ed__moc",
+      ".ed__sua-thanh",
+      ".ed__nudge",
+      ".ed__nut--luu",
+      ".ed__nut--huy",
+      ".ed__ghi",
+      ".ed__ghi--loi",
+      ".ed__loi-thoi",
+    ];
+    for (const chon of lopD1) {
+      const ten = chon.slice(1);
+      assert.ok(
+        coTrongDom.has(ten),
+        `lop \`${ten}\` phai co THAT trong DOM (rules<->DOM: ${JSON.stringify([...coTrongDom].filter((t) => t.startsWith("ed")).sort())})`,
+      );
+      const khai = khaiBaoCua(appCss, chon);
+      assert.ok(khai.size > 0, `phai co LUAT \`${chon}\` trong app.css (co khai bao THANG CUOC)`);
+    }
+
+    // (b) KHAI BAO THANG CUOC (khong phai "co o dau do"): `.ed__sua-boc` va `.ed__sua-thanh` la
+    //     FLEX; mot luat SAU ghi de thanh `block` lam bai nay DO (mutation `D1-M4`).
+    assert.equal(khaiBaoCua(appCss, ".ed__sua-boc").get("display"), "flex");
+    assert.equal(khaiBaoCua(appCss, ".ed__sua-thanh").get("display"), "flex");
+    assert.equal(khaiBaoCua(appCss, ".ed__moc").get("display"), "flex");
+
+    // (c) LUOI `.ed` (ERRATA #31 muc 1): cau "loi thoi" la CON THU HAI cua mot luoi tung khai
+    //     DUNG MOT track ⇒ phai khai them track VA vi tri cho TUNG con. Khong ghim nguyen van
+    //     danh sach track (ghim the la dong bang so luong track).
+    const trackEd = (khaiBaoCua(appCss, ".ed").get("grid-template-rows") ?? "")
+      .split(/\s+/)
+      .filter((t) => t !== "");
+    assert.ok(
+      trackEd.length >= 2,
+      `\`.ed\` phai khai DU track cho HAI con (cau loi thoi + khung danh sach); do duoc ${JSON.stringify(trackEd)}`,
+    );
+    function hangCua(chon: string): number {
+      const khai = khaiBaoCua(appCss, chon).get("grid-row");
+      assert.ok(khai !== undefined, `\`${chon}\` phai khai \`grid-row\` TUONG MINH (ERRATA #31 muc 1)`);
+      const khop = /^(\d+)/.exec(khai);
+      assert.ok(khop !== null, `\`grid-row\` cua \`${chon}\` phai bat dau bang mot so; do duoc ${khai}`);
+      return Number(khop[1]);
+    }
+    assert.equal(hangCua(".ed__khung"), 2, "khung danh sach nam track `1fr`");
+    assert.equal(hangCua(".ed__loi-thoi"), 1, "cau 'loi thoi' nam track `auto` (co lai khi vang)");
+    assert.ok(coTrongDom.has("ed__khung") && coTrongDom.has("ed__loi-thoi"));
+
+    // (d) NOI DUNG cua hai cau: cau "loi thoi" la MOT cau doc duoc, va no la vung thong bao.
+    assert.equal(
+      phanTu(container, '[data-testid="loi-thoi"]').textContent,
+      "bản dịch đã lỗi thời so với bản ghi",
+    );
+    assert.match(phanTu(container, '[data-testid="loi-thoi"]').getAttribute("class") ?? "", /(^|\s)ed__loi-thoi(\s|$)/);
+    assert.equal(phanTu(container, '[data-testid="loi-thoi"]').getAttribute("role"), "status");
+    assert.equal(chu(container, '[data-testid="dang-luu"]'), "đang lưu…");
+    // LOI GHI la NGUYEN VAN `ApiError.message` (`<status>: <detail>`) — khong phai mot cau chung.
+    assert.equal(
+      chu(container, '[data-testid="loi-ghi"]'),
+      "422: segment không hợp lệ: thiếu khoá 'text'",
+    );
+
+    assert.deepEqual(tiengOn, [], "hinh thuc D1 khong duoc sinh tieng on console");
     unmount();
   });
 });

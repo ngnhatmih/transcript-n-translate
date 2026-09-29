@@ -43,8 +43,13 @@
  *    cua trang thai rong la `<IntakeFrame/>` — khung ke net dut + dong mono §4.2.
  *    ⚠️ Man nay **KHONG** tu goi API: no chi TRUYEN `onNapTep` xuong (MOT ham nap o `App`,
  *    dung cho ca hai loi vao — xem `src/shell/IntakeFrame.tsx`).
- *  - **Khong xu ly ban phim** (`J`/`K`/`Enter`/`Esc`, spec UI §5.1): do la Task 11. O day
- *    chi co duong CHUOT (bam dong ⇒ xin mo o sua).
+ *  - **Khong xu ly BANG PHIM DAY DU** (`J`/`K`/`Space`/`N`, spec UI §5.1): do la Task 11. Man nay
+ *    chi co HAI phim gan voi CHINH o dang mo (`Enter` luu, `Esc` huy) va duong CHUOT (bam dong ⇒
+ *    xin mo o sua). ⚠️ `[`/`]` (nudge moc) do `App` bat o cap `window` — cung MOT duong GHI
+ *    (`PATCH /api/transcripts/{id}`) voi nut `luu`, va man nay chi BAO bang `onNudge`.
+ *  - **Khong GHI gi**: moi thao tac ghi (`luu`, `nudge`) la mot CALLBACK ra ngoai. Man nay khong
+ *    `fetch`, khong tu sua `Segment`, khong giu ban sao du lieu may chu, va KHONG tu clamp moc
+ *    thoi gian (phep kep giay am nam o `formatTimecode`).
  */
 import { useState } from "react";
 
@@ -164,8 +169,28 @@ export interface EditScreenProps {
   editingSegment?: number | null;
   /** Goi khi nguoi dung BAM mot dong. Chu trang thai "dang sua dong nao" la BEN GOI. */
   onStartEdit?: (i: number) => void;
-  /** Goi khi nguoi dung LUU (`Enter`) voi chu MOI; ban nhap khong nam trong DOM. */
+  /** Goi khi nguoi dung LUU (`Enter`/nut `luu`) voi chu MOI; ban nhap khong nam trong DOM. */
   onCommitEdit?: (i: number, text: string) => void;
+  /**
+   * Goi khi nguoi dung HUY (`Esc`/nut `huy`). ⚠️ HUY KHONG GHI GI: no chi bao cho ben goi biet
+   * de `endEdit` — va day la duong DUY NHAT khong di qua `onCommitEdit`.
+   */
+  onCancelEdit?: () => void;
+  /**
+   * Nudge mot MOC cua dong DANG SUA: `"start"` = mốc bắt đầu −0,1s, `"end"` = mốc kết thúc +0,1s
+   * (spec UI §5.2). ⚠️ Man nay KHONG tu sua mốc: nó chỉ BÁO, còn ben goi mới là người GHI
+   * (`PATCH /api/transcripts/{id}`) — và khi KHÔNG có dòng nào đang sửa thì ben goi KHÔNG LÀM GÌ.
+   */
+  onNudge?: (moc: "start" | "end") => void;
+  /** Đang ghi (PATCH đang bay) — trạng thái phải NÓI RA, không chỉ đổi màu. */
+  dangLuu?: boolean;
+  /** Lỗi ghi, **NGUYÊN VĂN `ApiError.message`** (`"<status>: <detail>"`). `null` = không có. */
+  loiGhi?: string | null;
+  /**
+   * Câu nói ra rằng BẢN DỊCH ĐÃ LỖI THỜI so với bản ghi — do `App` QUYẾT và truyền CÂU xuống
+   * (cùng khuôn `Transport.xuatCho`): truyền `stale` xuống sẽ để màn này quyết lần thứ hai.
+   */
+  cauLoiThoi?: string | null;
   /** Vi tri cuon KHOI TAU; sau do man tu giu theo su kien `scroll` cua khung. */
   scrollTop?: number;
   /** Cao khung nhin — mac dinh `VIEWPORT_H` (xem TRAN o do). */
@@ -183,6 +208,11 @@ export function EditScreen({
   editingSegment = null,
   onStartEdit,
   onCommitEdit,
+  onCancelEdit,
+  onNudge,
+  dangLuu = false,
+  loiGhi = null,
+  cauLoiThoi = null,
   scrollTop = 0,
   viewportH = VIEWPORT_H,
   rowH = ROW_H,
@@ -221,6 +251,17 @@ export function EditScreen({
 
   return (
     <div className="ed">
+      {/* ⚠️ CÂU "ĐÃ LỖI THỜI" LÀ **CON THỨ HAI** CỦA `.ed` — một lưới trước đây khai ĐÚNG MỘT
+          track (`grid-template-rows: 1fr`). Thêm một con vào một lưới có số track cố định là
+          một thay đổi BỐ CỤC (ERRATA #31 mục 1 / #36 mục 3): nay `.ed` khai HAI track và MỖI con
+          khai `grid-row` tường minh trong `app.css`. Khi câu này vắng, track `auto` co lại bằng
+          không và khung danh sách VẪN ở track `1fr` — điều đó chỉ đúng vì có `grid-row` tường minh.
+          Nguồn của câu: `stale` TÍNH Ở MÁY CHỦ (`is_stale`), `App` chỉ đọc cờ đó. */}
+      {cauLoiThoi === null ? null : (
+        <p className="ed__loi-thoi" data-testid="loi-thoi" role="status">
+          {cauLoiThoi}
+        </p>
+      )}
       <div
         className="ed__khung"
         onScroll={(suKien) => setCuon(suKien.currentTarget.scrollTop)}
@@ -241,27 +282,110 @@ export function EditScreen({
               <li key={seg.i} data-i={seg.i} className={lop.join(" ")}>
                 <span className="ed__rail">{formatTimecode(seg.start)}</span>
                 {dangSua ? (
+                  // Ô SỬA + NÚT + DẤU NUDGE + CÂU TRẠNG THÁI nằm trong MỘT con (`.ed__sua-boc`)
+                  // của hàng: `.ed__item` khai BA cột (`var(--rail) 1fr auto`) và hai con đầu là
+                  // rail + ô sửa — thêm ba con nữa làm hàng thứ tư rơi vào CỘT ẩn (ERRATA #31
+                  // mục 1). Một con bọc giữ nguyên số con của lưới.
+                  //
                   // `<textarea>` chu KHONG `contentEditable` (plan Task 6 Step 4): kiem soat
                   // duoc focus, khong de HTML nguoi dung dan vao thanh DOM cua app.
-                  <textarea
-                    className="ed__sua"
-                    aria-label={`sửa đoạn ${seg.i}`}
-                    rows={soDong(chuHienTai)}
-                    value={chuHienTai}
-                    onChange={(suKien) => setBanNhap({ i: seg.i, text: suKien.target.value })}
-                    onKeyDown={(suKien) => {
-                      // `Enter` luu; `Shift+Enter` de xuong dong trong cau dai.
-                      if (suKien.key !== "Enter" || suKien.shiftKey) return;
-                      suKien.preventDefault();
-                      onCommitEdit?.(seg.i, chuHienTai);
-                      setBanNhap(null);
-                    }}
-                  />
+                  <div className="ed__sua-boc">
+                    <textarea
+                      className="ed__sua"
+                      data-testid="o-sua"
+                      aria-label={`sửa đoạn ${seg.i}`}
+                      rows={soDong(chuHienTai)}
+                      value={chuHienTai}
+                      onChange={(suKien) => setBanNhap({ i: seg.i, text: suKien.target.value })}
+                      onKeyDown={(suKien) => {
+                        // `Esc` HUY: xoá bản nháp và báo cho `App` `endEdit` — KHÔNG ghi gì.
+                        if (suKien.key === "Escape") {
+                          suKien.preventDefault();
+                          setBanNhap(null);
+                          onCancelEdit?.();
+                          return;
+                        }
+                        // `Enter` luu; `Shift+Enter` de xuong dong trong cau dai.
+                        if (suKien.key !== "Enter" || suKien.shiftKey) return;
+                        suKien.preventDefault();
+                        // ⚠️ KHÔNG xoá bản nháp ở đây: việc ghi là BẤT ĐỒNG BỘ, và xoá ngay thì
+                        // một lượt ghi LỖI sẽ nuốt mất chữ người dùng vừa gõ. Bản nháp được giữ
+                        // tới khi `App` đóng ô sửa (thành công) hoặc người dùng tự huỷ.
+                        onCommitEdit?.(seg.i, chuHienTai);
+                      }}
+                    />
+                    {/* HAI MỐC của dòng đang sửa — nudge mà không NHÌN THẤY kết quả là một phép
+                        đo mù. `formatTimecode` KẸP giây âm về 0, và nudge KHÔNG tự kẹp lần hai. */}
+                    <p className="ed__moc" data-testid="moc-doan">
+                      {`${formatTimecode(seg.start)} → ${formatTimecode(seg.end)}`}
+                    </p>
+                    <div className="ed__sua-thanh">
+                      {/* DẤU NUDGE: `[` = mốc BẮT ĐẦU −0,1s; `]` = mốc KẾT THÚC +0,1s (spec §5.2).
+                          Hai nút này là lối CHUỘT của cùng hai phím `[`/`]`. */}
+                      <button
+                        type="button"
+                        className="ed__nudge"
+                        data-testid="nudge-start"
+                        title="đẩy mốc bắt đầu lùi 0,1 giây"
+                        disabled={dangLuu}
+                        onClick={() => onNudge?.("start")}
+                      >
+                        [ −0,1s
+                      </button>
+                      <button
+                        type="button"
+                        className="ed__nudge"
+                        data-testid="nudge-end"
+                        title="đẩy mốc kết thúc tới 0,1 giây"
+                        disabled={dangLuu}
+                        onClick={() => onNudge?.("end")}
+                      >
+                        ] +0,1s
+                      </button>
+                      <button
+                        type="button"
+                        className="ed__nut ed__nut--luu"
+                        data-testid="luu-doan"
+                        disabled={dangLuu}
+                        onClick={() => onCommitEdit?.(seg.i, chuHienTai)}
+                      >
+                        lưu
+                      </button>
+                      <button
+                        type="button"
+                        className="ed__nut ed__nut--huy"
+                        data-testid="huy-doan"
+                        onClick={() => {
+                          setBanNhap(null);
+                          onCancelEdit?.();
+                        }}
+                      >
+                        huỷ
+                      </button>
+                    </div>
+                    {/* TRẠNG THÁI GHI nói ra bằng CHỮ (§7: thông tin không được chỉ nằm ở màu).
+                        Lỗi là `ApiError.message` NGUYÊN VĂN (`"<status>: <detail>"` — câu tiếng
+                        Việt của backend), không phải một câu chung. */}
+                    {dangLuu ? (
+                      <p className="ed__ghi" data-testid="dang-luu">
+                        đang lưu…
+                      </p>
+                    ) : null}
+                    {loiGhi === null ? null : (
+                      <p className="ed__ghi ed__ghi--loi" data-testid="loi-ghi">
+                        {loiGhi}
+                      </p>
+                    )}
+                  </div>
                 ) : (
                   <button
                     type="button"
                     className="ed__chu"
-                    onClick={() => onStartEdit?.(seg.i)}
+                    onClick={() => {
+                      // Mở ô sửa ⇒ BỎ bản nháp cũ (nếu có): mỗi lượt sửa bắt đầu từ chữ CỦA MÁY CHỦ.
+                      setBanNhap(null);
+                      onStartEdit?.(seg.i);
+                    }}
                   >
                     {seg.text}
                   </button>

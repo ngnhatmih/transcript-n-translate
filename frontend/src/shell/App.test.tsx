@@ -180,16 +180,59 @@ let TRANSCRIPT_CHI_TIET: Record<number, Transcript> = {
     ...tomTat(2, 1, "faster-whisper-large", "zh", 1, "draft"),
     segments: [doan(0, 0, 2, "bản cũ kênh một")],
   },
+  /**
+   * KENH HAI (#3) la `ben ghi CUA D1`: BON doan, va doan CUOI mang DU cac truong TUY CHON cua
+   * `Segment` (`suspect`/`qa`/`events`/`words`/`t`/`avg_logprob`).
+   *
+   * ⚠️ VI SAO KHONG dung ban ghi #5 cua kenh mot: bai "Doi chieu" khang dinh
+   * `cotCps.length === 3`, ma so o CPS = SO DOAN cua ban ghi ⇒ them mot doan vao #5 lam DO mot
+   * bai dang co. Ban ghi #3 chi duoc hai bai "DOI KENH" cham toi, va ca hai chi doi chu cua
+   * doan DAU. Mot ban ghi RIENG cho D1 khong lam yeu khang dinh nao.
+   *
+   * ⚠️ Va day chinh la GIA DOI ma D1 phai tra: `TranscriptPatch.segments` buoc gui TOAN BO mang
+   * (backend `min_length=1`), nen mot ban dung lai `Segment` chi voi `{i,start,end,text}` se XOA
+   * AM THAM `suspect`/`qa` cua MOI dong. Doan thu tu la cho do duoc dieu do.
+   */
   3: {
     ...tomTat(3, 2, "sensevoice-small", "en", 1, "draft"),
-    segments: [doan(0, 0, 2, "bản kênh hai")],
+    segments: [
+      doan(0, 0, 2, "bản kênh hai"),
+      doan(1, 2, 4, "dòng hai"),
+      doan(2, 4, 6, "dòng ba"),
+      {
+        i: 3,
+        start: 6,
+        end: 8,
+        text: "dòng bốn",
+        suspect: true,
+        qa: ["nhạc nền"],
+        events: ["bgm"],
+        words: [{ w: "bốn", s: 6, e: 7 }],
+        t: "bốn (dịch tay)",
+        avg_logprob: -0.42,
+      },
+    ],
   },
 };
+
+/**
+ * `stale` TINH O SERVER, khong luu — dung `is_stale` cua backend
+ * (`domain/staleness.py`: `translated_from < version_hien_tai`).
+ *
+ * ⚠️ VI SAO FIXTURE PHAI TINH CHU KHONG DUOC HARD-CODE `false`: cau "ban dich da loi thoi" cua D1
+ * chi la SU THAT neu co mot MAY CHU noi no. Mot fixture tra `stale: false` co dinh se lam bai ghim
+ * do luon (hoac xanh luon) vi mot ly do khong lien quan gi toi san pham.
+ */
+function staleCua(row: Translation): boolean {
+  const versionHienTai = TRANSCRIPT_CHI_TIET[row.transcript_id]?.version ?? row.transcript_version;
+  return row.transcript_version < versionHienTai;
+}
 
 function banDich(
   id: number,
   transcriptId: number,
   status: Translation["status"],
+  transcriptVersion = 2,
 ): Translation {
   return {
     id,
@@ -197,7 +240,7 @@ function banDich(
     engine: "qwen2.5-7b",
     target_lang: "vi",
     prompt_version: "raw-p1",
-    transcript_version: 2,
+    transcript_version: transcriptVersion,
     status,
     stale: false,
     created_at: "2026-01-01T00:00:00Z",
@@ -219,6 +262,13 @@ let TRANSLATIONS: Translation[] = [
   banDich(12, 5, "queued"),
   banDich(11, 5, "done"),
   banDich(7, 2, "done"),
+  /**
+   * Ban dich CUA BAN GHI #3 (kenh hai) — `transcript_version: 1` = DUNG version hien tai cua ban
+   * ghi #3, nen truoc khi ghi no KHONG loi thoi, va sau MOT lan PATCH (version ⇒ 2) no THANH loi
+   * thoi. Do la cach do cau "ban dich da loi thoi" bang SU THAT cua may chu, khong bang mot co
+   * hard-code trong fixture.
+   */
+  banDich(4, 3, "done", 1),
 ];
 
 /**
@@ -242,6 +292,24 @@ const TRANSLATION_CHI_TIET: Record<number, TranslationDetail> = {
   },
   12: { ...banDich(12, 5, "queued"), segments: [], cps: { max_cps: 21, rows: [] } },
   7: { ...banDich(7, 2, "done"), segments: [], cps: { max_cps: 21, rows: [] } },
+  4: {
+    ...banDich(4, 3, "done", 1),
+    segments: [
+      doan(0, 0, 2, "bản kênh hai (dịch)"),
+      doan(1, 2, 4, "dòng hai (dịch)"),
+      doan(2, 4, 6, "dòng ba (dịch)"),
+      doan(3, 6, 8, "dòng bốn (dịch)"),
+    ],
+    cps: {
+      max_cps: 21,
+      rows: [
+        { i: 0, chars: 5, window: 1.0, cps: 5.0, max_cps: 21, over: false },
+        { i: 1, chars: 5, window: 1.0, cps: 5.0, max_cps: 21, over: false },
+        { i: 2, chars: 5, window: 1.0, cps: 5.0, max_cps: 21, over: false },
+        { i: 3, chars: 5, window: 1.0, cps: 5.0, max_cps: 21, over: false },
+      ],
+    },
+  },
 };
 
 /**
@@ -390,6 +458,23 @@ const dem = {
   uploadLoiTheoTen: [] as string[],
   /** Bat de MOI tep bi tu choi 422 — dung cho bai "MOI tep loi ⇒ KHONG doi kenh". */
   uploadLoiToanBo: false,
+  /**
+   * D1 — DUONG GHI `PATCH /api/transcripts/{id}`, dem o PHIA SERVER.
+   *
+   * ⚠️ VI SAO PHAI DEM O PHIA MAY CHU: "bam luu ⇒ co chu moi hien ra" co the xanh vi mot ly do
+   * khac (chu moi den tu DRAFT trong state chu khong tu dia). Chi bo dem nay phan biet duoc
+   * "request da DI RA" voi "giao dien tu sua state tai cho".
+   */
+  patch: 0,
+  /** So lan PATCH theo TUNG id — bo dem tich luy KHONG duoc dung lam phep cho (ERRATA #37 muc 1). */
+  patchTheoId: {} as Record<number, number>,
+  /** Body JSON THAT cua lan PATCH gan nhat, va chuoi JSON THO (de bao cao duoc BYTE client gui). */
+  patchBody: null as { segments?: Segment[]; status?: string } | null,
+  patchRaw: "",
+  /** Version TRUOC lan PATCH cuoi, do o PHIA SERVER — khong suy tu phia client. */
+  versionTruocPatch: {} as Record<number, number>,
+  /** Bat de PATCH tra 422 kem cau tieng Viet NGUYEN VAN cua backend (nhanh LOI GHI). */
+  patchLoi: false,
 };
 
 /** Them mot ban ghi MOI vao ca hai route — dung cho ngoi no doc lai (`Minor #3`). */
@@ -535,6 +620,52 @@ const server: Server = createServer((req, res) => {
     res.end(JSON.stringify(JOBS));
     return;
   }
+  if (req.method === "PATCH" && url.startsWith("/api/transcripts/")) {
+    // ⚠️ PHAN NHANH THEO METHOD va dat TRUOC nhanh GET `/api/transcripts/` (nhanh do khong phan
+    // nhanh theo method, nen mot PATCH se bi no NUOT va tra ve mot BAN GHI CHUA SUA — dung cai bay
+    // ma tep nay da canh bao cho `/api/translations`).
+    dem.patch += 1;
+    const id = Number(url.split("/")[3]);
+    dem.patchTheoId[id] = (dem.patchTheoId[id] ?? 0) + 1;
+    let raw = "";
+    req.on("data", (chunk) => { raw += String(chunk); });
+    req.on("end", () => {
+      // BODY THAT, doc tu chinh request — khong phai mot gia tri test tu nghi ra.
+      dem.patchRaw = raw;
+      let body: { segments?: Segment[]; status?: string } = {};
+      try { body = JSON.parse(raw) as { segments?: Segment[]; status?: string }; } catch { body = {}; }
+      dem.patchBody = body;
+      const cu = TRANSCRIPT_CHI_TIET[id];
+      if (cu === undefined) {
+        res.writeHead(404, { "content-type": "application/json" });
+        res.end(JSON.stringify({ detail: `khong co transcript ${id}` }));
+        return;
+      }
+      if (dem.patchLoi) {
+        // 422 NGUYEN VAN cua backend (`routes_transcripts.patch_transcript` ⇒ 422 khi mot doan
+        // thieu khoa). Client phai hien CAU NAY, khong duoc thay bang mot chu chung.
+        res.writeHead(422, { "content-type": "application/json" });
+        res.end(JSON.stringify({ detail: "segment không hợp lệ: thiếu khoá 'text'" }));
+        return;
+      }
+      // ⚠️ GIONG BACKEND THAT: `routes_transcripts.patch_transcript` goi
+      // `SqliteRepos.update_transcript_segments`, va ham do GHI segments roi TANG version DUNG MOT
+      // (`sqlite_repos.py`: doc version + ghi version+1 trong CUNG mot giao dich). `stale` KHONG
+      // duoc luu — no duoc TINH lai moi lan doc (`staleCua`), dung nhu `is_stale` cua backend.
+      dem.versionTruocPatch[id] = cu.version;
+      const version = cu.version + 1;
+      // Object MOI, khong sua tai cho: anh chup `TRANSCRIPT_CHI_TIET_GOC` phai nguyen ven qua
+      // `beforeEach` (sua tai cho se lam moi bai sau thay du lieu cua bai truoc).
+      TRANSCRIPT_CHI_TIET = {
+        ...TRANSCRIPT_CHI_TIET,
+        [id]: { ...cu, segments: body.segments ?? [], version },
+      };
+      TRANSCRIPTS = TRANSCRIPTS.map((t) => (t.id === id ? { ...t, version } : t));
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify(TRANSCRIPT_CHI_TIET[id]));
+    });
+    return;
+  }
   if (url.startsWith("/api/transcripts/")) {
     // ⚠️ Phai kiem NHANH NAY TRUOC `/api/transcripts`: `/api/transcripts/5` cung khop
     // tien to ngan, va mot lan doc chi tiet bi dem nham thanh lan doc danh sach se lam
@@ -568,7 +699,8 @@ const server: Server = createServer((req, res) => {
       return;
     }
     res.writeHead(200, { "content-type": "application/json" });
-    res.end(JSON.stringify(dayDu));
+    // `stale` do MAY CHU tinh moi lan doc (xem `staleCua`) — khong phai mot co luu san.
+    res.end(JSON.stringify({ ...dayDu, stale: staleCua(dayDu) }));
     return;
   }
   if (url.startsWith("/api/translations")) {
@@ -607,7 +739,10 @@ const server: Server = createServer((req, res) => {
     // hien ban dich cua KENH KHAC — dung lop loi "hai nguon su that" ma du an dang chan.
     const transcriptId = Number(new URL(url, "http://127.0.0.1").searchParams.get("transcript_id"));
     res.writeHead(200, { "content-type": "application/json" });
-    res.end(JSON.stringify(TRANSLATIONS.filter((t) => t.transcript_id === transcriptId)));
+    res.end(JSON.stringify(
+      TRANSLATIONS.filter((t) => t.transcript_id === transcriptId)
+        .map((t) => ({ ...t, stale: staleCua(t) })),
+    ));
     return;
   }
   if (url.startsWith("/api/registry")) {
@@ -1002,6 +1137,34 @@ async function toiDoiChieu(container: HTMLElement, soLuong: number): Promise<voi
   if (soLuong > 0) await choDanhSachBanDich(container, soLuong);
 }
 
+/**
+ * Mo man BIEN TAP cua KENH HAI (ban ghi #3) — BON doan, doan cuoi mang `suspect`/`qa`.
+ *
+ * ⚠️ Cho theo TIN HIEU DOM, khong theo dong ho va khong theo bo dem tich luy o phia may chu: ten
+ * kenh, roi CHU CUA DOAN CUOI. Chu do chi co khi `GET /api/transcripts/3` da xong VA React da
+ * commit ⇒ dung thu bai sap doc (ERRATA #38 muc 2/#39 muc 3).
+ */
+async function toiBienTapBonDoan(container: HTMLElement): Promise<void> {
+  await choChu(container, "kenh-hai");
+  fireEvent.click(nutKenh(container, "kenh-hai"));
+  await choChu(container, "bản kênh hai");
+  await choChu(container, "dòng bốn");
+}
+
+/** Bam mot dong ⇒ cho toi khi dong do THANH O SUA (tin hieu DOM that), roi tra ve chinh o do. */
+async function moOSua(container: HTMLElement, i: number): Promise<HTMLTextAreaElement> {
+  fireEvent.click(phanTu(container, `[data-i="${i}"] button`));
+  await choPhuHop(
+    container,
+    `[data-i="${i}"]`,
+    (el) => (el.getAttribute("class") ?? "").split(/\s+/).includes("is-editing"),
+    `dong ${i} chua thanh o sua`,
+  );
+  const o = container.querySelector(`[data-i="${i}"] textarea`);
+  assert.ok(o !== null, `dong ${i} phai la mot O SUA (textarea)`);
+  return o as HTMLTextAreaElement;
+}
+
 describe("App: KENH THAT + HANG DOI THAT tu server node:http trong tien trinh", () => {
   before(async () => {
     await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()));
@@ -1057,6 +1220,13 @@ describe("App: KENH THAT + HANG DOI THAT tu server node:http trong tien trinh", 
     dem.uploadByteTep = [];
     dem.uploadLoiTheoTen = [];
     dem.uploadLoiToanBo = false;
+    // DUONG GHI (D1): moi bo dem/gia tri cua fixture phai ve 0/goc.
+    dem.patch = 0;
+    dem.patchTheoId = {};
+    dem.patchBody = null;
+    dem.patchRaw = "";
+    dem.versionTruocPatch = {};
+    dem.patchLoi = false;
     // ⚠️ CA MANG KENH: mot luot nap THEM mot hang THAT (`SOURCES.push`) ⇒ khong cat ve anh goc thi
     // bai sau se thay kenh cua bai truoc, va "kenh MOI xuat hien" xanh ngay ca khi khong doc lai.
     SOURCES.length = SO_SOURCE_GOC;
@@ -2805,6 +2975,309 @@ describe("App: KENH THAT + HANG DOI THAT tu server node:http trong tien trinh", 
     );
 
     assert.deepEqual(tiengOn, [], "nap multipart khong duoc sinh tieng on console");
+    unmount();
+  });
+
+  // =========================================================================
+  // TASK D1 — DUONG GHI DAU TIEN CUA WORKSPACE 1: SUA DONG + NUDGE MOC
+  //
+  // DO DUOC TRUOC D1: `endpoints.patchTranscript` **0 luot goi trong san pham**,
+  // `startEdit`/`endEdit` **0 luot dispatch** (chi co trong `reducer.ts` va `reducer.test.ts`),
+  // `nudge` **0 handler** (chi co trong hai comment cua `lib/timecode*`).
+  //
+  // ⚠️ Mot ban dung lai `Segment` chi voi `{i,start,end,text}` se XOA AM THAM `suspect`/`qa`/
+  // `events`/`words` cua MOI dong (backend buoc gui TOAN BO mang — `min_length=1`). Bon bai duoi
+  // day do o PHIA MAY CHU (body JSON that, so request that).
+  // =========================================================================
+
+  it("D1 SỬA DÒNG: Enter ⇒ PATCH gửi TOÀN BỘ segments, CHỈ MỘT phần tử đổi `text`, dòng khác GIỮ `suspect`/`qa`", async () => {
+    const { container, unmount } = render(taoPhanTu(App));
+    await toiBienTapBonDoan(container);
+
+    const goc = TRANSCRIPT_CHI_TIET_GOC[3].segments;
+    assert.equal(goc.length, 4, "ban ghi cua D1 phai co BON doan");
+
+    // (1) VÀO: bấm dòng 1 ⇒ dòng đó thành Ô NHẬP chứa ĐÚNG chữ hiện có.
+    const o = await moOSua(container, 1);
+    assert.equal(o.value, "dòng hai", "ô nhập phải chứa ĐÚNG chữ hiện có của dòng");
+
+    // (2) SỬA + `Enter`.
+    fireEvent.change(o, { target: { value: "dòng hai (đã sửa)" } });
+    fireEvent.keyDown(o, { key: "Enter" });
+
+    // (3) XONG ⇒ ĐỌC LẠI: chờ ĐÚNG thứ sắp đọc — chữ ĐÃ LƯU trong DOM (nguồn sự thật là máy chủ).
+    await choPhanTu(
+      container,
+      ".ed__chu",
+      (t) => t.includes("dòng hai (đã sửa)"),
+      "dòng chưa hiện chữ ĐÃ LƯU sau khi ghi (thiếu bước ĐỌC LẠI bản ghi)",
+    );
+    await choPhuHop(
+      container,
+      '[data-i="1"]',
+      (el) => !(el.getAttribute("class") ?? "").includes("is-editing"),
+      "ghi xong phải THOÁT ô sửa",
+    );
+
+    // (4) BODY THẬT ở PHÍA MÁY CHỦ.
+    assert.equal(dem.patch, 1, "một lần lưu ⇒ ĐÚNG MỘT PATCH");
+    assert.equal(dem.patchTheoId[3], 1);
+    const body = dem.patchBody;
+    assert.ok(body !== null, "server phải đọc được body JSON của PATCH");
+    const segments = body.segments;
+    assert.ok(Array.isArray(segments), "body phải mang khoá `segments` là MẢNG");
+    // (a) TOÀN BỘ mảng: backend TỪ CHỐI mảng rỗng (`min_length=1`), và gửi MỘT đoạn là XOÁ mọi
+    //     đoạn khác. Mutation `D1-1` (gửi một đoạn) làm dòng này ĐỎ.
+    assert.equal(segments.length, 4, "body phải chứa TOÀN BỘ 4 đoạn, không chỉ đoạn vừa sửa");
+    assert.deepEqual(segments.map((s) => s.i), [0, 1, 2, 3]);
+    // (b) ĐÚNG MỘT phần tử đổi `text`.
+    const soDoi = segments.filter((s, k) => s.text !== goc[k].text).length;
+    assert.equal(soDoi, 1, `đúng MỘT đoạn được đổi \`text\`; đo được ${soDoi}`);
+    assert.equal(segments[1].text, "dòng hai (đã sửa)");
+    // (c) CHỐNG MẤT DỮ LIỆU: mọi đoạn KHÔNG sửa đi lên NGUYÊN VẸN — kể cả `suspect`/`qa`/
+    //     `events`/`words`/`t` của dòng 4. Mutation `D1-2` (dựng lại Segment thiếu trường) ĐỎ.
+    assert.deepEqual(segments[0], goc[0]);
+    assert.deepEqual(segments[2], goc[2]);
+    assert.deepEqual(segments[3], goc[3], "dòng 4 phải giữ NGUYÊN `suspect`/`qa`/`events`/`words`/`t`");
+    assert.equal(segments[3].suspect, true);
+    assert.deepEqual(segments[3].qa, ["nhạc nền"]);
+    assert.deepEqual(segments[3].events, ["bgm"]);
+    assert.equal(segments[3].text, "dòng bốn", "chữ của dòng 4 KHÔNG được bị đụng tới");
+    assert.equal(body.status, undefined, "PATCH sửa dòng KHÔNG được kèm `status`");
+    // (d) Máy chủ THẬT SỰ đã ghi: version tăng đúng một, và bản ghi đọc lại mang chữ mới.
+    assert.equal(TRANSCRIPT_CHI_TIET[3].version, (dem.versionTruocPatch[3] ?? 0) + 1);
+    assert.equal(TRANSCRIPT_CHI_TIET[3].segments[1].text, "dòng hai (đã sửa)");
+
+    assert.deepEqual(tiengOn, [], "ghi mot dong khong duoc sinh tieng on console");
+    unmount();
+  });
+
+  it("D1 HUỶ: `Esc` và NÚT HUỶ đều THOÁT ô sửa mà KHÔNG ghi gì (0 PATCH ở phía máy chủ)", async () => {
+    const { container, unmount } = render(taoPhanTu(App));
+    await toiBienTapBonDoan(container);
+
+    // (1) `Esc`.
+    const o = await moOSua(container, 1);
+    fireEvent.change(o, { target: { value: "bản nháp bị bỏ" } });
+    fireEvent.keyDown(o, { key: "Escape" });
+    await choPhuHop(
+      container,
+      '[data-i="1"]',
+      (el) => !(el.getAttribute("class") ?? "").includes("is-editing"),
+      "`Esc` chưa thoát ô sửa",
+    );
+    assert.equal(chu(container, '[data-i="1"] .ed__chu'), "dòng hai", "`Esc` phải để dòng về ĐÚNG chữ cũ");
+
+    // (2) NÚT HUỶ.
+    const o2 = await moOSua(container, 1);
+    fireEvent.change(o2, { target: { value: "bản nháp 2" } });
+    fireEvent.click(phanTu(container, '[data-testid="huy-doan"]'));
+    await choPhuHop(
+      container,
+      '[data-i="1"]',
+      (el) => !(el.getAttribute("class") ?? "").includes("is-editing"),
+      "nút huỷ chưa thoát ô sửa",
+    );
+    assert.equal(chu(container, '[data-i="1"] .ed__chu'), "dòng hai");
+
+    // (3) KHÔNG GHI — đếm ở PHÍA MÁY CHỦ. Hai vế: (i) hai vòng microtask (không có `fetch` nào
+    //     được GỬI RA đồng bộ), và (ii) một KHOẢNG LẶNG — cùng loại phép chờ mà ĐỐI CHỨNG DƯƠNG
+    //     của bài nudge dùng để thấy một PATCH thật tới nơi. Giới hạn phải khai: đây là một
+    //     khoảng lặng CÓ HIỆU CHUẨN, không phải một chứng minh tuyệt đối.
+    await choHaiNhip();
+    assert.equal(dem.patch, 0, "Esc/nút huỷ KHÔNG được ghi gì");
+    await choNhip(150);
+    assert.equal(dem.patch, 0, "Esc/nút huỷ KHÔNG được ghi gì (kể cả sau khoảng lặng)");
+    assert.equal(TRANSCRIPT_CHI_TIET[3].version, 1, "version KHÔNG được tăng khi huỷ");
+
+    assert.deepEqual(tiengOn, [], "huy sua khong duoc sinh tieng on console");
+    unmount();
+  });
+
+  it("D1 NUDGE: `]` đổi `end` +0,1 và `[` đổi `start` −0,1 (so SỐ trên body máy chủ nhận) — TỚI ĐƯỢC ĐĨA", async () => {
+    const { container, unmount } = render(taoPhanTu(App));
+    await toiBienTapBonDoan(container);
+    const goc = TRANSCRIPT_CHI_TIET_GOC[3].segments;
+    await moOSua(container, 1);
+
+    // Mốc NHÌN THẤY được của dòng đang sửa: nudge mà không thấy kết quả là một phép đo MÙ.
+    assert.equal(chu(container, '[data-testid="moc-doan"]'), "0:02.00 → 0:04.00");
+
+    // (1) `]` ⇒ `end` +0,1.
+    fireEvent.keyDown(phanTu(container, '[data-testid="o-sua"]'), { key: "]" });
+    await choChu(container, "0:02.00 → 0:04.10");
+    assert.equal(dem.patch, 1, "nudge `]` phải TỚI ĐƯỢC ĐĨA (đếm ở phía máy chủ)");
+    const sau1 = dem.patchBody?.segments ?? [];
+    assert.equal(sau1.length, 4, "nudge cũng phải gửi TOÀN BỘ segments");
+    assert.ok(
+      Math.abs(sau1[1].end - (goc[1].end + 0.1)) < 1e-9,
+      `\`]\` phải đổi \`end\` +0,1; đo được ${sau1[1].end}`,
+    );
+    assert.equal(sau1[1].start, goc[1].start, "`]` KHÔNG được đụng tới `start`");
+    assert.equal(sau1[1].text, goc[1].text, "nudge KHÔNG được đụng tới chữ");
+    assert.deepEqual(sau1[3], goc[3], "nudge cũng phải giữ NGUYÊN mọi trường của dòng khác");
+
+    // (2) `[` ⇒ `start` −0,1 — và vế "ĐỌC LẠI": lần ghi này phải dựa trên bản ghi ĐÃ ĐỌC LẠI,
+    //     nếu không nó gửi `end` = 4,0 và XOÁ mất nudge thứ nhất (mất dữ liệu âm thầm).
+    fireEvent.keyDown(phanTu(container, '[data-testid="o-sua"]'), { key: "[" });
+    await choChu(container, "0:01.90 → 0:04.10");
+    assert.equal(dem.patch, 2, "hai lần nudge ⇒ HAI lần ghi");
+    const sau2 = dem.patchBody?.segments ?? [];
+    assert.ok(
+      Math.abs(sau2[1].start - (goc[1].start - 0.1)) < 1e-9,
+      `\`[\` phải đổi \`start\` −0,1; đo được ${sau2[1].start}`,
+    );
+    assert.ok(
+      Math.abs(sau2[1].end - (goc[1].end + 0.1)) < 1e-9,
+      `nudge thứ hai phải GIỮ \`end\` = 4,1 (đọc lại sau khi ghi); đo được ${sau2[1].end}`,
+    );
+
+    assert.deepEqual(tiengOn, [], "nudge khong duoc sinh tieng on console");
+    unmount();
+  });
+
+  it("D1 NUDGE KHÔNG CÓ DÒNG ĐANG SỬA: `[`/`]` KHÔNG LÀM GÌ (0 request, đếm ở PHÍA MÁY CHỦ)", async () => {
+    const { container, unmount } = render(taoPhanTu(App));
+    await toiBienTapBonDoan(container);
+
+    // ĐỐI CHỨNG DƯƠNG — CÙNG bài, CÙNG phím, CÙNG server, chỉ khác "có dòng đang sửa": phím `]`
+    // CÓ đường tới đĩa, và ĐỘ TRỄ THẬT của nó được ĐO ⇒ khoảng lặng ở vế âm là khoảng lặng ĐÃ
+    // HIỆU CHUẨN (ERRATA #39 muc 1: mot phep do khong phan biet duoc "da sua" voi "tiem nham cho"
+    // la phep do vo gia tri).
+    await moOSua(container, 1);
+    const truocDuong = Date.now();
+    fireEvent.keyDown(phanTu(container, '[data-testid="o-sua"]'), { key: "]" });
+    await choChu(container, "0:02.00 → 0:04.10");
+    const doTre = Date.now() - truocDuong;
+    assert.equal(dem.patch, 1, "đối chứng dương: nudge khi ĐANG sửa phải tới được đĩa");
+
+    // Thoát ô sửa ⇒ KHÔNG còn dòng nào đang sửa.
+    fireEvent.keyDown(phanTu(container, '[data-testid="o-sua"]'), { key: "Escape" });
+    await choPhuHop(
+      container,
+      '[data-i="1"]',
+      (el) => !(el.getAttribute("class") ?? "").includes("is-editing"),
+      "chưa thoát ô sửa",
+    );
+
+    dem.patch = 0;
+    dem.patchTheoId = {};
+    fireEvent.keyDown(document.body, { key: "]" });
+    fireEvent.keyDown(document.body, { key: "[" });
+    await choHaiNhip();
+    assert.equal(dem.patch, 0, "không có dòng đang sửa ⇒ KHÔNG được có request nào");
+    await choNhip(Math.max(doTre, 50) + 100);
+    assert.equal(
+      dem.patch,
+      0,
+      "không có dòng đang sửa ⇒ KHÔNG được có request nào (sau khoảng lặng đã hiệu chuẩn)",
+    );
+    assert.equal(TRANSCRIPT_CHI_TIET[3].version, 2, "version chỉ tăng ĐÚNG MỘT lần (của đối chứng dương)");
+
+    assert.deepEqual(tiengOn, [], "nudge khi khong sua dong khong duoc sinh tieng on console");
+    unmount();
+  });
+
+  it("D1 LỖI GHI: PATCH 422 ⇒ màn hiện NGUYÊN VĂN `ApiError.message`, GIỮ bản nháp, và ghi lại được", async () => {
+    const { container, unmount } = render(taoPhanTu(App));
+    await toiBienTapBonDoan(container);
+    dem.patchLoi = true;
+
+    const o = await moOSua(container, 1);
+    fireEvent.change(o, { target: { value: "dòng hai (sửa)" } });
+    fireEvent.keyDown(o, { key: "Enter" });
+    assert.equal(
+      await choPhanTu(
+        container,
+        '[data-testid="loi-ghi"]',
+        (t) => t.length > 0,
+        "không thấy câu báo lỗi ghi",
+      ),
+      "422: segment không hợp lệ: thiếu khoá 'text'",
+      "câu lỗi phải là NGUYÊN VĂN `ApiError.message` (`<status>: <detail>`)",
+    );
+    // Lỗi KHÔNG được nuốt bản nháp: người dùng còn nguyên chữ để bấm lưu lại.
+    assert.equal(
+      (phanTu(container, '[data-testid="o-sua"]') as HTMLTextAreaElement).value,
+      "dòng hai (sửa)",
+      "ghi lỗi KHÔNG được xoá bản nháp",
+    );
+    assert.match(
+      phanTu(container, '[data-i="1"]').getAttribute("class") ?? "",
+      /is-editing/,
+      "ghi lỗi thì VẪN ở trong ô sửa",
+    );
+    assert.equal(TRANSCRIPT_CHI_TIET[3].version, 1, "PATCH lỗi KHÔNG được tăng version");
+
+    // Bản ghi lại được sau khi lỗi qua đi — và câu lỗi BIẾN MẤT.
+    dem.patchLoi = false;
+    fireEvent.keyDown(phanTu(container, '[data-testid="o-sua"]'), { key: "Enter" });
+    await choPhanTu(
+      container,
+      ".ed__chu",
+      (t) => t.includes("dòng hai (sửa)"),
+      "lần ghi lại không tới được đĩa",
+    );
+    await waitFor(
+      () => {
+        assert.equal(
+          container.querySelectorAll('[data-testid="loi-ghi"]').length,
+          0,
+          "câu lỗi cũ phải BIẾN MẤT sau khi ghi được",
+        );
+      },
+      { timeout: 5000, interval: 20 },
+    );
+    assert.equal(dem.patch, 2, "hai lần bấm lưu ⇒ HAI request (lần đầu 422, lần sau xong)");
+    assert.equal(TRANSCRIPT_CHI_TIET[3].version, 2);
+
+    assert.deepEqual(tiengOn, [], "loi ghi khong duoc sinh tieng on console");
+    unmount();
+  });
+
+  it("D1 LỖI THỜI: ghi xong ⇒ bản dịch của bản ghi thành `stale` (MÁY CHỦ tính) ⇒ màn NÓI RA", async () => {
+    const { container, unmount } = render(taoPhanTu(App));
+    await toiBienTapBonDoan(container);
+
+    // TÍN HIỆU "danh sách bản dịch đã đọc xong": ba nút xuất có `href` (bản 31 `done`). Đọc câu
+    // "lỗi thời" mà CHƯA biết danh sách đã về là một phép đo phụ thuộc thời điểm.
+    await choPhuHop(
+      container,
+      ".tp__xuat",
+      (el) => el.getAttribute("href") !== null,
+      "bản dịch của bản ghi chưa nạp xong",
+    );
+    assert.equal(
+      phanTu(container, ".tp__xuat").getAttribute("href"),
+      "/api/export/4?format=srt&bilingual=0",
+    );
+    assert.equal(
+      container.querySelectorAll('[data-testid="loi-thoi"]').length,
+      0,
+      "CHƯA sửa gì thì KHÔNG được nói 'lỗi thời'",
+    );
+    assert.equal(dem.patch, 0);
+
+    const o = await moOSua(container, 1);
+    fireEvent.change(o, { target: { value: "dòng hai (đã sửa)" } });
+    fireEvent.keyDown(o, { key: "Enter" });
+
+    const cau = await choPhanTu(
+      container,
+      '[data-testid="loi-thoi"]',
+      (t) => t.length > 0,
+      "màn không NÓI RA rằng bản dịch đã lỗi thời so với bản ghi",
+    );
+    assert.equal(cau, "bản dịch đã lỗi thời so với bản ghi");
+    // Và cờ đó là SỰ THẬT CỦA MÁY CHỦ: version đã tăng, và `stale` được TÍNH LẠI ở lần đọc sau.
+    assert.equal(dem.versionTruocPatch[3], 1);
+    assert.equal(TRANSCRIPT_CHI_TIET[3].version, 2);
+    const banCuaBanGhi3 = TRANSLATIONS.filter((t) => t.id === 4)[0];
+    assert.ok(banCuaBanGhi3 !== undefined, "fixture phải có bản dịch 4 của bản ghi 3");
+    assert.equal(banCuaBanGhi3.transcript_version, 1, "bản dịch đã dịch từ version 1");
+    assert.equal(staleCua(banCuaBanGhi3), true, "version hiện tại 2 > 1 ⇒ máy chủ nói LỖI THỜI");
+
+    assert.deepEqual(tiengOn, [], "cau loi thoi khong duoc sinh tieng on console");
     unmount();
   });
 });
