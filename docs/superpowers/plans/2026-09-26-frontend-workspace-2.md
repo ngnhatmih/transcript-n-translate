@@ -2475,11 +2475,65 @@ Vòng sửa 2 báo: mutant mà brief tôi **bắt buộc** (`D1-DEPS-NUDGE-STALE
 - Trên cây **CHƯA** sửa, chính mutant cũ (`PREFIX-D1-DEPS-NUDGE-STALE`) ⇒ **đỏ 3 tên**, gồm `D1 NỀN MỚI HƠN` ⇒ **tái lập nguyên vẹn phép falsify** của re-review.
 ⇒ **LUẬT:** một mutant **trơ đi sau khi vá** KHÔNG phải là "mất độ phủ" — nó là **hệ quả tất yếu** của một bản vá đúng. Nhưng phải **chứng minh cả hai chiều**: (i) trên cây chưa sửa nó giết được bài, (ii) trên cây đã sửa có **mutant khác** mô tả đúng bản vá và giết được bài. Thiếu (i) thì không có falsify; thiếu (ii) thì không có ghim.
 
+⚠️ **ĐÍNH CHÍNH (đo lại ở ERRATA #47 mục 1–2):** phép đo vế (i) ở trên dùng nền `dedad0c`, và nền đó **KHÔNG sạch** — `tests 54 / pass 54 / fail 0` nhưng **`EXIT=1`** vì `uncaughtException: window is not defined` (rò async **tất định 3/3 lượt**, phát ra **từ chính bài ghim** là mục tiêu của phép falsify). Vế (i) **vẫn đứng** (mutant ⇒ `54/53/1`, **1 tên đỏ**), nhưng câu «tái lập nguyên vẹn» là **SAI**, và **«3 tên đỏ» phải đọc là 2 guard nền + 1**. Cờ «bài ghim đỏ 1/3 lượt» **không tái lập được** (3/3 xanh) ⇒ **không dùng làm tiền đề**.
+⚠️ Và nhãn «TƯƠNG ĐƯƠNG» cho `E11` là **SAI**: nó là **mutant SỐNG SÓT** (trong cửa sổ một-lượt-commit nó chạy **handler MỚI với `mode` CŨ**, còn mã hiện tại chạy **handler CŨ**) ⇒ đúng lớp ERRATA #45 mục 2. Nguồn nhãn sai là **brief của phiên chính**, không phải người làm.
+
 ## 11. Trạng thái vòng sửa 2 — `c575192`
 `frontend/src/shell/App.tsx` (G1+G2) · `App.test.tsx` (3 bài ghim + bộ đếm fixture) · `api/contract.test.ts` (G3+M-3). Cổng: **`tests 263 / pass 261 / fail 2 / cancelled 0 / EXIT=1`**, `typecheck` 0, `build` 0, 0 pytest, **20,7–21,4 s**; **danh sách TÊN bài đỏ = đúng 2 guard `EMPTY_DB_MSG`** (tôi tự chạy lại một lượt và tự đếm `✖`: **đúng 2 tên**). Mutation: 10 backup BYTE, `drift_after_restore` = 0; EOL đo theo từng tệp.
 Bản vá G1 (đọc thẳng diff): `banGhiMoiNhat` là `useRef` **gán trong THÂN render** (không trong effect — đúng cái cửa sổ đang hở); nền = ảnh chụp mới nhất **cùng id**, nếu ảnh mới nhất thuộc bản ghi KHÁC thì lùi về `hienTai`; **đích vẫn là tham số** ⇒ bất biến F7 *"chốt đích lúc GỬI"* không bị phá. G2: `}, [jobs, daYeuCauHuy]);`. G3: guard kiểm tính rỗng của **chính DB mà tiến trình tự spawn sẽ dùng**, tách **ba ca** thay vì boolean, và câu nêu đúng cơ chế (`spawn` không truyền `env` ⇒ con thừa hưởng `PHUDE_DATA`/`PHUDE_DB`).
 ⚠️ **Việc xác minh độc lập vòng sửa 2 được GỘP vào review của Task 11** (quyết định có chủ ý để tiết kiệm một vòng): reviewer Task 11 phải xác minh **3 mục Important này trên đúng `c575192`** trước, rồi mới chấm Task 11 — và bài ghim G1 được thiết kế **không phụ thuộc cấu trúc** để còn giết được mutant sau khi Task 11 viết lại listener thành `src/keys/useShortcuts.ts`.
 **TRẦN mới khai:** ca "job **biến mất** khỏi bản đồ" của phép dọn G2 chưa có bài ghim.
+
+## ⚠️ ERRATA #47 — TASK 11 ĐÓNG (`PASS`): **ba lời khai của tôi bị bác**, hai luật đo lường mới, và **hai mối nguy vận hành**
+
+Bối cảnh: Task 11 (`919eeac`) → review độc lập **`CONDITIONAL PASS` 0C/3I/6M** → vòng sửa `13e5c98` → re-review **`PASS` 0C/0I/5M**. Cổng cuối (đo độc lập bởi reviewer và bởi tôi, khớp nhau): `tests 292 / suites 28 / pass 290 / fail 2 / cancelled 0`, EXIT=1, **đỏ đúng 2 guard `EMPTY_DB_MSG`**, ~24,0–24,1 s; `typecheck` 0; `build` 0.
+
+## 1. 🔴 ĐÍNH CHÍNH ERRATA #46 mục 10b — nền `dedad0c` **KHÔNG sạch**
+Đo lại **3/3 lượt** trên worktree `dedad0c`: `tests 54 / pass 54 / fail 0` **nhưng `EXIT=1`**, với `uncaughtException`:
+*"Test «D1 NỀN MỚI HƠN: bản ghi MÁY CHỦ mới hơn nền…» at src\shell\App.test.tsx:3777:5 generated asynchronous activity after the test ended … ReferenceError: window is not defined"*
+— tức **rò async TẤT ĐỊNH, phát ra TỪ CHÍNH BÀI GHIM là mục tiêu của phép falsify**.
+⇒ **Vế (i) của luật VẪN ĐỨNG**: mutant `PREFIX-D1-DEPS-NUDGE-STALE` ⇒ `54/53/1`, **1 tên đỏ** `D1 NỀN MỚI HƠN: bản ghi MÁY CHỦ mới hơn nền…`.
+⇒ **Nhưng hai chỗ chữ phải sửa:** *"tái lập nguyên vẹn"* là **SAI** (nền nhiễm), và *"3 tên đỏ"* phải đọc là **2 guard nền `EMPTY_DB_MSG` + 1 tên `D1 NỀN MỚI HƠN`**.
+⇒ Cờ *"bài ghim đỏ 1/3 lượt"* mà vòng sửa 1 khai thì re-review **KHÔNG tái lập** (3/3 xanh) ⇒ **không được dùng làm tiền đề**; vế cần thiết (nền **BẨN**) đã đứng vững bằng `EXIT=1`.
+⇒ `c575192` đóng **đúng** cái rò đó: 2/2 lượt `tests 57 / pass 57 / fail 0 / EXIT=0`, **không** dòng `asynchronous activity`; diff viết lại chính bài ghim + thêm **nhịp dọn TRONG BÀI** (`choChu` + 2×`waitFor`, **không** `sleep`).
+
+🔴 **LUẬT MỚI: một lượt có `fail 0` mà `EXIT ≠ 0` là lượt BẨN.** Nó có thể đang rò async **từ chính bài đang đo**, và mọi kết luận "ĐỎ/XANH" rút từ đó đều nhiễm. Phải kiểm **`EXIT` + `uncaughtException`**, không chỉ `pass/fail`. (Đây là lần thứ hai trong giai đoạn này `EXIT` là tín hiệu mà `fail` không thấy — lần đầu là chiều ngược lại: `EXIT=1` với 2 bài đỏ **cố ý**.)
+
+## 2. 🔴 `E11` **KHÔNG tương đương** — nhãn sai, và gốc là BRIEF CỦA TÔI
+`E11A` (handler trong `useRef` gán **trong thân render**, deps `[mode]`) cho **0 đỏ**, `E11A+G1` cũng **0 đỏ**; chỉ bản **cưỡng bức** `E11B` (ref gán trong **effect**) + `G1` mới cho **1 đỏ** (`D1 NỀN MỚI HƠN (CỬA SỔ CHƯA GẮN LẠI)`).
+Nhưng `E11A` **không tương đương ngữ nghĩa**: trong cửa sổ một-lượt-commit nó chạy **handler MỚI với `mode` CŨ**, còn mã hiện tại chạy **handler CŨ** — khác nhau ở **mọi state mà `xuLyPhim` đọc** (ví dụ mở bảng bằng `?` rồi `Esc` trong cùng cửa sổ).
+⇒ Đúng lớp **ERRATA #45 mục 2**: gọi nó là **MUTANT SỐNG SÓT** (một đường vá KHÁC cùng chữa một lỗi), **không** phải tương đương. Nguồn của nhãn sai: **brief F2 của tôi** và review `§A3.3` — **không** phải người làm.
+⇒ Hệ quả: nghĩa vụ **#46 mục 10b** vẫn giữ nguyên giá trị, nhưng **câu chữ của chính tôi trong brief F2 cũng phải bị bác** — lần thứ tư trong giai đoạn này phép đo bác brief của tôi.
+
+## 3. 🔴 Lỗ hổng ở cấp **GIÁ TRỊ** (`#45` mục 1 áp cho một CON SỐ)
+`NGHE-LAI-MS-4000` (đổi cửa sổ nghe lại từ 300 ms thành **4 s**) ⇒ **0 bài đỏ**, dù tên bài khai *"dừng sau 300 ms"* và báo cáo §3.4 nói vậy.
+⇒ **Bài ghim phải chặn ĐỘ DÀI cửa sổ**, không chỉ "có gọi `pause()`": đo **trần thời gian từ tín hiệu DOM** (`t_close − t_open ≤ 1500` ms), chứ không dựa vào việc bài test *đọc* hằng số.
+⇒ **LUẬT:** một bài ghim mà **đổi hằng số không làm nó đỏ** thì nó đang ghim **sự tồn tại** của lời gọi, không ghim **giá trị**. Phải nêu **mutant đổi giá trị** trong bảng mutation.
+
+## 4. 🔴 Guard nhường quá RỘNG — và nó làm MẤT một phím toàn cục
+Bản vá F1 nhường `preventDefault` cho `Enter`/`Space` khi tiêu điểm ở một tập selector: `button, a[href], select, summary, input[type=button|submit|reset|checkbox|radio]`.
+Nhưng trình duyệt **không** kích hoạt `a[href]` bằng `Space`, và **không** kích hoạt `input[type=radio|checkbox]` bằng `Enter` ⇒ khi tiêu điểm ở `<a download>` (chính là 3 nút XUẤT), **`Space` toàn cục (phát/dừng) im lặng mất tác dụng**.
+⇒ **Tập kích hoạt phải tách THEO PHÍM**, không theo một danh sách selector chung: `Enter` ⇒ `button, a[href], summary, input[type=submit|button|reset]`; `Space` ⇒ `button, summary, input[type=checkbox|radio|button|submit|reset]`.
+
+## 5. 🔴 HAI lần trong một lượt: "phím không chạy" là do **PHÉP TIÊM CỦA TÔI**
+(a) gửi `?` **thiếu `Shift`** ⇒ bảng phím tắt không mở (mà một cú `?` thật **luôn** có `shiftKey=true`); (b) gửi `Enter` bằng `rawKeyDown` **thiếu pha ký tự** (`text="\r"`) ⇒ nút native không kích hoạt. Cả hai lần tôi suýt báo một "lỗi" không tồn tại.
+⇒ **LUẬT: khi một phím "không chạy", nghi PHÉP TIÊM trước, rồi mới nghi sản phẩm** — và **luôn cài một ĐẦU DÒ `keydown` trên trang** để phân biệt *"sự kiện không tới"* với *"app không xử lý"*. Đầu dò đó là thứ duy nhất phân biệt được hai ca này.
+
+## 6. Tab NỀN không nhận input ⇒ mọi kết luận "phím không chạy" ở tab nền là ARTIFACT
+Đo ở tab nền: đầu dò ghi **0 sự kiện**, click không mở được bản ghi, `Page.captureScreenshot` timeout. Sau `activate_tab(current_tab())`: mọi thứ chạy.
+⇒ Đo bàn phím/click trong Chrome thật **phải** đưa tab lên **tiền cảnh** (một lần, **có khai** với người dùng), và phải **kiểm `page_info()["url"]` TRƯỚC** khi tác động — vì daemon có thể đang gắn vào **tab khác của người dùng** (lượt này nó đang ở `x.com`, và một script của tôi đã `location.reload()` **tab đó**).
+
+## 7. `Ctrl+1/2/3` + Chrome: TRẦN ① có CHỦ = NGƯỜI
+CDP tiêm ở tầng **renderer** ⇒ `Ctrl+2`/`Ctrl+3` **chạy** (đo được: `edit → compare → glossary`), nhưng phép đo đó **đi vòng qua bảng accelerator của trình duyệt** nên **KHÔNG kết luận được cho phím VẬT LÝ**. Chromium có thay đổi *"Don't send tab switching/killing/creating keyboard accelerators to pages"* ([codereview 224023](https://codereview.chromium.org/224023/patch/21011/21028#1)) ⇒ nghi spec `ui-design.md:300` **sai cho Chrome**.
+⚠️ `Alt+1/2/3` **cũng** là accelerator chuyển tab của **Firefox** ⇒ **không được tự chọn**; phải đo bằng phím vật lý rồi mới ghi ERRATA sửa spec.
+
+## 8. 🔴 HAI MỐI NGUY VẬN HÀNH (cả hai đã xảy ra THẬT trong phiên này)
+1. **`rmdir /s /q` một scratch dir có JUNCTION `node_modules` ⇒ XOÁ `frontend/node_modules` THẬT.** Đã khôi phục bằng `npm ci --prefer-offline --no-audit --no-fund` (71 gói, 12,5 s) từ `package-lock.json` + cache; `npm ls --depth=0` = **đúng 9 gói**, không thiếu/không lạ; `package.json`/`package-lock.json` **KHÔNG** bị sửa; lượt suite của tôi sau đó xác nhận **292/290/2**. ⇒ **LUẬT: KHÔNG bao giờ xoá đệ quy một thư mục có junction/symlink.** Dùng `Remove-Item` trên **đúng** đường dẫn scratch, hoặc tạo scratch **không** chứa junction.
+2. **`frontend/dev-server.mjs:97` giết cả tiến trình khi backend mất** (`ERR_HTTP_HEADERS_SENT`) — **tái lập HAI lần** trong phiên ⇒ là lỗi **TẤT ĐỊNH**, không ngẫu nhiên. Đã giao **Task 12** (kèm việc làm cổng **backend** cấu hình được, ⚠️ **chỉ** cổng backend: `dev-server.mjs:131-132` ghi backend chỉ whitelist CORS `:3100`).
+
+## 9. Phạm vi Task 11 — ĐÃ ĐÓNG
+`919eeac` + `13e5c98`, re-review **`PASS` 0C/0I/5M**. Đạt: bảng §11.4 render từ **MỘT nguồn** (19 hàng, `chưa nối` đúng 3 hàng `S`/`M`/`Ctrl+Enter`); `[`/`]` = **đặt mốc tại đầu đọc** (ánh xạ sai của `#44` mục 3 đã hết); nudge `Shift+←/→` ±0,1 s + `Alt+←/→` ±1 s; **nghe lại 300 ms có thật**; guard I3 hai vế + bài ghim `G1` **còn răng** sau khi viết lại listener; `.q*` hai chiều còn răng.
+Năm Minor còn lại **đã có chủ** (xem `task-11-fix-round-1-rereview.md`): nhãn `E11` · 300 ms chưa ghim · guard nhường rộng · TRẦN #7 khai sai · `scrollIntoView` tách 2 vế (`currentSegment` KHÔNG được ghim ⇒ "dòng vừa chọn có mặt trong DOM" là mệnh đề **DOM** hiện **SAI** với danh sách dài, **ghim được trong jsdom**).
 
 ## Quy ước thẩm mỹ — spec UI thắng, skill chỉ là checklist
 
