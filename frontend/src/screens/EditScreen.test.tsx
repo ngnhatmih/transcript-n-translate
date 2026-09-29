@@ -577,7 +577,10 @@ describe("EditScreen: §4.1 danh sach doan ao hoa + GHIM dong dang sua + suspect
       assert.ok(khop !== null, `\`grid-row\` cua \`${chon}\` phai bat dau bang mot so; do duoc ${khai}`);
       return Number(khop[1]);
     }
-    assert.equal(hangCua(".ed__khung"), 2, "khung danh sach nam track `1fr`");
+    // ⚠️ DINH CHINH SO CUA D1 (D2): `.ed` nay co BA con (cau loi thoi · thanh tren cua D2 ·
+    // khung danh sach) nen khung danh sach lui xuong track 3. Menh de KHONG doi: "moi con khai
+    // `grid-row` tuong minh, va khung danh sach nam o track CUOI (cho cuon)".
+    assert.equal(hangCua(".ed__khung"), 3, "khung danh sach nam track `1fr` (track CUOI)");
     assert.equal(hangCua(".ed__loi-thoi"), 1, "cau 'loi thoi' nam track `auto` (co lai khi vang)");
     assert.ok(coTrongDom.has("ed__khung") && coTrongDom.has("ed__loi-thoi"));
 
@@ -596,6 +599,97 @@ describe("EditScreen: §4.1 danh sach doan ao hoa + GHIM dong dang sua + suspect
     );
 
     assert.deepEqual(tiengOn, [], "hinh thuc D1 khong duoc sinh tieng on console");
+    unmount();
+  });
+
+  // ===========================================================================
+  // TASK D2 — NUT `duyet` O MAN BIEN TAP
+  //
+  // Man nay KHONG tu goi API (xem khoi dau tep): no BAO bang `onDuyet`, con `App` moi la nguoi
+  // goi `approveTranscript` + DOC LAI. Trang thai ban ghi (`transcript.status`) la du lieu CUA MAY
+  // CHU di qua prop — man chi RENDER no ra chu.
+  // ===========================================================================
+
+  it("D2 DUYET: nút `duyệt` CHỈ có khi CÓ bản ghi đang mở, và bấm thì BÁO LÊN (màn không tự gọi API)", () => {
+    const soLan: number[] = [];
+    const { container, unmount } = render(
+      taoPhanTu(EditScreen, {
+        transcript: banGhi([doan(0, 0, 2, "câu 1")]),
+        onDuyet: (): void => {
+          soLan.push(1);
+        },
+      }),
+    );
+
+    // TRANG THAI BAN GHI noi ra bang CHU — va no la du lieu cua may chu (`Transcript.status`).
+    assert.equal(chu(container, '[data-testid="trang-thai-ban-ghi"]'), "trạng thái: draft");
+    fireEvent.click(phanTu(container, '[data-testid="duyet-ban-ghi"]'));
+    assert.equal(soLan.length, 1, "bấm `duyệt` phải BÁO cho bên gọi (màn không tự gọi API)");
+
+    assert.deepEqual(tiengOn, [], "nut duyet khong duoc sinh tieng on console");
+    unmount();
+
+    // TRANG THAI RONG: khong co ban ghi ⇒ KHONG co nut (khong the duyet mot thu khong ton tai).
+    const rong = render(taoPhanTu(EditScreen, { transcript: null, onNapTep: async () => [] }));
+    assert.equal(
+      rong.container.querySelectorAll('[data-testid="duyet-ban-ghi"]').length,
+      0,
+      "chưa có bản ghi đang mở ⇒ KHÔNG được có nút duyệt",
+    );
+    assert.equal(
+      rong.container.querySelectorAll('[data-testid="trang-thai-ban-ghi"]').length,
+      0,
+      "chưa có bản ghi ⇒ cũng không có câu trạng thái nào",
+    );
+    rong.unmount();
+  });
+
+  it("HINH THUC (D2): thanh trên khai `grid-row` (`.ed` ba track) + LUẬT ↔ CLASS của nút duyệt và câu trạng thái", () => {
+    const { container, unmount } = render(
+      taoPhanTu(EditScreen, {
+        transcript: banGhi([doan(0, 0, 2, "câu 1"), doan(1, 2, 4, "câu 2")]),
+        dangDuyet: true,
+        loiDuyet: "422: bản ghi không duyệt được: chưa có đoạn nào",
+        cauLoiThoi: "bản dịch đã lỗi thời so với bản ghi",
+      }),
+    );
+
+    const appCss = readFileSync(new URL("../styles/app.css", import.meta.url), "utf8");
+    const coTrongDom = lopTrongDom(container);
+
+    // (a) QUAN HE LUAT ↔ CLASS (hai chieu): mot `className` trong TSX khong ve gi ca.
+    for (const ten of ["ed__thanh", "ed__trang-thai", "lenh--duyet", "lenh__tin"]) {
+      assert.ok(
+        coTrongDom.has(ten),
+        `lop \`${ten}\` phai co THAT trong DOM; do duoc ${JSON.stringify([...coTrongDom].filter((t) => t.startsWith("ed") || t.startsWith("lenh")).sort())}`,
+      );
+      const khai = khaiBaoCua(appCss, `.${ten}`);
+      assert.ok(khai.size > 0, `phai co LUAT \`.${ten}\` trong app.css (co khai bao THANG CUOC)`);
+    }
+
+    // (b) LUOI `.ed` (ERRATA #31 muc 1): thanh tren la CON THU HAI ⇒ phai khai them track VA vi tri
+    //     cho TUNG con. Khong ghim NGUYEN VAN danh sach track (ghim the la dong bang so luong track).
+    const trackEd = (khaiBaoCua(appCss, ".ed").get("grid-template-rows") ?? "")
+      .split(/\s+/)
+      .filter((t) => t !== "");
+    assert.ok(
+      trackEd.length >= 3,
+      `\`.ed\` phai khai DU track cho BA con (cau loi thoi + thanh tren + khung danh sach); do duoc ${JSON.stringify(trackEd)}`,
+    );
+    assert.equal(khaiBaoCua(appCss, ".ed__thanh").get("grid-row"), "2", "thanh tren nam track `auto` rieng");
+    assert.equal(khaiBaoCua(appCss, ".ed__khung").get("grid-row"), "3", "khung danh sach van o track CUOI (cho cuon)");
+    assert.equal(khaiBaoCua(appCss, ".ed__loi-thoi").get("grid-row"), "1");
+
+    // (c) CHU: hai cau cua D2 la CHU that, va cau loi la NGUYEN VAN `ApiError.message`.
+    assert.equal(chu(container, '[data-testid="dang-duyet"]'), "đang duyệt…");
+    assert.equal(
+      chu(container, '[data-testid="loi-duyet"]'),
+      "422: bản ghi không duyệt được: chưa có đoạn nào",
+      "câu lỗi phải là NGUYÊN VĂN `ApiError.message` (`<status>: <detail>`)",
+    );
+    assert.equal(chu(container, '[data-testid="trang-thai-ban-ghi"]'), "trạng thái: draft");
+
+    assert.deepEqual(tiengOn, [], "hinh thuc D2 cua man Bien tap khong duoc sinh tieng on console");
     unmount();
   });
 });

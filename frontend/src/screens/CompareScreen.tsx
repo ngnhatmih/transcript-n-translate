@@ -256,7 +256,7 @@ export function CompareScreen({
     <section className="cmp">
       {/* Segmented control (U7: KHÔNG phải N tab) + nút ghim + CỬA VÀO "bắt đầu dịch". */}
       <div className="cmp__thanh" role="radiogroup" aria-label="Bản dịch">
-        {translations.map((tr, k) => (
+        {translations.map((tr) => (
           <button
             key={tr.id}
             type="button"
@@ -272,8 +272,13 @@ export function CompareScreen({
               if (onChonBanDich !== undefined) onChonBanDich(tr.id);
             }}
           >
-            bản dịch {k + 1} · {tr.engine}
-            {tr.stale ? " · lỗi thời" : ""}
+            {/* NHÃN BỀN (D2) — KHÔNG đánh số theo VỊ TRÍ MẢNG.
+                ĐO ĐƯỢC TRƯỚC (ảnh chụp thật, ERRATA #41 mục 3a): nhãn cũ là `bản dịch {k + 1} ·
+                {engine}`, tức DANH TÍNH của một bản dịch là CHỖ ĐỨNG của nó trong mảng — thêm/bớt
+                một bản dịch là mọi nhãn sau đổi số, và cùng một bản dịch mang hai tên khác nhau ở
+                hai lần đọc. Nay danh tính lấy từ CHÍNH DỮ LIỆU CỦA HÀNG: `id` (duy nhất), `engine`
+                và `status` (đều của máy chủ). */}
+            {`bản dịch #${tr.id} · ${tr.engine} · ${tr.status}${tr.stale ? " · lỗi thời" : ""}`}
           </button>
         ))}
         {coBanDich ? nutDich : null}

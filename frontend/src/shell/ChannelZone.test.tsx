@@ -418,4 +418,158 @@ describe("ChannelZone: chon duoc KENH (Task W1)", () => {
       '`<ul class="ch__danh-sach">` phai duoc RESET (margin/padding/list-style)',
     );
   });
+
+  /**
+   * Cac khoi luat cua `app.css` (da bo chu thich) — doc VAN BAN, khong hoi jsdom (no khong co CSS).
+   * Cung khuon voi `IntakeFrame.test.tsx`.
+   */
+  function cacKhoi(css: string): { chon: string; than: string }[] {
+    const sach = css.replace(/\/\*[\s\S]*?\*\//g, "");
+    const ra: { chon: string; than: string }[] = [];
+    for (const m of sach.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+      ra.push({ chon: (m[1] ?? "").trim(), than: m[2] ?? "" });
+    }
+    return ra;
+  }
+
+  /** Tap lop `ch*` ma `app.css` TAO KIEU (ten lop trong SELECTOR, khong phai `className` trong TSX). */
+  function lopChTrongCss(khoi: { chon: string; than: string }[]): Set<string> {
+    const ra = new Set<string>();
+    for (const k of khoi) {
+      for (const m of k.chon.matchAll(/\.(ch(?:__[a-z0-9-]+)?)/g)) ra.add(m[1] ?? "");
+    }
+    ra.delete("");
+    return ra;
+  }
+
+  /**
+   * NAM lop cua vung KENH **CHUA CO LUAT NAO** trong `app.css` — KHAI RA, khong che
+   * (`app.css:1429-1440`, bao cao W2 §5.4, comment bai `W2 M4`).
+   *
+   * ⚠️ Vi sao phai khai: phep ghim hai chieu o DUOI khang dinh "moi lop trong DOM deu co luat".
+   * Voi nam lop nay, menh de do SAI ngay hom nay — nhung no la NO da khai (Task 4/W1), khong phai
+   * mot loi moi. Danh sach nay la mot phep khai, va no chi duoc PHEP la tap CON cua cac lop khong
+   * co luat: dong not mot mon no (them luat) KHONG lam bai do.
+   */
+  const NO_CHUA_CO_LUAT: ReadonlySet<string> = new Set([
+    "ch",
+    "ch__dong",
+    "ch__rong",
+    "ch__loi",
+    "ch__cho",
+  ]);
+
+  it("P3 (nợ W2 đóng kèm): LUẬT `.ch*` ↔ CLASS `ch*` KHỚP NHAU (hai chiều) — đổi tên class trong DOM mà giữ luật ⇒ ĐỎ", async () => {
+    // ---------------------------------------------------------------------------
+    // ⚠️ VI SAO BAI NAY TON TAI — do duoc, KHONG phai suy luan (mutant `P3` cua re-review W2):
+    // doi `className` trong DOM (`ch__danh-sach` → `ch__danh-sach-doi-ten`) ma GIU NGUYEN luat
+    // trong `app.css` ⇒ `fail 2`, **0 bai do**. Tuc luat `.ch__danh-sach` tro thanh LUAT MO COI
+    // (dung lop `ERRATA #36 muc 5`) ma khong ai thay. Bai `W2 M4` ngay tren ghim CHU CUA LUAT,
+    // khong ghim QUAN HE luat ↔ class; va `ChannelZone.test.tsx` truoc do KHONG co bai hai chieu nao.
+    //
+    // Bai nay ghim QUAN HE, KHONG ghim danh sach ten lop nguyen van (ERRATA #34 muc 1):
+    //   (A) MOI lop `ch*` ma `app.css` TAO KIEU phai XUAT HIEN trong DOM THAT ⇒ luat mo coi = DO;
+    //   (B) MOI lop `ch*` trong DOM THAT phai duoc `app.css` tao kieu (tru nam lop NO da khai).
+    // ---------------------------------------------------------------------------
+    const appCss = readFileSync(new URL("../styles/app.css", import.meta.url), "utf8");
+    const trongCss = lopChTrongCss(cacKhoi(appCss));
+
+    const trongDom = new Set<string>();
+    const gom = (container: HTMLElement): void => {
+      for (const el of container.querySelectorAll("*")) {
+        for (const ten of el.classList) if (/^ch(__|$)/.test(ten)) trongDom.add(ten);
+      }
+    };
+
+    // (1) CO KENH: `ch`, `ch__danh-sach`, `ch__dong`, `ch__item`, `ch__dau`, `ch__ten`, `ch__meta`,
+    //     `ch__tieng`, `ch__buoc` + loi nap gon `ch__nap*`.
+    const co = render(
+      taoPhanTu(ChannelZone, {
+        sources: SOURCES,
+        jobs: JOBS,
+        loading: false,
+        error: null,
+        selectedId: 1,
+        onSelect: () => {},
+        onNapTep: khongNap,
+      }),
+    );
+    gom(co.container);
+    co.unmount();
+
+    // (2) BA trang thai CON LAI cua vung (moi trang thai mot lop CHI co o do).
+    for (const props of [
+      { sources: [], loading: false, error: null },
+      { sources: null, loading: true, error: null },
+      { sources: null, loading: false, error: "500: nguồn dữ liệu hỏng" },
+    ]) {
+      const c = render(
+        taoPhanTu(ChannelZone, {
+          ...props,
+          jobs: JOBS,
+          selectedId: null,
+          onSelect: () => {},
+          onNapTep: khongNap,
+        }),
+      );
+      gom(c.container);
+      c.unmount();
+    }
+
+    // (3) HAI trang thai CHI ton tai khi mot luot nap CHUA tra: `.ch__nap-cho` (dang nap) va
+    //     `.ch__nap-bo-qua` (luot chon bi bo qua). Phai GOM, neu khong phep kiem (A) se bao chung
+    //     la "LUAT MO COI" oan.
+    const cTreo = render(
+      taoPhanTu(ChannelZone, {
+        sources: SOURCES,
+        jobs: JOBS,
+        loading: false,
+        error: null,
+        selectedId: null,
+        onSelect: () => {},
+        onNapTep: () => new Promise<never[]>(() => {}),
+      }),
+    );
+    const o = cTreo.container.querySelector('[data-testid="ch-nap-o-tep"]') as Element;
+    const a = new File([new Uint8Array([1, 2, 3])], "mot.wav", { type: "audio/wav" });
+    fireEvent.change(o, { target: { files: [a] } });
+    await waitFor(
+      () => {
+        assert.equal(cTreo.container.querySelectorAll(".ch__nap-cho").length, 1, "chua thay `.ch__nap-cho`");
+      },
+      { timeout: 5000, interval: 20 },
+    );
+    gom(cTreo.container);
+    fireEvent.change(o, { target: { files: [new File([new Uint8Array([4])], "hai.wav")] } });
+    await waitFor(
+      () => {
+        assert.equal(cTreo.container.querySelectorAll(".ch__nap-bo-qua").length, 1, "chua thay `.ch__nap-bo-qua`");
+      },
+      { timeout: 5000, interval: 20 },
+    );
+    gom(cTreo.container);
+    cTreo.unmount();
+
+    assert.ok(trongCss.size >= 12, `phai doc duoc cac lop \`ch*\` tu app.css; do duoc ${trongCss.size}`);
+    assert.ok(trongDom.size >= 12, `phai thu duoc cac lop \`ch*\` tu DOM; do duoc ${trongDom.size}`);
+
+    // (A) LUAT ⇒ LOP.
+    const moCoi = [...trongCss].filter((ten) => !trongDom.has(ten)).sort();
+    assert.deepEqual(
+      moCoi,
+      [],
+      `LUAT MO COI: ${JSON.stringify(moCoi)} — luat nay khong lop nao trong DOM mang, tuc no KHONG `
+      + `tao kieu cho thu gi. Lop co trong DOM: ${JSON.stringify([...trongDom].sort())}`,
+    );
+
+    // (B) LOP ⇒ LUAT.
+    const voLuat = [...trongDom].filter((ten) => !trongCss.has(ten) && !NO_CHUA_CO_LUAT.has(ten)).sort();
+    assert.deepEqual(
+      voLuat,
+      [],
+      `LOP KHONG CO LUAT: ${JSON.stringify(voLuat)} — lop nay nam trong DOM nhung app.css khong tao `
+      + `kieu cho no, va no KHONG nam trong danh sach NO da khai. Luat co trong app.css: `
+      + `${JSON.stringify([...trongCss].sort())}`,
+    );
+  });
 });

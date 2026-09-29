@@ -701,8 +701,14 @@ describe("hop dong route MOI: GET /api/translations/{id} (backend 8621, DB gieo)
       for (const r of body.cps.rows) {
         const where = `ban dich ${id}/cps row ${String(r.i)}`;
         assert.equal(typeof r.i, "number", `${where}: i phải là số`);
+        // ⚠️ ĐÍNH CHÍNH (D2, nợ đã khai từ Task 2): comment cũ khai *"khoá đã đổi tên để phân biệt
+        // với `chars` của mt_qa"* — SAI. Route này phát ĐÚNG tên `chars` của `mt_qa.CpsRow`
+        // (`domain/mt_qa.py`: `chars=len(text.strip())`, **CÓ** đếm khoảng trắng), nên tên khoá ở
+        // đây KHÔNG đổi. Chỗ ĐỔI TÊN để phân biệt là `chars_no_space` của
+        // `routes_transcripts.qa_fast` (bỏ khoảng trắng) — cùng tên `chars` mà khác nghĩa là đúng
+        // thứ khiến người sau đọc sai số, và `routes_transcripts.py:145-149` đã ghi rõ điều đó.
         assert.equal(typeof r.chars, "number",
-          `${where}: chars phải là số (khoá đã đổi tên để phân biệt với \`chars\` của mt_qa)`);
+          `${where}: chars phải là số (số ký tự của mt_qa.CpsRow.chars — len(text.strip()), CÓ khoảng trắng)`);
         assert.equal(typeof r.window, "number", `${where}: window phải là số`);
         assert.equal(typeof r.max_cps, "number", `${where}: max_cps phải là số`);
         if (r.cps === null) {

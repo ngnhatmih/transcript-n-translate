@@ -102,11 +102,13 @@ body {
 
 .ed {
   display: grid;
-  /* ⚠️ HAI track, không phải MỘT: D1 thêm CON THỨ HAI (`.ed__loi-thoi` — câu "bản dịch đã lỗi
-     thời") vào lưới này. Một lưới `1fr` với hai con thì con thứ hai rơi vào hàng IMPLICIT `auto`
-     và khung danh sách bị co lại — đúng lớp lỗi `Critical #1` của Task 10 / ERRATA #31 mục 1.
-     Đổi lại: MỌI con phải khai `grid-row` tường minh (xem `.ed__loi-thoi`, `.ed__khung`). */
-  grid-template-rows: auto 1fr;
+  /* ⚠️ BA track, không phải HAI: D2 thêm CON THỨ HAI (`.ed__thanh` — trạng thái bản ghi + nút
+     `duyệt`), nên câu "bản dịch đã lỗi thời" giữ track 1 và khung danh sách lùi xuống track 3.
+     Một lưới `auto 1fr` với ba con thì con thứ ba rơi vào hàng IMPLICIT `auto` và khung danh sách
+     bị co lại — đúng lớp lỗi `Critical #1` của Task 10 / ERRATA #31 mục 1.
+     Đổi lại: MỌI con phải khai `grid-row` tường minh (xem `.ed__loi-thoi`, `.ed__thanh`,
+     `.ed__khung`). */
+  grid-template-rows: auto auto 1fr;
   height: 100%;
   min-height: 0;
 }
@@ -118,9 +120,11 @@ body {
 }
 
 /* Khung cuộn: ảo hoá chỉ có nghĩa khi chính khung này cuộn được.
-   `grid-row: 2` là VỊ TRÍ TƯỜNG MINH trong lưới hai track của `.ed` (track `1fr`). */
+   ⚠️ `grid-row: 3` là VỊ TRÍ TƯỜNG MINH trong lưới BA track của `.ed` — track CUỐI (`1fr`), chỗ
+   cuộn. D1 để nó ở track 2 khi `.ed` mới có hai con; D2 thêm thanh trên (`grid-row: 2`) nên nó
+   lùi xuống 3. Mệnh đề không đổi: **khung danh sách nằm ở track CUỐI**, và mọi con khai vị trí. */
 .ed__khung {
-  grid-row: 2;
+  grid-row: 3;
   height: 100%;
   min-height: 0;
   overflow-y: auto;
@@ -300,7 +304,8 @@ body {
 }
 
 /* CÂU "BẢN DỊCH ĐÃ LỖI THỜI" — con ĐẦU của lưới `.ed` (track `auto`), nên khi vắng nó thì track
-   co lại bằng không và khung danh sách vẫn ở track `1fr` nhờ `grid-row: 2`. */
+   co lại bằng không và khung danh sách vẫn ở track cuối (`grid-row: 3`) nhờ khai vị trí tường minh
+   cho MỌI con. */
 .ed__loi-thoi {
   grid-row: 1;
   margin: 0;
@@ -310,6 +315,74 @@ body {
   letter-spacing: var(--track-label);
   text-transform: uppercase;
   color: var(--fault);
+}
+
+/* ── §5.2 THANH TRÊN CỦA MÀN BIÊN TẬP (Task D2): TRẠNG THÁI BẢN GHI + nút `duyệt` ──────────────
+   CON THỨ HAI của lưới `.ed` (track `auto`, `grid-row: 2`) — thêm con vào một lưới `grid-template-*`
+   cố định là một thay đổi BỐ CỤC (ERRATA #31 mục 1), nên `.ed` nay khai BA track và mọi con khai
+   `grid-row`. Một HÀNG flex, và câu trạng thái là CHỮ (không chỉ màu — §7). */
+.ed__thanh {
+  grid-row: 2;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-1) var(--sp-3);
+  border-bottom: var(--rule-w) solid var(--rule);
+}
+
+/* Trạng thái bản ghi: chuỗi của MÁY CHỦ (`Transcript.status`), in bằng mono như mọi giá trị dữ
+   liệu — người đọc phân biệt được "chữ do người viết" và "giá trị do máy trả". */
+.ed__trang-thai {
+  font-family: var(--font-mono);
+  font-size: var(--fs-num);
+  color: var(--ink-1);
+}
+
+/* ── CÁC LỆNH GHI (Task D2): `duyệt` (Biên tập) · `huỷ`/`chạy lại` (Hàng đợi) ───────────────────
+   MỘT họ lớp cho BỐN hình thức mới, vì chúng là cùng một loại điều khiển: một lệnh ghi gửi lên máy
+   chủ. Họ này có BÀI GHIM HAI CHIỀU (mọi lớp `lenh*` trong `app.css` phải có trong DOM thật, và
+   ngược lại) — bài ghim QUAN HỆ luật ↔ class, không ghim chữ của luật (ERRATA #34 mục 1).
+   `.lenh__tin` là câu NÓI RA trạng thái của chính lệnh ("đã yêu cầu huỷ", câu lỗi nguyên văn). */
+.lenh {
+  align-self: flex-start;
+  padding: var(--sp-1) var(--sp-2);
+  border: var(--rule-w) solid var(--rule);
+  border-radius: var(--radius);
+  background: var(--panel-2);
+  color: var(--ink-0);
+  font-family: var(--font-label);
+  font-size: var(--fs-label);
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.lenh:hover {
+  border-color: var(--ink-2);
+}
+
+/* `duyệt` là lệnh nằm trong thanh trên của màn Biên tập. */
+.lenh--duyet {
+  margin-left: auto;
+}
+
+/* `huỷ` là lệnh PHÁ huỷ: mực `--fault` (cùng sắc với dấu hiệu lỗi), không phải nền đỏ. */
+.lenh--huy {
+  color: var(--fault);
+}
+
+/* `chạy lại` là lệnh ĐẨY TIẾN: mực `--signal` (đang hoạt động), không phải nền amber. */
+.lenh--lai {
+  color: var(--signal);
+}
+
+/* Câu trạng thái của một lệnh: KHỐI chữ riêng (không nằm cạnh nút trên cùng một dòng), mono như mọi
+   giá trị dữ liệu. */
+.lenh__tin {
+  display: block;
+  font-family: var(--font-mono);
+  font-size: var(--fs-num);
+  color: var(--ink-1);
 }
 
 /* Dòng đang sửa: lề trái sáng lên (cùng ngôn ngữ với `is-current`, nhưng KHÁC nghĩa — amber là

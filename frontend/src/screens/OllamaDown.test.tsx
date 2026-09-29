@@ -456,6 +456,11 @@ describe("§4.8 trang thai Ollama: dai trang thai + panel hang nhat + dropdown e
     assert.equal(thuocTinh(container, ".od", "data-ollama"), "down");
     assert.ok(chu(container, ".od__tieu-de").includes("Không kết nối được Ollama"),
       "tieu de phai la cau nguoi dung doc duoc, khong chi la ma trang thai");
+    // NO Task 10 DONG KEM (D2): panel la mot VUNG THONG BAO — `role=status` de trinh doc man hinh
+    // doc no RA khi no xuat hien. ⚠️ Spec UI KHONG doi dieu nay cho §4.8 ⇒ day la NO, khong phai
+    // mot vi pham; nhung mot menh de khong co gi lam no sai duoc thi phai duoc GHIM (ERRATA #45).
+    assert.equal(thuocTinh(container, ".od", "role"), "status",
+      "panel §4.8 phai la mot vung thong bao (`role=status`)");
   });
 
   it("panel HIEN khi ollama === 'unknown' va noi 'chua do duoc', KHONG bia 'down'", () => {

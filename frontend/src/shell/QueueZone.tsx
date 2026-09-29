@@ -4,12 +4,47 @@
  * Nguồn sự thật là BẢN ĐỒ JOB của `useJobStream` (ảnh chụp `GET /api/jobs` cộng các
  * sự kiện SSE). Không có request riêng nào ở đây: hai nơi cùng đọc hàng đợi là hai
  * nguồn sự thật, và chúng trôi khỏi nhau ngay khi một sự kiện tới.
+ *
+ * ## TASK D2 — HAI LỆNH TRÊN MỖI HÀNG JOB (`huỷ` · `chạy lại`)
+ *
+ * ĐO ĐƯỢC TRƯỚC D2: `endpoints.cancelJob` và `endpoints.retryJob` **0 lượt gọi trong sản phẩm**
+ * (grep ngoài `endpoints.ts`) ⇒ không có cách nào tác động lên một job từ giao diện.
+ *
+ * Ba mệnh đề hình thức + trung thực mà vùng này ghim:
+ *  1. **Nút CHỈ hiện ở trạng thái hợp lệ**: `queued`/`running` mới có nút `huỷ`;
+ *     `failed`/`interrupted` mới có nút `chạy lại`. Đừng để người dùng bấm rồi ăn 409 — nhưng
+ *     `App` **vẫn** xử lý 409, vì trạng thái phía client có thể CŨ (một tab khác vừa chạy lại job).
+ *  2. 🔴 **CÂU CHỮ TRUNG THỰC**: `cancelJob` trên job `running` **CHỈ ĐẶT CỜ** — trạng thái job
+ *     KHÔNG đổi. Nên câu duy nhất được phép là *"đã yêu cầu huỷ"*; *"đã dừng"* là **NÓI DỐI**,
+ *     không phải một lựa chọn văn phong.
+ *  3. **Trạng thái job KHÔNG được sửa tại chỗ**: `daYeuCauHuy` chỉ nói *"giao diện đã yêu cầu gì"*,
+ *     và câu đó biến mất ngay khi `job.state` khác trạng thái lúc gửi (máy chủ đã trả lời bằng một
+ *     sự kiện SSE). Bản đồ `jobs` vẫn là của `useJobStream` — vùng này chỉ ĐỌC nó.
+ *
+ * ⚠️ `ponytail:` TRẦN — vùng này KHÔNG có luật CSS riêng (`.q*` chưa từng có luật nào trong
+ * `app.css`). Nút và câu trạng thái dùng họ lớp `.lenh*` (có luật, và có bài ghim hai chiều), còn
+ * BỐ CỤC của một hàng (nút nằm ở đâu) **chỉ ảnh chụp trong trình duyệt thật mới xác nhận được**:
+ * jsdom không có layout. `.q__item` KHÔNG khai `grid-template-*` nên thêm con không phải là một
+ * thay đổi bố cục kiểu ERRATA #31 mục 1 (đã kiểm: `Select-String 'q__' app.css` = 0 dòng).
  */
-import type { Job } from "../api/types.ts";
+import type { Job, JobState } from "../api/types.ts";
 
 export interface QueueZoneProps {
   /** Job theo id — đúng cái `useJobStream()` trả về, không sao chép. */
   jobs: Map<number, Job>;
+  /**
+   * Job nào đã được **GỬI YÊU CẦU HUỶ**, kèm **TRẠNG THÁI LÚC GỬI** (`App.huyJob`).
+   *
+   * ⚠️ Đây không phải trạng thái của job: câu *"đã yêu cầu huỷ"* chỉ được render khi
+   * `job.state` VẪN BẰNG trạng thái lúc gửi — máy chủ xác nhận thì nó biến mất.
+   */
+  daYeuCauHuy: ReadonlyMap<number, JobState>;
+  /** Câu lỗi **NGUYÊN VĂN** (`ApiError.message`, `"<status>: <detail>"`) của lệnh gần nhất, theo id job. */
+  loiLenh: ReadonlyMap<number, string>;
+  /** Yêu cầu huỷ một job — BÊN GỌI ghi (`App.huyJob`, đi qua hàng đợi ghi của D1). */
+  onHuyJob: (id: number) => void;
+  /** Yêu cầu chạy lại một job — BÊN GỌI ghi (`App.chayLaiJob`). */
+  onChayLaiJob: (id: number) => void;
 }
 
 /**
@@ -49,7 +84,17 @@ function thuTu(job: Job): number {
   return 2;
 }
 
-export function QueueZone({ jobs }: QueueZoneProps) {
+/** Job này có được phép HUỶ không — `queued` bị huỷ ngay, `running` chỉ được đặt cờ (hợp đồng §2). */
+function huyDuoc(job: Job): boolean {
+  return job.state === "queued" || job.state === "running";
+}
+
+/** Job này có được phép CHẠY LẠI không — backend chỉ nhận `failed`/`interrupted` (409 nếu khác). */
+function chayLaiDuoc(job: Job): boolean {
+  return job.state === "failed" || job.state === "interrupted";
+}
+
+export function QueueZone({ jobs, daYeuCauHuy, loiLenh, onHuyJob, onChayLaiJob }: QueueZoneProps) {
   const hang = [...jobs.values()].sort((a, b) => thuTu(a) - thuTu(b) || a.id - b.id);
 
   if (hang.length === 0) {
@@ -64,7 +109,13 @@ export function QueueZone({ jobs }: QueueZoneProps) {
     <div className="q">
       <ul className="q__danh-sach">
         {hang.map((job) => (
-          <li key={job.id} className={`q__item q__item--${job.state}`}>
+          <li
+            key={job.id}
+            className={`q__item q__item--${job.state}`}
+            data-testid={`job-${job.id}`}
+            /* Trạng thái MÁY đọc được của chính hàng — cùng nguồn với chữ bên trong (`lyDoCho`). */
+            data-state={job.state}
+          >
             <span className="q__ten">
               {`#${job.id} ${job.type}${job.engine === null ? "" : ` · ${job.engine}`}`}
             </span>
@@ -72,6 +123,41 @@ export function QueueZone({ jobs }: QueueZoneProps) {
             <span className="q__ly-do">{lyDoCho(job)}</span>
             {/* `progress` là số thực 0..1 backend đưa; đây chỉ là định dạng phần trăm. */}
             <span className="q__tien-do">{`${Math.round(job.progress * 100)}%`}</span>
+            {huyDuoc(job) ? (
+              <button
+                type="button"
+                className="lenh lenh--huy"
+                data-testid={`huy-job-${job.id}`}
+                onClick={() => onHuyJob(job.id)}
+              >
+                huỷ
+              </button>
+            ) : null}
+            {chayLaiDuoc(job) ? (
+              <button
+                type="button"
+                className="lenh lenh--lai"
+                data-testid={`lai-job-${job.id}`}
+                onClick={() => onChayLaiJob(job.id)}
+              >
+                chạy lại
+              </button>
+            ) : null}
+            {/* 🔴 CÂU CHỮ TRUNG THỰC: "đã YÊU CẦU huỷ" — KHÔNG BAO GIỜ "đã dừng". Nó gắn với trạng
+                thái LÚC GỬI, nên khi máy chủ xác nhận (SSE đổi `job.state`) thì nó BIẾN MẤT và
+                nhường chỗ cho sự thật mới của job (`lyDoCho` ở trên). */}
+            {daYeuCauHuy.get(job.id) === job.state ? (
+              <span className="lenh__tin" data-testid={`huy-tin-${job.id}`}>
+                đã yêu cầu huỷ
+              </span>
+            ) : null}
+            {/* LỖI CỦA LỆNH, NGUYÊN VĂN (`<status>: <detail>`) — khoá theo ĐÚNG id job, không phải
+                một thông báo chung của vùng. */}
+            {loiLenh.has(job.id) ? (
+              <span className="lenh__tin" data-testid={`loi-lenh-${job.id}`}>
+                {loiLenh.get(job.id)}
+              </span>
+            ) : null}
           </li>
         ))}
       </ul>

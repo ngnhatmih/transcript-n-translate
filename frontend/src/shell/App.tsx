@@ -404,6 +404,143 @@ export function App() {
     });
   }
 
+  // ---------------------------------------------------------------------------
+  // TASK D2 — BA LỆNH GHI MỚI: DUYỆT BẢN GHI · HUỶ JOB · CHẠY LẠI JOB
+  //
+  // ĐO ĐƯỢC TRƯỚC D2 (grep ngoài `endpoints.ts`): `approveTranscript` **0 lượt gọi trong sản
+  // phẩm**, `cancelJob` **0**, `retryJob` **0** ⇒ không có cách nào duyệt một bản ghi, và không có
+  // cách nào tác động lên một job đang chạy/đang chờ.
+  //
+  // ⚠️ CẢ BA đi qua **CÙNG MỘT hàng đợi ghi** của D1 (`xepHangGhi`) — ERRATA #44 mục 1: hai lần
+  // ghi CHỒNG LẤN là lớp lỗi KHÔNG CÓ TRIỆU CHỨNG (không exception, không 4xx, `version` vẫn
+  // tăng), và D2 thêm BA thao tác vào đúng lớp rủi ro đó — ca đắt nhất là "duyệt trong lúc một
+  // lượt ghi khác đang bay". Hàng đợi thi hành chúng TUẦN TỰ, nên lệnh sau không tính từ một bản
+  // ghi đã cũ.
+  // ---------------------------------------------------------------------------
+  const [dangDuyet, datDangDuyet] = useState(false);
+  /**
+   * LỖI DUYỆT — **NGUYÊN VĂN `ApiError.message`** (`"<status>: <detail>"`), cùng lý do `loiTao`
+   * và `loiGhiDoan`: câu tiếng Việt của backend là thứ DUY NHẤT đúng.
+   */
+  const [loiDuyet, datLoiDuyet] = useState<string | null>(null);
+  /**
+   * Job nào đang có **MỘT lệnh bay** (`Set` id) — **GUARD CHỐNG TRÙNG LẶP**, và nó là cổng DUY
+   * NHẤT: không có `disabled` song song ở nút, vì hai cơ chế cho một câu hỏi là hai nguồn sự thật
+   * (và cái thứ hai sẽ là một mệnh đề không có gì làm nó sai được — ERRATA #45 mục 1).
+   */
+  const [dangLenh, datDangLenh] = useState<ReadonlySet<number>>(() => new Set<number>());
+  /**
+   * Job nào đã được **GỬI YÊU CẦU HUỶ**, kèm **TRẠNG THÁI LÚC GỬI**.
+   *
+   * ⚠️ Đây KHÔNG phải một nguồn trạng thái job thứ hai: nó không nói job đang ở đâu, nó nói
+   * **giao diện đã yêu cầu gì**. Nó chỉ được RENDER khi `job.state` VẪN LÀ trạng thái lúc gửi —
+   * máy chủ xác nhận (sự kiện SSE) thì câu đó **BIẾN MẤT** và nhường chỗ cho sự thật mới của job.
+   * `jobs` vẫn là bản đồ của `useJobStream` và **không có dòng nào ở đây sửa nó tại chỗ**.
+   */
+  const [daYeuCauHuy, datDaYeuCauHuy] = useState<ReadonlyMap<number, JobState>>(() => new Map());
+  /** Câu lỗi **NGUYÊN VĂN** của lệnh gần nhất, theo TỪNG job (khoá = id job). */
+  const [loiLenh, datLoiLenh] = useState<ReadonlyMap<number, string>>(() => new Map());
+
+  /**
+   * DUYỆT bản ghi đang mở — nút ở thanh trên của màn Biên tập (`EditScreen.onDuyet`).
+   *
+   * ⚠️ **DUYỆT KHÔNG TĂNG `version`** (khác `patchTranscript`): `endpoints.approveTranscript` khai
+   * điều đó, và backend chỉ đổi `status` (`routes_transcripts.approve` — "Cố ý KHÔNG đụng tới
+   * segments/version"). Nếu nó tăng thì mọi bản dịch của bản ghi thành `stale` vì một thao tác
+   * KHÔNG sửa nội dung.
+   *
+   * ⚠️ Xong thì **ĐỌC LẠI** bản ghi (`transcript.reload()`) — `status` là dữ liệu của MÁY CHỦ,
+   * không tự sửa state tại chỗ. ⚠️ Chỉ đọc lại CHI TIẾT, không đọc lại danh sách: `status` không
+   * được dùng ở đâu khác, và một lượt `GET` thừa là một đường không ai ghim.
+   */
+  function duyetBanGhi(): void {
+    const hienTai = transcript.data;
+    if (hienTai === null) return;
+    if (dangDuyet) return; // GUARD chống trùng lặp (bấm hai lần KHÔNG chờ ⇒ vẫn MỘT request)
+    datDangDuyet(true);
+    datLoiDuyet(null);
+    xepHangGhi(async () => {
+      try {
+        await endpoints.approveTranscript(hienTai.id);
+        transcript.reload();
+      } catch (loi: unknown) {
+        datLoiDuyet(loi instanceof Error ? loi.message : String(loi));
+      } finally {
+        datDangDuyet(false);
+      }
+    });
+  }
+
+  /**
+   * HUỶ một job — nút trên **mỗi hàng `queued`/`running`** của vùng HÀNG ĐỢI.
+   *
+   * 🔴 CÂU CHỮ LÀ MỆNH ĐỀ TRUNG THỰC CỦA CẢ TASK NÀY (hợp đồng §2): job `queued` bị huỷ **NGAY**,
+   * còn job `running` **CHỈ ĐƯỢC ĐẶT CỜ** (`cancel_requested`) — trạng thái VẪN LÀ `running` cho
+   * tới khi có một sự kiện SSE khác. Nên giao diện chỉ được nói *"đã YÊU CẦU huỷ"*; **KHÔNG** được
+   * nói *"đã dừng"*. Chính vì vậy lời hứa đó không nằm ở đây mà ở `QueueZone` (nơi render), và nó
+   * gắn với `job.state` hiện tại: SSE đổi trạng thái thì câu ấy biến mất.
+   */
+  function huyJob(id: number): void {
+    const job = jobs.get(id);
+    // THUẦN KIỂU, không phải một guard hành vi: không có job thì cũng không có nút nào để bấm.
+    if (job === undefined) return;
+    if (dangLenh.has(id)) return; // GUARD chống trùng lặp
+    const trangThaiLucGui = job.state;
+    datDangLenh((cu) => new Set(cu).add(id));
+    datLoiLenh((cu) => {
+      const moi = new Map(cu);
+      moi.delete(id);
+      return moi;
+    });
+    xepHangGhi(async () => {
+      try {
+        await endpoints.cancelJob(id);
+        datDaYeuCauHuy((cu) => new Map(cu).set(id, trangThaiLucGui));
+      } catch (loi: unknown) {
+        datLoiLenh((cu) => new Map(cu).set(id, loi instanceof Error ? loi.message : String(loi)));
+      } finally {
+        datDangLenh((cu) => {
+          const moi = new Set(cu);
+          moi.delete(id);
+          return moi;
+        });
+      }
+    });
+  }
+
+  /**
+   * CHẠY LẠI một job `failed`/`interrupted` — nút **CHỈ hiện ở hai trạng thái đó** (`QueueZone`).
+   *
+   * ⚠️ Vẫn phải xử lý **409**: trạng thái phía client có thể CŨ (job đã được chạy lại ở một tab
+   * khác), và khi đó câu của backend phải hiện **NGUYÊN VĂN**.
+   *
+   * `ponytail:` TRẦN — chạy lại THÀNH CÔNG thì giao diện **không nói gì**: trạng thái job chỉ đến
+   * từ `useJobStream`, và một câu "đã yêu cầu chạy lại" sẽ là một mệnh đề nữa cần ghim. Nâng cấp:
+   * nói ra bằng cùng khuôn "yêu cầu" như `huyJob` (và ghim nó).
+   */
+  function chayLaiJob(id: number): void {
+    if (dangLenh.has(id)) return; // GUARD chống trùng lặp
+    datDangLenh((cu) => new Set(cu).add(id));
+    datLoiLenh((cu) => {
+      const moi = new Map(cu);
+      moi.delete(id);
+      return moi;
+    });
+    xepHangGhi(async () => {
+      try {
+        await endpoints.retryJob(id);
+      } catch (loi: unknown) {
+        datLoiLenh((cu) => new Map(cu).set(id, loi instanceof Error ? loi.message : String(loi)));
+      } finally {
+        datDangLenh((cu) => {
+          const moi = new Set(cu);
+          moi.delete(id);
+          return moi;
+        });
+      }
+    });
+  }
+
   /**
    * `Enter`/nút `lưu` ⇒ GHI chữ mới. Xong thì `endEdit` (đóng ô sửa) — nhưng **chỉ khi ghi được**:
    * một lượt ghi LỖI phải để người dùng Ở LẠI trong ô sửa với nguyên bản nháp của họ.
@@ -612,6 +749,9 @@ export function App() {
     // LỖI GHI của D1 cũng thuộc BẢN GHI đang mở: để nó sống qua một lần đổi kênh là một câu 422
     // của bản ghi KHÁC hiện như mới (cùng lý do `loiTao` ở trên).
     datLoiGhiDoan(null);
+    // LỖI DUYỆT của D2 cũng vậy: câu 422 của bản ghi CŨ không được nằm cạnh thanh trên của bản ghi
+    // MỚI (cùng lớp lỗi `I1` mà vòng sửa W3 đã đóng cho `loiTao`).
+    datLoiDuyet(null);
   }, [ui.channelId]);
 
   /**
@@ -825,11 +965,25 @@ export function App() {
               dangLuu={dangLuuDoan}
               loiGhi={loiGhiDoan}
               cauLoiThoi={cauLoiThoi}
+              /* D2: nut `duyet` o thanh tren cua man. Man chi BAO — `App` goi
+                 `approveTranscript` roi DOC LAI ban ghi (`status` la du lieu cua MAY CHU). */
+              onDuyet={duyetBanGhi}
+              dangDuyet={dangDuyet}
+              loiDuyet={loiDuyet}
             />
           )}
         </main>
         <aside className="shell__queue">
-          <QueueZone jobs={jobs} />
+          {/* D2: vùng HÀNG ĐỢI nhận BA prop nữa — hai lệnh (`huỷ`/`chạy lại`) và hai bản đồ NÓI RA
+              trạng thái của CHÍNH các lệnh đó. ⚠️ Bản đồ job vẫn là của `useJobStream`: `App`
+              KHÔNG sửa nó tại chỗ sau khi bấm (xem `daYeuCauHuy`). */}
+          <QueueZone
+            jobs={jobs}
+            daYeuCauHuy={daYeuCauHuy}
+            loiLenh={loiLenh}
+            onHuyJob={huyJob}
+            onChayLaiJob={chayLaiJob}
+          />
         </aside>
       </div>
       {/* Thanh transport (§4.1): phát, timecode, track có đầu đọc, ba nút xuất — Task 7.

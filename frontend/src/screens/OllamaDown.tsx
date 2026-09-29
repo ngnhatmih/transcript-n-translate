@@ -114,7 +114,12 @@ export function OllamaDown({ status, specs, onRetry }: OllamaDownProps) {
   const khong = specs.filter((s) => s.kind === "mt" && s.capabilities.available !== true);
 
   return (
-    <section className="od" data-ollama={status.ollama}>
+    /* NỢ Task 10 ĐÓNG KÈM (D2): panel này là một VÙNG THÔNG BÁO — `role="status"` để trình đọc
+       màn hình ĐỌC NÓ RA khi nó xuất hiện (panel không phải toast, và nó chỉ hiện khi Ollama không
+       dùng được). ⚠️ Spec UI KHÔNG đòi điều này cho §4.8 ⇒ đây là **NỢ**, không phải một vi phạm;
+       nhưng một mệnh đề không có gì làm nó sai được thì phải được GHIM (ERRATA #45 mục 1) — nên
+       `OllamaDown.test.tsx` khẳng định chính thuộc tính này. */
+    <section className="od" role="status" data-ollama={status.ollama}>
       <div className="od__van" aria-hidden />
       <p className="od__tieu-de">
         {chuaDo ? "Chưa đo được Ollama" : "Không kết nối được Ollama"}

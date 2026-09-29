@@ -189,6 +189,17 @@ export interface EditScreenProps {
   /** Lỗi ghi, **NGUYÊN VĂN `ApiError.message`** (`"<status>: <detail>"`). `null` = không có. */
   loiGhi?: string | null;
   /**
+   * Gọi khi người dùng bấm `duyệt` ở THANH TRÊN của màn (D2).
+   *
+   * ⚠️ Màn này KHÔNG tự gọi API (xem khối đầu tệp): nó chỉ BÁO, còn `App` mới gọi
+   * `endpoints.approveTranscript` rồi **ĐỌC LẠI** bản ghi — `status` là dữ liệu của MÁY CHỦ.
+   */
+  onDuyet?: () => void;
+  /** Lời gọi duyệt đang bay — trạng thái phải NÓI RA bằng CHỮ (`đang duyệt…`), không chỉ đổi màu. */
+  dangDuyet?: boolean;
+  /** Lỗi duyệt, **NGUYÊN VĂN `ApiError.message`** (`"<status>: <detail>"`). `null` = không có. */
+  loiDuyet?: string | null;
+  /**
    * Câu nói ra rằng BẢN DỊCH ĐÃ LỖI THỜI so với bản ghi — do `App` QUYẾT và truyền CÂU xuống
    * (cùng khuôn `Transport.xuatCho`): truyền `stale` xuống sẽ để màn này quyết lần thứ hai.
    */
@@ -214,6 +225,9 @@ export function EditScreen({
   onNudge,
   dangLuu = false,
   loiGhi = null,
+  onDuyet,
+  dangDuyet = false,
+  loiDuyet = null,
   cauLoiThoi = null,
   scrollTop = 0,
   viewportH = VIEWPORT_H,
@@ -264,6 +278,36 @@ export function EditScreen({
           {cauLoiThoi}
         </p>
       )}
+      {/* ⚠️ THANH TRÊN (D2) LÀ **CON THỨ HAI** CỦA `.ed` — một lưới nay khai BA track
+          (`auto auto 1fr`), và MỖI con khai `grid-row` tường minh trong `app.css` (thanh này ở
+          track 2, khung danh sách lùi xuống track 3). Thêm một con vào một lưới có số track cố
+          định là một thay đổi BỐ CỤC (ERRATA #31 mục 1 / #36 mục 3); thiếu `grid-row` thì track
+          `auto` không co lại đúng và khung danh sách mất chỗ cuộn.
+          Nội dung: TRẠNG THÁI BẢN GHI (dữ liệu của máy chủ, `Transcript.status`) + nút `duyệt` +
+          hai câu NÓI RA trạng thái của chính lời gọi (`đang duyệt…` / lỗi nguyên văn). */}
+      <div className="ed__thanh">
+        <span className="ed__trang-thai" data-testid="trang-thai-ban-ghi">
+          {`trạng thái: ${transcript.status}`}
+        </span>
+        <button
+          type="button"
+          className="lenh lenh--duyet"
+          data-testid="duyet-ban-ghi"
+          onClick={() => onDuyet?.()}
+        >
+          duyệt
+        </button>
+        {dangDuyet ? (
+          <span className="lenh__tin" data-testid="dang-duyet">
+            đang duyệt…
+          </span>
+        ) : null}
+        {loiDuyet === null ? null : (
+          <span className="lenh__tin" data-testid="loi-duyet">
+            {loiDuyet}
+          </span>
+        )}
+      </div>
       <div
         className="ed__khung"
         onScroll={(suKien) => setCuon(suKien.currentTarget.scrollTop)}
