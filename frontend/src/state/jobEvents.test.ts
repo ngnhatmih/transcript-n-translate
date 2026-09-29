@@ -2,7 +2,9 @@
  * Test cua `applyJobEvent` — ham THUAN: khong DOM, khong React.
  *
  * Vi sao tach khoi `useJobStream.ts`: tep do import `react`, ma `react` la CJS
- * trong repo nay, nen hook chi duoc Playwright phu o Task 12 (xem brief Task 3).
+ * trong repo nay, nen hook chi duoc phu o TANG CHROME THAT (`frontend/e2e/`, Task 12 —
+ * ⚠️ ĐÍNH CHÍNH Minor m3 của vòng sửa 1: câu cũ ghi *"Playwright ở Task 12"*, nhưng
+ * **Playwright KHÔNG còn tồn tại trong repo**; tầng Chrome nay dùng **CDP thuần**).
  * Logic ghep su kien vao `Map` thi khong can React, va no la cho DE SAI: su kien
  * `id: null`, job chua co trong map, va map goc bi sua tai cho.
  *

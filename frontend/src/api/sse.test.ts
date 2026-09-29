@@ -2,7 +2,10 @@
  * Test cua parser SSE — ham THUAN: khong DOM, khong mang, khong React.
  *
  * Vi sao tach khoi `useJobStream.ts`: tep do import `react`, ma `react` la CJS
- * trong repo nay, nen no chi duoc Playwright phu o Task 12. Parser thi khong can
+ * trong repo nay, nen no chi duoc phu o TANG CHROME THAT (`frontend/e2e/`, Task 12 —
+ * ⚠️ ĐÍNH CHÍNH Minor m3 của vòng sửa 1: câu cũ ghi *"Playwright ở Task 12"*, nhưng
+ * **Playwright KHÔNG còn tồn tại trong repo** — T5 của Task 12 đã bỏ script chết đó, và
+ * tầng Chrome nay dùng **CDP thuần**). Parser thi khong can
  * gi ngoai `JSON.parse`, nen no duoc ghim o day bang `node --test` (Vitest khong
  * dung duoc trong sandbox nay — xem ERRATA trong plan).
  *
