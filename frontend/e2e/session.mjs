@@ -16,8 +16,8 @@
  * 2. **KHONG BAO GIO doi cong dev-server** — `3100` VAN CUNG: backend chi whitelist CORS
  *    `http://localhost:3100` / `http://127.0.0.1:3100`, nen doi cong la hong CORS, ma sua CORS thi
  *    phai cham `backend/` (bi cam trong task frontend).
- * 3. **DB + media o scratch NGOAI repo** (`_seed-e2e/` canh repo) ⇒ chay xong xoa sach, khong lam
- *    ban `data/app.db` cua repo.
+ * 3. **DB + media o scratch NGOAI repo** (`_seed-e2e/` canh repo, doi duoc bang
+ *    `PHUDE_E2E_SCRATCH`) ⇒ chay xong xoa sach, khong lam ban `data/app.db` cua repo.
  *
  * ## Don dep
  *
@@ -43,7 +43,25 @@ const BACKEND_PORT = Number(process.env.PHUDE_E2E_PORT ?? 8631);
 //  (b) `seed.py` chép vào đây tính `BACKEND = Path(__file__).parents[1]/"phu-de-lab"/"backend"`
 //      ⇒ `parents[1]` PHẢI là gốc workspace. Để trong repo thì nó thành `<repo>/phu-de-lab/backend`.
 //  Hệ quả kèm theo (đúng ý định): `path.dirname(SCRATCH)` = gốc workspace = nơi `_seed/` thật sự nằm.
-const SCRATCH = path.join(path.dirname(REPO_DIR), "_seed-e2e");
+// 🔴 Vòng sửa 1 (Minor m4): chỗ ghi scratch nay ĐỔI ĐƯỢC bằng `PHUDE_E2E_SCRATCH` (đúng khuôn
+// `PHUDE_E2E_PORT`/`PHUDE_CDP_PORT` đã có) — vừa cho phép hai lượt chạy SONG SONG (trước đây mọi
+// lượt ghi CÙNG một `_seed-e2e`, nên `rmSync` ở `finally` của lượt này xoá scratch của lượt kia),
+// vừa cho phép kiểm chốt chặn dưới đây **không cần** một bản sao của tệp này.
+// ⚠️ Ràng buộc giữ nguyên dù đổi chỗ: `path.dirname(SCRATCH)` PHẢI là gốc workspace (vì (b)).
+const SCRATCH = process.env.PHUDE_E2E_SCRATCH !== undefined
+  && process.env.PHUDE_E2E_SCRATCH !== ""
+  ? path.resolve(process.env.PHUDE_E2E_SCRATCH)
+  : path.join(path.dirname(REPO_DIR), "_seed-e2e");
+const REPO_RESOLVED = path.resolve(REPO_DIR);
+/**
+ * Scratch có nằm TRONG repo không.
+ *
+ * ⚠️ Vòng sửa 1 (Minor m4): bản cũ là `SCRATCH.startsWith(path.resolve(REPO_DIR))` — một phép so
+ * **TIỀN TỐ CHUỖI**, nên một thư mục **ANH EM** tên `<repo>-e2e` (KHÔNG nằm trong repo) bị **từ
+ * chối oan** (reviewer đo được: CA 3 bắn nhầm). Đúng phải là "bằng chính nó" HOẶC "nằm dưới nó
+ * theo đúng một dấu phân cách đường dẫn".
+ */
+const trongRepo = SCRATCH === REPO_RESOLVED || SCRATCH.startsWith(REPO_RESOLVED + path.sep);
 const BACKEND_DIR = path.join(REPO_DIR, "backend");
 const VENV_PYTHON = process.platform === "win32"
   ? path.join(BACKEND_DIR, ".venv", "Scripts", "python.exe")
@@ -104,7 +122,9 @@ function gieo() {
   if (!existsSync(seedGoc)) {
     throw new Error(
       `khong thay ${seedGoc}. Thu muc _seed/ la tai san NGOAI repo (ERRATA #42 muc 4) — `
-      + "dung xoa no, va dung sinh ban sao thu hai cua cong thuc gieo.",
+      + "dung xoa no, va dung sinh ban sao thu hai cua cong thuc gieo. "
+      + "⚠️ `PHUDE_E2E_SCRATCH` phai tro toi mot thu muc CANH goc workspace (vi `seed.py` tinh "
+      + "`parents[1]`), khong phai mot cho tuy y.",
     );
   }
   writeFileSync(path.join(SCRATCH, "seed.py"), readFileSync(seedGoc), "utf8");
@@ -129,11 +149,11 @@ async function main() {
       + "⚠️ Chrome CHI mo duoc voi quyen rong (ERRATA #40).",
     );
   }
-  if (SCRATCH.startsWith(path.resolve(REPO_DIR))) {
+  if (trongRepo) {
     throw new Error(
-      `scratch ${SCRATCH} nam TRONG repo ${REPO_DIR} — trai luat (xem chu thich o \`SCRATCH\`): `
+      `scratch ${SCRATCH} nam TRONG repo ${REPO_RESOLVED} — trai luat (xem chu thich o \`SCRATCH\`): `
       + "(a) lam ban cay repo; (b) `seed.py` chep vao do tinh `parents[1]/\"phu-de-lab\"/\"backend\"` "
-      + "nen se tro SAI backend. Sua `SCRATCH` cho dung thay vi bo qua loi nay.",
+      + "nen se tro SAI backend. Sua `SCRATCH` (hoac `PHUDE_E2E_SCRATCH`) cho dung thay vi bo qua loi nay.",
     );
   }
   if (congDangMo(DEV_PORT)) {
