@@ -2,20 +2,22 @@
   "url": "http://127.0.0.1:3100",
   "width": 1440,
   "height": 900,
-  "ghiChu": "§11.4 + §12.5 do bang BAN PHIM THAT (Input.dispatchKeyEvent). Moi buoc `key` deu doc lai DAU DO `keydown` da cai tren trang ⇒ phan biet 'su kien KHONG TOI' voi 'app KHONG XU LY' (ERRATA #47 muc 5). Canh bao hinh dang: `?` gui KEM Shift; `Enter` gui kem PHA KY TU text='\\r'.",
+  "ghiChu": "§11.4 + §12.5 do bang BAN PHIM THAT (Input.dispatchKeyEvent). Moi buoc `key` doc lai DAU DO `keydown` da cai tren trang ⇒ phan biet 'su kien KHONG TOI' voi 'app KHONG XU LY' (ERRATA #47 muc 5), va mot buoc `key` ma dau do RONG lam luot chay DO (I2, vong sua 1). Canh bao hinh dang: `?` gui KEM Shift; `Enter` gui kem PHA KY TU text='\\r'.",
   "steps": [
     { "do": "nav", "url": "http://127.0.0.1:3100" },
     { "do": "waitText", "text": "seed-kenh-mot.wav", "timeout": 30000 },
     { "do": "clickChu", "chon": ".ch__item", "text": "seed-kenh-mot.wav" },
     { "do": "waitText", "text": "今天我們來說一個很重要的問題。", "timeout": 30000 },
-    { "do": "eval", "js": "'dau do da cai: ' + (window.__t12DauDo ? 'co' : 'KHONG')", "log": "dau do keydown" },
+    { "do": "eval", "js": "'dau do da cai: ' + (window.__t12DauDoGan === true ? 'co' : 'KHONG') + ' / mang: ' + (Array.isArray(window.__t12DauDo) ? 'co' : 'KHONG')", "log": "dau do keydown" },
+    { "do": "khangDinh", "js": "window.__t12DauDoGan === true && Array.isArray(window.__t12DauDo)", "log": "I2-1 TIEN DE: dau do keydown da CAI tren tai lieu nay (sau `nav`)", "thongDiep": "I2: dau do keydown khong duoc cai sau `nav` ⇒ moi ket luan 'phim khong chay' o luot nay la ARTIFACT" },
 
     { "do": "eval", "js": "document.body.focus(), document.activeElement ? document.activeElement.tagName : 'khong co'", "log": "§11.4 truoc: tieu diem" },
     { "do": "key", "key": "?", "shift": true },
     { "do": "waitFor", "selector": "[data-testid=dong-bang-phim]", "timeout": 10000 },
     { "do": "eval", "js": "document.querySelectorAll('.bp__dong').length", "log": "§11.4 so hang" },
     { "do": "eval", "js": "[...document.querySelectorAll('.bp__dong')].some((li) => (li.getAttribute('data-testid') === 'phim-['))", "log": "§11.4 co hang `[`" },
-    { "do": "eval", "js": "[...document.querySelectorAll('.bp__dong')].filter((li) => (li.textContent || '').includes('CHƯA NỐI')).map((li) => li.getAttribute('data-testid')).join(',')", "log": "§11.4 cac hang CHUA NOI" },
+    { "do": "eval", "js": "[...document.querySelectorAll('.bp__dong')].filter((li) => (li.textContent || '').toLowerCase().includes('chưa nối')).map((li) => li.getAttribute('data-testid')).join(',')", "log": "§11.4 cac hang CHUA NOI" },
+    { "do": "khangDinh", "js": "[...document.querySelectorAll('.bp__dong')].filter((li) => (li.textContent || '').toLowerCase().includes('chưa nối')).map((li) => li.getAttribute('data-testid')).sort().join(',') === 'phim-Ctrl+Enter,phim-M,phim-S'", "log": "§11.4 + m1: dau do 'chua noi' phai ra dung BA hang", "thongDiep": "m1/§11.4: dau do 'chua noi' lech ky vong (ban cu so CHU HOA 'CHƯA NỐI' trong khi DOM in chu thuong ⇒ luon ra rong)" },
     { "do": "shot", "name": "20-bang-phim-11-4" },
 
     { "do": "key", "key": "Escape" },
@@ -63,6 +65,6 @@
     { "do": "key", "key": "1", "ctrl": true },
     { "do": "eval", "js": "document.querySelector('.ed__khung') === null ? 'khong o Bien tap' : 'DANG o Bien tap'", "log": "Ctrl+1 tro ve" },
 
-    { "do": "eval", "js": "JSON.stringify((window.__t12DauDo || []).map((e) => e.key + (e.ctrl ? '|ctrl' : '') + (e.shift ? '|shift' : '') + (e.defaultPrevented ? '|pd' : '')))", "log": "DAU DO: hinh dang that cua cac phim vua gui" }
+    { "do": "eval", "js": "JSON.stringify((window.__t12DauDo || []).map((e) => e.key + (e.ctrl ? '|ctrl' : '') + (e.shift ? '|shift' : '') + (e.defaultPrevented ? '|pd' : '')))", "log": "DAU DO cua PHIM CUOI (`Ctrl+1`) — moi buoc `key` da ghi dau do cua CHINH NO trong `ket-qua.json` (I2: mot buoc `key` ma dau do rong lam luot chay DO)" }
   ]
 }

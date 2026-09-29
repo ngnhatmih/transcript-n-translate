@@ -21,7 +21,10 @@
  *    người dùng).
  * 2. **Luôn cài ĐẦU DÒ `keydown` trên trang** trước khi phát phím ⇒ phân biệt *"sự kiện KHÔNG
  *    TỚI"* với *"app KHÔNG XỬ LÝ"*. Thiếu đầu dò thì mọi kết luận "phím không chạy" đều là
- *    **artifact**.
+ *    **artifact**. ⚠️ **Vòng sửa 1 (`I2`) đã sửa đúng chỗ này**: bản cũ cài đầu dò **một lần TRƯỚC
+ *    bước `nav` đầu tiên** ⇒ điều hướng xoá nó, và `xoaDauDo` lại gắn mảng rỗng KHÔNG listener
+ *    ⇒ đầu dò **không hề tồn tại lúc chạy**. Nay đầu dò được cài **sau mỗi `nav`** và **trước mỗi
+ *    phím**, và một bước `key` đọc ra đầu dò **rỗng** làm **lượt đó ĐỎ** (không còn im lặng).
  * 3. **Phím phải có HÌNH DẠNG NGƯỜI THẬT**: `?` **kèm `Shift`**; `Enter` **kèm pha ký tự**
  *    (`text: "\r"`). Hai lần trong một lượt, "phím không chạy" là do **phép tiêm** (ERRATA #47
  *    mục 5).
@@ -124,24 +127,42 @@ export async function cho(driver, { chon, chu, timeout = 20_000 }) {
 }
 
 /**
- * Cài ĐẦU DÒ `keydown` trên trang (bọc một lần, idempotent).
+ * Cài ĐẦU DÒ `keydown` trên trang (bọc một lần, idempotent TRONG CÙNG một tài liệu).
  *
  * 🔴 Đây là thứ DUY NHẤT phân biệt *"sự kiện không tới"* với *"app không xử lý"* (ERRATA #47 mục 5).
+ *
+ * ⚠️ **VÒNG SỬA 1 (I2) — BẢN CŨ KHÔNG HỀ CÀI ĐẦU DÒ.** Hai lỗi, cả hai đo được:
+ *  1. `chayKeHoach` gọi `caiDauDo` **TRƯỚC** bước `nav` đầu tiên ⇒ điều hướng tạo **tài liệu mới**
+ *     và xoá luôn `window.__t12DauDo`; không ai cài lại ⇒ log của chính phiên chính ghi
+ *     `"dau do da cai: KHONG"` và `dauDo: []` cho **cả 6** phím.
+ *  2. `xoaDauDo` **TẠO** `window.__t12DauDo = []` mà **KHÔNG** gắn listener ⇒ dù có cài lại thì mỗi
+ *     bước `key` (nó gọi `xoaDauDo` trước khi phát phím) vẫn xoá listener đã gắn.
+ * ⇒ Nay: hàm cài nằm **TRÊN TRANG** (`__t12CaiDauDo`) và **idempotent theo cờ `__t12DauDoGan`**;
+ * `xoaDauDo` xoá mảng **rồi CÀI LẠI**; `chayKeHoach` cài lại **sau mỗi `nav`** và **trước mỗi phím**.
+ * Kèm theo: một bước `key` mà đầu đò **rỗng** là một lượt **ĐỎ** (xem `chayKeHoach`), không còn là
+ * một con số vô nghĩa được ghi ra rồi bỏ qua.
  */
 export async function caiDauDo(driver) {
-  await driver.goi(`(() => {
-    if (window.__t12DauDo) return "da co";
-    window.__t12DauDo = [];
-    document.addEventListener("keydown", (e) => {
-      window.__t12DauDo.push({
-        key: e.key, code: e.code, shift: e.shiftKey, ctrl: e.ctrlKey, alt: e.altKey,
-        defaultPrevented: e.defaultPrevented,
-        dich: (e.target && (e.target.tagName || "")) + "#" + (e.target && (e.target.id || "")),
-        luc: Date.now(),
-      });
-    }, true);
-    return "da cai";
+  const kq = await driver.goi(`(() => {
+    if (typeof window.__t12CaiDauDo !== "function") {
+      window.__t12CaiDauDo = () => {
+        if (window.__t12DauDoGan === true) return "da gan";
+        window.__t12DauDoGan = true;
+        if (!Array.isArray(window.__t12DauDo)) window.__t12DauDo = [];
+        document.addEventListener("keydown", (e) => {
+          window.__t12DauDo.push({
+            key: e.key, code: e.code, shift: e.shiftKey, ctrl: e.ctrlKey, alt: e.altKey,
+            defaultPrevented: e.defaultPrevented,
+            dich: (e.target && (e.target.tagName || "")) + "#" + (e.target && (e.target.id || "")),
+            luc: Date.now(),
+          });
+        }, true);
+        return "da cai";
+      };
+    }
+    return window.__t12CaiDauDo();
   })()`);
+  return kq.loi ?? kq.giaTri;
 }
 
 /** Đọc đầu đò. */
@@ -150,8 +171,39 @@ export async function docDauDo(driver) {
   return JSON.parse(kq.giaTri ?? "[]");
 }
 
+/**
+ * Xoá mảng sự kiện **VÀ BẢO ĐẢM** đầu đò đang gắn (idempotent ⇒ **đúng MỘT** listener).
+ *
+ * ⚠️ Bản cũ chỉ gán `window.__t12DauDo = []` — nó **xoá luôn** listener đã gắn ở lượt trước (nếu có),
+ * nên mọi bước `key` đều đọc ra `[]` (I2). Nay việc xoá **không** được phép tháo đầu đò.
+ * ⚠️ Và nó cũng **KHÔNG** được hạ cờ `__t12DauDoGan`: đo được một lần vap — hạ cờ rồi cài lại làm
+ * **chồng listener** (2 sự kiện cho `?`, 3 cho `Escape` trong cùng một bước), tức một phép đếm
+ * "đúng một sự kiện" sau này sẽ sai. Một tài liệu = một listener.
+ */
 export async function xoaDauDo(driver) {
   await driver.goi("(window.__t12DauDo = []), 'da xoa'");
+  return caiDauDo(driver);
+}
+
+/**
+ * Chờ TÀI LIỆU MỚI sẵn sàng sau `Page.navigate`.
+ *
+ * ⚠️ Cần thiết vì `Page.navigate` trả về **trước** khi tài liệu mới commit: một `Runtime.evaluate`
+ * ngay sau đó có thể chạy trong tài liệu CŨ, và mọi thứ cài vào đó bị xoá khi tài liệu mới hiện ra.
+ */
+export async function choTaiLieu(driver, { timeout = 20_000, url = null } = {}) {
+  const het = Date.now() + timeout;
+  for (;;) {
+    const kq = await driver.goi(
+      "(() => ({ san: document.readyState, href: location.href, co: document.body !== null }))()",
+    );
+    const v = kq.giaTri;
+    if (v && v.co === true && v.san !== "loading" && (url === null || v.href.startsWith(url))) {
+      return v;
+    }
+    if (Date.now() > het) return null;
+    await sleep(100);
+  }
 }
 
 /**
@@ -247,6 +299,25 @@ export async function chayKeHoach(driver, plan, { outDir }) {
     switch (buoc.do) {
       case "nav": {
         await driver.send("Page.navigate", { url: buoc.url });
+        // 🔴 I2: tài liệu MỚI xoá mọi thứ đã cài trên `window` ⇒ phải chờ nó commit RỒI cài lại
+        // đầu đò `keydown`. Bản cũ cài một lần TRƯỚC vòng lặp nên đầu đò không tồn tại lúc chạy.
+        const tai = await choTaiLieu(driver, { url: buoc.url });
+        const trangThai = await caiDauDo(driver);
+        ghi(buoc, { url: buoc.url, taiLieu: tai, dauDo: trangThai });
+        break;
+      }
+      case "khangDinh": {
+        // 🔴 I2: `assert`, KHÔNG phải `log`. Một tiền đề sai phải làm LƯỢT ĐÓ ĐỎ (exit 1) —
+        // nếu không, mọi con số đo được sau nó là số vô nghĩa mà không ai biết.
+        const kq = await driver.goi(buoc.js);
+        const dung = kq.giaTri === true;
+        ghi(buoc, { nhan: buoc.log ?? buoc.thongDiep ?? buoc.js.slice(0, 60), dung, giaTri: kq.loi ?? kq.giaTri });
+        if (!dung) {
+          throw new Error(
+            `KHANG DINH TIEN DE THAT BAI: ${buoc.thongDiep ?? buoc.log ?? buoc.js} `
+            + `(do duoc: ${JSON.stringify(kq.loi ?? kq.giaTri)})`,
+          );
+        }
         break;
       }
       case "waitFor": {
@@ -303,6 +374,8 @@ export async function chayKeHoach(driver, plan, { outDir }) {
         break;
       }
       case "key": {
+        // 🔴 I2: cài lại đầu đò NGAY TRƯỚC khi phát phím (idempotent trong cùng tài liệu) — kể cả
+        // khi kế hoạch không có bước `nav` nào sau lần điều hướng cuối.
         await xoaDauDo(driver);
         const hd = await phim(driver, buoc.key, {
           shift: buoc.shift, ctrl: buoc.ctrl, alt: buoc.alt,
@@ -310,6 +383,16 @@ export async function chayKeHoach(driver, plan, { outDir }) {
         await sleep(buoc.sauMs ?? 150);
         const dau = await docDauDo(driver);
         ghi(buoc, { ...hd, dauDo: dau });
+        // 🔴 I2: ĐẦU ĐÒ RỖNG = LƯỢT ĐỎ. Không có khẳng định này thì một đầu đò chết im lặng cho ra
+        // `dauDo: []` và mọi kết luận "app không xử lý phím" đều là ARTIFACT (ERRATA #47 mục 5).
+        // `choDauDo: false` chỉ dùng cho phím mà kế hoạch KHAI RÕ là không tới được trang.
+        if (dau.length === 0 && buoc.choDauDo !== false) {
+          throw new Error(
+            `DAU DO keydown RONG sau khi phát phím ${JSON.stringify(buoc.key)}: sự kiện KHÔNG tới `
+            + "trang (hoặc đầu đò không được cài) ⇒ mọi kết luận \"app không xử lý\" ở lượt này là "
+            + "ARTIFACT. Xem ERRATA #47 mục 5.",
+          );
+        }
         break;
       }
       case "eval": {

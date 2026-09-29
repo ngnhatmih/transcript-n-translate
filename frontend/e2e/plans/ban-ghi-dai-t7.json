@@ -2,40 +2,54 @@
   "url": "http://127.0.0.1:3100",
   "width": 1440,
   "height": 900,
-  "ghiChu": "T7 — do CAI GIA cua ban va D4: `currentSegment` duoc them vao tap GHIM cua danh sach ao hoa (EditScreen.windowFor). Khi hai chi so GHIM xa nhau, cua so phai render TOAN BO khoang giua. Ke hoach nay do: so hang CO MAT trong DOM, va thoi gian phan hoi khi moc cach xa ~500 doan. Chay voi PHUDE_E2E_DOAN=600 (mac dinh).",
+  "ghiChu": "T7 — (a) GHIM C1 trong CHROME THAT: `.ed__khung` PHAI la khung cuon that, va mot hang NGOAI cua so ban dau PHAI tro thanh CO MAT trong DOM sau khi cuon; (b) do CAI GIA CO TRAN cua ban va D4 bang PHIM `n` THAT (gieo `suspect` o i=1 va i=481), kem KHANG DINH TIEN DE de luot sau DO thay vi lang le cho so vo nghia. Chay voi PHUDE_E2E_DOAN=600 (mac dinh). Moi buoc `khangDinh` that bai ⇒ luot chay EXIT=1.",
   "steps": [
     { "do": "nav", "url": "http://127.0.0.1:3100" },
     { "do": "waitText", "text": "ban-ghi-dai-600.wav", "timeout": 30000 },
-
     { "do": "clickChu", "chon": ".ch__item", "text": "ban-ghi-dai-600.wav" },
     { "do": "waitText", "text": "doan 1", "timeout": 30000 },
 
-    { "do": "eval", "js": "document.querySelectorAll('.ed__item').length", "log": "T7-A so hang trong DOM khi CHUA ghim gi (ky vong ~ viewportH/rowH + 2*overscan)" },
-    { "do": "eval", "js": "(() => { const k = document.querySelector('.ed__khung'); return JSON.stringify({ clientHeight: k ? k.clientHeight : null, scrollHeight: k ? k.scrollHeight : null, ROW_H: 44, VIEWPORT_H: 480 }); })()", "log": "T7-A kich thuoc khung cuon" },
+    { "do": "eval", "js": "(() => { const thu = ['.shell', '.shell__mid', '.shell__work', '.ed', '.ed__khung']; const ra = {}; for (const t of thu) { const e = document.querySelector(t); if (e === null) { ra[t] = 'khong thay'; continue; } e.scrollTop = 5000; ra[t] = e.scrollTop; } window.scrollTo(0, 5000); ra.window_scrollY = window.scrollY; window.scrollTo(0, 0); return JSON.stringify(ra); })()", "log": "C1 ung vien nhan `scrollTop = 5000` (chi `.ed__khung` duoc nhan)" },
+    { "do": "eval", "js": "(() => { const k = document.querySelector('.ed__khung'); return JSON.stringify({ clientHeight: k ? k.clientHeight : null, scrollHeight: k ? k.scrollHeight : null, html_scrollHeight: document.documentElement.scrollHeight, innerHeight: window.innerHeight, soHang: document.querySelectorAll('.ed__item').length, dau: document.querySelector('.ed__item') ? document.querySelector('.ed__item').getAttribute('data-i') : null }); })()", "log": "C1 kich thuoc khung cuon + chieu cao tai lieu TRUOC khi cuon" },
 
-    { "do": "eval", "js": "(() => { const b = document.querySelector('.ed__chu'); if (b === null) return 'khong thay'; b.click(); return 'da mo o sua dong dau'; })()", "log": "T7-B mo o sua o DONG DAU (editingSegment = 1)" },
-    { "do": "waitFor", "selector": "[data-testid=o-sua]", "timeout": 10000 },
-    { "do": "eval", "js": "document.querySelectorAll('.ed__item').length", "log": "T7-B so hang khi ghim 1 dong (ky vong ~22)" },
-    { "do": "shot", "name": "10-t7-ghim-mot-dong" },
+    { "do": "eval", "js": "(() => { const m = document.querySelector('.shell__mid'), w = document.querySelector('.shell__work'), k = document.querySelector('.ed__khung'); const sm = getComputedStyle(m), sw = getComputedStyle(w); return JSON.stringify({ mid_overflowY: sm.overflowY, mid_rows: sm.gridTemplateRows, mid_h: m.clientHeight, work_overflowY: sw.overflowY, work_minHeight: sw.minHeight, work_h: w.clientHeight, khung_h: k.clientHeight, khung_scrollH: k.scrollHeight, html_scrollH: document.documentElement.scrollHeight, innerH: window.innerHeight }); })()", "log": "C1 DO COMPUTED STYLE: `.shell__mid`/`.shell__work` (khai bao nao THAT SU chan phan tran)" },
 
-    { "do": "eval", "js": "(() => { const k = document.querySelector('.ed__khung'); k.scrollTop = 44 * 480; return 'da cuon toi ~doan 481'; })()", "log": "T7-C cuon xuong ~doan 481 (moc dang doc doi theo su kien scroll)" },
-    { "do": "cho", "chon": "[data-i]", "timeout": 5000 },
-    { "do": "eval", "js": "document.querySelectorAll('.ed__item').length", "log": "T7-C so hang sau khi cuon (chua co ghim thu hai)" },
+    { "do": "khangDinh", "js": "document.querySelector('.ed__khung') !== null", "log": "C1-1 khung danh sach ton tai va dung TEN LOP trong DOM", "thongDiep": "C1: khong thay `.ed__khung` trong DOM — luat CSS cua khung cuon khong con dinh vao phan tu nao" },
+    { "do": "khangDinh", "js": "window.__t12DauDoGan === true", "log": "I2-1 dau do keydown DA CAI tren tai lieu hien tai", "thongDiep": "I2: dau do keydown KHONG duoc cai tren tai lieu dang chay — moi ket luan ve phim o luot nay la artifact" },
 
-    { "do": "eval", "js": "(() => { const k = document.querySelector('.ed__khung'); const cu = k.scrollTop; const ds = [...document.querySelectorAll('.ed__chu')]; const cuoi = ds[ds.length - 1]; if (cuoi === undefined) return 'khong thay dong nao'; const t0 = performance.now(); cuoi.click(); requestAnimationFrame(() => requestAnimationFrame(() => { window.__t7 = { cu, t1: performance.now() - t0, soHang: document.querySelectorAll('.ed__item').length }; })); return 'da bam dong cuoi trong DOM (truoc khi render lai)'; })()", "log": "T7-D bam mot dong XA (doan ~481+) khi dang sua doan 1" },
-    { "do": "cho", "chon": "[data-testid=o-sua]", "timeout": 5000 },
-    { "do": "eval", "js": "JSON.stringify(window.__t7 ?? null)", "log": "T7-D thoi gian phan hoi (2 khung hinh) + so hang" },
-    { "do": "eval", "js": "document.querySelectorAll('.ed__item').length", "log": "T7-D SO HANG CO MAT TRONG DOM khi hai moc CACH XA (~480 doan) — day la CAI GIA cua D4" },
-    { "do": "eval", "js": "(() => { const d = document.querySelector('.ed__dem-dau'); return d === null ? 'khong thay' : getComputedStyle(d).height; })()", "log": "T7-D chieu cao dem dau (start * rowH)" },
-    { "do": "shot", "name": "11-t7-hai-moc-cach-xa" },
+    { "do": "eval", "js": "(() => { const k = document.querySelector('.ed__khung'); k.scrollTop = 44 * 480; return JSON.stringify({ dat: 44 * 480, docLai: k.scrollTop }); })()", "log": "C1 cuon khung xuong ~dong 480 (44 * 480 px)" },
+    { "do": "khangDinh", "js": "document.querySelector('.ed__khung').scrollTop > 0", "log": "C1-2 `.ed__khung` NHAN `scrollTop ≠ 0` — no la khung cuon THAT", "thongDiep": "C1 CHUA CHET: `.ed__khung` khong nhan `scrollTop` (do la khung cuon gia; cuon la MAN HINH TRANG)" },
+    { "do": "waitFor", "selector": "[data-i=\"481\"]", "timeout": 10000 },
+    { "do": "khangDinh", "js": "document.querySelector('[data-i=\"481\"]') !== null", "log": "C1-3 hang NGOAI cua so ban dau (i=481) DA CO MAT trong DOM sau khi cuon", "thongDiep": "C1 CHUA CHET: cuon khung khong lam hang ngoai cua so vao DOM (ao hoa khong chay)" },
+    { "do": "khangDinh", "js": "document.querySelector('[data-i=\"1\"]') === null", "log": "C1-4 hang DAU cua danh sach da RA khoi cua so (khung cuon THAT SU cat)", "thongDiep": "C1: cua so render khong troi theo vi tri cuon" },
+    { "do": "khangDinh", "js": "document.documentElement.scrollHeight <= window.innerHeight + 2", "log": "C1-5 TAI LIEU khong con cao hon khung nhin (window KHONG con la khung cuon)", "thongDiep": "C1: `html.scrollHeight` van lon hon khung nhin ⇒ cua so van la thu cuon duoc, va cuon no la man hinh trang" },
+    { "do": "shot", "name": "10-c1-khung-cuon-that" },
 
-    { "do": "eval", "js": "(() => { const k = document.querySelector('.ed__khung'); const t0 = performance.now(); k.scrollTop = k.scrollHeight; return 'da cuon xuong day'; })()", "log": "T7-E cuon xuong day (khong doi ghim)" },
-    { "do": "cho", "chon": "[data-i]", "timeout": 5000 },
-    { "do": "eval", "js": "document.querySelectorAll('.ed__item').length", "log": "T7-E so hang o day danh sach" },
-    { "do": "shot", "name": "12-t7-cuon-day" },
+    { "do": "eval", "js": "(() => { document.querySelector('.ed__khung').scrollTop = 0; return 'da cuon ve dau'; })()", "log": "T7 dua khung ve dau danh sach truoc khi do bang PHIM" },
+    { "do": "waitFor", "selector": "[data-i=\"1\"]", "timeout": 10000 },
+    { "do": "khangDinh", "js": "document.querySelector('[data-i=\"481\"]') === null", "log": "T7 tien de: cua so da ve DAU danh sach", "thongDiep": "T7: khung chua ve dau danh sach ⇒ phep do sau do khong bat dau tu trang thai da khai" },
 
-    { "do": "eval", "js": "(() => { const ds = [...document.querySelectorAll('.ed__item')]; return JSON.stringify({ dau: ds[0] ? ds[0].getAttribute('data-i') : null, cuoi: ds[ds.length - 1] ? ds[ds.length - 1].getAttribute('data-i') : null, so: ds.length }); })()", "log": "T7-F khoang `data-i` THAT trong DOM" },
-    { "do": "eval", "js": "document.querySelectorAll('.ed__item.is-current').length", "log": "T7-F so dong dang duoc chon co mat trong DOM (menh de DOM cua D4)" },
-    { "do": "eval", "js": "document.querySelectorAll('.ed__item.is-editing').length", "log": "T7-F so dong dang sua co mat trong DOM" }
+    { "do": "key", "key": "n" },
+    { "do": "waitFor", "selector": ".ed__item.is-current", "timeout": 10000 },
+    { "do": "khangDinh", "js": "(() => { const e = document.querySelector('.ed__item.is-current'); return e !== null && e.getAttribute('data-i') === '1'; })()", "log": "I4e TIEN DE: `n` lan 1 ⇒ dong nghi ngo DAU (i=1) dang duoc chon", "thongDiep": "I4e: `n` khong chon duoc dong nghi ngo i=1 ⇒ gieo `suspect` sai hoac phim khong toi app; moi so sau day vo nghia" },
+    { "do": "eval", "js": "(() => { const k = document.querySelector('.ed__khung'); return JSON.stringify({ scrollTop: k.scrollTop, soHang: document.querySelectorAll('.ed__item').length }); })()", "log": "T7 TRONG cua so: so hang + vi tri cuon (khong duoc doi)" },
+    { "do": "khangDinh", "js": "document.querySelector('.ed__khung').scrollTop === 0 && document.querySelectorAll('.ed__item').length <= 48", "log": "T7-1 TRONG TRAN ⇒ so hang <= cua so + TRAN (48), va khung DUNG YEN", "thongDiep": "T7: ngoai le cua TRAN — so hang da vuot cua so + TRAN, hoac khung tu cuon khi moc chon con trong tran" },
+    { "do": "shot", "name": "11-t7-trong-tran-giu-nguyen-cho-cuon" },
+
+    { "do": "key", "key": "n" },
+    { "do": "waitFor", "selector": "[data-i=\"481\"]", "timeout": 10000 },
+    { "do": "khangDinh", "js": "(() => { const e = document.querySelector('.ed__item.is-current'); return e !== null && e.getAttribute('data-i') === '481'; })()", "log": "I4e TIEN DE: `n` lan 2 ⇒ i=481 dang duoc chon VA CO MAT trong DOM", "thongDiep": "I4e: sau `n` lan 2, dong i=481 khong phai dong dang chon co mat trong DOM" },
+    { "do": "eval", "js": "(() => { const k = document.querySelector('.ed__khung'); const ds = [...document.querySelectorAll('.ed__item')]; window.__t7 = { chon: (() => { const e = document.querySelector('.ed__item.is-current'); return e === null ? null : e.getAttribute('data-i'); })(), soHang: ds.length, scrollTop: k.scrollTop, dau: ds.length ? ds[0].getAttribute('data-i') : null, cuoi: ds.length ? ds[ds.length - 1].getAttribute('data-i') : null, editing: document.querySelectorAll('.ed__item.is-editing').length }; return JSON.stringify(window.__t7); })()", "log": "T7 NGOAI TRAN: anh chup DOM do duoc (`__t7`) — so hang, vi tri cuon, khoang `data-i` THAT" },
+    { "do": "khangDinh", "js": "window.__t7 !== null", "log": "I4e TIEN DE: `__t7` co gia tri do duoc", "thongDiep": "I4e: buoc do khong chay (`__t7` null) ⇒ luot nay khong do duoc gi" },
+    { "do": "khangDinh", "js": "window.__t7.scrollTop > 0", "log": "T7-2 NGOAI TRAN ⇒ khung DA CUON TOI dong vua chon (duong bu cua ban ghim co tran)", "thongDiep": "T7: moc chon ngoai TRAN ma khung khong cuon ⇒ duong bu cua ban ghim co tran khong chay" },
+    { "do": "khangDinh", "js": "window.__t7.soHang <= 48", "log": "T7-3 GIA CO TRAN: so hang trong DOM <= cua so + TRAN (48), KHONG no theo khoang cach", "thongDiep": "T7: so hang trong DOM no theo khoang cach ⇒ TRAN cua ban ghim D4 khong con tac dung" },
+    { "do": "shot", "name": "12-t7-ngoai-tran-da-cuon-toi-481" },
+
+    { "do": "eval", "js": "(() => { const k = document.querySelector('.ed__khung'); k.scrollTop = k.scrollHeight; return 'da cuon xuong day'; })()", "log": "T7 cuon xuong DAY danh sach" },
+    { "do": "waitFor", "selector": "[data-i=\"578\"]", "timeout": 10000 },
+    { "do": "eval", "js": "(() => { const ds = [...document.querySelectorAll('.ed__item')]; return JSON.stringify({ so: ds.length, dau: ds.length ? ds[0].getAttribute('data-i') : null, cuoi: ds.length ? ds[ds.length - 1].getAttribute('data-i') : null, scrollTop: document.querySelector('.ed__khung').scrollTop }); })()", "log": "T7 day danh sach: khoang `data-i` THAT trong DOM (PHAI cho mot nhip React commit — do duoc: doc NGAY sau khi dat `scrollTop` thi DOM con o cua so CU)" },
+    { "do": "khangDinh", "js": "(() => { const ds = [...document.querySelectorAll('.ed__item')]; const dau = ds.length ? Number(ds[0].getAttribute('data-i')) : 0; return dau >= 560; })()", "log": "T7-4 cuon xuong DAY ⇒ cua so da toi CUOI danh sach (khong con man hinh trang)", "thongDiep": "T7: cuon xuong day ma cua so khong toi cuoi danh sach ⇒ khung khong cuon duoc het (C1 con, hoac tran cat sai)" },
+    { "do": "khangDinh", "js": "document.querySelectorAll('.ed__item').length <= 48", "log": "T7-5 o DAY danh sach so hang van co tran", "thongDiep": "T7: o day danh sach so hang khong con bi chan boi TRAN" },
+    { "do": "shot", "name": "13-t7-cuon-day" }
   ]
 }

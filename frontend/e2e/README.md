@@ -23,6 +23,7 @@ dev-server **3100** (`PHUDE_BACKEND_PORT=8631`) → Chrome headless + CDP **9229
 |---|---|---|
 | `PHUDE_E2E_PORT` | `8631` | Cổng backend của tầng này. **Không bao giờ** là 8620/8621 |
 | `PHUDE_E2E_DOAN` | `600` | Số đoạn của bản ghi DÀI (cho T7) |
+| `PHUDE_E2E_SCRATCH` | `../_seed-e2e` (cạnh repo) | Chỗ ghi DB/media/tán chrome. ⚠️ Phải là một thư mục **cạnh gốc workspace** (vì `seed.py` tính `parents[1]`), và **không** được nằm trong repo. Vòng sửa 1 thêm biến này (Minor m4) để hai lượt chạy **song song** không giẫm nhau |
 | `PHUDE_CDP_PORT` | `9229` | Cổng CDP. **Không dùng 9222** (Chrome của người dùng có thể đang giữ) |
 | `PHUDE_CHROME` | `C:/Program Files/Google/Chrome/Application/chrome.exe` | Đường dẫn `chrome.exe` |
 
@@ -47,6 +48,13 @@ dev-server **3100** (`PHUDE_BACKEND_PORT=8631`) → Chrome headless + CDP **9229
   (ERRATA #47 mục 6: một script cũ đã `location.reload()` tab `x.com` của người dùng).
 - **Luôn cài ĐẦU DÒ `keydown`** trước khi phát phím ⇒ phân biệt *"sự kiện KHÔNG TỚI"* với *"app
   KHÔNG XỬ LÝ"*. Thiếu đầu dò thì mọi kết luận "phím không chạy" là **artifact**.
+  🔴 **Vòng sửa 1 (`I2`) sửa đúng chỗ này:** bản cũ cài đầu dò **một lần TRƯỚC bước `nav` đầu tiên**,
+  nên điều hướng xoá nó, và `xoaDauDo` lại tạo mảng rỗng **không listener** ⇒ đo được `dauDo: []`
+  cho **cả 6** phím trong log của chính phiên chính. Nay: cài **sau mỗi `nav`** và **trước mỗi
+  phím** (một tài liệu = **đúng MỘT** listener, đo được 1 sự kiện/phím), và **một bước `key` đọc ra
+  đầu dò RỖNG làm LƯỢT ĐÓ ĐỎ**.
+- **Bước `khangDinh`** (`{"do":"khangDinh","js":"…","thongDiep":"…"}`) là `assert`, **không** phải
+  `log`: một TIỀN ĐỀ sai làm lượt chạy `EXIT=1` thay vì để lại một con số vô nghĩa.
 - **Phím gửi đúng HÌNH DẠNG NGƯỜI THẬT**: `?` **kèm `Shift`**; `Enter` **kèm pha ký tự**
   (`text: "\r"`). Hai lần trong một lượt, "phím không chạy" là do **phép tiêm** (ERRATA #47 mục 5).
   `phim()` **NÉM LỖI** với phím chưa khai hình dạng — cố ý: một hình dạng đoán mò sẽ bị đọc nhầm
@@ -54,14 +62,16 @@ dev-server **3100** (`PHUDE_BACKEND_PORT=8631`) → Chrome headless + CDP **9229
 - **Chờ theo TÍN HIỆU** (`waitFor`/`waitText`); `timeout` chỉ là **hạn chót** (ERRATA #35 mục 2).
 - **Neo phép CHỜ lấy từ DỮ LIỆU gieo** (`seed-kenh-mot.wav`, `今天我們來說…`, `ban-ghi-dai-600.wav`),
   không từ nhãn UI (ERRATA #42 mục 5).
+- ⚠️ **Đọc DOM NGAY sau khi đặt `scrollTop` là đọc SAI** (đo được ở vòng sửa 1): React commit sau
+  một nhịp, nên DOM còn ở cửa sổ CŨ. Phải `waitFor` hàng mới rồi mới khẳng định.
 
 ## Kế hoạch có sẵn
 
 | Kế hoạch | Việc | Ảnh |
 |---|---|---|
-| `plans/bon-man.json` | Bốn màn + bảng phím §11.4 + hàng đợi `.q*` (đối chứng bản vá `c575192`), computed style + toạ độ thật của `.q__ten`/`.q__ly-do` | `01..08` |
-| `plans/phim-va-12-5.json` | §11.4 + §12.5 bằng **bàn phím thật**, kèm đầu đò `keydown` cho từng phím | `20..23` |
-| `plans/ban-ghi-dai-t7.json` | **T7** — cái giá của bản vá D4: số hàng có mặt trong DOM khi hai mốc ghim cách xa ~500 đoạn | `10..12` |
+| `plans/bon-man.json` | Bốn màn + bảng phím §11.4 + hàng đợi `.q*` (đối chứng bản vá `c575192`), computed style + toạ độ thật của `.q__ten`/`.q__ly-do`; `khangDinh` cho đầu dò `chưa nối` (m1) và cho đầu dò `keydown` (I2) | `01..08` |
+| `plans/phim-va-12-5.json` | §11.4 + §12.5 bằng **bàn phím thật**, kèm đầu đò `keydown` cho **từng** phím (một sự kiện/phím) | `20..23` |
+| `plans/ban-ghi-dai-t7.json` | **C1** (khung `.ed__khung` là khung cuộn THẬT: nhận `scrollTop ≠ 0` + hàng ngoài cửa sổ vào DOM) **và** **T7** (cái giá CÓ TRẦN của `D4`: ép `n` từ `i=1` sang `i=481`), kèm khẳng định TIỀN ĐỀ | `10..13` |
 
 Chạy lần lượt (không chạy song song: cùng cổng CDP):
 
@@ -73,7 +83,8 @@ node e2e/session.mjs e2e/plans/ban-ghi-dai-t7.json   --out $out
 ```
 
 Mỗi lượt ghi `ket-qua.json` cạnh ảnh: **mọi bước + giá trị đo được** (đó là bằng chứng, không phải
-log cho vui).
+log cho vui). Một lượt chỉ được coi là ĐẠT khi **`EXIT=0`** — `khangDinh` sai hoặc một bước `key`
+có đầu dò rỗng đều làm `EXIT=1`.
 
 ## Cái tầng này **KHÔNG** chứng minh
 

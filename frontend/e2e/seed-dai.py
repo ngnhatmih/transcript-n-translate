@@ -8,7 +8,13 @@ co the render hang tram hang.
 Script nay chi gieo DU LIEU; phep do nam trong ke hoach Chrome (`plans/`), vi "so hang co trong
 DOM" la mot phep do DOM THAT, khong phai mot suy luan tu so hoc.
 
-Dung: `<venv python> seed-dai.py <backend_dir> <db_path> [so_doan]`
+🔴 VONG SUA 1 (`I4e`): ban gieo nay dat `suspect=True` o **HAI** doan — `i=1` (TRONG cua so ban dau)
+va `i=481` (NGOAI cua so, ngoai ca TRAN ghim). Ly do DO DUOC: luot T7 truoc gieo 600 doan **khong co
+doan `suspect` nao**, nen buoc "bam `n`" khong co DICH ⇒ do duoc `is-current` van la 0 sau 4 lan bam
+`n`, va 17 hang trong DOM khong noi gi ve cai gia cua ghim. Phim `n` di tu doan nghi ngo nay sang doan
+nghi ngo KE TIEP, nen hai moc nay cho dung canh `1 -> 481` ma `D4` nham toi — **khong can cuon tay**.
+
+Dung: `<venv python> seed-dai.py <backend_dir> <db_path> [so_doan] [media]`
 """
 import sys
 
@@ -31,8 +37,14 @@ sid = repos.add_source(
     kind="file", origin=f"ban-ghi-dai-{SO_DOAN}.wav", media_path=media, lang="zh",
     duration=float(SO_DOAN),
 )
+# Hai doan NGHI NGO: `i=1` (trong cua so ban dau) va `i=481` (ngoai cua so ⇒ phai CUON toi). Xem
+# docblock: thieu chung thi buoc `n` cua ke hoach khong co dich, va phep do tro thanh vo nghia.
+NGHI_NGO = {1, 481}
 segs = [
-    Segment(i=i, start=float(i - 1), end=float(i), text=f"doan {i} 今天我們來說一個很重要的問題。")
+    Segment(
+        i=i, start=float(i - 1), end=float(i), text=f"doan {i} 今天我們來說一個很重要的問題。",
+        suspect=i in NGHI_NGO,
+    )
     for i in range(1, SO_DOAN + 1)
 ]
 tid = repos.add_transcript(source_id=sid, engine="fw-small", lang="zh", segments=segs)
