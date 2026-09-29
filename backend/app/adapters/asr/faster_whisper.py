@@ -82,9 +82,23 @@ class FasterWhisperEngine:
             from faster_whisper import BatchedInferencePipeline
             if self._batched is None:
                 self._batched = BatchedInferencePipeline(model=model)
+            # `without_timestamps` PHẢI được khai tường minh là False. Nguyên nhân
+            # gốc của lỗi "mất đoạn đầu": `BatchedInferencePipeline.transcribe`
+            # mặc định `without_timestamps=True` (chế độ nhanh, prompt có
+            # <|notimestamps|>), còn `WhisperModel.transcribe` mặc định False.
+            # Ở chế độ nhanh, `fw-large-v3-turbo` — engine ASR MẶC ĐỊNH — trả về
+            # một stub cụt cho chunk đầu: đo trên clip thật 234,17 s
+            # (`_realpipe`, CC BY-SA 4.0), chunk 0 có cửa sổ 0,000 -> 29,904 s
+            # nhưng model chỉ sinh 4 token ("文章名", 3 chữ) rồi dừng, trong khi
+            # 8 chunk còn lại sinh 114-170 token. Hệ quả: transcript mất sạch
+            # ~130 chữ có tiếng nói thật trong 28,5 s đầu và mốc đầu tiên bị đẩy
+            # thành 28,58 s. Bật lại timestamp (False) thì CÙNG chunk đó sinh
+            # 153 token và chữ ở đầu trở lại đủ. Xem
+            # tests/test_asr_first_chunk_live.py.
             iterator, _info = self._batched.transcribe(
                 audio_path, language=lang, batch_size=batch_size,
                 vad_filter=True, word_timestamps=True,
+                without_timestamps=False,
                 condition_on_previous_text=False,
                 initial_prompt=self.spec.opts.get("initial_prompt"),
             )

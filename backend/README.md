@@ -45,31 +45,33 @@ là thành chế độ im lặng gấp đôi và **mất dòng "N passed"** — 
 bao nhiêu test đã chạy.
 
 `pytest.ini` cũng đã có `-m "not live"`, nên lần chạy mặc định **bỏ qua** các bài
-chạm model thật trong `tests/test_mt_live.py`. Đó là chủ ý: máy chưa tải weight
-không được đỏ vì lý do không liên quan tới code. Muốn chạy chúng thì `-m live`, và
-mỗi lần chạy như vậy là một lần **ĐO** — đừng thay bằng test giả.
+chạm model thật trong `tests/test_mt_live.py` và
+`tests/test_asr_first_chunk_live.py` (clip thật ~234 s ở `_realpipe`). Đó là chủ ý:
+máy chưa tải weight không được đỏ vì lý do không liên quan tới code. Muốn chạy
+chúng thì `-m live`, và mỗi lần chạy như vậy là một lần **ĐO** — đừng thay bằng
+test giả.
 
 `scripts/smoke_asr.py` **không** thuộc bộ pytest: nó tải model ~1,6 GB và cần
 GPU. Nó tự ép UTF-8 cho stdout (console Windows mặc định cp1252, còn script in
 tiếng Trung/Việt) và tự đặt cache model trước khi nạp `faster_whisper`.
 
 Con số nền của lần chạy mặc định, đo sau khi xoá `__pycache__` (lệnh ở mục
-"Kiểm thử" trên, chạy từ trong `backend\`). Thứ có nghĩa là **920 / 13**, không
+"Kiểm thử" trên, chạy từ trong `backend\`). Thứ có nghĩa là **921 / 15**, không
 phải số giây — thời gian trôi giữa các lần chạy (đã thấy 24,00–30,94 s) còn con
 số bài thì không:
 
 ```
-920 passed, 13 deselected, 1 warning
+921 passed, 15 deselected, 1 warning
 ```
 
 Hai con số đó là SỐ BÀI ĐƯỢC CHỌN, và chúng khớp với số mà `--collect-only` báo
 (`tests/test_backend_readme.py::test_readme_baseline_matches_the_tests_actually_
 collected` đối chiếu mỗi lần chạy).
 
-Máy này **CÓ** `ffmpeg 8.1.1` + `ffprobe` trên PATH (đã đo), nên `920/13` ở trên
+Máy này **CÓ** `ffmpeg 8.1.1` + `ffprobe` trên PATH (đã đo), nên `921/15` ở trên
 là số THẬT của nó. Máy **không có** `ffmpeg`/`ffprobe` cho một kết quả KHÁC: cả
 `tests/test_ingest.py` bị `skipif` ở cấp module — **9** bài cùng skip một lượt —
-nên dòng tổng kết của máy đó là **`911 passed, 9 skipped, 13 deselected`**. Đó là
+nên dòng tổng kết của máy đó là **`912 passed, 9 skipped, 15 deselected`**. Đó là
 con số của máy thiếu ffmpeg, **không phải** con số máy này từng in ra; đừng chép
 nó vào khối nền ở trên, và đừng "sửa" số nền xuống chỉ vì thiếu ffmpeg.
 
