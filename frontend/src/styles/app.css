@@ -581,9 +581,9 @@ body {
 
 /* Khay TIN cua cua vao "bat dau dich": MOT con cua luoi `.cmp`, du trong no co 0, 1 hay 3
    nhanh (ly do khong dich duoc · loi backend · cua vao khi chua co ban dich). No la con
-   THU HAI cua `.cmp` va LUON co mat trong JSX (`CompareScreen` render `<div className=
-   "cmp__tin">` o moi trang thai cua ban ghi), nen so con CO MAT cua luoi nay la NAM hoac
-   SAU — khong bao gio con bon. Luat `:empty` duoi day chi an no khi no khong co gi de noi,
+   ke tu §4.5 no la con THU BA (dai canh bao chi phi chiem hang 2), va no LUON co mat
+   trong JSX (`CompareScreen` render `<div className="cmp__tin">` o moi trang thai cua
+   ban ghi), nen so con CO MAT cua luoi nay la NAM hoac SAU — khong bao gio con bon. Luat `:empty` duoi day chi an no khi no khong co gi de noi,
    va no an duoc vi hang `auto` cua no co lai bang khong. */
 .cmp__tin:empty {
   display: none;
@@ -594,7 +594,7 @@ body {
    trong `:empty` thì lúc khay CÓ chữ, `.cmp__tin` lại do auto-placement đặt, và đó đúng là
    cơ chế đã sinh ra C1. */
 .cmp__tin {
-  grid-row: 2;
+  grid-row: 3;
 }
 
 /* ── §4.3 CUA VAO "BAT DAU DICH" (Task W3) — o chon engine + nut "dich" ──────────────
@@ -724,32 +724,159 @@ body {
 
    SÁU con theo thứ tự DOM (`CompareScreen.tsx`), và track tương ứng:
      1 `.cmp__thanh`    (thanh chọn bản dịch)          → track 1 `auto`
-     2 `.cmp__tin`      (khay tin — LUÔN có mặt)        → track 2 `auto` (co lại khi `:empty`)
-     3 `.cmp__nguong`   (dòng ngưỡng)                   ┐ hai nhánh LOẠI TRỪ NHAU,
-     3 `.cmp__rong`     (trạng thái rỗng)               ┘ cùng track 3 `auto`
-     4 `.cmp__dau`      (đầu cột)                       → track 4 `auto`
-     5 `.cmp__danh-sach`(danh sách cuộn được)           → track 6 `1fr`  ← HÀNG CUỐI
-   ⚠️ `.cmp__danh-sach` trỏ vào track CUỐI (`grid-row: 6`), KHÔNG phải track 5: đây là hàng
-   `1fr` — chỗ cuộn của danh sách — và nó phải là hàng DUY NHẤT được giãn. Khai `grid-row: 5`
+     2 `.cmp__chi-phi`  (§4.5 dải cảnh báo chi phí)     → track 2 `auto` (vắng khi chip TẮT)
+     3 `.cmp__tin`      (khay tin — LUÔN có mặt)        → track 3 `auto` (co lại khi `:empty`)
+     4 `.cmp__nguong`   (dòng ngưỡng)                   ┐ hai nhánh LOẠI TRỪ NHAU,
+     4 `.cmp__rong`     (trạng thái rỗng)               ┘ cùng track 4 `auto`
+     5 `.cmp__dau`      (đầu cột)                       → track 5 `auto`
+     6 `.cmp__danh-sach`(danh sách cuộn được)           → track 7 `1fr`  ← HÀNG CUỐI
+   ⚠️ `.cmp__danh-sach` trỏ vào track CUỐI (`grid-row: 7`), KHÔNG phải track 6: đây là hàng
+   `1fr` — chỗ cuộn của danh sách — và nó phải là hàng DUY NHẤT được giãn. Khai `grid-row: 6`
    là một lỗi IM LẶNG: phép đo của bài ghim dưới đây (`track[grid-row - 1] === "1fr"`) bắt được
    nó, và bản nháp đầu của khối này đã mắc đúng lỗi đó.
-   Khai TRACK cho cả sáu con CÓ MẶT, không phải cho số con của một nhánh: `.cmp__tin` có
+   Khai TRACK cho cả BẢY con CÓ MẶT, không phải cho số con của một nhánh: `.cmp__tin` có
    mặt ở mọi trạng thái của một bản ghi đã chọn, nên "bốn con" là con số của một trạng thái
-   KHÔNG tồn tại. */
+   KHÔNG tồn tại.
+   ⚠️ ERRATA #31 mục 1, LẦN THỨ TƯ: `.cmp__chi-phi` (nhánh CHIMERA) là một CON MỚI, nên nó
+   phải có track RIÊNG và `grid-row` TƯỜNG MINH — nếu không, hàng `1fr` (chỗ cuộn của danh
+   sách) trôi sang nó và danh sách không cuộn được. `.cmp` đi từ sáu lên bảy track trong
+   CÙNG lượt với việc thêm con đó. */
 .cmp {
   display: grid;
-  grid-template-rows: auto auto auto auto auto 1fr;
+  grid-template-rows: auto auto auto auto auto auto 1fr;
   height: 100%;
   min-height: 0;
   background: var(--panel-0);
+}
+
+/* ── §4.5 CHẾ ĐỘ CHIMERA — chip, dải cảnh báo chi phí, bốn cửa sổ ứng viên ───────── */
+
+/* Chip trên thanh công cụ. CÙNG một phần tử ở cả hai trạng thái: `aria-pressed` nói
+   trạng thái, không phải việc nó biến mất khi tắt. `--signal` chỉ có MỘT nghĩa (đang
+   hoạt động), nên chỉ chip ĐANG BẬT mới được viền + chữ amber. */
+.cmp__chimera-chip {
+  padding: var(--sp-1) var(--sp-2);
+  border: var(--rule-w) solid var(--rule);
+  border-radius: var(--radius);
+  background: var(--panel-2);
+  color: var(--ink-1);
+  font-family: var(--font-label);
+  font-size: var(--fs-label);
+  letter-spacing: var(--track-label);
+  cursor: pointer;
+  transition: border-color var(--dur-1) var(--ease-1), color var(--dur-1) var(--ease-1);
+}
+
+.cmp__chimera-chip[aria-pressed="true"] {
+  border-color: var(--signal);
+  color: var(--signal);
+}
+
+/* Hàng 2 — DẢI CẢNH BÁO CHÉO (§4.5 nguyên văn: *"Dải cảnh báo chéo chạy ngang"*).
+   ⚠️ Vân chéo ở đây TRÙNG kỹ thuật với vân "nghi ngờ" của §2.5 (`--suspect-hatch-*`)
+   nhưng KHÁC nghĩa: §2.5 dành vân đó cho "đoạn nghi ngờ", còn §4.5 chỉ định hình thức
+   này cho dải cảnh báo chi phí. Sắc là `--signal` ở alpha rất thấp, không phải `--fault`
+   — nhầm hai thứ này sẽ biến một cảnh báo chi phí thành một báo lỗi.
+   Chữ dùng `--ink-1` (≥ 4,5:1), KHÔNG dùng `--ink-2`: đây là câu người dùng PHẢI đọc
+   trước khi bấm. */
+.cmp__chi-phi {
+  grid-row: 2;
+  display: grid;
+  gap: var(--sp-1);
+  padding: var(--sp-2) var(--sp-3);
+  border-bottom: var(--rule-w) solid var(--rule);
+  background-image: repeating-linear-gradient(
+    var(--suspect-hatch-angle),
+    transparent 0,
+    transparent var(--suspect-hatch-step),
+    color-mix(in srgb, var(--signal) 8%, transparent) var(--suspect-hatch-step),
+    color-mix(in srgb, var(--signal) 8%, transparent)
+      calc(var(--suspect-hatch-step) * 2)
+  );
+  color: var(--ink-1);
+  font-family: var(--font-mono);
+  font-size: var(--fs-note);
+  line-height: var(--lh-body);
+}
+
+.cmp__chi-phi p {
+  margin: 0;
+}
+
+.cmp__chi-phi [data-testid="chimera-loi"] {
+  color: var(--fault);
+}
+
+/* Ký hiệu ◆ của §4.5 — chữ DUY NHẤT của dải mang amber, vì nó đánh dấu chế độ đang bật. */
+.cmp__cp-ky {
+  color: var(--signal);
+}
+
+/* Mọi CON SỐ ở đây là mono + chữ số đều nhau (§2.1): chúng phải xếp thẳng cột dọc. */
+.cmp__cp-so {
+  color: var(--ink-0);
+  font-variant-numeric: tabular-nums;
+}
+
+.cmp__chi-phi code {
+  font-family: var(--font-mono);
+  color: var(--ink-0);
+}
+
+/* Dòng HỢP NHẤT của mỗi đoạn (§4.5: *"bản hợp nhất ở trên, đánh ◆, kèm HỢP NHẤT TỪ 6
+   ỨNG VIÊN · hyp 3 · 1.4s"*). Sáng hơn các ứng viên: đây là thứ được GIỮ. */
+.cmp__hop-nhat {
+  display: block;
+  margin-top: var(--sp-1);
+  color: var(--ink-0);
+  font-family: var(--font-mono);
+  font-size: var(--fs-label);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Bốn cửa sổ ứng viên xếp chồng dưới bản hợp nhất. Có đường kẻ 1px ngăn cách (§2.3:
+   phân tầng bằng đường kẻ, không bằng shadow). */
+.cmp__uv-boc {
+  display: block;
+  margin-top: var(--sp-1);
+  padding-top: var(--sp-1);
+  border-top: var(--rule-w) solid var(--rule);
+}
+
+.cmp__uv {
+  display: grid;
+  grid-template-columns: 3.5rem 1fr;
+  gap: var(--sp-2);
+}
+
+.cmp__uv-nhan,
+.cmp__uv-chu {
+  color: var(--ink-1);
+  font-family: var(--font-mono);
+  font-size: var(--fs-label);
+}
+
+/* §4.5 nguyên văn: *"ứng viên được chọn sáng hơn"* — SÁNG HƠN, không phải amber:
+   `--signal` đã có nghĩa "đang hoạt động", và mỏ neo là một sự thật về dữ liệu. */
+.cmp__uv.is-chon .cmp__uv-nhan,
+.cmp__uv.is-chon .cmp__uv-chu {
+  color: var(--ink-0);
+}
+
+/* Ba sự thật khó nói nhất của một lượt pha, nói bằng CHỮ ở cạnh dòng hợp nhất: lượt pha
+   đã lùi về mỏ neo, lượt pha không đổi gì, và số bản KHÁC NHAU giữa các ứng viên. */
+.cmp__hop-nhat [data-testid^="lui-"],
+.cmp__hop-nhat [data-testid^="khong-doi-"],
+.cmp__hop-nhat [data-testid^="khac-nhau-"] {
+  color: var(--ink-1);
 }
 
 /* Trạng thái rỗng nói SỰ THẬT của lượt này, không hứa một thứ chưa có đường làm.
    Hình dạng nay là "tấm rỗng" dùng chung (`.rong`): chỗ này chỉ giữ VỊ TRÍ của nó trong lưới
    SÁU track của `.cmp` (luật ERRATA #31 mục 1) — bỏ `grid-row` ở đây là một lỗi IM LẶNG. */
 .cmp__rong {
-  /* Hàng 3 — CÙNG track với `.cmp__nguong` (hai nhánh loại trừ nhau). */
-  grid-row: 3;
+  /* Hàng 4 — CÙNG track với `.cmp__nguong` (hai nhánh loại trừ nhau). */
+  grid-row: 4;
   margin: 0;
 }
 
@@ -806,8 +933,8 @@ body {
 }
 
 .cmp__nguong {
-  /* Hàng 3 — CÙNG track với `.cmp__rong` (hai nhánh loại trừ nhau). */
-  grid-row: 3;
+  /* Hàng 4 — CÙNG track với `.cmp__rong` (hai nhánh loại trừ nhau). */
+  grid-row: 4;
   margin: 0;
   padding: var(--sp-1) var(--sp-3);
   border-bottom: var(--rule-w) solid var(--rule);
@@ -828,7 +955,7 @@ body {
 .cmp__dau,
 .cmp__dong {
   display: grid;
-  grid-row: 4;
+  grid-row: 5;
   grid-template-columns: 1fr 1fr 4.5rem;
   gap: var(--sp-3);
   padding-right: var(--sp-3);
@@ -859,10 +986,10 @@ body {
 }
 
 .cmp__danh-sach {
-  /* Hàng 6 — hàng `1fr` DUY NHẤT của lưới: đây là chỗ cuộn của danh sách. Nếu nó rơi vào
+  /* Hàng 7 — hàng `1fr` DUY NHẤT của lưới: đây là chỗ cuộn của danh sách. Nếu nó rơi vào
      một hàng implicit `auto` (đúng lỗi C1 của ERRATA #36 mục 3) thì danh sách không cuộn
      được còn đầu cột lại giãn ra. */
-  grid-row: 6;
+  grid-row: 7;
   margin: 0;
   padding: 0;
   list-style: none;

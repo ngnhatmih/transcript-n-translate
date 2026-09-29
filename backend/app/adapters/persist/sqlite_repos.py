@@ -85,6 +85,11 @@ class SqliteRepos:
     _MIGRATIONS: tuple[tuple[int, str, str, str], ...] = (
         (2, "translations", "status",
          "ALTER TABLE translations ADD COLUMN status TEXT NOT NULL DEFAULT 'queued'"),
+        # `chimera` cho phép NULL và KHÔNG có default: một hàng cũ (và mọi hàng
+        # dịch thường) mang NULL, nghĩa là "không chạy ở chế độ Chimera" — khác hẳn
+        # `'{}'`, thứ sẽ nói "có chạy, mà không có ứng viên nào".
+        (3, "translations", "chimera",
+         "ALTER TABLE translations ADD COLUMN chimera TEXT"),
     )
 
     def _column_names(self, conn: sqlite3.Connection, table: str) -> set[str]:
@@ -224,6 +229,11 @@ class SqliteRepos:
             qa_issues=json.loads(row["qa_issues"] or "[]"),
             tokens_in=row["tokens_in"], tokens_out=row["tokens_out"],
             duration_ms=row["duration_ms"], status=row["status"],
+            # Cột có thể VẮNG trên một DB chưa migrate (migration chạy trong
+            # `init_schema`, nhưng `_row_to_translation` cũng được gọi từ những
+            # đường chỉ mở kết nối) — đọc bằng `getattr`-kiểu-dict ở đây là một
+            # `IndexError` chờ sẵn. Dùng `row.keys()` để nói rõ ý định.
+            chimera=_chimera_from_row(row),
             created_at=row["created_at"],
         )
 
@@ -244,6 +254,7 @@ class SqliteRepos:
                         qa_issues: list[str] | None = None,
                         tokens_in: int | None = None, tokens_out: int | None = None,
                         duration_ms: int | None = None,
+                        chimera: dict | None = None,
                         status: str = "queued") -> int:
         """Ghi một bản dịch.
 
@@ -260,12 +271,14 @@ class SqliteRepos:
             cur = conn.execute(
                 "INSERT INTO translations(transcript_id, transcript_version, engine,"
                 " target_lang, segments, prompt_version, glossary_version, qa_issues,"
-                " tokens_in, tokens_out, duration_ms, status, created_at)"
-                " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                " tokens_in, tokens_out, duration_ms, chimera, status, created_at)"
+                " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (transcript_id, transcript_version, engine, target_lang,
                  segments_to_json(segments), prompt_version, glossary_version,
                  json.dumps(qa_issues or [], ensure_ascii=False), tokens_in,
-                 tokens_out, duration_ms, status, self._clock.now_iso()),
+                 tokens_out, duration_ms,
+                 None if chimera is None else json.dumps(chimera, ensure_ascii=False),
+                 status, self._clock.now_iso()),
             )
             return int(cur.lastrowid)
 
@@ -335,6 +348,23 @@ class SqliteRepos:
         args.append(translation_id)
         with self._connect() as conn:
             cur = conn.execute(f"UPDATE translations SET {', '.join(sets)} WHERE id=?", args)
+            if cur.rowcount == 0:
+                raise NotFound(f"translation {translation_id} không tồn tại")
+
+    def set_translation_chimera(self, translation_id: int, data: dict | None) -> None:
+        """Ghi ĐÈ cột `chimera`. `None` xoá dấu vết (đường chưa dùng tới).
+
+        Ghi ĐÈ bằng ĐÚNG dict được đưa, cùng quy ước với
+        `update_translation_segments`: người gọi giữ bản đã cộng dồn và truyền cả
+        nó, nên hai lần ghi không thể trộn thành một bản nửa cũ nửa mới.
+
+        Id không tồn tại ném `NotFound` — cùng lý do với mọi lệnh ghi khác ở đây.
+        """
+        with self._connect() as conn:
+            cur = conn.execute(
+                "UPDATE translations SET chimera=? WHERE id=?",
+                (None if data is None else json.dumps(data, ensure_ascii=False),
+                 translation_id))
             if cur.rowcount == 0:
                 raise NotFound(f"translation {translation_id} không tồn tại")
 
@@ -640,3 +670,22 @@ class SqliteRepos:
         with self._connect() as conn:
             rows = conn.execute(sql, params).fetchall()
         return [dict(r) for r in rows]
+
+
+def _chimera_from_row(row) -> dict | None:
+    """Cột `chimera` của một hàng `translations` -> `dict`, hoặc `None`.
+
+    Hàm cấp module chứ không phải phương thức: nó chỉ là một phép GIẢI MÃ, và nó
+    được gọi từ `_row_to_translation`, nơi không có gì ngoài một hàng SQLite.
+
+    `None` (không chạy Chimera) khác `{}` (chạy mà chưa có dữ liệu), nên cột NULL
+    không bao giờ được đọc thành `{}`. Dùng `row.keys()` chứ không tin là cột luôn
+    có: `_row_to_translation` cũng chạy trên một DB vừa được migration, và một
+    `IndexError` ở đây sẽ đội lốt "hàng bản dịch hỏng".
+    """
+    if "chimera" not in row.keys():
+        return None
+    raw = row["chimera"]
+    if raw is None:
+        return None
+    return json.loads(raw)

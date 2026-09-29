@@ -54,25 +54,27 @@ GPU. Nó tự ép UTF-8 cho stdout (console Windows mặc định cp1252, còn s
 tiếng Trung/Việt) và tự đặt cache model trước khi nạp `faster_whisper`.
 
 Con số nền của lần chạy mặc định, đo sau khi xoá `__pycache__` (lệnh ở mục
-"Kiểm thử" trên, chạy từ trong `backend\`). Thứ có nghĩa là **868 / 13**, không
+"Kiểm thử" trên, chạy từ trong `backend\`). Thứ có nghĩa là **920 / 13**, không
 phải số giây — thời gian trôi giữa các lần chạy (đã thấy 24,00–30,94 s) còn con
 số bài thì không:
 
 ```
-868 passed, 13 deselected, 1 warning
+920 passed, 13 deselected, 1 warning
 ```
 
 Hai con số đó là SỐ BÀI ĐƯỢC CHỌN, và chúng khớp với số mà `--collect-only` báo
 (`tests/test_backend_readme.py::test_readme_baseline_matches_the_tests_actually_
 collected` đối chiếu mỗi lần chạy).
 
-Máy này **CÓ** `ffmpeg 8.1.1` + `ffprobe` trên PATH (đã đo), nên `868/13` ở trên
+Máy này **CÓ** `ffmpeg 8.1.1` + `ffprobe` trên PATH (đã đo), nên `920/13` ở trên
 là số THẬT của nó. Máy **không có** `ffmpeg`/`ffprobe` cho một kết quả KHÁC: cả
 `tests/test_ingest.py` bị `skipif` ở cấp module — **9** bài cùng skip một lượt —
-nên dòng tổng kết của máy đó là **`856 passed, 9 skipped, 13 deselected`**. Đó là
+nên dòng tổng kết của máy đó là **`911 passed, 9 skipped, 13 deselected`**. Đó là
 con số của máy thiếu ffmpeg, **không phải** con số máy này từng in ra; đừng chép
-nó vào khối `821/13` ở trên, và đừng "sửa" số nền xuống `812` chỉ vì thiếu
-ffmpeg.
+nó vào khối nền ở trên, và đừng "sửa" số nền xuống chỉ vì thiếu ffmpeg.
+
+⚠️ Con số `856` ở đây TỪNG không khớp phép trừ của chính nó: `865 − 9 = 856`, tức
+nó là số của lượt TRƯỚC `V1` (+3 bài) còn sót lại. Nay nó bằng đúng `920 − 9`.
 
 (Con số này từng bị ghi là `798`: bài `test_a_failed_translation_leaves_the_
 transcript_reviewed` được thêm ở `a428334` — **cùng commit đã sửa tệp này** — mà
@@ -97,6 +99,20 @@ và số đo ra HTTP (`qa_issues` + `tokens_in`/`tokens_out`/`duration_ms`) tron
 `test_api_translations.py` +3 (route phơi cờ cho ca echo + đối chứng âm `opus-mt`;
 vắng cờ ⇒ `[]` chứ không `null`; danh sách cùng hình dạng với chi tiết). Hai lượt
 bump này là **cùng một nhánh**, nên `865/13` ở trên không phải số của `gd3-frontend`.
+
+Bump của nhánh `chimera`: `868/13` → `920/13` (**+52 bài**), do tính năng **CHIMERA**
+(§8.7.5 của spec kiến trúc + §4.5 của spec UI) — `.superpowers/sdd/
+2026-09-26-frontend-workspace-2/chimera-report.md`. Chia ra: `tests/test_chimera.py`
+mới **+50 bài** (dữ liệu registry, luật mỏ neo, hệ số chi phí, runner N+1 lượt,
+đường LÙI có ghi chép, ba route Chimera); `tests/test_schema_migration.py` **+1**
+(cột `translations.chimera` trên DB v1); `tests/test_schema_llm_calls_index.py`
+**+1** (bất biến "index không phải một bước migration" nay ghim bằng
+`_MIGRATIONS` thay vì bằng con số `SCHEMA_VERSION` — con số đó bump vì một CỘT, nên
+ghim nó ở đó sẽ nói sai lý do).
+
+Bump này cũng đổi `SCHEMA_VERSION` `2` → `3`: cột `translations.chimera` là một
+CỘT, nên nó cần một bước migration thật, khác hẳn index của `llm_calls` (một ĐỐI
+TƯỢNG, `CREATE INDEX IF NOT EXISTS` tự chạy trên DB cũ).
 
 Số này chỉ để phát hiện TRÔI: một thay đổi làm nó **giảm** là một bài đã bị gỡ
 hoặc bị bỏ quên, không phải "suite nhanh hơn".

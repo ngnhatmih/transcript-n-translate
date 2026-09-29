@@ -1005,8 +1005,19 @@ def test_over_uses_the_unrounded_cps_so_the_client_never_compares_itself(wired):
 def test_the_detail_route_describes_the_translation_exactly_like_the_list(wired):
     """Route chi tiết KHÔNG được tự ghép lại phần tóm tắt: 9 khoá phải TRÙNG KHÍT.
 
-    Thêm `segments` + `cps` là đúng mục đích của route; đổi bất kỳ khoá tóm tắt nào
-    là hai hình dạng cho một hàng — đúng lỗi mà builder dùng chung đã dẹp một lần.
+    Đổi bất kỳ khoá tóm tắt nào là hai hình dạng cho một hàng — đúng lỗi mà builder
+    dùng chung đã dẹp một lần. Con số "hai khoá thêm" của bản trước nay là BA:
+
+    * `segments` — đoạn của BẢN DỊCH;
+    * `cps` — tốc độ đọc dạng SỐ;
+    * `chimera` — dấu vết chế độ CHIMERA (spec UI §4.5: "hiện cả 6 ứng viên và bản
+      hợp nhất"), `null` trên một bản dịch thường.
+
+    Cả ba đều là PAYLOAD RIÊNG CỦA MỘT BẢN DỊCH, và cả ba đều bị loại khỏi route
+    danh sách có lý do cùng loại: `segments`/`chimera` là JSON lớn (route danh sách
+    chạy cho TỪNG transcript), còn `cps` được tính từ chính `segments`. Nên bất biến
+    thật sự ở đây vẫn nguyên: **mọi khoá TÓM TẮT phải trùng khít**, và route chi
+    tiết chỉ được THÊM payload của riêng nó.
     """
     c, repos, _specs, _worker, _broker, _mt = wired
     tid, tr_id = _seed(repos)
@@ -1014,9 +1025,13 @@ def test_the_detail_route_describes_the_translation_exactly_like_the_list(wired)
     from_list = c.get(f"/api/translations?transcript_id={tid}").json()[0]
     from_detail = c.get(f"/api/translations/{tr_id}").json()
 
-    extras = {key: from_detail.pop(key) for key in ("segments", "cps")}
-    assert set(extras) == {"segments", "cps"}, (
-        "route chi tiết phải THÊM đúng hai khoá, không hơn"
+    extras = {key: from_detail.pop(key) for key in ("segments", "cps", "chimera")}
+    assert set(extras) == {"segments", "cps", "chimera"}, (
+        "route chi tiết phải THÊM đúng ba khoá, không hơn"
+    )
+    assert extras["chimera"] is None, (
+        "bản dịch của bài này KHÔNG chạy ở chế độ Chimera, nên dấu vết phải là "
+        "`null` — `{}` sẽ nói 'có chạy mà không có dữ liệu'"
     )
     assert from_detail == from_list, (
         "route chi tiết và route danh sách mô tả CÙNG một hàng bằng hai hình dạng "

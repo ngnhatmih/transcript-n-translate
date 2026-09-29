@@ -29,6 +29,13 @@ PROMPT_VERSION: dict[str, str] = {
     "opus-mt": "raw-p1",
 }
 
+#: Phiên bản prompt của LƯỢT PHA Chimera. Tách khỏi `PROMPT_VERSION` vì nó là
+#: một prompt KHÁC, không phải một phiên bản khác của prompt dịch: dùng chung một
+#: chuỗi thì `translations.prompt_version` của một lượt pha không phân biệt được
+#: với một lượt dịch thường — và cột đó tồn tại đúng để trả lời câu "bản dịch này
+#: sinh từ prompt nào".
+MERGE_PROMPT_VERSION = "chimera-merge-p1"
+
 #: Model thật hay bọc JSON trong ```json ... ``` — đây là failure mode phổ biến
 #: chứ không phải đầu vào bất thường, nên nó phải parse được.
 _FENCE = re.compile(r"^\s*```[a-zA-Z]*\s*|\s*```\s*$")
@@ -179,3 +186,64 @@ def parse_batch_response(raw: str, batch: list[Segment]) -> list[Segment]:
     # `suspect`, `t`, `qa` (đúng lỗi đã bị bắt ở review Task 7). Dịch chỉ được
     # đổi `text`; mọi thứ khác — kể cả `words` — là dữ liệu của bản gốc.
     return [replace(s, text=got[s.i]) for s in batch]
+
+
+def merge_system_prompt(glossary: list[Term], *, target_lang: str,
+                        run_count: int) -> str:
+    """Vai trò của LƯỢT PHA: GỘP, không dịch lại từ đầu.
+
+    Câu CUỐI giữ nguyên câu CẤM CHÉP NGUYÊN VĂN của `system_prompt`, và ở đây nó
+    còn cần hơn: lượt pha nhận được N bản đã có sẵn, nên continuation rẻ nhất của
+    một model yếu là chép lại nguyên ứng viên đầu tiên — kể cả khi cả N ứng viên
+    đều là chữ Hán. Câu cấm là thứ duy nhất nói ra rằng việc đó không được phép.
+    """
+    lines = [
+        f"Bạn là biên tập viên phụ đề {target_lang}.",
+        f"Bạn nhận được {run_count} bản dịch ứng viên cho CÙNG một lô phụ đề.",
+        "Với mỗi mục, viết MỘT bản hợp nhất: giữ nội dung đúng nhất, câu chữ tự "
+        "nhiên nhất, và NGẮN nhất trong số các ứng viên.",
+        "Trả về DUY NHẤT một đối tượng JSON, không thêm chữ nào khác.",
+    ]
+    if glossary:
+        lines.append("Bắt buộc dùng đúng các thuật ngữ sau:")
+        lines.extend(f"- {t.term} => {t.translation}" for t in glossary)
+    lines.append(
+        f"TUYỆT ĐỐI không sao chép nguyên văn bản gốc: mỗi 'text' phải là câu "
+        f"{target_lang}, không được để lại chữ của bản gốc.")
+    return "\n".join(lines)
+
+
+def merge_user_prompt(batch: list[Segment],
+                      candidates: tuple, *, anchor: str | None,
+                      source_lang: str, target_lang: str) -> str:
+    """Dữ liệu của lượt pha: mỗi mục có bản NGUỒN + MỌI ứng viên, gọi tên theo `id`.
+
+    Mỏ neo được NÓI RA ("ỨNG VIÊN MỎ NEO"), không chỉ được xếp đầu: `anchor_index`
+    đã chọn nó bằng một luật tất định, và luật đó chỉ có tác dụng nếu lượt pha biết
+    nó là gì. Một lượt pha không biết mỏ neo sẽ tự chọn lại — tức là có hai chỗ
+    quyết định, và chỗ thứ hai không ai ghi lại được.
+
+    Định dạng ĐẦU RA giữ nguyên chuỗi của `user_prompt`, nên `parse_batch_response`
+    vẫn là chỗ DUY NHẤT biến phản hồi engine thành `Segment` — cho cả lượt dịch
+    lẫn lượt pha.
+    """
+    ids = [cid for cid, _segs in candidates]
+    texts: dict[str, dict[int, str]] = {}
+    for cid, segs in candidates:
+        texts[cid] = {s.i: s.text for s in segs}
+
+    items: list[dict] = []
+    for s in batch:
+        item: dict = {"i": s.i, "nguon": s.text}
+        for cid in ids:
+            item[cid] = texts.get(cid, {}).get(s.i, "")
+        items.append(item)
+
+    return (
+        f"Pha {len(ids)} bản dịch ứng viên ({', '.join(ids)}) từ {source_lang} "
+        f"sang {target_lang} thành MỘT bản.\n"
+        "Giữ nguyên `i` của từng mục và trả đúng bấy nhiêu mục.\n"
+        f"ỨNG VIÊN MỎ NEO: {anchor or '(không có)'}\n"
+        'Định dạng: {"translations": [{"i": <số>, "text": "<bản hợp nhất>"}]}\n'
+        f"Dữ liệu: {json.dumps(items, ensure_ascii=False)}"
+    )

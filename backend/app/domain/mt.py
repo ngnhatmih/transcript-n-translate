@@ -40,6 +40,26 @@ def batch_segments(segments: list[Segment], *, max_chars: int) -> list[list[Segm
 
 @dataclass(frozen=True)
 class MtOpts:
-    """Tham số của một lần gọi engine. Bất biến, nên so sánh được trong test."""
+    """Tham số của một lần gọi engine. Bất biến, nên so sánh được trong test.
+
+    `temperature` là tham số THẬT của lượt gọi, không phải một cờ trang trí:
+    `OllamaMtEngine` gửi nó trong `options` của `/api/chat`. Nó tồn tại vì chế độ
+    Chimera (§8.7.5) cần N ứng viên KHÁC NHAU từ cùng một model — ở một nhiệt độ
+    cố định thì sáu lời gọi cho ra sáu bản gần như giống hệt nhau, và lượt "pha"
+    không còn gì để pha. `None` = dùng mặc định của adapter (`_TEMPERATURE`).
+
+    Hai trường `merge_*` CHỈ có nghĩa với adapter của lượt PHA
+    (`adapters/mt/chimera_merge.py`); mọi adapter khác bỏ qua chúng. Chúng nằm ở
+    ĐÂY — chứ không thành một tham số riêng của `translate` — vì như vậy lượt pha
+    đi qua ĐÚNG `TranslateHandler._translate_batch`: cùng chính sách alignment,
+    cùng đường retry, và cùng MỘT hàng `llm_calls` cho mỗi lần chạm engine
+    (spec §4.2). Một đường gọi thứ hai cho lượt pha là đường thứ hai để những thứ
+    đó trôi khỏi nhau.
+    """
     source_lang: str
     target_lang: str = "vi"
+    temperature: float | None = None
+    #: `((id_ứng_viên, (Segment, ...)), ...)` — CHỈ lượt pha đọc.
+    merge_candidates: tuple = ()
+    #: `id` của ứng viên MỎ NEO — CHỈ lượt pha đọc.
+    merge_anchor: str | None = None

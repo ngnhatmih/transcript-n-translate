@@ -212,6 +212,29 @@ export function App() {
   const [banDaChon, datBanDaChon] = useState<{ id: number; kenh: number; tid: number } | null>(null);
 
   /**
+   * CHẾ ĐỘ CHIMERA (§4.5, spec kiến trúc §8.7.5) — state của `App`, không phải của màn.
+   *
+   * Vì sao ở ĐÂY: cờ này đi vào BODY của `POST /api/translations` (`taoBanDich` bên
+   * dưới), và `App` là nơi DUY NHẤT gọi endpoint đó. Giữ nó trong `CompareScreen` là
+   * hai điểm quyết định cho cùng một lượt chạy — đúng lỗi mà `macDinhId` đã dẹp.
+   */
+  const [chimera, datChimera] = useState(false);
+  /**
+   * CẢNH BÁO CHI PHÍ (§4.5): đọc `GET /api/chimera/cost` khi chip BẬT và có kênh.
+   *
+   * ⚠️ Chỉ đọc khi `chimera === true`: endpoint này là một lượt đọc THẬT (không cache,
+   * `useApi` TRẦN), nên gọi nó lúc chip tắt là một request không ai dùng.
+   * ⚠️ Chỉ đọc lại khi `tid` đổi: cảnh báo chi phí phụ thuộc SỐ ĐOẠN của kênh và một
+   * bản dịch đã xong của chính kênh đó, không phụ thuộc bản dịch đang xem.
+   */
+  const chiPhiChimera = useApi(
+    () => (chimera && tid !== null
+      ? endpoints.chimeraCost(tid)
+      : Promise.resolve(null)),
+    [chimera, tid],
+  );
+
+  /**
    * Tạo một bản dịch cho bản ghi đang mở — **MỘT** hàm, gọi từ `CompareScreen`.
    *
    * ⚠️ Body là `{ transcript_id, engine }`: **KHÔNG gửi `target_lang`**. Backend đã mặc định
@@ -228,7 +251,20 @@ export function App() {
     datDangTao(true);
     datLoiTao(null);
     try {
-      const tao = await endpoints.createTranslation({ transcript_id: tid, engine });
+      // `chimera` đi CÙNG body — nhưng CHỈ khi BẬT. Khi bật, backend bỏ qua `engine`
+      // của người dùng và dùng kế hoạch ứng viên của registry, nên
+      // `translations.engine` ghi engine PHA (engine thật sự viết ra chữ được giữ).
+      //
+      // ⚠️ KHÔNG gửi `chimera: false`: đó đúng là mặc định của backend
+      // (`CreateIn.chimera = False`), nên nó chỉ làm body phình thêm một khoá mang
+      // giá trị backend đã có — và hợp đồng body của lượt W3 là HAI khoá, được ghim
+      // NGUYÊN VĂN JSON gửi lên ở `App.test.tsx::W3 BAT DAU DICH`.
+      const than: Parameters<typeof endpoints.createTranslation>[0] = {
+        transcript_id: tid,
+        engine,
+      };
+      if (chimera) than.chimera = true;
+      const tao = await endpoints.createTranslation(than);
       // ⚠️ Ghi KÈM kênh: ưu tiên này chỉ có nghĩa cho kênh đã tạo ra nó (xem `banDangXemId`).
       datBanMoiTao({ id: tao.translation.id, kenh: ui.channelId });
       // Trạng thái JOB của bản vừa tạo — cũng từ HTTP, không phải màn tự đoán. Kèm CẢ kênh
@@ -1242,6 +1278,14 @@ export function App() {
               /* Lựa chọn của người dùng đi LÊN `App` (xem `banDaChon`): nếu giữ nó ở state cục
                  bộ của màn thì `banDangXemId` — và do đó cả `Transport` — vẫn là bản VỪA TẠO. */
               onChonBanDich={chonBanDich}
+              /* §4.5 CHẾ ĐỘ CHIMERA: cờ là state của `App` (nó đi vào body của
+                 `createTranslation`), còn cảnh báo chi phí đọc ở MỘT hook phía trên —
+                 màn chỉ hiện, không tự `fetch` (cùng luật với mọi màn khác). */
+              chimera={chimera}
+              onChimeraChange={datChimera}
+              chiPhi={chiPhiChimera.data}
+              dangDocChiPhi={chiPhiChimera.loading}
+              loiChiPhi={chiPhiChimera.error}
             />
           ) : ui.mode === "glossary" ? (
             /* §4.4 tab THUẬT NGỮ (Task 9). Màn này KHÔNG nhận prop: nó độc lập với

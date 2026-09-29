@@ -60,6 +60,7 @@ from app.domain.glossary_match import approved
 from app.domain.models import Segment
 from app.domain.mt import DEFAULT_MAX_CHARS, MtOpts, batch_segments
 from app.domain.mt_qa import QaLimits, qa_translation
+from app.pipeline.chimera import ChimeraRunner
 
 
 @dataclass(frozen=True)
@@ -81,14 +82,38 @@ def _sum_rows(rows: list[dict], column: str) -> int | None:
     return sum(values) if values else None
 
 
+def _totals_of(rows: list[dict]) -> dict:
+    """Số đo của MỘT NHÓM hàng `llm_calls` (thường là các hàng của đúng một lời gọi).
+
+    Chế độ Chimera cần tách số đo theo TỪNG ứng viên, mà `llm_calls` là một dãy
+    phẳng theo job. Cách tách ở đây là ĐẾM SỐ HÀNG trước và sau một lời gọi rồi
+    cắt — không thêm cột, không thêm bảng, và không suy đoán: một lời gọi ghi ít
+    nhất một hàng (kể cả hàng hỏng), nên phép cắt luôn cắt đúng chỗ.
+    """
+    return {
+        "calls": len(rows),
+        "tokens_in": _sum_rows(rows, "tokens_in"),
+        "tokens_out": _sum_rows(rows, "tokens_out"),
+        "duration_ms": _sum_rows(rows, "duration_ms"),
+    }
+
+
 class TranslateHandler:
     def __init__(self, repos, engines: dict[str, object], *,
                  batch_chars: int = DEFAULT_MAX_CHARS,
-                 limits: QaLimits = QaLimits()) -> None:
+                 limits: QaLimits = QaLimits(),
+                 chimera=None, chimera_merge=None) -> None:
         self._repos = repos
         self._engines = engines
         self._batch_chars = batch_chars
         self._limits = limits
+        #: Kế hoạch Chimera (§8.7.5). `None` = registry không khai báo chế độ này,
+        #: và khi đó MỌI hàng `translations` đi đường cũ — không có nhánh chết nào
+        #: được kích hoạt bằng cách thiếu cấu hình.
+        self._chimera = chimera
+        #: Adapter của LƯỢT PHA (`adapters/mt/chimera_merge.OllamaMergeEngine`).
+        #: `None` = lượt pha không chạy được, và runner LÙI VỀ MỎ NEO kèm lý do.
+        self._chimera_merge = chimera_merge
 
     def handles(self) -> str:
         return "translate"
@@ -121,6 +146,16 @@ class TranslateHandler:
         # (`engine`/`prompt_version`): chúng là dữ liệu ĐÃ GHI LÚC TẠO (route lấy
         # từ `spec.capabilities` của registry), không phải thứ suy lại từ engine.
         stored = self._repos.get_translation(translation_id)
+        # Chế độ Chimera là DỮ LIỆU ĐÃ GHI trên hàng (`POST /api/translations` ghi
+        # nó lúc tạo, kèm ƯỚC LƯỢNG CHI PHÍ đã hiện cho người dùng). Đọc từ hàng
+        # chứ không từ `job.payload`: payload là ảnh chụp lúc xếp hàng, còn hàng là
+        # thứ API trả cho giao diện — hai nguồn cho cùng một câu trả lời là hai
+        # câu trả lời có thể lệch.
+        cfg = getattr(stored, "chimera", None) or {}
+        runner = None
+        if cfg.get("enabled") and self._chimera is not None:
+            runner = ChimeraRunner(self._chimera, merge_engine=self._chimera_merge,
+                                   limits=self._limits, created=cfg)
         # `running` (spec §6): thiếu nó thì hàng dịch nằm nguyên ở `queued` suốt
         # thời gian chạy, và `GET /api/translations` (Task 13) không phân biệt
         # được "vừa xếp, chưa ai chạm" với "đang chạy" — trong khi vocabulary đã
@@ -163,9 +198,21 @@ class TranslateHandler:
                     report(job.progress, f"đã huỷ: giữ {len(done)}/{total} segment")
                     return
 
-                translated, missing = self._translate_batch(
-                    engine, batch, glossary, opts, report, job.progress,
-                    facts=(stored.engine, stored.prompt_version), job=job)
+                if runner is None:
+                    translated, missing = self._translate_batch(
+                        engine, batch, glossary, opts, report, job.progress,
+                        facts=(stored.engine, stored.prompt_version), job=job)
+                else:
+                    kq = runner.run_batch(
+                        run=self._run_engine_batch, engines=self._engines,
+                        batch=batch, glossary=glossary, opts=opts, job=job,
+                        report=report, progress=job.progress)
+                    translated, missing = kq.segments, kq.missing
+                    # Ghi NGAY sau mỗi lô. Một lượt Chimera dài gấp `N+1` lần lượt
+                    # thường, nên "chỉ ghi khi cả bản dịch xong" là mất trắng số đo
+                    # của cả lượt chạy khi lô cuối hỏng — mà số đo đó chính là thứ
+                    # §4.5 tồn tại để phơi ra.
+                    self._repos.set_translation_chimera(translation_id, runner.session())
                 if translated is None:
                     # Giữ nguyên phần đã dịch (không xoá công đã làm) và nói rõ id nào
                     # chưa có bản dịch — đây là thông báo hành động được của bước (c).
@@ -193,6 +240,11 @@ class TranslateHandler:
         done = self._ordered_prefix(source, done)
         self._repos.update_translation_segments(translation_id, done)
 
+        if runner is not None:
+            # Bản ghi CUỐI: cùng `runner` nên nó chỉ hơn bản ghi giữa đường ở chỗ
+            # đã có đủ mọi lô. Không dựng lại từ DB — dựng lại là nguồn thứ hai.
+            self._repos.set_translation_chimera(translation_id, runner.session())
+
         issues = qa_translation(source, done, glossary=glossary,
                                 supports_glossary=engine.supports_glossary(),
                                 limits=self._limits,
@@ -216,6 +268,22 @@ class TranslateHandler:
         self._repos.set_transcript_status(transcript_id, "translated")
         job.progress = 1.0
         report(1.0, f"xong: {len(done)} segment, {len(issues)} issue QA")
+
+    def _run_engine_batch(self, engine, batch, glossary, opts, facts, job,
+                          report, progress) -> tuple[list[Segment] | None,
+                                                     list[int], dict]:
+        """MỘT lời gọi engine qua chính sách alignment, kèm SỐ ĐO CỦA RIÊNG NÓ.
+
+        Đây là chỗ chế độ Chimera lấy được "ứng viên này tốn bao nhiêu token": số
+        đo được cắt từ `llm_calls` theo mốc đếm trước/sau, nên nó đến từ CÙNG nguồn
+        với tổng của cả bản dịch (`_totals_for`) và hai con số không thể lệch nhau.
+        """
+        job_id = getattr(job, "id", None)
+        before = len(self._repos.list_llm_calls(job_id))
+        out, missing = self._translate_batch(engine, batch, glossary, opts, report,
+                                             progress, facts=facts, job=job)
+        rows = self._repos.list_llm_calls(job_id)[before:]
+        return out, missing, _totals_of(rows)
 
     def _cancel_requested(self, job) -> bool:
         """Cờ huỷ của job, ĐỌC LẠI TỪ REPO mỗi lô.

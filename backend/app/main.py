@@ -14,15 +14,18 @@ from fastapi import FastAPI
 
 from app.adapters.clock_system import SystemClock
 from app.adapters.governor.single_gpu import SingleGpuGovernor
+from app.adapters.mt.chimera_merge import OllamaMergeEngine
 from app.adapters.mt.ollama_mt import OllamaMtEngine
 from app.adapters.mt.opus_mt import OpusMtEngine
-from app.adapters.mt.prompts import PROMPT_VERSION
+from app.adapters.mt.prompts import MERGE_PROMPT_VERSION, PROMPT_VERSION
 from app.adapters.persist.sqlite_repos import SqliteRepos
-from app.adapters.registry_file import load_default_asr, load_default_mt, load_registry
+from app.adapters.registry_file import (load_chimera, load_default_asr,
+                                        load_default_mt, load_registry)
 from app.api.app import create_app
 from app.api.sse import JobEventBroker
 from app.config import (API_HOST, API_PORT, DB_PATH, HF_HOME, LOG_DIR, MEDIA_DIR,
                         OUTPUT_DIR, OLLAMA_MODELS, ensure_dirs)
+from app.domain.chimera import ChimeraPlan, mark_availability, plan_from_raw
 from app.pipeline.export import ExportHandler
 from app.pipeline.ingest import IngestHandler
 from app.pipeline.transcribe import AUTO_FORWARD_SETTING, TranscribeHandler
@@ -70,6 +73,64 @@ def _mark_availability(specs) -> None:
             spec.capabilities["available"] = spec.model_ref in pulled
         else:
             spec.capabilities["available"] = True
+
+
+def chimera_plan_for(specs) -> ChimeraPlan:
+    """Kế hoạch Chimera của registry HIỆN HÀNH — DỮ LIỆU, không dựng engine.
+
+    Nguồn sự thật của "ứng viên này chạy được không" là `capabilities["available"]`
+    mà `_mark_availability` đã ghi lên CHÍNH danh sách `specs` này — hàm này KHÔNG
+    dò Ollama lần thứ hai (hai phép dò cho cùng một câu hỏi là hai câu trả lời có
+    thể lệch, và câu trả lời lệch ở đây nghĩa là giao diện hứa một ứng viên rồi job
+    chết ở tận worker).
+
+    Ứng viên trỏ tới một engine KHÔNG có trong danh sách `specs` bị BỎ khỏi kế
+    hoạch thay vì làm nổ lúc dựng: `load_registry` là thứ bị thay trong nhiều bài
+    test, và một registry tối mười dòng là cấu hình HỢP LỆ. Trên registry ĐÃ SHIP,
+    cả sáu engine đều có mặt nên không ứng viên nào bị bỏ — và
+    `test_shipped_registry_declares_six_chimera_candidates` ghim đúng điều đó.
+
+    Hàm này THUẦN theo nghĩa nó chỉ đọc `specs` + `registry.json`: gọi hai lần cho
+    ra hai kế hoạch BẰNG NHAU, nên `build_components()` và `build_app()` không thể
+    trao cho handler và cho route hai kế hoạch khác nhau.
+    """
+    block = load_chimera()
+    mt_ids = {s.id for s in specs if s.kind == "mt"}
+    if not block:
+        return ChimeraPlan(candidates=(), merge_engine="")
+    raw_candidates = [c for c in block.get("candidates", [])
+                      if isinstance(c, dict) and c.get("engine") in mt_ids]
+    merge_engine = block.get("merge_engine")
+    if merge_engine not in mt_ids or not raw_candidates:
+        return ChimeraPlan(candidates=(), merge_engine="")
+    plan = plan_from_raw({"merge_engine": merge_engine, "candidates": raw_candidates},
+                         mt_ids=mt_ids)
+    available = {s.id for s in specs
+                 if s.kind == "mt" and s.capabilities.get("available")}
+    return mark_availability(plan, available)
+
+
+def chimera_merge_for(plan: ChimeraPlan, engines) -> object | None:
+    """Adapter của LƯỢT PHA, hoặc `None` khi lượt pha không chạy được.
+
+    Nhận ĐÚNG dict `mt_engines` mà `TranslateHandler` đang giữ, không dựng thêm
+    một engine cho cùng model: hai `OllamaMtEngine` cho một model là hai cờ
+    `_loaded`, và governor đăng ký `release` trên cái kia — lượt pha đổ model
+    xong thì bản sao của nó vẫn tưởng model còn trong VRAM.
+
+    Điều kiện là DUCK TYPING (`hasattr(base, "chat")`), không phải
+    `isinstance(base, OllamaMtEngine)`: `tests/test_mt_wiring.py` thay
+    `main.OllamaMtEngine` bằng một hàm factory, và `isinstance` với một thuộc tính
+    đã bị vá sẽ ném `TypeError`. Thứ lượt pha thật sự cần là một engine biết
+    `chat(system, user)`, và đó cũng đúng là thứ nó kiểm.
+
+    `None` KHÔNG phải lỗi: runner lùi về mỏ neo và GHI RA lý do (một engine chạy
+    trong tiến trình như OPUS-MT không có "gộp N bản" trong hợp đồng của nó).
+    """
+    base = engines.get(plan.merge_engine)
+    if base is None or not hasattr(base, "chat"):
+        return None
+    return OllamaMergeEngine(base, engine_id=plan.merge_engine)
 
 
 def _build_mt_engines(specs) -> dict[str, object]:
@@ -185,8 +246,19 @@ def build_components():
     for spec in specs:
         if spec.kind == "mt":
             spec.capabilities["prompt_version"] = prompt_versions[spec.id]
+            # Lượt PHA là một prompt KHÁC, nên nó là một version KHÁC. Đặt cạnh
+            # `prompt_version` trong cùng dict: route bản dịch chỉ được đọc
+            # `spec.capabilities` (nó không được import `app.adapters`), và một khoá
+            # thứ hai ở đây là cách duy nhất để hàng `translations` của một lượt
+            # Chimera mang ĐÚNG version của prompt đã viết ra nó.
+            spec.capabilities["chimera_prompt_version"] = MERGE_PROMPT_VERSION
 
     mt_engines = _build_mt_engines(specs)
+    # SAU `_mark_availability` VÀ SAU `_build_mt_engines`: cờ chạy được của từng ứng
+    # viên đọc từ chính `specs` vừa được đánh dấu, còn lượt pha mượn ĐÚNG engine
+    # của `mt_engines` (không dựng bản sao thứ hai — xem `chimera_merge_for`).
+    chimera_plan = chimera_plan_for(specs)
+    chimera_merge = chimera_merge_for(chimera_plan, mt_engines)
 
     transcribe_handler = TranscribeHandler(
         repos, specs, engine_factory=_engine_factory, workdir=MEDIA_DIR,
@@ -211,7 +283,8 @@ def build_components():
         # Task 12: cùng lớp lỗi với `publish=` bị bỏ quên ở Giai đoạn 1a — dựng
         # `TranslateHandler` mà KHÔNG trao `mt_engines` thì mọi job dịch tự sinh
         # `KeyError` trong handler, và bóc băng xong chẳng có bản dịch nào.
-        "translate": TranslateHandler(repos, mt_engines),
+        "translate": TranslateHandler(repos, mt_engines, chimera=chimera_plan,
+                                      chimera_merge=chimera_merge),
         "export": ExportHandler(repos, out_dir=OUTPUT_DIR),
     }
     broker = JobEventBroker()
@@ -244,15 +317,22 @@ def build_components():
     return repos, specs, worker, broker, mt_engines
 
 
-def build_app(repos, specs, worker, broker, mt_engines) -> FastAPI:
+def build_app(repos, specs, worker, broker, mt_engines, *, chimera_plan=None) -> FastAPI:
     """Ráp app HTTP từ ĐÚNG những thành phần `build_components()` trả về.
 
     Tách khỏi `main()` để test gọi được đường dây thật, không phải bản sao của
     nó: bỏ `broker=broker` ở đây là app tự dựng broker riêng và stream câm.
     """
+    if chimera_plan is None:
+        # `chimera_plan_for` là hàm THUẦN trên `specs` (mọi thứ nó đọc đã nằm trong
+        # `spec.capabilities`) nên gọi lại cho ra ĐÚNG kế hoạch mà
+        # `build_components()` đã trao cho `TranslateHandler` — không có lần dò
+        # Ollama thứ hai, và không có bản sao nào có thể lệch.
+        chimera_plan = chimera_plan_for(specs)
     return create_app(repos=repos, specs=specs, media_dir=MEDIA_DIR,
                       out_dir=OUTPUT_DIR, worker=worker, log_dir=LOG_DIR,
-                      broker=broker, mt_engines=mt_engines)
+                      broker=broker, mt_engines=mt_engines,
+                      chimera_plan=chimera_plan)
 
 
 def _prepare_local_model_caches() -> None:

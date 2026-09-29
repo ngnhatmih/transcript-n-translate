@@ -6,8 +6,11 @@ Hai lý do khiến chỗ này đáng một tệp riêng:
   đúng MỘT truy vấn cho mỗi bản dịch, nhưng không index thì nó quét cả bảng,
   mà bảng đó lớn lên một hàng mỗi lần gọi engine, của MỌI job.
 * Index là một ĐỐI TƯỢNG MỚI, không phải một cột: `CREATE INDEX IF NOT EXISTS`
-  trong `SCHEMA_SQL` chạy được trên DB đã tồn tại, nên không cần migration và
-  `SCHEMA_VERSION` phải giữ nguyên. Tệp này khoá cả hai vế đó lại.
+  trong `SCHEMA_SQL` chạy được trên DB đã tồn tại, nên nó KHÔNG cần một bước
+  migration. Tệp này khoá vế đó lại — và nay khoá nó bằng ĐÚNG thứ nó nói
+  (`_MIGRATIONS` không nhắc tới index), không bằng con số `SCHEMA_VERSION`:
+  nhánh CHIMERA bump version lên 3 vì nó thêm một CỘT
+  (`translations.chimera`), nên ghim con số ở đây sẽ nói sai lý do.
 
 DB cũ được dựng bằng `V1_SQL` của `test_schema_migration` — nguyên văn schema
 TRƯỚC bản này — nên đây đúng là "DB tạo trước khi thêm index".
@@ -66,12 +69,28 @@ def test_fresh_database_gets_the_index(tmp_path):
     assert INDEX in plan, f"query planner không dùng index: {plan!r}"
 
 
+def test_the_index_is_not_a_migration_step():
+    """Index là ĐỐI TƯỢNG, `_MIGRATIONS` là các bước THÊM CỘT.
+
+    Đây là cách ghim vế "index không cần migration" mà không phụ thuộc con số
+    `SCHEMA_VERSION` (nhánh CHIMERA bump nó vì một CỘT khác). Một index lọt vào
+    `_MIGRATIONS` là dấu hiệu ai đó tin sai về `CREATE INDEX IF NOT EXISTS`, và nó
+    sẽ hỏng ở lần chạy thứ hai trên DB đã có index.
+    """
+    flat = " ".join(" ".join(str(part) for part in step)
+                    for step in SqliteRepos._MIGRATIONS)
+    assert INDEX not in flat, (
+        f"`{INDEX}` phải do `SCHEMA_SQL` tạo, không phải một bước migration: {flat!r}"
+    )
+
+
 def test_an_older_database_is_healed_without_a_migration(tmp_path):
     """DB dựng bằng schema CŨ (chưa có index) phải nhận index ở lần `init_schema`.
 
-    Đồng thời ghim `SCHEMA_VERSION` không đổi: index là đối tượng mới nên
-    `CREATE INDEX IF NOT EXISTS` tự chạy trên DB cũ, không cần bước migration
-    nào và không được phép bump version.
+    Và nó nhận được mà KHÔNG cần bước migration nào cho index: cùng lần
+    `init_schema()` đó có chạy các bước thêm cột của phiên bản hiện hành, nhưng
+    index đến từ `CREATE INDEX IF NOT EXISTS` trong `SCHEMA_SQL` — câu lệnh tự
+    chạy được trên một bảng đã tồn tại.
     """
     db = tmp_path / "old.db"
     conn = sqlite3.connect(db)
@@ -87,6 +106,8 @@ def test_an_older_database_is_healed_without_a_migration(tmp_path):
         "init_schema() trên DB cũ phải tạo index — nếu không thì mọi DB đã tồn "
         "tại vẫn quét cả bảng và cần một migration thật"
     )
-    assert _version(db) == str(SCHEMA_VERSION) == "2", (
-        "index KHÔNG phải lý do để đổi schema version"
+    assert _version(db) == str(SCHEMA_VERSION) == "3", (
+        "init_schema() đóng dấu version HIỆN HÀNH; ở nhánh này nó là 3 vì cột "
+        "`translations.chimera`, KHÔNG vì index — xem "
+        "`test_the_index_is_not_a_migration_step`"
     )

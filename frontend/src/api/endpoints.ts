@@ -12,6 +12,7 @@
 import { api, BASE } from "./client.ts";
 import type {
   AffectedPreview,
+  ChimeraCost,
   EngineSpec,
   GlossaryVersion,
   Job,
@@ -159,6 +160,25 @@ export function patchTranslation(
 }
 
 // ---------------------------------------------------------------------------
+// chimera — cảnh báo chi phí, ĐỌC TRƯỚC khi bấm
+// ---------------------------------------------------------------------------
+
+/**
+ * Cảnh báo chi phí của MỘT lượt Chimera trên kênh này (§4.5, §9.2).
+ *
+ * Vì sao nó là một endpoint riêng chứ không phải một khoá của `/api/translations`:
+ * câu hỏi "chế độ này tốn bao nhiêu" phải trả lời được TRƯỚC khi có bản dịch nào
+ * tồn tại — nếu không thì "hiện trước khi người dùng bấm" là một lời hứa không có
+ * đường thực hiện.
+ *
+ * ⚠️ `estimate: null` là câu trả lời HỢP LỆ ("chưa đo được"), kèm `estimate_basis`
+ * và `estimate_hint`. Client KHÔNG được tự tính một con số thay thế.
+ */
+export function chimeraCost(transcriptId: number): Promise<ChimeraCost> {
+  return api.get<ChimeraCost>(`/chimera/cost${query({ transcript_id: transcriptId })}`);
+}
+
+// ---------------------------------------------------------------------------
 // glossary — thuật ngữ và hệ quả của nó
 // ---------------------------------------------------------------------------
 
@@ -289,6 +309,7 @@ export const endpoints = {
   listTerms,
   createTerm,
   patchTerm,
+  chimeraCost,
   glossaryVersion,
   affectedPreview,
   registry,

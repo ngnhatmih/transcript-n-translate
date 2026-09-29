@@ -41,6 +41,23 @@ def load_default_asr(path: str | pathlib.Path | None = None) -> str | None:
     return str(declared) if declared else None
 
 
+def load_chimera(path: str | pathlib.Path | None = None) -> dict | None:
+    """Khối `chimera` THÔ của registry, hoặc `None` khi registry không khai báo.
+
+    `None` KHÔNG được coi là lỗi cấu hình: một registry không có chế độ Chimera là
+    một cấu hình HỢP LỆ (chế độ này là tuỳ chọn — "Tuỳ chọn bật trong UI", §8.7.5),
+    và nhiều bài test dựng app trên một registry tối thiểu. Coi nó là lỗi sẽ biến
+    mọi registry tối thiểu thành một lỗi khởi động.
+
+    Việc KIỂM TÍNH ĐÚNG của khối này nằm ở `domain.chimera.plan_from_raw` — hàm
+    thuần, nên nó ghim được bằng test mà không cần đọc tệp.
+    """
+    p = pathlib.Path(path) if path is not None else REGISTRY_PATH
+    raw = json.loads(p.read_text(encoding="utf-8"))
+    block = raw.get("chimera")
+    return block if isinstance(block, dict) else None
+
+
 def load_default_mt(path: str | pathlib.Path | None = None) -> str | None:
     """Khoá `default_mt` của registry, hoặc `None` khi registry không khai báo (R58).
 

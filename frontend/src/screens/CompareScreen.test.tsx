@@ -122,7 +122,14 @@ function banDich(
   id: number,
   texts: string[],
   cps: { i: number; cps: number | null; over: boolean }[],
-  opts: { stale?: boolean; maxCps?: number; engine?: string; status?: TranslationDetail["status"] } = {},
+  opts: {
+    stale?: boolean;
+    maxCps?: number;
+    engine?: string;
+    status?: TranslationDetail["status"];
+    /** Dấu vết CHIMERA (§4.5) — vắng ⇒ `null`, tức một bản dịch THƯỜNG. */
+    chimera?: TranslationDetail["chimera"];
+  } = {},
 ): TranslationDetail {
   return {
     id,
@@ -134,6 +141,7 @@ function banDich(
     status: opts.status ?? "done",
     stale: opts.stale ?? false,
     created_at: "2026-01-01T00:00:00Z",
+    chimera: opts.chimera ?? null,
     segments: texts.map((t, k) => doan(k + 1, t)),
     cps: {
       max_cps: opts.maxCps ?? 21,
@@ -148,6 +156,36 @@ function banDich(
     },
   };
 }
+
+/**
+ * Dấu vết CHIMERA tối thiểu (§4.5) — CHỈ để bài "mồ côi" thấy được các lớp mới.
+ *
+ * Dựng ở đây chứ không import từ `CompareScreen.chimera.test.tsx`: hai tệp test độc
+ * lập, và một fixture dùng chung giữa hai tệp là một phụ thuộc ẩn giữa chúng.
+ */
+const CHIMERA_RUN: NonNullable<TranslationDetail["chimera"]> = {
+  enabled: true,
+  declared: 6,
+  run_count: 4,
+  ran_count: 4,
+  calls_per_batch: 5,
+  merge_engine: "qwen2.5-3b",
+  anchors: { c1: 1 },
+  candidates: [
+    {
+      id: "c1", engine: "opus-mt", label: "OPUS-MT", temperature: null,
+      quality_note: null, available: true, reason: null, ran: true, skipped: null,
+      qa: 1, cps_over: 0, echo: 0, calls: 1, tokens_in: null, tokens_out: null,
+      duration_ms: null, segments: [{ i: 1, text: "Xin chao" }],
+    },
+  ],
+  merge: {
+    engine: "qwen2.5-3b", calls: 1, tokens_in: 669, tokens_out: 147,
+    duration_ms: 1037, fallback_segments: [], fallback_reason: null,
+    identical_segments: [1], anchor_by_segment: { "1": 1 },
+  },
+  distinct_by_segment: { "1": 2 },
+};
 
 const consoleGoc = { error: console.error, warn: console.warn };
 const tiengOn: string[] = [];
@@ -789,6 +827,31 @@ describe("CompareScreen: §4.3 hai cot + cot CPS + segmented control + ghim ban 
           specs: SPECS,
         },
       },
+      // (c) §4.5 CHIMERA: chip BAT ⇒ `.cmp__chi-phi` LA MOT CON CO MAT, va no phai co
+      //     `grid-row` TRO VAO MOT TRACK CO THAT.
+      //     ⚠️ VI SAO PHAI CO TRANG THAI NAY (do duoc, mutant `M16`): thieu no thi
+      //     `.cmp__chi-phi` khong bao gio la "con CO MAT", nen luat `grid-row` cua no
+      //     KHONG duoc kiem — va mutant "bo `grid-row` cua dai chi phi" **SONG SOT 0 bai do**
+      //     trong khi chinh no lam hang `1fr` (cho cuon cua danh sach) troi di, dung lop loi
+      //     ma bai nay ton tai de bat.
+      {
+        ten: "CHIMERA (chip BAT ⇒ co dai chi phi)",
+        props: {
+          translations: [banDich(11, ["câu một (dịch)"], [{ i: 1, cps: 4.2, over: false }])],
+          specs: SPECS,
+          chimera: true,
+          chiPhi: {
+            segments: 2, declared: 6, runnable: 4, calls_per_batch: 5, multiplier: 5,
+            merge_engine: "qwen2.5-3b",
+            candidates: [
+              { id: "c1", engine: "opus-mt", label: "OPUS-MT", temperature: null,
+                quality_note: null, available: true, reason: null },
+            ],
+            baseline: null, estimate: null,
+            estimate_basis: "chua do duoc", estimate_hint: null,
+          },
+        },
+      },
     ];
 
     const trackDaGhim = new Map<string, number>();
@@ -925,6 +988,39 @@ describe("CompareScreen: §4.3 hai cot + cot CPS + segmented control + ghim ban 
         specs: SPECS,
         loiTao: "409: engine chua san sang",
         bamGhim: true,
+      },
+      // ⚠️ §4.5 (nhanh CHIMERA) THEM BON LOP MOI, va chung chi xuat hien o HAI trang
+      // thai: (a) chip BAT + dang doc chi phi ⇒ `.cmp__chi-phi`, `.cmp__cp-ky`;
+      // (b) chip BAT + CO so do + mot ban dich CO dau vet ⇒ `.cmp__cp-so`,
+      // `.cmp__hop-nhat`, `.cmp__uv-boc`, `.cmp__uv`, `.cmp__uv-nhan`, `.cmp__uv-chu`.
+      // Thieu hai trang thai nay thi bai (A) bao "luat mo coi" cho nhung luat CO THAT
+      // — dung phep do SAI ma khoi chu thich o dau bai nay da canh bao.
+      {
+        transcript: banGhi([doan(1, "你好")]),
+        translations: [banDich(11, ["Xin chao"], [{ i: 1, cps: 4, over: false }])],
+        chimera: true,
+        dangDocChiPhi: true,
+      },
+      {
+        transcript: banGhi([doan(1, "你好")]),
+        translations: [
+          banDich(11, ["Xin chao"], [{ i: 1, cps: 4, over: false }], { chimera: CHIMERA_RUN }),
+        ],
+        chimera: true,
+        chiPhi: {
+          segments: 1, declared: 6, runnable: 4, calls_per_batch: 5, multiplier: 5,
+          merge_engine: "qwen2.5-3b",
+          candidates: [
+            { id: "c1", engine: "opus-mt", label: "OPUS-MT", temperature: null,
+              quality_note: null, available: true, reason: null },
+          ],
+          baseline: null,
+          // ⚠️ `estimate` phải KHÁC `null` ở ĐÚNG trạng thái này: nhánh "có số đo" mới
+          // sinh ra `.cmp__cp-so` (ba con số mono của dòng ước lượng). Đặt `null` ở đây
+          // là để luật đó mồ côi — đã đo được đúng như vậy ở lượt chạy đầu.
+          estimate: { calls_per_batch: 5, duration_ms: 15000, tokens_in: 1280, tokens_out: 550 },
+          estimate_basis: "do tu ban dich #7", estimate_hint: null,
+        },
       },
     ] as (Record<string, unknown> & { bamGhim?: boolean })[]) {
       const { container } = render(taoPhanTu(CompareScreen, { onTaoBanDich: () => {}, ...props }));

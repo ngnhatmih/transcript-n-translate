@@ -147,6 +147,12 @@ class Translation:
     tokens_in: int | None = None
     tokens_out: int | None = None
     duration_ms: int | None = None
+    #: Dấu vết chế độ CHIMERA (§8.7.5) của hàng này: kế hoạch N ứng viên + lượt
+    #: pha, ước lượng chi phí ĐÃ GHI LÚC TẠO HÀNG, và số đo THẬT của từng ứng
+    #: viên. `None` = hàng này không chạy ở chế độ Chimera. Không nằm trên
+    #: `TranslationSummary`: `segments` cũng không nằm ở đó, và cùng lý do — nó là
+    #: một JSON lớn, chỉ route CHI TIẾT mới được kéo.
+    chimera: dict | None = None
     created_at: str = ""
 
 
