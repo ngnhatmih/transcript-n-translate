@@ -98,6 +98,33 @@ async function waitForBackend(timeoutMs: number): Promise<boolean> {
   return backendIsUp();
 }
 
+/**
+ * Backend ở 8620 có phải đúng thứ khối này GIẢ ĐỊNH không: `/api/status` trả lời **và DB RỖNG**.
+ *
+ * 🔴 VÌ SAO PHẢI HỎI THÊM CÂU THỨ HAI (`I4` của review D2, đo được): phép dò cũ chỉ hỏi
+ * `/api/status` — một route **không đụng tới DB** — nên một server LẠ đã gieo dữ liệu ở 8620 được
+ * nhận là "backend dùng được", hai guard `EMPTY_DB_MSG` ở dưới thành **XANH**, và toàn bộ `fail`
+ * DỊCH ĐI HAI. Đo được CẢ HAI trạng thái trên CÙNG một cây byte-exact: `pass 254 / fail 0 /
+ * EXIT=0` khi 8620 bị chiếm, `pass 252 / fail 2 / EXIT=1` khi 8620 trống. Tức `fail` KHÔNG phải
+ * một thuộc tính của commit mà của MÔI TRƯỜNG, và bất kỳ ai áp `fail − 2` sẽ ra số ÂM hoặc thiếu.
+ *
+ * Hệ quả có chủ ý: gặp một server gieo dữ liệu ở 8620 thì khối này **ĐỎ TO** (hook `before` ném)
+ * thay vì im lặng đổi nền — một phép đo sai mà không ai thấy là thứ tệ hơn một bài đỏ.
+ */
+async function backendHasEmptyDb(): Promise<boolean> {
+  try {
+    const response = await fetch(`${API}/transcripts`, {
+      signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
+    });
+    if (!response.ok) return false;
+    const rows: unknown = await response.json();
+    return Array.isArray(rows) && rows.length === 0;
+  } catch {
+    // Không đọc được danh sách ⇒ không phải cái mình giả định.
+    return false;
+  }
+}
+
 /** Tắt ĐÚNG tiến trình mình spawn. Không có gì của mình ⇒ no-op. */
 function stopSpawnedBackend(): void {
   if (spawnedPid === null) return;
@@ -138,8 +165,19 @@ async function getSeedJson(path: string): Promise<unknown> {
 
 describe("hop dong API that (backend 8620)", () => {
   before(async () => {
-    // Backend của NGƯỜI KHÁC: không spawn thêm, và `after` sẽ không tắt nó.
-    if (await backendIsUp()) return;
+    // Backend của NGƯỜI KHÁC: không spawn thêm, và `after` sẽ không tắt nó — NHƯNG nó phải là
+    // backend mà khối này giả định (`I4` của review D2): DB RỖNG. Một server đã gieo dữ liệu ở
+    // 8620 làm hai guard `EMPTY_DB_MSG` xanh và `fail` dịch đi hai, KHÔNG một dấu hiệu nào.
+    if (await backendIsUp()) {
+      assert.ok(
+        await backendHasEmptyDb(),
+        `8620 đang trả lời nhưng DB của nó KHÔNG rỗng. Khối này chỉ đo được trên DB rỗng (hai `
+        + "guard `EMPTY_DB_MSG`), nên một server lạ đã gieo dữ liệu sẽ làm `fail` DỊCH ĐI HAI mà "
+        + "không ai thấy (I4 của review D2 — đã đo được thật: `pass 254 / fail 0`). Hãy để 8620 "
+        + "TRỐNG trước khi chạy `npm test`.",
+      );
+      return;
+    }
 
     let spawnError: string | null = null;
     const child = spawn(VENV_PYTHON, ["run_api.py"], {

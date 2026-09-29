@@ -18,14 +18,16 @@
  *     KHÔNG đổi. Nên câu duy nhất được phép là *"đã yêu cầu huỷ"*; *"đã dừng"* là **NÓI DỐI**,
  *     không phải một lựa chọn văn phong.
  *  3. **Trạng thái job KHÔNG được sửa tại chỗ**: `daYeuCauHuy` chỉ nói *"giao diện đã yêu cầu gì"*,
- *     và câu đó biến mất ngay khi `job.state` khác trạng thái lúc gửi (máy chủ đã trả lời bằng một
- *     sự kiện SSE). Bản đồ `jobs` vẫn là của `useJobStream` — vùng này chỉ ĐỌC nó.
+ *     và câu đó chỉ sống trong ĐÚNG lượt chạy đã xin huỷ: nó biến mất ngay khi `job.state` khác
+ *     trạng thái lúc gửi (máy chủ đã trả lời bằng một sự kiện SSE), và **`App` DỌN hẳn mục đó**
+ *     (effect theo `jobs`) nên một lượt chạy MỚI quay lại đúng trạng thái cũ **không** làm câu cũ
+ *     sống lại (`I3` của review D2). Bản đồ `jobs` vẫn là của `useJobStream` — vùng này chỉ ĐỌC nó.
  *
- * ⚠️ `ponytail:` TRẦN — vùng này KHÔNG có luật CSS riêng (`.q*` chưa từng có luật nào trong
- * `app.css`). Nút và câu trạng thái dùng họ lớp `.lenh*` (có luật, và có bài ghim hai chiều), còn
- * BỐ CỤC của một hàng (nút nằm ở đâu) **chỉ ảnh chụp trong trình duyệt thật mới xác nhận được**:
- * jsdom không có layout. `.q__item` KHÔNG khai `grid-template-*` nên thêm con không phải là một
- * thay đổi bố cục kiểu ERRATA #31 mục 1 (đã kiểm: `Select-String 'q__' app.css` = 0 dòng).
+ * ⚠️ `ponytail:` TRẦN — BỐ CỤC của một hàng (nút và câu trạng thái nằm ở đâu) **chỉ ảnh chụp trong
+ * trình duyệt thật mới xác nhận được**: jsdom không có layout. Luật CSS của vùng này (`.q*`) NAY
+ * ĐÃ CÓ trong `app.css` (reset `<ul>` + MỘT hàng `flex`, `I1` của review D2) và có bài ghim KHAI BÁO
+ * + QUAN HỆ hai chiều ở `QueueZone.test.tsx`. `.q__item` **KHÔNG** khai `grid-template-*` (cố ý
+ * `flex`): một lưới track CỐ ĐỊNH thì thêm con thứ N là tái sinh ERRATA #31 mục 1.
  */
 import type { Job, JobState } from "../api/types.ts";
 
@@ -37,6 +39,11 @@ export interface QueueZoneProps {
    *
    * ⚠️ Đây không phải trạng thái của job: câu *"đã yêu cầu huỷ"* chỉ được render khi
    * `job.state` VẪN BẰNG trạng thái lúc gửi — máy chủ xác nhận thì nó biến mất.
+   *
+   * ⚠️ Và nó phải BIẾN MẤT VĨNH VIỄN cho lượt chạy đó, không chỉ tới lần đổi trạng thái kế tiếp:
+   * `App` DỌN mục nào có `job.state` khác trạng thái lúc gửi, nên `running + huỷ ⇒ failed ⇒
+   * chạy lại ⇒ running` KHÔNG làm câu cũ hiện lại (`I3` của review D2). Vùng này chỉ ĐỌC bản đồ;
+   * nếu nó tự quyết định "còn hiệu lực hay không" thì đó là nguồn sự thật thứ hai.
    */
   daYeuCauHuy: ReadonlyMap<number, JobState>;
   /** Câu lỗi **NGUYÊN VĂN** (`ApiError.message`, `"<status>: <detail>"`) của lệnh gần nhất, theo id job. */
@@ -144,8 +151,10 @@ export function QueueZone({ jobs, daYeuCauHuy, loiLenh, onHuyJob, onChayLaiJob }
               </button>
             ) : null}
             {/* 🔴 CÂU CHỮ TRUNG THỰC: "đã YÊU CẦU huỷ" — KHÔNG BAO GIỜ "đã dừng". Nó gắn với trạng
-                thái LÚC GỬI, nên khi máy chủ xác nhận (SSE đổi `job.state`) thì nó BIẾN MẤT và
-                nhường chỗ cho sự thật mới của job (`lyDoCho` ở trên). */}
+                thái LÚC GỬI, nên khi máy chủ xác nhận (SSE đổi `job.state`) thì nó BIẾN MẤT. ⚠️ Và
+                nó biến mất VĨNH VIỄN cho lượt chạy đó — không phải "tới khi job quay lại đúng trạng
+                thái này": `App` DỌN mục đã rời trạng thái lúc gửi (`I3` của review D2), nên một lượt
+                `chạy lại` về `running` KHÔNG làm câu của lượt CŨ sống lại. */}
             {daYeuCauHuy.get(job.id) === job.state ? (
               <span className="lenh__tin" data-testid={`huy-tin-${job.id}`}>
                 đã yêu cầu huỷ

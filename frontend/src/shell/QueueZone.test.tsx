@@ -318,4 +318,73 @@ describe("QueueZone: huy job + chay lai job (Task D2)", () => {
     assert.deepEqual(tiengOn, [], "hinh thuc D2 cua vung HANG DOI khong duoc sinh tieng on console");
     unmount();
   });
+
+  it("D2 HÌNH THỨC: `.q*` của vùng HÀNG ĐỢI có LUẬT trong `app.css` VA có THAT trong DOM (hai chiều)", () => {
+    // DO DUOC TRUOC (`I1` cua review D2): `Select-String '^\.q' app.css` = **0** ⇒
+    // `<ul class="q__danh-sach">` khong duoc reset (trinh duyet ve DAU DAU DONG + thut le mac dinh)
+    // va cac `<span>` inline khong co `gap`/`margin` ⇒ chu DINH (`qwen2.5-3bđang chạy`). Bai ghim
+    // hai chieu cua D2 loc `/^lenh/` nen ca ho `q*` nam NGOAI luat do — dung ba dieu khien MOI cua
+    // D2 lai nam trong chinh `<li class="q__item">` do.
+    const appCss = readFileSync(new URL("../styles/app.css", import.meta.url), "utf8");
+
+    // (a) GHIM KHAI BAO, khong ghim CHU cua luat: ⚠️ `listStyleType` KHONG the ghim trong jsdom
+    //     (khong bai nao nap `app.css` vao DOM, va jsdom khong co layout) ⇒ ghim KHAI BAO + QUAN HE.
+    assert.match(
+      appCss,
+      /\.q__danh-sach \{[^}]*margin: 0[^}]*padding: 0[^}]*list-style: none/,
+      '`<ul class="q__danh-sach">` phai duoc RESET (margin/padding/list-style) — cung khuon `.ch__danh-sach`',
+    );
+    const khaiItem = khaiBaoCua(appCss, ".q__item");
+    assert.equal(khaiItem.get("display"), "flex", "`.q__item` phai la mot HANG flex (khai bao THANG CUOC)");
+    assert.ok(
+      khaiItem.get("gap") !== undefined,
+      "`gap` la thu TACH cac `<span>` cua mot hang job; khong co no thi chu DINH vao nhau",
+    );
+    // 🔴 CO Y FLEX, KHONG GRID: `grid-template-*` la luoi track CO DINH ⇒ them con thu N la tai
+    // sinh ERRATA #31 muc 1 (lop loi da sai that hai lan o `.shell`/`.cmp`).
+    assert.equal(khaiItem.get("grid-template-rows"), undefined, "`.q__item` KHONG duoc khai luoi track co dinh");
+    assert.equal(khaiItem.get("grid-template-columns"), undefined, "`.q__item` KHONG duoc khai luoi track co dinh");
+
+    // (b) HAI CHIEU: moi LUAT `q*` phai co lop trong DOM, va moi LOP `q*` trong DOM phai co luat
+    //     (tru mot CAN TREN da khai ngay duoi).
+    const trongDom = new Set<string>();
+    const gom = (container: HTMLElement): void => {
+      for (const el of container.querySelectorAll("*")) {
+        for (const ten of el.classList) if (/^q/.test(ten)) trongDom.add(ten);
+      }
+    };
+    gom(renderQueue(JOBS, new Map<number, JobState>([[2, "running"]]), new Map<number, string>([[4, "x"]])).container);
+    cleanup();
+    // Trang thai RONG cua vung: `.q__rong` chi co o nhanh do ⇒ phai GOM, neu khong phep kiem (A)
+    // se bao "LUAT MO COI" oan.
+    gom(renderQueue(new Map<number, Job>(), KHONG_HUY, KHONG_LOI).container);
+
+    const sachCss = appCss.replace(/\/\*[\s\S]*?\*\//g, "");
+    const trongCss = new Set<string>();
+    for (const m of sachCss.matchAll(/\.(q(?:__[a-z0-9-]+)?)/g)) trongCss.add(m[1] ?? "");
+    trongCss.delete("");
+
+    const moCoi = [...trongCss].filter((t) => !trongDom.has(t)).sort();
+    assert.deepEqual(
+      moCoi,
+      [],
+      `LUẬT MỒ CÔI: ${JSON.stringify(moCoi)} — luật này không lớp nào trong DOM mang, tức nó KHÔNG `
+      + `tạo kiểu cho thứ gì. Lớp có trong DOM: ${JSON.stringify([...trongDom].sort())}`,
+    );
+    // CAN TREN da khai (dung khuon `NO_CHUA_CO_LUAT` cua `ChannelZone.test.tsx`): `.q__item--{state}`
+    // la lop BIEN THE theo trang thai (dau trang tri, chua co luat nao, va them mot luat cho no KHONG
+    // lam bai nay do), con `.q` lay hop cua `.shell__queue` — cung khuon `.ch` (cung chua co luat).
+    const voLuat = [...trongDom]
+      .filter((t) => !trongCss.has(t))
+      .filter((t) => t !== "q" && !/^q__item--/.test(t))
+      .sort();
+    assert.deepEqual(
+      voLuat,
+      [],
+      `LỚP KHÔNG CÓ LUẬT: ${JSON.stringify(voLuat)} — lớp này nằm trong DOM mà app.css không tạo kiểu `
+      + `cho nó. Luật có trong app.css: ${JSON.stringify([...trongCss].sort())}`,
+    );
+
+    assert.deepEqual(tiengOn, [], "hinh thuc `.q*` cua vung HANG DOI khong duoc sinh tieng on console");
+  });
 });

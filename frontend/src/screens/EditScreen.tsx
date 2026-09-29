@@ -293,6 +293,12 @@ export function EditScreen({
           type="button"
           className="lenh lenh--duyet"
           data-testid="duyet-ban-ghi"
+          /* 🔴 VÔ HIỆU khi bản ghi đã `reviewed` (`B-2` của review D2): backend chỉ UPDATE `status`
+             và KHÔNG đụng `version`/`segments`, nên bấm lại không tạo ra thay đổi quan sát được nào
+             — một nút bấm được mà không có kết quả là affordance NÓI DỐI. Không ẨN nút: câu
+             `trạng thái: reviewed` ngay cạnh đã nói sự thật bằng CHỮ (§7: thông tin không được chỉ
+             nằm ở màu/ở sự vắng mặt của một điều khiển). */
+          disabled={transcript.status === "reviewed"}
           onClick={() => onDuyet?.()}
         >
           duyệt

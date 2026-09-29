@@ -567,8 +567,8 @@ describe("EditScreen: §4.1 danh sach doan ao hoa + GHIM dong dang sua + suspect
       .split(/\s+/)
       .filter((t) => t !== "");
     assert.ok(
-      trackEd.length >= 2,
-      `\`.ed\` phai khai DU track cho HAI con (cau loi thoi + khung danh sach); do duoc ${JSON.stringify(trackEd)}`,
+      trackEd.length >= 3,
+      `\`.ed\` phai khai DU track cho BA con (cau loi thoi + thanh tren + khung danh sach); do duoc ${JSON.stringify(trackEd)}`,
     );
     function hangCua(chon: string): number {
       const khai = khaiBaoCua(appCss, chon).get("grid-row");
@@ -649,7 +649,7 @@ describe("EditScreen: §4.1 danh sach doan ao hoa + GHIM dong dang sua + suspect
       taoPhanTu(EditScreen, {
         transcript: banGhi([doan(0, 0, 2, "câu 1"), doan(1, 2, 4, "câu 2")]),
         dangDuyet: true,
-        loiDuyet: "422: bản ghi không duyệt được: chưa có đoạn nào",
+        loiDuyet: "404: transcript 3 không tồn tại",
         cauLoiThoi: "bản dịch đã lỗi thời so với bản ghi",
       }),
     );
@@ -684,12 +684,81 @@ describe("EditScreen: §4.1 danh sach doan ao hoa + GHIM dong dang sua + suspect
     assert.equal(chu(container, '[data-testid="dang-duyet"]'), "đang duyệt…");
     assert.equal(
       chu(container, '[data-testid="loi-duyet"]'),
-      "422: bản ghi không duyệt được: chưa có đoạn nào",
-      "câu lỗi phải là NGUYÊN VĂN `ApiError.message` (`<status>: <detail>`)",
+      "404: transcript 3 không tồn tại",
+      "câu lỗi phải là NGUYÊN VĂN `ApiError.message` (`<status>: <detail>`) của đường lỗi DUY NHẤT "
+      + "mà route `approve` có (`_require_transcript` ⇒ 404, `routes_transcripts.py`)",
     );
     assert.equal(chu(container, '[data-testid="trang-thai-ban-ghi"]'), "trạng thái: draft");
 
     assert.deepEqual(tiengOn, [], "hinh thuc D2 cua man Bien tap khong duoc sinh tieng on console");
     unmount();
+  });
+
+  it("HINH THUC (D2): MOI con TRỰC TIẾP của `.ed` khai `grid-row`, và SỐ con ≤ SỐ track đã khai", () => {
+    // DO DUOC TRUOC (`I5` cua review D2): them mot CON THU TU vao `.ed` (0 luat, 0 `grid-row`) cho
+    // **0 bai do**. Moi bai ghim truoc do chi kiem mot DANH SACH TEN LOP viet cung, nen mot con
+    // CHUA TUNG CO TEN trong danh sach do di qua tu do — dung lop loi ERRATA #31 muc 1 (da sai
+    // HAI lan that: `.shell`, `.cmp`). Bai nay ghim QUAN HE con↔track, khong ghim danh sach ten.
+    const { container, unmount } = render(
+      taoPhanTu(EditScreen, {
+        transcript: banGhi([doan(0, 0, 2, "câu 1"), doan(1, 2, 4, "câu 2")]),
+        cauLoiThoi: "bản dịch đã lỗi thời so với bản ghi",
+      }),
+    );
+    const appCss = readFileSync(new URL("../styles/app.css", import.meta.url), "utf8");
+
+    const conCuaEd = [...container.querySelectorAll(".ed > *")].map(
+      (el) => (el.getAttribute("class") ?? "").split(/\s+/)[0] ?? "",
+    );
+    assert.ok(
+      conCuaEd.length >= 2,
+      `\`.ed\` phai co it nhat hai con de phep ghim co nghia; do duoc ${JSON.stringify(conCuaEd)}`,
+    );
+    for (const ten of conCuaEd) {
+      const khai = khaiBaoCua(appCss, `.${ten}`).get("grid-row");
+      assert.ok(
+        khai !== undefined,
+        `con \`.${ten}\` của \`.ed\` phải khai \`grid-row\` TƯỜNG MINH (ERRATA #31 mục 1); `
+        + `con đọc được từ DOM: ${JSON.stringify(conCuaEd)}`,
+      );
+    }
+    const trackEd = (khaiBaoCua(appCss, ".ed").get("grid-template-rows") ?? "")
+      .split(/\s+/)
+      .filter((t) => t !== "");
+    assert.ok(
+      conCuaEd.length <= trackEd.length,
+      `\`.ed\` khai ${trackEd.length} track nhưng có ${conCuaEd.length} con — thêm một con vào một `
+      + `lưới cố định là một thay đổi BỐ CỤC (ERRATA #31 mục 1): ${JSON.stringify(conCuaEd)}`,
+    );
+
+    assert.deepEqual(tiengOn, [], "khoi luoi cua .ed khong duoc sinh tieng on console");
+    unmount();
+  });
+
+  it("D2 DUYET: nút `duyệt` VÔ HIỆU khi bản ghi đã `reviewed` (không mời một lệnh không đổi gì)", () => {
+    // DO DUOC TRUOC (`B-2` cua review D2): `duyet-ban-ghi` KHONG co `disabled`, va KHONG bai nao
+    // khang dinh nut hien/vo hieu theo `status` ⇒ mutant them `disabled` cho **0 bai do**.
+    // ⚠️ Vi sao `disabled` ma khong AN nut: cau `trạng thái: reviewed` ngay canh da noi su that
+    // bang CHU (§7), con mot nut bam duoc ma khong doi gi la mot affordance NOI DOI.
+    function kiem(status: Transcript["status"], voHieu: boolean): void {
+      const { container, unmount } = render(
+        taoPhanTu(EditScreen, {
+          transcript: { ...banGhi([doan(0, 0, 2, "câu 1")]), status },
+        }),
+      );
+      assert.equal(chu(container, '[data-testid="trang-thai-ban-ghi"]'), `trạng thái: ${status}`);
+      const nut = phanTu(container, '[data-testid="duyet-ban-ghi"]') as HTMLButtonElement;
+      assert.equal(nut.tagName, "BUTTON", "nút duyệt vẫn phải là một NÚT thật");
+      assert.equal(
+        nut.disabled,
+        voHieu,
+        `status=${status} ⇒ nút duyệt phải ${voHieu ? "VÔ HIỆU" : "bật"}: backend chỉ UPDATE `
+        + "`status` (không đụng `version`), nên bấm lại một bản ghi đã `reviewed` không đổi gì",
+      );
+      unmount();
+    }
+    kiem("draft", false);
+    kiem("translated", false);
+    kiem("reviewed", true);
   });
 });

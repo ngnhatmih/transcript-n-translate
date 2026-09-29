@@ -417,7 +417,19 @@ export function App() {
   // lượt ghi khác đang bay". Hàng đợi thi hành chúng TUẦN TỰ, nên lệnh sau không tính từ một bản
   // ghi đã cũ.
   // ---------------------------------------------------------------------------
-  const [dangDuyet, datDangDuyet] = useState(false);
+  /**
+   * BẢN GHI (id + kênh) đang có **MỘT lời gọi `duyệt` BAY**, hoặc `null`.
+   *
+   * ⚠️ VÌ SAO `{id, kenh}` chứ không một `boolean` (đo được, `I3b` của review D2): một cờ GLOBAL
+   * không được dọn khi đổi kênh ⇒ thanh trên của kênh MỚI nói *"đang duyệt…"* trong khi chưa ai
+   * duyệt bản ghi đó; và `finally` của lệnh CŨ sẽ xoá cờ của lệnh MỚI đang bay (mở toang guard
+   * chống trùng lặp của nó). Đây là cùng một câu hỏi với `banDaChon`/`loiTao`: trạng thái của một
+   * lệnh phải mang THEO đối tượng mà nó thuộc về.
+   *
+   * ⚠️ Đối chiếu `loiDuyet`/`loiLenh`: `loiDuyet` đã được dọn trong effect đổi kênh; `loiLenh` khoá
+   * theo id JOB (hàng đợi là của cả app, không thuộc kênh nào) nên nó đúng như đang có.
+   */
+  const [dangDuyet, datDangDuyet] = useState<{ id: number; kenh: number | null } | null>(null);
   /**
    * LỖI DUYỆT — **NGUYÊN VĂN `ApiError.message`** (`"<status>: <detail>"`), cùng lý do `loiTao`
    * và `loiGhiDoan`: câu tiếng Việt của backend là thứ DUY NHẤT đúng.
@@ -435,9 +447,40 @@ export function App() {
    * ⚠️ Đây KHÔNG phải một nguồn trạng thái job thứ hai: nó không nói job đang ở đâu, nó nói
    * **giao diện đã yêu cầu gì**. Nó chỉ được RENDER khi `job.state` VẪN LÀ trạng thái lúc gửi —
    * máy chủ xác nhận (sự kiện SSE) thì câu đó **BIẾN MẤT** và nhường chỗ cho sự thật mới của job.
-   * `jobs` vẫn là bản đồ của `useJobStream` và **không có dòng nào ở đây sửa nó tại chỗ**.
+   * Lời hứa đó chỉ sống trong ĐÚNG lượt chạy đã xin huỷ: effect NGAY DƯỚI đây DỌN mục nào có
+   * `job.state` khác trạng thái lúc gửi. `jobs` vẫn là bản đồ của `useJobStream` và **không có
+   * dòng nào ở đây sửa nó tại chỗ**.
    */
   const [daYeuCauHuy, datDaYeuCauHuy] = useState<ReadonlyMap<number, JobState>>(() => new Map());
+  /**
+   * DỌN `daYeuCauHuy` — lời hứa "đã yêu cầu huỷ" KHÔNG được sống lại trên một lượt chạy mới.
+   *
+   * 🔴 VÌ SAO PHẢI CÓ (đo được, `I3` của review D2): chỗ GHI duy nhất là `huyJob`, và phép render so
+   * `get(id) === job.state`. Trình tự `running + huỷ` ⇒ worker **NÉM LỖI** ⇒ `FAILED` (nhánh
+   * `except` của `worker._run_one` bỏ qua cờ huỷ; phép kiểm cờ chỉ tới được ở đường THÀNH CÔNG) ⇒
+   * bấm `chạy lại` ⇒ `running` làm câu đó **HIỆN LẠI** trên một lượt chạy mới tinh — một phát ngôn
+   * SAI, đúng lớp lỗi mà cả task này tồn tại để chặn.
+   *
+   * ⚠️ VÌ SAO KHÔNG KHOÁ THEO `{state, attempts}` (brief gợi ý — ĐO ĐƯỢC LÀ KHÔNG ĐỦ): `attempts`
+   * KHÔNG nằm trong sự kiện SSE (`Job.to_event()` chỉ có `id`/`state`/`progress`/`phase`/`error`/
+   * `log_tail`), `applyJobEvent` cố ý KHÔNG đụng tới nó (*"`attempts` … chỉ đến từ ảnh chụp"*), và
+   * `chayLaiJob` không đọc lại ảnh chụp ⇒ sau `retry_job` (backend TĂNG `attempts`) CLIENT vẫn giữ
+   * `attempts` CŨ, nên khoá cũ khớp lại y như trước. Mệnh đề đúng không phải "cùng trạng thái và
+   * cùng số lần chạy" mà là "**CHƯA TỪNG RỜI khỏi trạng thái lúc gửi**": quan sát thấy job ở trạng
+   * thái KHÁC (hoặc job biến mất khỏi bản đồ) là lời hứa hết hiệu lực — không phụ thuộc việc client
+   * có kịp thấy `attempts` mới hay không.
+   *
+   * Trả về CHÍNH `cu` khi không có gì để dọn ⇒ React bỏ qua lượt render đó (không vòng lặp).
+   */
+  useEffect(() => {
+    datDaYeuCauHuy((cu) => {
+      const conHieuLuc = new Map<number, JobState>();
+      for (const [id, trangThai] of cu) {
+        if (jobs.get(id)?.state === trangThai) conHieuLuc.set(id, trangThai);
+      }
+      return conHieuLuc.size === cu.size ? cu : conHieuLuc;
+    });
+  }, [jobs]);
   /** Câu lỗi **NGUYÊN VĂN** của lệnh gần nhất, theo TỪNG job (khoá = id job). */
   const [loiLenh, datLoiLenh] = useState<ReadonlyMap<number, string>>(() => new Map());
 
@@ -452,21 +495,39 @@ export function App() {
    * ⚠️ Xong thì **ĐỌC LẠI** bản ghi (`transcript.reload()`) — `status` là dữ liệu của MÁY CHỦ,
    * không tự sửa state tại chỗ. ⚠️ Chỉ đọc lại CHI TIẾT, không đọc lại danh sách: `status` không
    * được dùng ở đâu khác, và một lượt `GET` thừa là một đường không ai ghim.
+   *
+   * ⚠️ **ĐƯỜNG LỖI DUY NHẤT của route này là 404** (`_require_transcript` ⇒ `HTTPException(404,
+   * str(exc))`, với `exc` từ cổng: `transcript {id} không tồn tại`); route `approve` KHÔNG có nhánh
+   * 422 nào (`grep 'không duyệt được' backend/` = 0). Fixture của `App.test.tsx` vì thế phát ĐÚNG
+   * 404 + ĐÚNG câu đó — một fixture phát 422 với câu tự nghĩ là một đường KHÔNG TỒN TẠI (`I2`).
    */
   function duyetBanGhi(): void {
     const hienTai = transcript.data;
     if (hienTai === null) return;
-    if (dangDuyet) return; // GUARD chống trùng lặp (bấm hai lần KHÔNG chờ ⇒ vẫn MỘT request)
-    datDangDuyet(true);
+    const kenhLucGui = ui.channelId;
+    // GUARD chống trùng lặp — theo ĐÚNG BẢN GHI: hai lần bấm trên CÙNG một bản ghi không chờ nhau
+    // ⇒ vẫn MỘT request (bài `D2 DUYET CHỐNG TRÙNG LẶP`), nhưng cờ "đang bay" của bản ghi này
+    // KHÔNG được chặn một bản ghi KHÁC vừa được mở sau khi đổi kênh.
+    if (dangDuyet !== null && dangDuyet.id === hienTai.id && dangDuyet.kenh === kenhLucGui) return;
+    datDangDuyet({ id: hienTai.id, kenh: kenhLucGui });
     datLoiDuyet(null);
     xepHangGhi(async () => {
       try {
+        // 🔴 ĐÍCH CHỐT **LÚC GỬI**: `hienTai` là bản ghi của CHÍNH lần render đã nhận cú bấm, không
+        // phải thứ đang mở lúc hàng đợi thi hành. Đổi kênh (hoặc chọn bản ghi khác) trong lúc lệnh
+        // còn XẾP HÀNG vì một PATCH chậm ⇒ lệnh vẫn phải tác động bản ghi ĐÃ BẤM (ERRATA #44 mục 1,
+        // cùng họ với `huyJob` chốt `trangThaiLucGui` trước khi vào hàng đợi).
         await endpoints.approveTranscript(hienTai.id);
         transcript.reload();
       } catch (loi: unknown) {
         datLoiDuyet(loi instanceof Error ? loi.message : String(loi));
       } finally {
-        datDangDuyet(false);
+        // Chỉ XOÁ cờ của CHÍNH mình: một lệnh MỚI (bản ghi khác) đang bay không được mở khoá bởi
+        // `finally` của lệnh CŨ — nếu không thì câu "đang duyệt…" của bản ghi mới biến mất sớm và
+        // guard chống trùng lặp của nó mở toang.
+        datDangDuyet((cu) =>
+          cu !== null && cu.id === hienTai.id && cu.kenh === kenhLucGui ? null : cu,
+        );
       }
     });
   }
@@ -752,6 +813,9 @@ export function App() {
     // LỖI DUYỆT của D2 cũng vậy: câu 422 của bản ghi CŨ không được nằm cạnh thanh trên của bản ghi
     // MỚI (cùng lớp lỗi `I1` mà vòng sửa W3 đã đóng cho `loiTao`).
     datLoiDuyet(null);
+    // Và CỜ "đang bay" của lệnh duyệt: nó thuộc về bản ghi + kênh CŨ (`I3b`), nên để nó sống qua
+    // một lần đổi kênh là thanh trên của kênh MỚI tự nói *"đang duyệt…"*.
+    datDangDuyet(null);
   }, [ui.channelId]);
 
   /**
@@ -968,7 +1032,14 @@ export function App() {
               /* D2: nut `duyet` o thanh tren cua man. Man chi BAO — `App` goi
                  `approveTranscript` roi DOC LAI ban ghi (`status` la du lieu cua MAY CHU). */
               onDuyet={duyetBanGhi}
-              dangDuyet={dangDuyet}
+              /* "ĐANG DUYỆT…" LÀ CÂU CỦA **BẢN GHI ĐANG MỞ TRONG KÊNH ĐANG CHỌN**, không phải một
+                 cờ toàn cục: lời gọi của bản ghi CŨ (kênh khác) không được nói thay bản ghi này. */
+              dangDuyet={
+                dangDuyet !== null
+                && transcript.data !== null
+                && dangDuyet.id === transcript.data.id
+                && dangDuyet.kenh === ui.channelId
+              }
               loiDuyet={loiDuyet}
             />
           )}

@@ -549,7 +549,8 @@ const dem = {
    */
   approveSauPatch: -1,
   approveXong: 0,
-  /** Bat de approve tra 422 kem cau tieng Viet NGUYEN VAN (nhanh LOI DUYET). */
+  /** Bat de approve tra **404** kem cau NGUYEN VAN cua backend (nhanh LOI DUYET; route `approve`
+      chi co 404/200 — xem comment tai nhanh do). */
   approveLoi: false,
   cancel: 0,
   cancelTheoId: {} as Record<number, number>,
@@ -561,7 +562,8 @@ const dem = {
   retryTre: 0,
   retrySauPatch: -1,
   retryXong: 0,
-  /** Bat de retry tra 409 kem cau tieng Viet NGUYEN VAN cua backend. */
+  /** Bat nhanh 409 cua retry. ⚠️ CHI co hieu luc khi trang thai THAT cua job KHONG chay lai duoc
+      (`failed`/`interrupted` la `RETRYABLE_STATES` ⇒ backend KHONG BAO GIO tra 409 cho chung). */
   retry409: false,
 };
 
@@ -776,16 +778,21 @@ const server: Server = createServer((req, res) => {
       const vitri = JOBS.findIndex((j) => j.id === id);
       if (vitri < 0) {
         res.writeHead(404, { "content-type": "application/json" });
-        res.end(JSON.stringify({ detail: `khong co job ${id}` }));
+        res.end(JSON.stringify({ detail: `job ${id} không tồn tại` }));
         return;
       }
       const job = JOBS[vitri];
       if (chayLai) {
-        if (dem.retry409) {
-          // 409 NGUYEN VAN cua backend (`routes_jobs.retry` ⇒ job khong o trang thai chay lai duoc).
+        // ⚠️ FIXTURE PHAI KHOP DIEU HE THONG THAT SU LAM (`I2` cua review D2). 409 CHI co that khi
+        // trang thai THAT cua job KHONG nam trong `RETRYABLE_STATES` (`job_state.py`:
+        // `frozenset({failed, interrupted})`), va cau chu la NGUYEN VAN cua `routes_jobs.retry_job`:
+        // `f"chỉ chạy lại được job ở trạng thái {sorted(js.RETRYABLE_STATES)}"`.
+        // Fixture CU ban 409 cho CHINH mot job `failed` — ca BAT KHA (backend khong bao gio lam the),
+        // va ban mot cau khong ton tai trong `backend/`.
+        if (dem.retry409 && job.state !== "failed" && job.state !== "interrupted") {
           res.writeHead(409, { "content-type": "application/json" });
           res.end(JSON.stringify({
-            detail: `job ${id} không ở trạng thái chạy lại được (đang \`${job.state}\`)`,
+            detail: "chỉ chạy lại được job ở trạng thái ['failed', 'interrupted']",
           }));
           dem.retryXong += 1;
           return;
@@ -837,16 +844,21 @@ const server: Server = createServer((req, res) => {
     dem.approveSauPatch = dem.patchXong;
     const traDuyet = (): void => {
       if (dem.approveLoi) {
-        // 422 NGUYEN VAN cua backend: client phai hien CAU NAY, khong duoc thay bang chu chung.
-        res.writeHead(422, { "content-type": "application/json" });
-        res.end(JSON.stringify({ detail: "bản ghi không duyệt được: chưa có đoạn nào" }));
+        // ⚠️ DUONG LOI DUY NHAT cua route `approve` la **404** (`routes_transcripts.py`:
+        // `_require_transcript` ⇒ `HTTPException(404, str(exc))`; `grep 'không duyệt được' backend/`
+        // = 0, tuc KHONG co nhanh 422 nao). Cau duoi day la NGUYEN VAN `NotFound` cua cong
+        // (`sqlite_repos.get_transcript`: `f"transcript {transcript_id} không tồn tại"`).
+        // Fixture CU phat 422 + mot cau TU NGHI ⇒ duong loi duy nhat tung chay cho `approve` la mot
+        // ma trang thai KHONG TON TAI tren route do (`I2` cua review D2).
+        res.writeHead(404, { "content-type": "application/json" });
+        res.end(JSON.stringify({ detail: `transcript ${id} không tồn tại` }));
         dem.approveXong += 1;
         return;
       }
       const cu = TRANSCRIPTS.find((t) => t.id === id);
       if (cu === undefined) {
         res.writeHead(404, { "content-type": "application/json" });
-        res.end(JSON.stringify({ detail: `khong co transcript ${id}` }));
+        res.end(JSON.stringify({ detail: `transcript ${id} không tồn tại` }));
         return;
       }
       // ⚠️ DUYET **KHONG** TANG `version` (hop dong `endpoints.approveTranscript` + docstring
@@ -889,7 +901,7 @@ const server: Server = createServer((req, res) => {
       const traLoi = (): void => {
         if (cu === undefined) {
           res.writeHead(404, { "content-type": "application/json" });
-          res.end(JSON.stringify({ detail: `khong co transcript ${id}` }));
+          res.end(JSON.stringify({ detail: `transcript ${id} không tồn tại` }));
           return;
         }
         if (dem.patchLoi) {
@@ -3737,8 +3749,9 @@ describe("App: KENH THAT + HANG DOI THAT tu server node:http trong tien trinh", 
     fireEvent.click(phanTu(container, '[data-testid="duyet-ban-ghi"]'));
     assert.equal(
       await choPhanTu(container, '[data-testid="loi-duyet"]', (t) => t.length > 0, "không thấy câu báo lỗi duyệt"),
-      "422: bản ghi không duyệt được: chưa có đoạn nào",
-      "câu lỗi phải là NGUYÊN VĂN `ApiError.message`, không phải một câu chung",
+      "404: transcript 3 không tồn tại",
+      "câu lỗi phải là NGUYÊN VĂN `ApiError.message` của ĐƯỜNG LỖI DUY NHẤT mà route `approve` có "
+      + "(`_require_transcript` ⇒ 404, `routes_transcripts.py`), không phải một câu tự nghĩ",
     );
     assert.equal(
       chu(container, '[data-testid="trang-thai-ban-ghi"]'),
@@ -3893,18 +3906,26 @@ describe("App: KENH THAT + HANG DOI THAT tu server node:http trong tien trinh", 
       assert.equal(container.querySelectorAll(chon).length, 0, `${moTa} KHÔNG được có nút này`);
     }
 
-    // (1) 409: backend TU CHOI (trang thai client da cu) ⇒ hien NGUYEN VAN cau cua backend.
+    // (1) 409: MAY CHU tu choi vi trang thai THAT cua no khong chay lai duoc. Day la ca "trang thai
+    //     phia client da CU" (brief §3.4): UI dang hien `failed` (nen nut chay lai CO mat) nhung
+    //     ban ghi phia may chu da o `done`. ⚠️ Fixture CU ban 409 cho chinh mot job `failed` — ca
+    //     BAT KHA, vi `failed` NAM TRONG `RETRYABLE_STATES` (`job_state.py`) nen backend khong bao
+    //     gio tra 409 cho no.
     dem.retry409 = true;
+    const job21 = JOBS.find((j) => j.id === 21);
+    assert.ok(job21 !== undefined, "fixture: job 21 phải có trong ảnh chụp /api/jobs");
+    job21.state = "done";
     fireEvent.click(phanTu(container, '[data-testid="lai-job-21"]'));
     assert.equal(
       await choPhanTu(container, '[data-testid="loi-lenh-21"]', (t) => t.length > 0, "không thấy câu lỗi chạy lại"),
-      "409: job 21 không ở trạng thái chạy lại được (đang `failed`)",
-      "409 phải hiện NGUYÊN VĂN `ApiError.message`",
+      "409: chỉ chạy lại được job ở trạng thái ['failed', 'interrupted']",
+      "409 phải hiện NGUYÊN VĂN câu của backend (`routes_jobs.retry_job`), không phải một câu tự nghĩ",
     );
 
     // (2) Chay lai THANH CONG: request di ra, cau loi CU bien mat, va trang thai HIEN THI van la
     //     su that cua lan doc truoc (chua co su kien SSE nao).
     dem.retry409 = false;
+    job21.state = "failed"; // MAY CHU chap nhan chay lai trang thai nay
     fireEvent.click(phanTu(container, '[data-testid="lai-job-21"]'));
     await waitFor(
       () => {
@@ -4027,6 +4048,170 @@ describe("App: KENH THAT + HANG DOI THAT tu server node:http trong tien trinh", 
     );
     assert.equal(dem.patch, 1, "một lần lưu ⇒ ĐÚNG MỘT PATCH");
     assert.deepEqual(tiengOn, [], "ba lenh ghi chong lan khong duoc sinh tieng on console");
+    unmount();
+  });
+
+  it("D2 HUY RỒI CHẠY LẠI: câu 'đã yêu cầu huỷ' KHÔNG sống lại trên một LƯỢT CHẠY MỚI", async () => {
+    // DO DUOC TRUOC (`I3` cua review D2): `daYeuCauHuy` chi duoc GHI, KHONG BAO GIO duoc DON, va
+    // phep render so `get(id) === job.state`. Trinh tu duoi day HOP LE tung buoc:
+    //   job `running` + huy ⇒ worker NEM LOI ⇒ `failed` ⇒ bam `chay lai` ⇒ `running`
+    //   ⇒ cau "đã yêu cầu huỷ" cua luot CU hien lai tren mot luot chay MOI TINH.
+    const { container, unmount } = render(taoPhanTu(App));
+    await choPhanTu(container, '[data-testid="huy-job-7"]', () => true, "job `running` chưa có nút huỷ");
+
+    fireEvent.click(phanTu(container, '[data-testid="huy-job-7"]'));
+    await choPhanTu(
+      container,
+      '[data-testid="huy-tin-7"]',
+      (t) => t.length > 0,
+      "không thấy câu 'đã yêu cầu huỷ'",
+    );
+
+    // (2) worker NEM LOI ⇒ FAILED. `worker.py` bo qua co huy o nhanh `except` (phep kiem co chi toi
+    //     duoc o duong THANH CONG) ⇒ day la mot trang thai CO THAT, khong phai mot gia dinh.
+    emit(sse({
+      id: 7, state: "failed", progress: 0.4, phase: "asr:faster-whisper-large",
+      error: "model lỗi", log_tail: "",
+    }));
+    await choPhanTu(container, '[data-testid="lai-job-7"]', () => true, "job `failed` chưa có nút chạy lại");
+    assert.equal(
+      container.querySelectorAll('[data-testid="huy-tin-7"]').length,
+      0,
+      "job đổi trạng thái ⇒ câu 'đã yêu cầu huỷ' phải BIẾN MẤT (máy chủ đã trả lời bằng một sự kiện)",
+    );
+
+    // (3) CHAY LAI ⇒ MOT LUOT CHAY MOI. Phia CLIENT van thay `failed` (su kien SSE chua toi), tuc
+    //     loi hua CU khong con thuoc ve bat cu trang thai nao dang hien.
+    fireEvent.click(phanTu(container, '[data-testid="lai-job-7"]'));
+    await waitFor(
+      () => {
+        assert.equal(dem.retry, 1, "lệnh chạy lại chưa tới máy chủ");
+      },
+      { timeout: 5000, interval: 20 },
+    );
+    assert.equal(
+      container.querySelectorAll('[data-testid="huy-tin-7"]').length,
+      0,
+      "chạy lại ⇒ lời hứa của lượt CŨ không còn thuộc về lượt MỚI (client còn thấy `failed`)",
+    );
+
+    // (4) Luot chay MOI bat dau THAT SU: SSE dua job ve `running` — DUNG trạng thái LÚC GỬI.
+    emit(sse({
+      id: 7, state: "running", progress: 0, phase: "asr:faster-whisper-large",
+      error: null, log_tail: "",
+    }));
+    await choPhuHop(
+      container,
+      '[data-testid="job-7"]',
+      (el) => (el.textContent ?? "").includes("đang chạy"),
+      "sự kiện SSE không tới được dòng job",
+    );
+    assert.equal(
+      container.querySelectorAll('[data-testid="huy-tin-7"]').length,
+      0,
+      "LƯỢT CHẠY MỚI ở ĐÚNG trạng thái lúc gửi ⇒ giao diện KHÔNG được nói 'đã yêu cầu huỷ' (chưa ai yêu cầu lượt này)",
+    );
+
+    assert.deepEqual(tiengOn, [], "huy roi chay lai khong duoc sinh tieng on console");
+    unmount();
+  });
+
+  it("D2 DUYET: trạng thái 'đang duyệt…' thuộc về BẢN GHI + KÊNH của nó (đổi kênh ⇒ không rò sang bản ghi khác)", async () => {
+    // DO DUOC TRUOC (`I3b` cua review D2): `dangDuyet` la mot co GLOBAL va KHONG duoc don khi doi
+    // kenh ⇒ thanh tren cua kenh MOI noi "đang duyệt…" trong khi chua ai duyet ban ghi do.
+    dem.approveTre = 600; // loi goi CON BAY khi doi kenh (du de phép đo dưới đây không phải cuộc đua)
+    const { container, unmount } = render(taoPhanTu(App));
+    await toiBienTapBonDoan(container); // kenh HAI, ban ghi #3
+
+    fireEvent.click(phanTu(container, '[data-testid="duyet-ban-ghi"]'));
+    assert.equal(
+      chu(container, '[data-testid="dang-duyet"]'),
+      "đang duyệt…",
+      "trong lúc lời gọi đang bay, màn phải NÓI RA là đang duyệt",
+    );
+
+    // (1) DOI KENH trong luc lenh CON BAY: cau do thuoc ve ban ghi + kenh CU.
+    fireEvent.click(nutKenh(container, "kenh-mot.wav"));
+    await choChu(container, "câu 1");
+    assert.equal(dem.approveXong, 0, "phép đo chỉ có nghĩa khi lời gọi CÒN BAY (không chồng giả)");
+    assert.equal(
+      container.querySelectorAll('[data-testid="dang-duyet"]').length,
+      0,
+      "thanh trên của kênh MỚI KHÔNG được nói 'đang duyệt…' — chưa ai duyệt bản ghi này",
+    );
+
+    // (2) BAN GHI MOI co lenh RIENG: co "dang bay" cua ban ghi CU khong duoc NUOT lan bam nay.
+    //     ⚠️ Do tre cua lenh MOI nho (150ms): phep do o (3) phai roi DUNG vao cua so "lenh CU da
+    //     xong, lenh MOI con bay", va chang `waitFor` duoi day (interval 20ms) du de bat trung no.
+    dem.approveTre = 150;
+    fireEvent.click(phanTu(container, '[data-testid="duyet-ban-ghi"]'));
+    await waitFor(
+      () => {
+        assert.equal(dem.approve, 2, "lệnh duyệt của bản ghi MỚI không tới được máy chủ");
+      },
+      { timeout: 5000, interval: 20 },
+    );
+    // (3) `finally` cua lenh CU khong duoc XOA co cua lenh MOI (dang bay): lenh moi chi xong khi
+    //     PHIA MAY CHU da tra loi no, khong phai khi lenh CU ket thuc.
+    assert.equal(
+      dem.approveXong,
+      1,
+      "phép đo (3) phải nằm ĐÚNG cửa sổ: lệnh CŨ đã xong (1) và lệnh MỚI còn BAY (chưa thành 2)",
+    );
+    assert.equal(
+      container.querySelectorAll('[data-testid="dang-duyet"]').length,
+      1,
+      "lệnh CŨ xong KHÔNG được xoá câu 'đang duyệt…' của lệnh MỚI đang bay",
+    );
+    assert.deepEqual(dem.approveTheoId, { 3: 1, 5: 1 }, "mỗi bản ghi ĐÚNG MỘT request, đúng id của nó");
+
+    await waitFor(
+      () => {
+        assert.equal(dem.approveXong, 2, "lời gọi duyệt thứ hai chưa trả về");
+      },
+      { timeout: 5000, interval: 20 },
+    );
+    assert.deepEqual(tiengOn, [], "doi kenh giua luc duyet khong duoc sinh tieng on console");
+    unmount();
+  });
+
+  it("D2 DUYET: đích của lệnh chốt LÚC GỬI — xếp hàng rồi ĐỔI KÊNH vẫn duyệt ĐÚNG bản ghi đã bấm", async () => {
+    // DO DUOC TRUOC (`A6` cua review D2): mutant `APPROVE-LATE-BIND` (doc ban ghi LUC THI HANH)
+    // cho **0 bai do** ⇒ khong bai nao phan biet duoc "chot dich luc GUI" voi "doc lai luc thi hanh".
+    const { container, unmount } = render(taoPhanTu(App));
+    await toiBienTapBonDoan(container); // kenh HAI, ban ghi #3
+    await choPhanTu(container, '[data-testid="huy-job-7"]', () => true, "job `running` chưa có nút huỷ");
+
+    // Mot PATCH CHAM dang bay ⇒ lenh `duyet` duoc XEP HANG, tuc no thi hanh SAU khi ban ghi da doi.
+    dem.patchTre = 250;
+    const o = await moOSua(container, 1);
+    fireEvent.change(o, { target: { value: "dòng hai (đã sửa)" } });
+    fireEvent.keyDown(o, { key: "Enter" });
+    fireEvent.click(phanTu(container, '[data-testid="duyet-ban-ghi"]'));
+    assert.equal(dem.patchXong, 0, "PATCH phải còn ĐANG BAY lúc lệnh duyệt được bấm");
+    assert.equal(dem.approve, 0, "lệnh duyệt KHÔNG được gửi trước khi PATCH xong (nó xếp hàng)");
+
+    // DOI KENH trong lúc lệnh còn XẾP HÀNG: ban ghi dang mo bay gio la #5 (kenh MOT), khong phai #3.
+    fireEvent.click(nutKenh(container, "kenh-mot.wav"));
+    await choChu(container, "câu 1");
+    await waitFor(
+      () => {
+        assert.equal(dem.approve, 1, "lệnh duyệt chưa tới máy chủ");
+      },
+      { timeout: 5000, interval: 20 },
+    );
+    assert.deepEqual(
+      dem.approveTheoId,
+      { 3: 1 },
+      "lệnh duyệt phải tác động bản ghi ĐÃ BẤM (#3), không phải bản ghi đang mở SAU khi đổi kênh (#5)",
+    );
+    await waitFor(
+      () => {
+        assert.equal(dem.approveXong, 1, "lời gọi duyệt chưa trả về");
+      },
+      { timeout: 5000, interval: 20 },
+    );
+    assert.deepEqual(tiengOn, [], "doi kenh trong luc lenh xep hang khong duoc sinh tieng on console");
     unmount();
   });
 

@@ -385,6 +385,60 @@ body {
   color: var(--ink-1);
 }
 
+/* ── §3 VÙNG HÀNG ĐỢI (Task D2): reset danh sách + MỘT hàng FLEX cho mỗi job ─────────────────────
+   ĐO ĐƯỢC TRƯỚC (`I1` của review D2): `Select-String '^\.q' app.css` = **0** ⇒ `<ul
+   class="q__danh-sach">` không được reset (trình duyệt vẽ DẤU ĐẦU DÒNG + thụt lề mặc định), và các
+   `<span>` của một hàng job là inline không có `gap`/`margin` ⇒ chữ DÍN vào nhau (`qwen2.5-3bđang
+   chạy`, `dịch42%`) — trong khi D2 vừa đặt BA điều khiển MỚI vào chính `<li class="q__item">` đó.
+   ⚠️ CỐ Ý FLEX, KHÔNG GRID: `grid-template-*` là lưới track CỐ ĐỊNH ⇒ thêm con thứ N là tái sinh
+   ERRATA #31 mục 1 (đúng lớp lỗi `.shell`/`.cmp` đã sai THẬT hai lần). `flex` + `flex-wrap` không
+   có danh sách track nên thêm con KHÔNG THỂ "cướp chỗ" của con khác.
+   ⚠️ HÌNH THỨC của vùng này (nút và câu trạng thái nằm ở đâu) **chỉ ảnh chụp trong trình duyệt
+   thật mới xác nhận được**: jsdom không có layout, và `listStyleType` không ghim được (không bài
+   nào nạp `app.css` vào DOM). Bài ghim là GHIM KHAI BÁO + QUAN HỆ hai chiều ở `QueueZone.test.tsx`. */
+.q__danh-sach {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.q__item {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--sp-1) var(--sp-2);
+  padding: var(--sp-1) var(--sp-2);
+  border-bottom: var(--rule-w) solid var(--rule);
+}
+
+/* `#7 asr · engine` là GIÁ TRỊ DỮ LIỆU ⇒ mono, như mọi giá trị dữ liệu khác trong tệp này. */
+.q__ten {
+  font-family: var(--font-mono);
+  font-size: var(--fs-num);
+}
+
+/* LÝ DO CHỜ là nội dung CHÍNH của vùng này (U2) ⇒ nhãn, không phải mono; mực nhạt hơn tên job. */
+.q__ly-do {
+  font-family: var(--font-label);
+  font-size: var(--fs-label);
+  color: var(--ink-2);
+}
+
+/* `42%` cũng là giá trị của MÁY CHỦ (số thực `progress`) ⇒ mono. */
+.q__tien-do {
+  font-family: var(--font-mono);
+  font-size: var(--fs-num);
+  color: var(--ink-2);
+}
+
+/* "hàng đợi trống" là một `<p>`: mặc định của trình duyệt là lề trên/dưới 1em — cùng lớp lỗi với
+   `<ul>` không được reset ở trên. */
+.q__rong {
+  margin: 0;
+  padding: var(--sp-3);
+  color: var(--ink-2);
+}
+
 /* Dòng đang sửa: lề trái sáng lên (cùng ngôn ngữ với `is-current`, nhưng KHÁC nghĩa — amber là
    "đang hoạt động", còn đây là "đang mở để gõ" ⇒ dùng `--ink-0`, không dùng amber). */
 .ed__item.is-editing {
