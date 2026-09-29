@@ -446,8 +446,10 @@ describe("CompareScreen: §4.3 hai cot + cot CPS + segmented control + ghim ban 
   // -------------------------------------------------------------------------
 
   it("RONG: chua chon kenh thi noi that, khong bia mot ban ghi nao", () => {
-    // Day la trang thai THAT trong app hom nay: `App` chua co duong CHON KENH
-    // (ERRATA #18 muc 4) nen no truyen `transcript={null}`.
+    // ⚠️ CHU THICH CU SUA O VONG THIET KE 1: ban cu viet *"`App` chua co duong CHON KENH
+    // (ERRATA #18 muc 4)"* — dieu do KHONG con dung sau W1 (`ChannelZone` da noi `selectChannel`
+    // vao tung muc kenh). Trang thai `transcript === null` nay KHONG phai "khong co duong", ma la
+    // "nguoi dung CHUA chon" — dung cai ma cau chu cua `CompareScreen` da noi SAI (va da sua).
     const { container } = render(taoPhanTu(CompareScreen, { transcript: null, translations: [] }));
 
     const chuRong = chu(container, '[data-testid="rong"]');

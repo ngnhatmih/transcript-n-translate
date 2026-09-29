@@ -63,6 +63,7 @@ import { useEffect, useState } from "react";
 
 import type { EngineSpec, JobState, TranslationDetail, Transcript } from "../api/types.ts";
 import { EngineSelect } from "../shell/EngineSelect.tsx";
+import { KhungRong } from "../ui/TrangRong.tsx";
 
 interface Props {
   /** Bản ghi đang mở; `null` = chưa chọn kênh (trạng thái THẬT của app hôm nay). */
@@ -211,12 +212,24 @@ export function CompareScreen({
   }, [khoaDungDuoc, engine]);
 
   if (transcript === null) {
-    // Trạng thái rỗng NÓI THẬT: không bịa một bản ghi nào để màn trông đầy đủ.
+    // 🔴 CÂU SAI SAU W1 — SỬA Ở ĐÂY. Bản cũ viết *"Vùng KÊNH chưa có đường chọn bản ghi, nên chưa
+    // có gì để đối chiếu."* — **SAI**. W1 đã nối `selectChannel` vào TỪNG mục của vùng KÊNH
+    // (`ChannelZone.tsx`: mỗi `.ch__item` là một `<button>` gọi `onSelect(id)`), nên KÊNH **CHỌN
+    // ĐƯỢC RỒI**. Cái còn thiếu KHÔNG phải một đường — nó là một LƯỢT CHỌN của người dùng. Câu cũ
+    // nói ngược sự thật và đẩy người đọc đi tìm một tính năng đã có.
+    //
+    // Câu mới nói ĐÚNG hai vế và là một MỆNH LỆNH, không phải một lời báo trạng thái:
+    //   (a) chưa chọn kênh nào — sự thật của lượt này;
+    //   (b) chọn Ở ĐÂU — vùng KÊNH bên trái, và chọn xong thì bản ghi mở ra.
+    // ⚠️ `data-testid="rong"` và lớp `cmp__rong` GIỮ NGUYÊN: đó là hai chỗ neo của bài ghim.
     return (
       <section className="cmp">
-        <p className="cmp__rong" data-testid="rong">
-          Chưa chọn kênh. Vùng KÊNH chưa có đường chọn bản ghi, nên chưa có gì để đối chiếu.
-        </p>
+        <KhungRong
+          className="cmp__rong"
+          testid="rong"
+          kicker="CHƯA CHỌN"
+          lenh="Chưa chọn kênh — bấm một kênh ở vùng KÊNH bên trái để mở bản ghi, rồi đối chiếu."
+        />
       </section>
     );
   }

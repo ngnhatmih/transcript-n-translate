@@ -135,10 +135,12 @@ body {
   min-height: 0;
 }
 
+/* Trạng thái rỗng của màn Biên tập. HÌNH DẠNG của nó nay là "tấm rỗng" dùng chung (`.rong` —
+   xem khối "TẤM RỖNG / TẤM LỖI" ở CUỐI tệp): ở đây chỉ còn phần RIÊNG của chỗ này, và phần riêng
+   đó là ĐÚNG MỘT điều — nó là con của `.ed__rong-boc` (một cột flex), nên nó không được mang lề
+   dọc mặc định của một `<p>`. Chữ/nền/đệm nay do `.rong` và `.rong__*` quyết định. */
 .ed__rong {
   margin: 0;
-  padding: var(--sp-4);
-  color: var(--ink-1);
 }
 
 /* Khung cuộn: ảo hoá chỉ có nghĩa khi chính khung này cuộn được.
@@ -453,12 +455,10 @@ body {
   color: var(--ink-2);
 }
 
-/* "hàng đợi trống" là một `<p>`: mặc định của trình duyệt là lề trên/dưới 1em — cùng lớp lỗi với
-   `<ul>` không được reset ở trên. */
+/* Trạng thái rỗng của vùng HÀNG ĐỢI — cùng "tấm rỗng" dùng chung (`.rong`). Phần RIÊNG ở đây
+   là không có: `margin: 0` là để một `<div>` trong cột 286 px không mượn lề của `<p>`. */
 .q__rong {
   margin: 0;
-  padding: var(--sp-3);
-  color: var(--ink-2);
 }
 
 /* Dòng đang sửa: lề trái sáng lên (cùng ngôn ngữ với `is-current`, nhưng KHÁC nghĩa — amber là
@@ -744,14 +744,13 @@ body {
   background: var(--panel-0);
 }
 
-/* Trạng thái rỗng nói SỰ THẬT của lượt này, không hứa một thứ chưa có đường làm. */
+/* Trạng thái rỗng nói SỰ THẬT của lượt này, không hứa một thứ chưa có đường làm.
+   Hình dạng nay là "tấm rỗng" dùng chung (`.rong`): chỗ này chỉ giữ VỊ TRÍ của nó trong lưới
+   SÁU track của `.cmp` (luật ERRATA #31 mục 1) — bỏ `grid-row` ở đây là một lỗi IM LẶNG. */
 .cmp__rong {
   /* Hàng 3 — CÙNG track với `.cmp__nguong` (hai nhánh loại trừ nhau). */
   grid-row: 3;
   margin: 0;
-  padding: var(--sp-4);
-  color: var(--ink-1);
-  font-size: var(--fs-note);
 }
 
 /* Segmented control (U7: N bản dịch là MỘT dải nút, không phải N tab). */
@@ -988,6 +987,20 @@ body {
   gap: var(--sp-1);
 }
 
+/* `L1` — CỤM BA điều khiển đi liền một việc: `Ghi chú` · `Đã duyệt` · `Lưu thuật ngữ`.
+   ⚠️ Vì sao phải là MỘT CỤM: `.gl__form` có `flex-wrap: wrap` (đúng — sáu mục không vừa ở 1280),
+   và ba điều khiển này là MỘT việc. Để rời thì ở 1280 px chúng rơi vào hai dòng và LỆCH NHAU
+   62,25 px (đo trong Chrome thật: `#gl-note` top 149,25 · `#gl-approved` top 211,50). Một cụm là
+   MỘT mục flex ⇒ xuống dòng NGUYÊN KHỐI ⇒ mệnh đề "cùng `top`" đúng ở MỌI bề rộng.
+   `align-items: end` + cùng băng `--row-1` cho ba điều khiển con là cùng luật với `.gl__form`
+   (một luật, hai cấp — không phải hai định nghĩa của "thẳng hàng"). */
+.gl__cum {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: var(--sp-3) var(--sp-5);
+}
+
 /* Nhãn TRÊN ô nhập (checklist của plan), lỗi DƯỚI ô nhập (`.gl__loi`). */
 .gl__nhan {
   display: block;
@@ -999,6 +1012,10 @@ body {
 }
 
 .gl__nhap {
+  /* `L1` — băng chiều cao CÓ TÊN (`--row-1`, tokens.css §2.3), không phải chiều cao đến từ số
+     liệu font (15 px × 1,5 + đệm + viền = 30 px — TRÔI theo font/máy). Ba điều khiển của hàng
+     `GHI CHÚ` cùng khai một băng thì chúng thẳng nhau VÌ LUẬT, không vì trùng hợp. */
+  height: var(--row-1);
   padding: var(--sp-1) var(--sp-2);
   border: var(--rule-w) solid var(--rule);
   border-radius: var(--radius);
@@ -1009,12 +1026,60 @@ body {
 }
 
 .gl__o--duyet {
-  flex-direction: row;
+  /* NHÃN nằm TRÊN ô nhập — đúng khuôn bốn ô kia (checklist của plan + `L1` của vòng thiết kế 1).
+     Bản cũ để nó là một HÀNG, nên nó chỉ cao 14,25 px và bị `align-items: end` của `.gl__form`
+     đẩy lệch hẳn xuống dưới ô nhập (đo được: lệch 14 px). */
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--sp-1);
+}
+
+/* BĂNG của ô kiểm: cao ĐÚNG bằng `--row-1` như ô nhập và nút lưu, và điều khiển nằm GIỮA băng
+   (`align-items: center`) — một ô kiểm 13 px trong một băng 32 px mà không căn giữa thì nó dính
+   lên đỉnh và trông như lỗi render. */
+.gl__duyet-bang {
+  display: flex;
   align-items: center;
-  gap: var(--sp-2);
+  height: var(--row-1);
+}
+
+/* Ô kiểm chiếm TRỌN băng (`height`/`width` = `--row-1`) ⇒ `getBoundingClientRect()` của nó và
+   của ô nhập có cùng `top` và cùng `height`. Đó là vế ĐO ĐƯỢC của `L1` (brief §4).
+   🔴 VÀ NÓ KHÔNG ĐƯỢC VẼ BẰNG Ô KIỂM CỦA TRÌNH DUYỆT. Ảnh chụp Chrome thật cho thấy một ô kiểm
+   native ở 32 px là một ô XANH DƯƠNG của Chrome — sắc duy nhất trong cả app không đến từ
+   `tokens.css`, trong khi §2.2 chỉ cho ĐÚNG MỘT accent (`--signal`). Nên ô này được vẽ bằng chính
+   ngôn ngữ của app: đường kẻ 1 px (`--rule`), `--panel-1`, bo `--radius`; và trạng thái ĐÃ DUYỆT
+   là một KHỐI MỰC `--ink-0` ở giữa — không thêm accent thứ hai, và không mượn màu hệ thống.
+   ⚠️ `appearance: none` KHÔNG bỏ hành vi: nó vẫn là `<input type="checkbox">` thật ⇒ `checked`,
+   `Space`, nhãn `<label for>`, và vòng tiêu điểm `:focus-visible` toàn cục đều giữ nguyên. */
+.gl__duyet {
+  appearance: none;
+  display: grid;
+  place-items: center;
+  width: var(--row-1);
+  height: var(--row-1);
+  margin: 0;
+  border: var(--rule-w) solid var(--rule);
+  border-radius: var(--radius);
+  background: var(--panel-1);
+  cursor: pointer;
+}
+
+.gl__duyet:checked {
+  border-color: var(--ink-1);
+}
+
+/* Dấu ĐÃ DUYỆT: một khối mực, không phải một dấu tick vẽ tay (repo không có icon lib). */
+.gl__duyet:checked::after {
+  content: "";
+  width: 14px;
+  height: 14px;
+  background: var(--ink-0);
 }
 
 .gl__luu {
+  /* Cùng băng chiều cao với `.gl__nhap` và `.gl__duyet` — xem `L1` ở khối `.gl__nhap`. */
+  height: var(--row-1);
   padding: var(--sp-2) var(--sp-4);
   border: var(--rule-w) solid var(--rule);
   border-radius: var(--radius);
@@ -1720,4 +1785,318 @@ body {
   letter-spacing: var(--track-label);
   text-transform: uppercase;
   color: var(--fault);
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════════════════════
+   VÒNG THIẾT KẾ 1 — "TẤM RỖNG" (`.rong`) và "TẤM LỖI" (`.tl`)
+
+   Hai hình dạng này là một TIỂU-NGÔN-NGỮ MỚI, và chúng KHÁC NHAU về nghĩa — không được gộp:
+     - `.rong` = **KHÔNG CÓ GÌ ĐỂ LÀM** ⇒ bóng ma của hình dạng sắp tới;
+     - `.tl`   = **MỘT CÁI GÌ ĐÓ HỎNG** ⇒ vân chéo ở đỉnh + mã lỗi mono + **CÂU NÓI RÕ CÁI GÌ
+       CÒN CHẠY ĐƯỢC** (khuôn trung thực của panel §4.8, `.od__*`).
+   ⇒ Một chỗ TRỐNG không được phép trông như một chỗ HỎNG, và ngược lại.
+
+   NĂM chỗ dùng (brief §1): `.ed__rong` (Biên tập) · `.q__rong` (Hàng đợi) · `.ch__loi` (vùng
+   KÊNH) · `.cmp__rong` (Đối chiếu) · `.gl__loi` (Thuật ngữ). Mỗi chỗ GIỮ NGUYÊN tên lớp cũ của
+   nó — tên đó là chỗ NEO của bài ghim QUAN HỆ luật ↔ lớp — và `.rong`/`.tl` chỉ mang hình dạng
+   dùng chung. Chỗ thứ sáu `.ch__rong` dùng cùng `.rong` để hai nhánh của CÙNG một vùng không
+   nói hai thứ tiếng khác nhau.
+
+   ⚠️ Chỉ animate `transform`/`opacity`, MỘT lần, khi tấm vào DOM (`--dur-vao`/`--ease-vao`).
+   KHÔNG spinner, KHÔNG emoji, KHÔNG ảnh minh hoạ, KHÔNG đổi màu nền vùng.
+   ⚠️ KHÔNG có `grid-template-*` ở đây: `flex`/`padding` không có "trần track", nên thêm một con
+   vào `.rong`/`.tl` KHÔNG THỂ tái sinh ERRATA #31 mục 1 (lớp lỗi đã sai THẬT ở `.shell`/`.cmp`).
+   ══════════════════════════════════════════════════════════════════════════════════════════════ */
+
+@keyframes vao-mot-lan {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.rong {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  padding: var(--sp-4);
+  animation: vao-mot-lan var(--dur-vao) var(--ease-vao) both;
+}
+
+/* Kicker: MONO, cỡ nhỏ nhất được phép (§7), giãn rộng, mực mờ — một nhãn KHẮC, không phải chữ. */
+.rong__kicker {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: var(--fs-label);
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  color: var(--ink-2);
+}
+
+/* MỘT CÂU MỆNH LỆNH — người dùng làm gì TIẾP, không phải một câu mô tả trạng thái. Đây là câu
+   DUY NHẤT trong tấm mà người đọc phải đọc, nên nó là chữ ĐỌC được (`--fs-line`, 13,5 px) và
+   mực sáng nhất (`--ink-0`). */
+.rong__lenh {
+  margin: 0;
+  max-width: 68ch;
+  color: var(--ink-0);
+  font-size: var(--fs-line);
+  line-height: var(--lh-body);
+}
+
+/* BÓNG MA TRỤC THỜI GIAN — nét đứt DỌC 1 px, cao BA hàng (`--row-2` × 3 = số hàng của danh sách
+   đoạn sắp tới), kèm ba rail mono.
+   ⚠️ Trục DỌC, không phải ngang: thời gian là một TRỤC DỌC ở app này (`.ed__item` xếp hàng theo
+   mốc, rail 72 px — xem `--rail`), nên bóng ma phải nói trước ĐÚNG hình dạng đó.
+   ⚠️ Hai đường kẻ trên/dưới là hình dạng của MỘT HÀNG trong danh sách (`.ed__item` có
+   `border-bottom`): bóng ma phải là bóng của một danh sách, không phải một khối trang trí.
+   ⚠️ `position: absolute` cho riêng đường trục ⇒ nó không tiêu thụ một track nào, và thêm/bớt
+   rail không làm trục đổi chỗ. */
+.rong__ma {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  min-height: calc(var(--row-2) * 3);
+  padding-left: calc(var(--rail) + var(--sp-3));
+  border-top: var(--rule-w) solid var(--rule);
+  border-bottom: var(--rule-w) solid var(--rule);
+}
+
+.rong__truc {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: var(--sp-4);
+  border-left: var(--rule-w) dashed var(--rule);
+}
+
+/* `--:--.--` là hình dạng mốc thời gian của `formatTimecode` khi CHƯA có số — một giá trị CHƯA
+   ĐO ĐƯỢC, không phải một giá trị bịa. */
+.rong__ray {
+  font-family: var(--font-mono);
+  font-size: var(--fs-num);
+  letter-spacing: var(--track-label);
+  color: var(--ink-2);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── TẤM LỖI ─────────────────────────────────────────────────────────────────────────────────── */
+
+.tl {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  padding: var(--sp-3);
+  background: var(--panel-1);
+  /* Lề trái `--fault` dày 2 px: cùng khuôn "mốc" của `.od__sua` (lề amber) nhưng đây là LỖI. */
+  border-left: var(--focus-w) solid var(--fault);
+  animation: vao-mot-lan var(--dur-vao) var(--ease-vao) both;
+}
+
+/* "Dải vằn chéo `--fault`" — CÙNG khuôn `.od__van` của panel §4.8: đây là VÂN, không phải một
+   nền đỏ (§2.2 quy tắc 3: `--fault` không bao giờ tô nền). */
+.tl__van {
+  height: var(--suspect-hatch-w);
+  background-image: repeating-linear-gradient(
+    var(--suspect-hatch-angle),
+    var(--fault) 0,
+    var(--fault) var(--suspect-hatch-step),
+    transparent var(--suspect-hatch-step),
+    transparent calc(var(--suspect-hatch-step) * 2)
+  );
+}
+
+.tl__kicker {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: var(--fs-label);
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  color: var(--ink-2);
+}
+
+/* MÃ LỖI — một GIÁ TRỊ CỦA MÁY ⇒ mono, và là thứ DUY NHẤT trong tấm được tô `--fault`.
+   Tương phản của cặp này (`--fault` trên `--panel-1`) là **5,24:1** — đo trong Chrome thật bằng
+   công thức độ chói tương đối; cặp trên `--panel-2` (nền của `.lenh--huy`) là **4,74:1**. */
+.tl__ma {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: var(--fs-line);
+  letter-spacing: var(--track-label);
+  color: var(--fault);
+  font-variant-numeric: tabular-nums;
+}
+
+/* NGUYÊN VĂN của lỗi — KHÔNG viết lại, KHÔNG rút gọn: một `422 "tệp rỗng"` nói được điều mà
+   "có lỗi xảy ra" không nói được. */
+.tl__ly-do {
+  margin: 0;
+  color: var(--ink-0);
+  font-size: var(--fs-ui);
+  line-height: var(--lh-body);
+}
+
+/* CÂU NÓI RÕ **CÁI GÌ CÒN CHẠY ĐƯỢC** — khuôn trung thực của `.od__sua`/`.od__con` (§4.8): lề
+   trái amber (cùng nghĩa "đang hoạt động"), và một CÂU KIỂM ĐƯỢC, không phải một lời an ủi. */
+.tl__con {
+  margin: 0;
+  padding-left: var(--sp-2);
+  border-left: var(--focus-w) solid var(--signal);
+  color: var(--ink-0);
+  font-size: var(--fs-ui);
+  line-height: var(--lh-body);
+}
+
+/* Người dùng xin ÍT chuyển động thì tấm vào thẳng, không trượt. */
+@media (prefers-reduced-motion: reduce) {
+  .rong,
+  .tl {
+    animation: none;
+  }
+}
+
+/* ── PHẢN HỒI XÚC GIÁC CỦA MỌI LỆNH (`:active`) ────────────────────────────────────────────────
+   Bốn nút GHI/CHẠY của app cùng một phản hồi: nhích xuống 1 px. Chỉ `transform`, nên không có
+   layout nào bị tính lại, và `transition` chỉ mang HAI thuộc tính (đường kẻ của hover + cú nhích)
+   — không có chuyển động nào khác được thêm vào. */
+.lenh,
+.nap__nut,
+.gl__luu,
+.od__thu-lai {
+  transition: border-color var(--dur-1) var(--ease-1), transform var(--dur-1) var(--ease-1);
+}
+
+.lenh:active,
+.nap__nut:active,
+.gl__luu:active,
+.od__thu-lai:active {
+  transform: translateY(1px);
+}
+
+/* ── L1 — HÀNG `GHI CHÚ` / `ĐÃ DUYỆT` / `Lưu thuật ngữ` ────────────────────────────────────────
+   ĐO ĐƯỢC TRONG CHROME THẬT ở 2003×1081, TRƯỚC bản vá: `.gl__form` khai `align-items: end`, nên
+   mọi con được CĂN ĐÁY theo nội dung CỦA CHÍNH NÓ. Ô nhập `#gl-note` cao 30 px (top 151,25) và
+   nút `.gl__luu` cao 30 px (top 151,25 — trùng nhau), nhưng `#gl-approved` cao **13 px** và top
+   **165,25** ⇒ lệch **14 px** về đỉnh và **−17 px** về chiều cao. Nguyên nhân KHÔNG phải một
+   con số sai: `.gl__o--duyet` là một HÀNG (nhãn + ô cạnh nhau) nên nó chỉ cao 14,25 px, và
+   căn đáy đặt cả hộp đó xuống dưới đáy của ô nhập.
+   LUẬT SỬA — ba vế, không phải ba con số:
+     1. NHÃN nằm TRÊN ô nhập (`.gl__o--duyet` thành CỘT, đúng khuôn bốn ô kia);
+     2. ba điều khiển CÙNG một BĂNG chiều cao (`height: var(--row-1)` — xem `.gl__nhap`,
+        `.gl__luu`, `.gl__duyet-bang`);
+     3. `align-items: center` cho BĂNG của ô kiểm (`.gl__duyet-bang`), để một ô kiểm 13 px nằm
+        GIỮA băng 32 px thay vì dính lên đỉnh.
+   Hệ quả ĐO ĐƯỢC: `top` và `height` của `#gl-note`, `#gl-approved`, `[data-testid=luu]` bằng
+   nhau trong sai số ±1 px — xem khẳng định `khangDinh` của `e2e/plans/rong-va-bo-cuc.json`. */
+
+/* ── L2 — `CHỌN TỆP`: KHÔNG ĐỂ TRÌNH DUYỆT VẼ Ô CHỌN TỆP NỮA ───────────────────────────────────
+   🔴 PHÉP ĐO BÁC BỎ CÁCH SỬA MÀ BRIEF §2 ĐỀ NGHỊ. Brief viết *"ở viewport 2003 px dòng này bị
+   vùng giữa cắt"* và đề nghị `min-width: 0` + `flex-wrap` + truncate. ĐO TRONG CHROME THẬT
+   (2003×1081, 2560×1440, 1280×800; cả khi ĐÃ chọn tệp với tên dài 179 ký tự):
+     `html` · `body` · `.shell` · `.shell__mid` · `.shell__channels` · `.shell__work` ·
+     `.shell__queue` · `.nap` · `.nap__chon` · `.nap__khung` · `.ch__nap`
+   — **MỌI** `scrollWidth === clientWidth` (`tran: false`) ở CẢ BA bề rộng.
+   ⇒ KHÔNG có tràn theo nghĩa `scrollWidth > clientWidth`, ở bất kỳ bề rộng nào, ở bất kỳ cấp nào.
+   (Nên vế ghim *"ở ≥ 2000 px thì `scrollWidth <= clientWidth`"* của brief là một GUARD ĐÚNG
+   nhưng **KHÔNG PHÂN BIỆT ĐƯỢC** — nó xanh ở CẢ trước lẫn sau bản vá. Xem báo cáo vòng 1.)
+
+   Cái TRÀN được đo là cái khác, và nó ĐO ĐƯỢC: `<input type="file">` là một widget do TRÌNH
+   DUYỆT vẽ, với `width` NỘI TẠI cố định — đo được `#nap-tep` = **212 px**, `#ch-nap-tep` =
+   **192 px**, KHÔNG đổi theo bề rộng khung — cộng `min-width: auto`, `overflow-x: clip`,
+   `white-space: pre`. Khi cha hẹp hơn bề rộng nội tại đó, flex CO CÁI HỘP của nó lại nhưng trình
+   duyệt VẪN VẼ nội dung bên trong theo bề rộng nội tại ⇒ chữ tên tệp bị CẮT bên trong hộp, và
+   `scrollWidth` KHÔNG thấy gì (nội dung đó không nằm trong cây layout của trang).
+   `text-overflow` cũng KHÔNG với tới nó: `getComputedStyle` báo `text-overflow: ellipsis` (mặc
+   định của UA) mà chữ vẫn bị cắt trần. Cột KÊNH rộng 213 px, ô nội tại 192 px — và ở Chrome
+   tiếng Việt, dòng mặc định của widget dài hơn hẳn "No file chosen".
+
+   ⇒ Cách sửa ĐÚNG là BỎ việc VẼ cho trình duyệt: giữ `<input type="file" multiple>` THẬT trong
+   DOM (bàn phím, `change`, `data-testid`, luồng nạp — KHÔNG đổi một hành vi nào), che phần VẼ
+   của nó đi, và vẽ điều khiển bằng chính ngôn ngữ của app: một `<label>` làm NÚT + một dòng mono
+   TỰ CẮT được. Hệ quả ĐO ĐƯỢC: điều khiển không còn bề rộng nội tại, và tên tệp dài bị
+   ellipsize (`scrollWidth > clientWidth` trên CHÍNH dòng đó — cắt CÓ CHỦ Ý) thay vì bị cắt trần. */
+.nap__chon-tep,
+.ch__nap-tep {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  /* `min-width: 0` cho flex con: không có nó thì một mục flex không co xuống dưới bề rộng NỘI
+     DUNG của nó, và cả hàng đẩy nhau ra ngoài khung. */
+  min-width: 0;
+  max-width: 100%;
+}
+
+/* Ô chọn tệp THẬT, chỉ che phần VẼ — khuôn "sr-only nhưng CÒN tiêu điểm" (1×1 + `clip-path`).
+   ⚠️ KHÔNG `display: none`, KHÔNG `visibility: hidden`, KHÔNG `opacity: 0`: hai cách đầu đưa ô ra
+   khỏi cây tiêu điểm và khỏi trình đọc màn hình (bàn phím mất đường chọn tệp), cách cuối để lại
+   một vòng tiêu điểm VÔ HÌNH. */
+.nap__o-tep,
+.ch__nap-o {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  border: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  background: none;
+}
+
+/* Nút THẬT của app: cùng mặt nhãn khắc với `.nap__nut`/`.nap__nhan` (Archivo Expanded, giãn rộng,
+   in hoa) — và cùng khuôn đường kẻ 1 px, không shadow mềm (§2.3). */
+.nap__nut-tep,
+.ch__nap-nut {
+  flex: 0 0 auto;
+  padding: var(--sp-1) var(--sp-3);
+  border: var(--rule-w) solid var(--rule);
+  border-radius: var(--radius);
+  background: var(--panel-2);
+  color: var(--ink-0);
+  font-family: var(--font-label);
+  font-size: var(--fs-label);
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: border-color var(--dur-1) var(--ease-1), transform var(--dur-1) var(--ease-1);
+}
+
+.nap__nut-tep:hover,
+.ch__nap-nut:hover {
+  border-color: var(--ink-2);
+}
+
+.nap__nut-tep:active,
+.ch__nap-nut:active {
+  transform: translateY(1px);
+}
+
+/* Vòng tiêu điểm phải NHÌN THẤY được: ô thật đã bị che phần vẽ, nên vòng của nó được vẽ lên
+   chính nút — `:focus-visible` trên ô, `+` là nút NGAY SAU nó trong DOM (xem `IntakeFrame.tsx`).
+   Đây là lý do THỨ TỰ DOM trong TSX không được đảo. */
+.nap__o-tep:focus-visible + .nap__nut-tep,
+.ch__nap-o:focus-visible + .ch__nap-nut {
+  outline: var(--focus-w) solid var(--focus-color);
+  outline-offset: 1px;
+}
+
+/* TÊN TỆP — dòng mono TỰ CẮT được: `min-width: 0` (co được) + ba khai báo cắt chuẩn.
+   ⚠️ Chỉ có ở khung §4.2 (vùng giữa): lối GỌN ở vùng KÊNH nạp NGAY khi chọn nên nó KHÔNG có
+   trạng thái "đã chọn tệp" nào để hiện — thêm một dòng tên ở đó là thêm một dòng luôn rỗng. */
+.nap__ten-tep {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: var(--fs-num);
+  color: var(--ink-2);
 }

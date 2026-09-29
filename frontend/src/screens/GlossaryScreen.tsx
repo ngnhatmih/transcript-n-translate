@@ -67,6 +67,7 @@ import { useEffect, useState } from "react";
 
 import { endpoints } from "../api/endpoints.ts";
 import type { Term } from "../api/types.ts";
+import { TamLoi, maLoi } from "../ui/TrangRong.tsx";
 
 /** Chờ trước khi hỏi route xem trước — gõ liên tục thì chỉ hỏi MỘT lần. */
 const CHO_GO_MS = 200;
@@ -332,32 +333,46 @@ export function GlossaryScreen() {
           />
         </span>
 
-        <span className="gl__o">
-          <label className="gl__nhan" htmlFor="gl-note">Ghi chú</label>
-          <input
-            className="gl__nhap"
-            id="gl-note"
-            data-testid="o-ghi-chu"
-            value={note}
-            onChange={(e) => datNote(e.target.value)}
-          />
-        </span>
+        {/* 🔴 `L1` (vòng thiết kế 1) — BA điều khiển đi liền một việc (`Ghi chú` · `Đã duyệt` ·
+            `Lưu thuật ngữ`) nằm trong MỘT CỤM, không phải ba mục rời của `.gl__form`.
+            VÌ SAO (đo được trong Chrome thật): `.gl__form` là một hàng FLEX có `flex-wrap: wrap`,
+            nên ở 1280 px nó xuống dòng — và ba điều khiển này rơi vào HAI dòng khác nhau
+            (`#gl-note` ở dòng 1 tại `left 733`, `#gl-approved`/`[data-testid=luu]` ở dòng 2 tại
+            `left 226`, đo được `top` 149,25 so với 211,50 ⇒ lệch **62,25 px**). Một cụm là MỘT
+            mục flex, nên nó xuống dòng NGUYÊN KHỐI, và ba điều khiển thẳng nhau ở MỌI bề rộng —
+            không phải chỉ ở bề rộng mà người dùng chụp ảnh. */}
+        <span className="gl__cum">
+          <span className="gl__o">
+            <label className="gl__nhan" htmlFor="gl-note">Ghi chú</label>
+            <input
+              className="gl__nhap"
+              id="gl-note"
+              data-testid="o-ghi-chu"
+              value={note}
+              onChange={(e) => datNote(e.target.value)}
+            />
+          </span>
 
-        <span className="gl__o gl__o--duyet">
-          <label className="gl__nhan" htmlFor="gl-approved">Đã duyệt</label>
-          <input
-            className="gl__duyet"
-            type="checkbox"
-            id="gl-approved"
-            data-testid="o-da-duyet"
-            checked={approved}
-            onChange={(e) => datApproved(e.target.checked)}
-          />
-        </span>
+          <span className="gl__o gl__o--duyet">
+            <label className="gl__nhan" htmlFor="gl-approved">Đã duyệt</label>
+            {/* BĂNG của ô kiểm: cao đúng `--row-1` như ô nhập, và điều khiển căn GIỮA băng
+                (`align-items: center` của `.gl__duyet-bang`). */}
+            <span className="gl__duyet-bang">
+              <input
+                className="gl__duyet"
+                type="checkbox"
+                id="gl-approved"
+                data-testid="o-da-duyet"
+                checked={approved}
+                onChange={(e) => datApproved(e.target.checked)}
+              />
+            </span>
+          </span>
 
-        <button className="gl__luu" data-testid="luu" type="submit" disabled={dangLuu}>
-          {editingId === null ? "Lưu thuật ngữ" : "Lưu thay đổi"}
-        </button>
+          <button className="gl__luu" data-testid="luu" type="submit" disabled={dangLuu}>
+            {editingId === null ? "Lưu thuật ngữ" : "Lưu thay đổi"}
+          </button>
+        </span>
 
         {/* NÓI RA vì sao hai ô kia bị khoá. Bỏ qua thay đổi một cách IM LẶNG là cùng lớp
             lỗi với `I1`: người dùng không biết chữ mình gõ đã bị bỏ. */}
@@ -385,9 +400,20 @@ export function GlossaryScreen() {
         ) : null}
 
         {loiNap !== null ? (
-          <p className="gl__loi" data-testid="loi-nap">
-            {`Không đọc được bảng thuật ngữ: ${loiNap}`}
-          </p>
+          // 🔴 VÒNG THIẾT KẾ 1: một dòng chữ đỏ ⇒ một TẤM LỖI. Câu NGUYÊN VĂN ở nguyên vẹn —
+          // `[data-testid="loi-nap"]` là phần tử mà `GlossaryScreen.test.tsx` đọc, và bài đó
+          // khẳng định nó mang CẢ mã HTTP (`/500/`) LẪN `detail` của backend. Vì vậy mã lỗi mono
+          // là một `<p>` RIÊNG trong cùng tấm, còn câu dưới vẫn là `ApiError.message` đầy đủ.
+          // Câu thêm vào phải KIỂM ĐƯỢC: bảng thuật ngữ chỉ được đọc bởi màn này (`/api/glossary`
+          // chỉ có ở `GlossaryScreen`), nên hai màn kia không thể hỏng vì nó.
+          <TamLoi
+            className="gl__loi"
+            testid="loi-nap"
+            kicker="LỖI"
+            ma={maLoi(loiNap)}
+            lyDo={`Không đọc được bảng thuật ngữ: ${loiNap}`}
+            con="Biên tập và Đối chiếu vẫn chạy được — hai màn đó không đọc bảng thuật ngữ."
+          />
         ) : null}
       </div>
 

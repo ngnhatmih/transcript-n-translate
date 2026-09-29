@@ -14,7 +14,15 @@
   --ink-2: #6b665c;
   --rule: #34322e; /* đường kẻ 1px */
   --signal: #ffb020; /* HIỆU ỨNG DUY NHẤT — đèn báo amber */
-  --fault: #b4443c; /* CHỈ lỗi thật và vân "nghi ngờ" */
+  /* 🔴 VÒNG THIẾT KẾ 1 — NÂNG TƯƠNG PHẢN. Bản cũ `#b4443c` cho **2,90:1** khi làm MỰC chữ trên
+     `--panel-2` (`rgb(35,34,32)`) ở cỡ 9,5 px — đo trong Chrome thật, và **trượt WCAG AA**
+     (cần 4,5:1 cho chữ nhỏ). `#cf7268` giữ ĐÚNG sắc "gạch đỏ đã khử bão hoà" (hue ≈ 4° → ≈ 6°,
+     độ bão hoà 44% → 52%) nhưng nâng độ chói: **4,74:1** trên `--panel-2`, **5,24:1** trên
+     `--panel-1`. Đo được ở cả hai chỗ bằng công thức độ chói tương đối trong Chrome.
+     ⚠️ `--fault` còn dùng làm VÂN (`repeating-linear-gradient` của `.ed__item.is-suspect`/
+     `.od__van`/`.tl__van`) và làm một CHẤM 8 px (`.stt[data-ollama="down"] .stt__cham`): sáng hơn
+     thì vân và chấm cũng sáng hơn — vân 1 px trên nền `--panel-0` đọc rõ hơn, không đổi nghĩa. */
+  --fault: #cf7268; /* CHỈ lỗi thật và vân "nghi ngờ" */
   --ok: #7e8c6a; /* xác nhận, rất tiết chế — không phải accent thứ ba */
   /* §2.3: phân tầng bằng đường kẻ 1px + chênh lệch độ sáng nền 4–6% — chọn 4% */
   --surface-step: 4%;
@@ -78,6 +86,14 @@
   /* ── §2.6 Chuyển động — tổng số chuyển động có chủ đích: HAI ───────────── */
   --dur-1: 120ms; /* transition duy nhất cho hover/focus */
   --ease-1: ease-out; /* không bounce, không spring, không parallax */
+
+  /* ── VÒNG THIẾT KẾ 1 — chuyển động vào MỘT LẦN của "tấm rỗng"/"tấm lỗi" ────────────
+     Đây là chuyển động THỨ BA của hệ, và nó được KHAI RA ở đây thay vì viết một hằng số trong
+     `app.css`: brief vòng 1 §4 đòi đúng `cubic-bezier(0.16, 1, 0.3, 1)` trong khoảng 120–160 ms,
+     tức KHÁC `--ease-1` (`ease-out`) đang dùng cho hover/focus. Chỉ `transform`/`opacity`, chạy
+     MỘT lần khi tấm vào DOM, và tắt hẳn khi người dùng xin `prefers-reduced-motion`. */
+  --dur-vao: 140ms;
+  --ease-vao: cubic-bezier(0.16, 1, 0.3, 1);
 
   /* ── §7 Khả năng tiếp cận ──────────────────────────────────────────────── */
   --focus-w: 2px; /* focus ring 2px --signal, không bao giờ outline:none */

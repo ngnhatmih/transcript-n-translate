@@ -56,6 +56,7 @@
 import type { Job, JobState, JobType, Source } from "../api/types.ts";
 import { NhapGon } from "./IntakeFrame.tsx";
 import type { NapTep } from "./IntakeFrame.tsx";
+import { KhungRong, TamLoi, maLoi } from "../ui/TrangRong.tsx";
 
 export interface ChannelZoneProps {
   /** `null` = chưa có dữ liệu (đang đọc, hoặc lỗi — xem `loading`/`error`). */
@@ -148,10 +149,24 @@ export function ChannelZone({
   const napGon = <NhapGon napTep={onNapTep} />;
 
   if (error !== null) {
+    // 🔴 VONG THIET KE 1: mot dong chu do ⇒ mot TAM LOI. Cau NGUYEN VAN o NGUYEN VEN (ba bai test
+    // khang dinh `"không đọc được kênh"`, ma HTTP `"500"`, va `detail` cua backend), va duoc NOI
+    // THEM cau tra loi cau hoi nguoi dung that su hoi: CON GI CHAY DUOC?
+    // ⚠️ Cau do phai KIEM DUOC, khong phai mot loi an ui: loi nay den tu `GET /api/sources`, con
+    // duong NAP di thang toi `POST /api/sources/upload` — HAI route khac nhau. Do la ly do
+    // `NhapGon` nam ngay TREN tam loi nay (`napGon` o dau ham): no van toi duoc, va no van chay.
     return (
       <div className="ch">
         {napGon}
-        <p className="ch__loi" role="alert">{`không đọc được kênh: ${error}`}</p>
+        <TamLoi
+          className="ch__loi"
+          role="alert"
+          testid="loi-kenh"
+          kicker="LỖI"
+          ma={maLoi(error)}
+          lyDo={`không đọc được kênh: ${error}`}
+          con="Nạp tệp vẫn chạy được: ô «nạp tệp» ở trên gửi thẳng lên máy chủ, không cần danh sách kênh."
+        />
       </div>
     );
   }
@@ -170,7 +185,12 @@ export function ChannelZone({
     return (
       <div className="ch">
         {napGon}
-        <p className="ch__rong">chưa có kênh nào — nạp tệp ở ô trên</p>
+        <KhungRong
+          className="ch__rong"
+          testid="rong-kenh"
+          kicker="TRỐNG"
+          lenh="chưa có kênh nào — nạp tệp ở ô trên để mở kênh đầu tiên"
+        />
       </div>
     );
   }

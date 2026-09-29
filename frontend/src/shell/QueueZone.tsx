@@ -37,6 +37,7 @@
  * `flex`): một lưới track CỐ ĐỊNH thì thêm con thứ N là tái sinh ERRATA #31 mục 1.
  */
 import type { Job, JobState } from "../api/types.ts";
+import { KhungRong } from "../ui/TrangRong.tsx";
 
 export interface QueueZoneProps {
   /** Job theo id — đúng cái `useJobStream()` trả về, không sao chép. */
@@ -112,9 +113,19 @@ export function QueueZone({ jobs, daYeuCauHuy, loiLenh, onHuyJob, onChayLaiJob }
   const hang = [...jobs.values()].sort((a, b) => thuTu(a) - thuTu(b) || a.id - b.id);
 
   if (hang.length === 0) {
+    // 🔴 VONG THIET KE 1: mot dong chu trang thai ⇒ mot TAM RONG. Cau cu *"hàng đợi trống"* o
+    // nguyen ven (no la su that), va duoc NOI THEM ve MENH LENH: co HAI duong day mot viec vao
+    // day, va ca hai deu co that trong app — nap mot tep (job `ingest`/`asr`) va bam «dich»
+    // (job `translate`, xem `CompareScreen.cmp__nut-dich`). Mot cau chi noi "trong" thi nguoi doc
+    // khong biet cai gi se lam no day.
     return (
       <div className="q">
-        <p className="q__rong">hàng đợi trống</p>
+        <KhungRong
+          className="q__rong"
+          testid="rong-hang-doi"
+          kicker="TRỐNG"
+          lenh="hàng đợi trống — nạp tệp hoặc bấm «dịch» để đẩy một việc vào đây"
+        />
       </div>
     );
   }

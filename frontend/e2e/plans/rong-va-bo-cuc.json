@@ -1,0 +1,36 @@
+{
+  "url": "http://127.0.0.1:3100",
+  "width": 2003,
+  "height": 1081,
+  "ghiChu": "VONG THIET KE 1 — KHANG DINH TANG CHROME THAT cho L1/L2 va do tuong phan `--fault`. Chay: `node e2e/session.mjs e2e/plans/rong-va-bo-cuc.json --out <dir ngoai repo>`. ⚠️ jsdom KHONG co layout: `top`/`height`/`scrollWidth` chi do duoc o day. Ve KHAI BAO nam o `src/ui/TrangRong.test.tsx`. ⚠️ KHONG co buoc `key` nao nen khong phu thuoc dau do ban phim.",
+  "steps": [
+    { "do": "nav", "url": "http://127.0.0.1:3100" },
+    { "do": "waitFor", "selector": ".nap__chon", "timeout": 60000 },
+
+    { "do": "eval", "js": "(() => { const Q = (s) => document.querySelector(s); const OV = (s) => { const e = Q(s); if (e === null) return null; return { cw: e.clientWidth, sw: e.scrollWidth, tran: e.scrollWidth > e.clientWidth }; }; const R = (s) => { const e = Q(s); if (e === null) return null; const b = e.getBoundingClientRect(); return { t: Math.round(b.top * 100) / 100, h: Math.round(b.height * 100) / 100, l: Math.round(b.left * 100) / 100, w: Math.round(b.width * 100) / 100 }; }; /* ⚠️ Token trong `tokens.css` la HEX; `getComputedStyle(...).getPropertyValue('--fault')` tra ve CHUOI HEX, khong phai `rgb()`. Do luong bang mot PHEP DO THAT: gan token lam `color` cua mot phan tu roi doc `color` DA TINH — trinh duyet doi no thanh `rgb()` (do duoc: ban dau doc thang token nen ca hai ve deu `null` va ty so ra 1). */ const mau = (bien) => { const el = document.createElement('span'); el.style.color = 'var(' + bien + ')'; el.style.position = 'absolute'; document.body.appendChild(el); const c = getComputedStyle(el).color; el.remove(); return c; }; const L = (m) => { const v = m / 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); }; const lum = (s) => { const m = /rgba?\\(([^)]+)\\)/.exec(s); if (m === null) return null; const p = m[1].split(',').map((x) => parseFloat(x)); return 0.2126 * L(p[0]) + 0.7152 * L(p[1]) + 0.0722 * L(p[2]); }; const ty = (a, b) => { const la = lum(a); const lb = lum(b); return (Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05); }; window.__K1 = { OV, R, ty, mau }; window.__khongTran = () => ['html', 'body', '.shell', '.shell__mid', '.shell__channels', '.shell__work', '.shell__queue', '.nap', '.nap__chon', '.nap__khung', '.ch__nap'].every((s) => { const o = OV(s); return o === null || o.tran === false; }); window.__l2CheVat = () => { const b = R('.nap__o-tep'); const c = R('.ch__nap-o'); return b !== null && c !== null && b.w <= 1.5 && b.h <= 1.5 && c.w <= 1.5 && c.h <= 1.5; }; window.__tuongPhan = () => { const fault = mau('--fault'); const p2 = mau('--panel-2'); const p1 = mau('--panel-1'); const r = (x) => Math.round(x * 1000) / 1000; return { fault, panel2: p2, panel1: p1, trenPanel2: r(ty(fault, p2)), trenPanel1: r(ty(fault, p1)), datAA: ty(fault, p2) >= 4.5 && ty(fault, p1) >= 4.5 }; }; window.__l1 = () => { const o = R('#gl-note'); const d = R('#gl-approved'); const n = R('[data-testid=luu]'); if (o === null || d === null || n === null) return { thay: false }; const dTop = Math.abs(d.t - o.t); const dH = Math.abs(d.h - o.h); const nTop = Math.abs(n.t - o.t); const nH = Math.abs(n.h - o.h); return { thay: true, o, d, n, dTop, dH, nTop, nH, dat: dTop <= 1 && dH <= 1 && nTop <= 1 && nH <= 1 }; }; return 'da cai bo do K1'; })()", "log": "cai bo do khang dinh (K1)" },
+
+    { "do": "eval", "js": "JSON.stringify({ viewport: [innerWidth, innerHeight], tran: { html: window.__K1.OV('html'), work: window.__K1.OV('.shell__work'), channels: window.__K1.OV('.shell__channels'), napChon: window.__K1.OV('.nap__chon'), chNap: window.__K1.OV('.ch__nap') }, oChonTep: window.__K1.R('.nap__o-tep'), oChonTepGon: window.__K1.R('.ch__nap-o'), tenTep: window.__K1.R('.nap__ten-tep'), nutChon: window.__K1.R('.nap__nut-tep') })", "log": "L2 @2003: tran + hinh hoc dieu khien chon tep" },
+    { "do": "khangDinh", "js": "window.__khongTran()", "log": "L2 @2003: KHONG cap nao co scrollWidth > clientWidth", "thongDiep": "L2 @2003: co mot cap bi tran ngang — bang chung cua loi bo cuc L2" },
+    { "do": "khangDinh", "js": "window.__l2CheVat()", "log": "L2 @2003: o chon tep cua TRINH DUYET da bi che phan ve (1x1)", "thongDiep": "L2: o chon tep cua trinh duyet VAN con chiem cho — no co be rong noi tai co dinh va tu cat chu ben trong" },
+    { "do": "shot", "name": "01-sau-bien-tap-2003" },
+    { "do": "shot", "name": "02-sau-zoom-chon-tep-2003", "clip": { "x": 236, "y": 905, "width": 620, "height": 60, "scale": 3 } },
+    { "do": "shot", "name": "03-sau-zoom-kenh-nap-2003", "clip": { "x": 0, "y": 40, "width": 224, "height": 100, "scale": 4 } },
+
+    { "do": "eval", "js": "JSON.stringify(window.__tuongPhan())", "log": "tuong phan `--fault` (mong doi >= 4,5:1 tren CA panel-2 va panel-1)" },
+    { "do": "khangDinh", "js": "window.__tuongPhan().datAA", "log": "tuong phan `--fault` >= 4,5:1 tren `--panel-2` VA `--panel-1`", "thongDiep": "tuong phan `--fault` chua dat WCAG AA (4,5:1 cho chu nho) — day la ly do vong nay nang token" },
+    { "do": "eval", "js": "(() => { const e = document.querySelector('.lenh--huy') ?? document.querySelector('.lenh'); if (e === null) return 'khong thay .lenh nao'; const c = getComputedStyle(e); return JSON.stringify({ lop: e.className, fg: c.color, bg: c.backgroundColor, fs: c.fontSize, ff: c.fontFamily, tySo: Math.round(window.__K1.ty(c.color, c.backgroundColor) * 1000) / 1000 }); })()", "log": "`.lenh` THAT trong DOM: mau/nen/co chu/ty so" },
+
+    { "do": "radio", "label": "Thuật ngữ" },
+    { "do": "waitFor", "selector": ".gl__form", "timeout": 20000 },
+    { "do": "eval", "js": "JSON.stringify(window.__l1())", "log": "L1 @2003: top/height cua o nhap / o kiem / nut luu" },
+    { "do": "khangDinh", "js": "window.__l1().dat", "log": "L1: ba dieu khien cua hang GHI CHU cung `top` +-1 va cung `height` +-1", "thongDiep": "L1: ba dieu khien cua hang GHI CHU / DA DUYET / Luu thuat ngu KHONG thang nhau" },
+    { "do": "shot", "name": "04-sau-thuat-ngu-2003" },
+    { "do": "shot", "name": "05-sau-zoom-hang-ghi-chu-2003", "clip": { "x": 700, "y": 100, "width": 560, "height": 100, "scale": 3 } },
+
+    { "do": "khung", "width": 1280, "height": 800 },
+    { "do": "eval", "js": "JSON.stringify({ viewport: [innerWidth, innerHeight], tran: { work: window.__K1.OV('.shell__work'), channels: window.__K1.OV('.shell__channels'), napChon: window.__K1.OV('.nap__chon'), chNap: window.__K1.OV('.ch__nap') }, l1: window.__l1() })", "log": "L2 + L1 @1280" },
+    { "do": "khangDinh", "js": "window.__khongTran()", "log": "L2 @1280: KHONG cap nao co scrollWidth > clientWidth", "thongDiep": "L2 @1280: co mot cap bi tran ngang" },
+    { "do": "khangDinh", "js": "window.__l1().dat", "log": "L1 @1280: ba dieu khien van cung `top`/`height`", "thongDiep": "L1 @1280: hang GHI CHU lech truc o be rong 1280" },
+    { "do": "shot", "name": "06-sau-thuat-ngu-1280" }
+  ]
+}

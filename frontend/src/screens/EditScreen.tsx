@@ -60,6 +60,7 @@ import { formatTimecode } from "../lib/timecode.ts";
 import { visibleRange, withPinned } from "../lib/window.ts";
 import { IntakeFrame } from "../shell/IntakeFrame.tsx";
 import type { NapTep } from "../shell/IntakeFrame.tsx";
+import { KhungRong } from "../ui/TrangRong.tsx";
 
 /** Cao mot hang (spec UI §2.3: 32px mot dong, 44px hai dong — mac dinh hai dong). */
 export const ROW_H = 44;
@@ -367,8 +368,18 @@ export function EditScreen({
     return (
       <div className="ed">
         <div className="ed__rong-boc">
-          {/* SU THAT, khong phai loi hua: duong NAP CO THAT (xem `IntakeFrame`). */}
-          <p className="ed__rong">chưa có bản ghi để biên tập</p>
+          {/* SU THAT, khong phai loi hua: duong NAP CO THAT (xem `IntakeFrame`).
+              🔴 VONG THIET KE 1: cau cu — *"chưa có bản ghi để biên tập"* — O LAI NGUYEN VEN
+              (no la su that cua trang thai nay, va bai `EditScreen.test.tsx` + `App.test.tsx`
+              khang dinh chinh chuoi do). Cai duoc NOI THEM la ve MENH LENH: nguoi doc phai biet
+              LAM GI TIEP, chu khong chi biet dang o dau. Chuoi cu duoc noi o CUOI, khong bi cat,
+              nen moi phep khop chuoi con van dung. */}
+          <KhungRong
+            className="ed__rong"
+            testid="rong-bien-tap"
+            kicker="TRỐNG"
+            lenh="chưa có bản ghi để biên tập — kéo tệp vào khung dưới rồi bấm «nạp» để mở một bản ghi"
+          />
           <IntakeFrame napTep={onNapTep} />
         </div>
       </div>

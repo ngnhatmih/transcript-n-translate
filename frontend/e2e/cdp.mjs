@@ -266,9 +266,11 @@ export async function phim(driver, ten, { shift = false, ctrl = false, alt = fal
   return { key: hd.key, shiftKey, ctrlKey, altKey, coPhaKyTu: typeof hd.text === "string" };
 }
 
-/** Chụp ảnh vào `outDir/ten.png`. */
-export async function chup(driver, ten, outDir) {
-  const r = await driver.send("Page.captureScreenshot", { format: "png" });
+/** Chụp ảnh vào `outDir/ten.png`. `clip` (tuỳ chọn) = `{x,y,width,height,scale}` để ZOOM một vùng. */
+export async function chup(driver, ten, outDir, clip = null) {
+  const tham = { format: "png" };
+  if (clip !== null) tham.clip = { ...clip, scale: clip.scale ?? 1 };
+  const r = await driver.send("Page.captureScreenshot", tham);
   if (typeof r.result?.data !== "string") {
     throw new Error(`Page.captureScreenshot khong tra du lieu cho ${ten}`);
   }
@@ -304,6 +306,19 @@ export async function chayKeHoach(driver, plan, { outDir }) {
         const tai = await choTaiLieu(driver, { url: buoc.url });
         const trangThai = await caiDauDo(driver);
         ghi(buoc, { url: buoc.url, taiLieu: tai, dauDo: trangThai });
+        break;
+      }
+      case "khung": {
+        // Doi KHUNG NHIN giua hai buoc cua CUNG mot tai lieu: mot phep do "o >= 2000 px" va mot
+        // phep do "o 1280 px" phai chay tren CUNG mot DOM/DL, neu khong thi hai con so khong so
+        // duoc voi nhau. `plan.width/height` chi dat duoc MOT lan, truoc moi buoc.
+        // ⚠️ Doi khung nhin lam layout reflow ⇒ phai cho mot nhip TRUOC khi doc
+        // `getBoundingClientRect`/`scrollWidth`, neu khong doc ra so cua khung CU.
+        await driver.send("Emulation.setDeviceMetricsOverride", {
+          width: buoc.width, height: buoc.height, deviceScaleFactor: 1, mobile: false,
+        });
+        await sleep(buoc.sauMs ?? 400);
+        ghi(buoc, { width: buoc.width, height: buoc.height });
         break;
       }
       case "khangDinh": {
@@ -401,7 +416,7 @@ export async function chayKeHoach(driver, plan, { outDir }) {
         break;
       }
       case "shot": {
-        await chup(driver, buoc.name, outDir);
+        await chup(driver, buoc.name, outDir, buoc.clip ?? null);
         break;
       }
       case "cho": {

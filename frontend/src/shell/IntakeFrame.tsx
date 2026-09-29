@@ -238,6 +238,17 @@ export function IntakeFrame({ napTep }: { napTep: NapTep }) {
   const [chon, datChon] = useState<File[]>([]);
   const { ketQua, dangNap, boQua, nap } = useNapTep(napTep);
 
+  /**
+   * Bản TÓM TẮT cho dòng cạnh nút `chọn tệp` (`.nap__ten-tep`) — đúng chỗ mà widget của trình
+   * duyệt từng chiếm. Nó ĐƯỢC PHÉP bị ellipsize, nên nó KHÔNG được là nơi duy nhất chứa một sự
+   * thật: câu đầy đủ, không cắt được, nằm ở `.nap__chon-tam` ngay dưới (xem `L2` cuối `app.css`).
+   */
+  function tenTep(): string {
+    if (chon.length === 0) return "chưa chọn tệp";
+    if (chon.length === 1) return chon[0]?.name ?? "chưa chọn tệp";
+    return `${chon.length} tệp: ${chon.map((t) => t.name).join(" · ")}`;
+  }
+
   return (
     <div className="nap" data-testid="khung-nap">
       <div
@@ -258,24 +269,43 @@ export function IntakeFrame({ napTep }: { napTep: NapTep }) {
         <p className="nap__dinh-dang" data-testid="nap-dinh-dang">{DINH_DANG}</p>
       </div>
       <div className="nap__chon">
-        <label className="nap__nhan" htmlFor="nap-tep">chọn tệp</label>
-        {/* `multiple`: §12.2 đòi nạp 3 tệp CÙNG LÚC. KHÔNG `accept` (xem khối đầu tệp). */}
-        <input
-          id="nap-tep"
-          className="nap__o-tep"
-          data-testid="nap-o-tep"
-          type="file"
-          multiple
-          onChange={(suKien) => {
-            // ⚠️ COPY `files` RA MẢNG TRƯỚC, rồi mới xoá `value`: xoá `value` làm `FileList` RỖNG
-            // đi (`M3` của review).
-            const tep = [...(suKien.currentTarget.files ?? [])];
-            // ⚠️ RESET `value` (M3): `<input type=file>` chỉ phát `change` khi GIÁ TRỊ ĐỔI, nên
-            // chọn LẠI đúng tệp đó sẽ KHÔNG phát sự kiện nào — người dùng không thấy gì xảy ra.
-            suKien.currentTarget.value = "";
-            datChon(tep);
-          }}
-        />
+        {/* 🔴 `L2` (vòng thiết kế 1) — Ô CHỌN TỆP CỦA TRÌNH DUYỆT KHÔNG ĐƯỢC VẼ NỮA.
+            Xem khối `L2` ở cuối `app.css` để có PHÉP ĐO bác bỏ cách sửa mà brief §2 đề nghị: ở
+            2003/2560/1280 px thì `scrollWidth === clientWidth` ở MỌI cấp (không có tràn theo
+            nghĩa đó), còn cái tràn THẬT là chữ bên trong widget do trình duyệt vẽ — nó có bề rộng
+            NỘI TẠI cố định (đo được: 212 px ở đây, 192 px ở lối gọn) và `text-overflow` không với
+            tới nội dung do UA vẽ.
+            ⇒ `<input type="file" multiple>` VẪN Ở ĐÂY, THẬT, và KHÔNG đổi một hành vi nào
+            (`change`, `multiple`, không `accept`, reset `value` — tất cả như cũ); chỉ PHẦN VẼ của
+            nó bị che (`.nap__o-tep`), và điều khiển được vẽ bằng ngôn ngữ của app.
+            ⚠️ THỨ TỰ DOM KHÔNG ĐƯỢC ĐẢO: `input` TRƯỚC `label`, vì vòng tiêu điểm của ô thật được
+            vẽ lên chính nút bằng `.nap__o-tep:focus-visible + .nap__nut-tep`. */}
+        <span className="nap__chon-tep">
+          <input
+            id="nap-tep"
+            className="nap__o-tep"
+            data-testid="nap-o-tep"
+            type="file"
+            multiple
+            onChange={(suKien) => {
+              // ⚠️ COPY `files` RA MẢNG TRƯỚC, rồi mới xoá `value`: xoá `value` làm `FileList` RỖNG
+              // đi (`M3` của review).
+              const tep = [...(suKien.currentTarget.files ?? [])];
+              // ⚠️ RESET `value` (M3): `<input type=file>` chỉ phát `change` khi GIÁ TRỊ ĐỔI, nên
+              // chọn LẠI đúng tệp đó sẽ KHÔNG phát sự kiện nào — người dùng không thấy gì xảy ra.
+              suKien.currentTarget.value = "";
+              datChon(tep);
+            }}
+          />
+          <label className="nap__nut-tep" htmlFor="nap-tep">chọn tệp</label>
+          {/* Tên tệp ngay CẠNH nút — đúng chỗ mà widget của trình duyệt từng chiếm, nhưng dòng
+              này TỰ CẮT được (ellipsis) thay vì bị UA cắt trần, và nó KHÔNG có bề rộng nội tại
+              cố định. Đây chỉ là bản TÓM TẮT: câu đầy đủ (không cắt được) nằm ở `.nap__chon-tam`
+              ngay dưới, nên không có thông tin nào chỉ sống trong một dòng bị ellipsize. */}
+          <span className="nap__ten-tep" data-testid="nap-ten-tep" title={tenTep()}>
+            {tenTep()}
+          </span>
+        </span>
         <label className="nap__nhan" htmlFor="nap-tep-lang">ngôn ngữ</label>
         <ChonLang id="nap-tep-lang" lang={lang} onLang={datLang} className="nap__lang" />
         <button
@@ -296,7 +326,8 @@ export function IntakeFrame({ napTep }: { napTep: NapTep }) {
         </button>
       </div>
       {/* SỰ THẬT của lượt đang chuẩn bị: đã chọn tệp nào. Không có nó thì nút `nạp` vô hiệu mà
-          không nói vì sao. */}
+          không nói vì sao. ⚠️ Dòng này KHÔNG được cắt (`white-space` mặc định, xuống dòng được):
+          đây là câu đầy đủ, còn `.nap__ten-tep` ở trên chỉ là bản tóm tắt bị ellipsize. */}
       <p className="nap__chon-tam" data-testid="nap-da-chon">
         {chon.length === 0
           ? "chưa chọn tệp nào — kéo tệp vào khung hoặc bấm «chọn tệp»"
@@ -330,22 +361,30 @@ export function NhapGon({ napTep }: { napTep: NapTep }) {
 
   return (
     <div className="ch__nap" data-testid="ch-nap">
-      <label className="ch__nap-nhan" htmlFor="ch-nap-tep">nạp tệp</label>
-      {/* GỌN: chọn tệp là nạp NGAY (không nút trung gian) — đây là lối cho tệp thứ 2..N. */}
-      <input
-        id="ch-nap-tep"
-        className="ch__nap-o"
-        data-testid="ch-nap-o-tep"
-        type="file"
-        multiple
-        onChange={(suKien) => {
-          // Cùng `M3` như khung giữa: COPY ra mảng TRƯỚC, rồi XOÁ `value` để mọi lần chọn đều
-          // phát `change` (lối này KHÔNG có nút, nên một lượt `change` bị nuốt là KHÔNG có gì xảy ra).
-          const tep = [...(suKien.currentTarget.files ?? [])];
-          suKien.currentTarget.value = "";
-          void nap(tep, lang);
-        }}
-      />
+      {/* 🔴 `L2` (vòng thiết kế 1) — cùng luật với khung §4.2: ô chọn tệp của TRÌNH DUYỆT không
+          được vẽ nữa (bề rộng nội tại 192 px trong một cột 213 px ⇒ chữ bên trong bị UA cắt trần
+          mà `scrollWidth` không thấy — xem khối `L2` ở cuối `app.css`).
+          ⚠️ Nhãn `nạp tệp` KHÔNG còn là nhãn đứng TRƯỚC ô; nó là chính NÚT, đứng SAU ô trong DOM
+          (`input` → `label`) để `.ch__nap-o:focus-visible + .ch__nap-nut` vẽ được vòng tiêu điểm
+          của ô thật lên nút. GỌN: chọn tệp là nạp NGAY (không nút trung gian) — đây là lối cho
+          tệp thứ 2..N. */}
+      <span className="ch__nap-tep">
+        <input
+          id="ch-nap-tep"
+          className="ch__nap-o"
+          data-testid="ch-nap-o-tep"
+          type="file"
+          multiple
+          onChange={(suKien) => {
+            // Cùng `M3` như khung giữa: COPY ra mảng TRƯỚC, rồi XOÁ `value` để mọi lần chọn đều
+            // phát `change` (lối này KHÔNG có nút, nên một lượt `change` bị nuốt là KHÔNG có gì xảy ra).
+            const tep = [...(suKien.currentTarget.files ?? [])];
+            suKien.currentTarget.value = "";
+            void nap(tep, lang);
+          }}
+        />
+        <label className="ch__nap-nut" htmlFor="ch-nap-tep">nạp tệp</label>
+      </span>
       {/* Review W2 `M4`: lối gọn TỪNG thiếu nhãn cho bộ chọn ngôn ngữ (khung giữa có) — hai lối
           vào cùng một việc mà một lối không đọc được là sót, không phải chủ ý. */}
       <label className="ch__nap-nhan" htmlFor="ch-nap-lang">ngôn ngữ</label>
