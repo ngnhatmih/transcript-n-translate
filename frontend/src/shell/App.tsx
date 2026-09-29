@@ -346,6 +346,27 @@ export function App() {
   const banGhiVuaGhi = useRef<{ id: number; version: number; segments: Segment[] } | null>(null);
 
   /**
+   * ẢNH CHỤP **MỚI NHẤT** của bản ghi đang mở — cập nhật ở MỖI lần render.
+   *
+   * 🔴 VÌ SAO CẦN (`I-1` của re-review vòng sửa 1 — ĐO ĐƯỢC, KHÔNG phải flake): listener `keydown`
+   * sống trong một effect, nên giữa lượt React commit DOM của bản ghi MỚI và lượt effect chạy lại,
+   * listener CŨ vẫn còn gắn. `nudgeDoan` của closure cũ đọc `transcript.data` của CHÍNH lần render
+   * ấy ⇒ lần ghi tính từ bản CŨ và **XOÁ ÂM THẦM** thay đổi của người khác (họ C1: `version` vẫn
+   * tăng, không một lỗi nào). `banGhiVuaGhi` KHÔNG cứu được ca này: nó chỉ biết bản do CHÍNH đường
+   * ghi này vừa gửi, còn bản mới ở đây đến từ một lượt ĐỌC LẠI. Trước vòng sửa, ca này bị khai là
+   * "flake 1/33"; nó **falsify được** bằng mutant `D1-DEPS-NUDGE-STALE` (bỏ `transcript.data` khỏi
+   * deps của listener) — ERRATA #45 mục 1 áp cho cả một phép đo, không chỉ cho mệnh đề.
+   *
+   * ⚠️ Chỉ **NỀN** của lệnh ghi được đọc mới nhất. **ĐÍCH** của lệnh (id bản ghi) vẫn chốt LÚC GỬI
+   * — bất biến của F7 (`D2 DUYET: đích của lệnh chốt LÚC GỬI`), và bản vá này không được phá nó.
+   *
+   * ⚠️ Phép gán nằm trong THÂN component, KHÔNG trong effect: nó phải xảy ra ngay ở lượt render
+   * đã có dữ liệu mới, TRƯỚC lượt flush passive effect — đúng cái cửa sổ đang hở.
+   */
+  const banGhiMoiNhat = useRef<Transcript | null>(transcript.data);
+  banGhiMoiNhat.current = transcript.data;
+
+  /**
    * MỘT chỗ GHI duy nhất cho cả hai thao tác của D1 (`luu` và `nudge`).
    *
    * `sua` là hàm THUẦN áp lên ĐÚNG đoạn cần sửa; mọi đoạn khác đi lên NGUYÊN VẸN.
@@ -353,6 +374,10 @@ export function App() {
    *
    * ⚠️ `hienTai.segments.length === 0` / không tìm thấy đoạn ⇒ **KHÔNG gửi gì**: backend từ chối
    * mảng rỗng (`min_length=1`), và một PATCH rỗng là một lỗi 422 vô nghĩa với người dùng.
+   *
+   * ⚠️ **NỀN đọc từ `banGhiMoiNhat.current`** (ảnh chụp mới nhất), KHÔNG từ closure của lần render
+   * đã gọi hàm này: xem docblock của `banGhiMoiNhat` — đó là vế chặn ghi-đè-âm-thầm khi listener
+   * chưa được gắn lại. `banGhiId` (ĐÍCH) vẫn là tham số, tức vẫn chốt LÚC GỬI.
    */
   async function ghiDoan(
     banGhiId: number,
@@ -361,11 +386,16 @@ export function App() {
   ): Promise<boolean> {
     const hienTai = transcript.data;
     if (hienTai === null || hienTai.id !== banGhiId) return false;
+    // NỀN = ảnh chụp MỚI NHẤT cùng id. `hienTai` chỉ là đường lùi khi ảnh chụp mới nhất thuộc một
+    // BẢN GHI KHÁC (người dùng vừa đổi kênh/bản ghi) — lấy chữ của bản ghi khác làm nền là một
+    // cách ghi-đè khác, không phải một cách chữa.
+    const moiNhat = banGhiMoiNhat.current;
+    const nenMayChu = moiNhat !== null && moiNhat.id === banGhiId ? moiNhat : hienTai;
     const vuaGhi = banGhiVuaGhi.current;
     const nen =
-      vuaGhi !== null && vuaGhi.id === banGhiId && vuaGhi.version > hienTai.version
+      vuaGhi !== null && vuaGhi.id === banGhiId && vuaGhi.version > nenMayChu.version
         ? vuaGhi.segments
-        : hienTai.segments;
+        : nenMayChu.segments;
     if (!nen.some((seg) => seg.i === i)) return false;
     const segments = nen.map((seg) => (seg.i === i ? sua(seg) : seg));
     datDangLuuDoan(true);
@@ -471,6 +501,14 @@ export function App() {
    * có kịp thấy `attempts` mới hay không.
    *
    * Trả về CHÍNH `cu` khi không có gì để dọn ⇒ React bỏ qua lượt render đó (không vòng lặp).
+   *
+   * ⚠️ **`daYeuCauHuy` CŨNG nằm trong deps** (`I-2` của re-review vòng sửa 1 — đo được): phép dọn
+   * chỉ theo `[jobs]` là **edge-triggered theo `jobs`**, nên một mục được GHI *sau khi* job đã rời
+   * trạng thái lúc gửi thì **không lượt dọn nào chạy nữa** — mục nằm lại vĩnh viễn, và khi job quay
+   * lại ĐÚNG trạng thái đó (một lượt chạy mới) thì câu "đã yêu cầu huỷ" của lượt CŨ **hiện lại**.
+   * Đưa `daYeuCauHuy` vào deps làm phép dọn chạy cả khi **bản thân bảng mục** đổi. Hội tụ: lượt
+   * chạy lại của effect thấy mọi mục còn lại đều hợp lệ (đó là điều kiện để chúng sống sót) nên nó
+   * trả CHÍNH `cu` và React bỏ qua lượt render ⇒ không vòng lặp.
    */
   useEffect(() => {
     datDaYeuCauHuy((cu) => {
@@ -480,7 +518,7 @@ export function App() {
       }
       return conHieuLuc.size === cu.size ? cu : conHieuLuc;
     });
-  }, [jobs]);
+  }, [jobs, daYeuCauHuy]);
   /** Câu lỗi **NGUYÊN VĂN** của lệnh gần nhất, theo TỪNG job (khoá = id job). */
   const [loiLenh, datLoiLenh] = useState<ReadonlyMap<number, string>>(() => new Map());
 

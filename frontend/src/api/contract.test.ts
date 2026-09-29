@@ -99,30 +99,70 @@ async function waitForBackend(timeoutMs: number): Promise<boolean> {
 }
 
 /**
- * Backend ở 8620 có phải đúng thứ khối này GIẢ ĐỊNH không: `/api/status` trả lời **và DB RỖNG**.
+ * KẾT QUẢ phép hỏi "DB của backend đang trả lời ở 8620 có rỗng không" — BA ca, không phải boolean.
  *
- * 🔴 VÌ SAO PHẢI HỎI THÊM CÂU THỨ HAI (`I4` của review D2, đo được): phép dò cũ chỉ hỏi
- * `/api/status` — một route **không đụng tới DB** — nên một server LẠ đã gieo dữ liệu ở 8620 được
- * nhận là "backend dùng được", hai guard `EMPTY_DB_MSG` ở dưới thành **XANH**, và toàn bộ `fail`
- * DỊCH ĐI HAI. Đo được CẢ HAI trạng thái trên CÙNG một cây byte-exact: `pass 254 / fail 0 /
- * EXIT=0` khi 8620 bị chiếm, `pass 252 / fail 2 / EXIT=1` khi 8620 trống. Tức `fail` KHÔNG phải
- * một thuộc tính của commit mà của MÔI TRƯỜNG, và bất kỳ ai áp `fail − 2` sẽ ra số ÂM hoặc thiếu.
+ * 🔴 VÌ SAO PHẢI HỎI CÂU NÀY (`I4` của review D2, đo được): phép dò cũ chỉ hỏi `/api/status` — một
+ * route **không đụng tới DB** — nên một server LẠ đã gieo dữ liệu ở 8620 được nhận là "backend dùng
+ * được", hai guard `EMPTY_DB_MSG` ở dưới thành **XANH**, và toàn bộ `fail` DỊCH ĐI HAI. Đo được CẢ
+ * HAI trạng thái trên CÙNG một cây byte-exact: `pass 254 / fail 0 / EXIT=0` khi 8620 bị chiếm,
+ * `pass 252 / fail 2 / EXIT=1` khi 8620 trống. Tức `fail` KHÔNG phải một thuộc tính của commit mà
+ * của MÔI TRƯỜNG, và bất kỳ ai áp `fail − 2` sẽ ra số ÂM hoặc thiếu.
  *
- * Hệ quả có chủ ý: gặp một server gieo dữ liệu ở 8620 thì khối này **ĐỎ TO** (hook `before` ném)
- * thay vì im lặng đổi nền — một phép đo sai mà không ai thấy là thứ tệ hơn một bài đỏ.
+ * 🔴 VÌ SAO TÁCH BA CA (`M-3` của re-review vòng sửa 1): hàm cũ gộp "DB KHÔNG rỗng" với "KHÔNG đọc
+ * được danh sách" (fetch ném / timeout / trả object ⇒ `false`) rồi hook `before` khẳng định bằng
+ * CHỮ *"DB của nó KHÔNG rỗng"* — một câu có thể SAI theo nghĩa đen (DB rỗng nhưng route danh sách
+ * hỏng). Hai nguyên nhân khác nhau phải có hai câu khác nhau, cùng chuẩn "câu chữ trung thực" mà
+ * cả task này theo đuổi.
  */
-async function backendHasEmptyDb(): Promise<boolean> {
+type DbCuaBackend =
+  | { kind: "rong" }
+  | { kind: "co-hang"; soHang: number }
+  | { kind: "khong-doc-duoc"; lyDo: string };
+
+async function docDbCuaBackend(): Promise<DbCuaBackend> {
   try {
     const response = await fetch(`${API}/transcripts`, {
       signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
     });
-    if (!response.ok) return false;
+    if (!response.ok) {
+      return { kind: "khong-doc-duoc", lyDo: `GET /api/transcripts -> HTTP ${response.status}` };
+    }
     const rows: unknown = await response.json();
-    return Array.isArray(rows) && rows.length === 0;
-  } catch {
-    // Không đọc được danh sách ⇒ không phải cái mình giả định.
-    return false;
+    if (!Array.isArray(rows)) {
+      return { kind: "khong-doc-duoc", lyDo: `GET /api/transcripts khong tra mot mang (${typeof rows})` };
+    }
+    return rows.length === 0 ? { kind: "rong" } : { kind: "co-hang", soHang: rows.length };
+  } catch (loi: unknown) {
+    return { kind: "khong-doc-duoc", lyDo: loi instanceof Error ? loi.message : String(loi) };
   }
+}
+
+/**
+ * KHẲNG ĐỊNH dùng chung cho **CẢ HAI** nhánh dò backend: server LẠ ở 8620 và server do CHÍNH tệp
+ * này spawn.
+ *
+ * 🔴 VÌ SAO PHẢI GỌI Ở **CẢ HAI** (`I-3` của re-review vòng sửa 1 — đo được): phép dò cũ chỉ hỏi
+ * câu này ở nhánh "server lạ". Nhánh **spawn** — nhánh BÌNH THƯỜNG khi 8620 trống — không khẳng
+ * định gì về DB, mà `spawn` KHÔNG truyền `env` nên tiến trình con **thừa hưởng** `PHUDE_DATA` /
+ * `PHUDE_DB` của người chạy. Đo được: gieo một DB chỉ bằng hai biến môi trường đó ⇒
+ * `tests 11 / pass 11 / fail 0 / cancelled 0 / **EXIT=0**`, **0 tên đỏ** — đúng cái "nền dịch đi hai
+ * mà không ai thấy" của `I4`, chỉ khác đường vào. Và đường vào này **đã được lên kế hoạch**: chú
+ * thích đầu tệp này nói Task 12 sẽ gieo dữ liệu thật vào `data/app.db`.
+ *
+ * Hỏi **chính tiến trình vừa lên** (qua `/api/transcripts` của nó) chứ không tự suy đường dẫn DB
+ * từ `process.env`: cái cần kiểm là DB mà backend **THẬT SỰ** dùng, không phải cái mình đoán.
+ */
+async function khangDinhDbRong(ai: string, cachXuLy: string): Promise<void> {
+  const db = await docDbCuaBackend();
+  if (db.kind === "rong") return;
+  const suThat = db.kind === "co-hang"
+    ? `DB của nó CÓ ${db.soHang} bản ghi ⇒ KHÔNG rỗng`
+    : `KHONG đọc được danh sách bản ghi (${db.lyDo}) ⇒ KHÔNG xác nhận được là DB rỗng`;
+  assert.fail(
+    `${ai} đang trả lời nhưng ${suThat}. Khối này chỉ đo được trên DB rỗng (hai guard `
+    + "`EMPTY_DB_MSG`), nên một DB đã gieo dữ liệu sẽ làm `fail` DỊCH ĐI HAI mà không ai thấy "
+    + `(I4 của review D2 — đã đo được thật: \`pass 254 / fail 0\`). ${cachXuLy}`,
+  );
 }
 
 /** Tắt ĐÚNG tiến trình mình spawn. Không có gì của mình ⇒ no-op. */
@@ -169,12 +209,9 @@ describe("hop dong API that (backend 8620)", () => {
     // backend mà khối này giả định (`I4` của review D2): DB RỖNG. Một server đã gieo dữ liệu ở
     // 8620 làm hai guard `EMPTY_DB_MSG` xanh và `fail` dịch đi hai, KHÔNG một dấu hiệu nào.
     if (await backendIsUp()) {
-      assert.ok(
-        await backendHasEmptyDb(),
-        `8620 đang trả lời nhưng DB của nó KHÔNG rỗng. Khối này chỉ đo được trên DB rỗng (hai `
-        + "guard `EMPTY_DB_MSG`), nên một server lạ đã gieo dữ liệu sẽ làm `fail` DỊCH ĐI HAI mà "
-        + "không ai thấy (I4 của review D2 — đã đo được thật: `pass 254 / fail 0`). Hãy để 8620 "
-        + "TRỐNG trước khi chạy `npm test`.",
+      await khangDinhDbRong(
+        `${ORIGIN} (backend của NGƯỜI KHÁC)`,
+        "Hãy để cổng đó TRỐNG trước khi chạy `npm test`.",
       );
       return;
     }
@@ -196,7 +233,19 @@ describe("hop dong API that (backend 8620)", () => {
     child.unref();
     spawnedPid = typeof child.pid === "number" ? child.pid : null;
 
-    if (await waitForBackend(START_TIMEOUT_MS)) return;
+    if (await waitForBackend(START_TIMEOUT_MS)) {
+      // 🔴 NHÁNH **TỰ SPAWN** CŨNG PHẢI HỎI CÂU THỨ HAI (`I-3` của re-review vòng sửa 1 — đo được).
+      // `spawn` ở trên KHÔNG truyền `env`, nên tiến trình con THỪA HƯỞNG `PHUDE_DATA`/`PHUDE_DB`:
+      // gieo DB chỉ bằng hai biến đó ⇒ `tests 11 / pass 11 / fail 0 / cancelled 0 / EXIT=0` và
+      // **0 tên đỏ** — nền dịch đi hai mà không ai thấy. Hỏi CHÍNH tiến trình vừa lên, nên câu trả
+      // lời là sự thật của cái DB nó đang dùng (không phải một đường dẫn mình đoán từ env).
+      await khangDinhDbRong(
+        `${ORIGIN} (backend do CHÍNH tệp này spawn)`,
+        "`spawn` ở trên KHÔNG truyền `env`, nên tiến trình con THỪA HƯỞNG `PHUDE_DATA`/`PHUDE_DB`: "
+        + "hãy để hai biến đó trỏ vào một DB rỗng (hoặc bỏ chúng đi) trước khi chạy `npm test`.",
+      );
+      return;
+    }
 
     const reason = spawnError === null ? "khong ro loi" : spawnError;
     stopSpawnedBackend();

@@ -562,6 +562,15 @@ const dem = {
   retryTre: 0,
   retrySauPatch: -1,
   retryXong: 0,
+  /**
+   * MA HTTP ma fixture retry DA TRA cho lan goi gan nhat.
+   *
+   * ⚠️ VI SAO CAN (`M-1` cua re-review vong sua 1): bang mutation cua vong truoc ke
+   * `F3-RETRY-409-FAILED` (bo guard DIEU KIEN cua fixture) la DO — DO LAI thi **0 do**, vi bai
+   * test tu dat `job21.state = "done"` nen no khong bao gio di vao nhanh guard. Con so NAY la
+   * tin hieu DUONG de bai moi ghim duoc chinh guard do: trang thai CHAY LAI DUOC ⇒ 200.
+   */
+  retryTrangThai: 0,
   /** Bat nhanh 409 cua retry. ⚠️ CHI co hieu luc khi trang thai THAT cua job KHONG chay lai duoc
       (`failed`/`interrupted` la `RETRYABLE_STATES` ⇒ backend KHONG BAO GIO tra 409 cho chung). */
   retry409: false,
@@ -591,6 +600,7 @@ function xoaDemLenh(): void {
   dem.retryTre = 0;
   dem.retrySauPatch = -1;
   dem.retryXong = 0;
+  dem.retryTrangThai = 0;
   dem.retry409 = false;
 }
 
@@ -777,6 +787,7 @@ const server: Server = createServer((req, res) => {
     const traLenh = (): void => {
       const vitri = JOBS.findIndex((j) => j.id === id);
       if (vitri < 0) {
+        if (chayLai) dem.retryTrangThai = 404;
         res.writeHead(404, { "content-type": "application/json" });
         res.end(JSON.stringify({ detail: `job ${id} không tồn tại` }));
         return;
@@ -790,6 +801,7 @@ const server: Server = createServer((req, res) => {
         // Fixture CU ban 409 cho CHINH mot job `failed` — ca BAT KHA (backend khong bao gio lam the),
         // va ban mot cau khong ton tai trong `backend/`.
         if (dem.retry409 && job.state !== "failed" && job.state !== "interrupted") {
+          dem.retryTrangThai = 409;
           res.writeHead(409, { "content-type": "application/json" });
           res.end(JSON.stringify({
             detail: "chỉ chạy lại được job ở trạng thái ['failed', 'interrupted']",
@@ -799,6 +811,7 @@ const server: Server = createServer((req, res) => {
         }
         // Chay lai ⇒ job ve `queued` (backend xep lai hang doi). THAY the phan tu, khong sua object goc.
         JOBS[vitri] = { ...job, state: "queued", progress: 0, cancel_requested: false };
+        dem.retryTrangThai = 200;
         dem.retryXong += 1;
         res.writeHead(200, { "content-type": "application/json" });
         res.end(JSON.stringify(JOBS[vitri]));
@@ -3946,6 +3959,68 @@ describe("App: KENH THAT + HANG DOI THAT tu server node:http trong tien trinh", 
     unmount();
   });
 
+  it("D2 FIXTURE RETRY: guard 409 CHỈ cho trạng thái KHÔNG chạy lại được (trạng thái ca + câu chữ, hai vế)", async () => {
+    // 🔴 VÌ SAO BÀI NÀY TỒN TẠI (`M-1` của re-review vòng sửa 1): bỏ RIÊNG guard điều kiện của
+    // fixture (`dem.retry409 && job.state !== "failed" && job.state !== "interrupted"`) cho **0
+    // bài đỏ** — vì bài `D2 CHAY LAI` tự đặt `job21.state = "done"` nên nó KHÔNG BAO GIỜ đi vào
+    // nhánh guard. Hàng `F3-RETRY-409-FAILED` trong bảng mutation của vòng trước vì thế chỉ đỏ
+    // được nhờ vế CÂU CHỮ. Bài này ghim TÁCH hai vế, và vế (1) là vế chưa từng có gì làm nó sai
+    // được: trạng thái THẬT chạy lại được ⇒ fixture phải đi đường 200.
+    themJobLoi(21, "asr", "failed", 2);
+    const { container, unmount } = render(taoPhanTu(App));
+    await choPhanTu(container, '[data-testid="lai-job-21"]', () => true, "job `failed` chưa có nút chạy lại");
+
+    // (1) VẾ "TRẠNG THÁI CA": `retry409` BẬT, nhưng trạng thái THẬT của job NẰM TRONG
+    //     `RETRYABLE_STATES` (`failed`) ⇒ backend thật KHÔNG BAO GIỜ trả 409 cho nó. Tín hiệu
+    //     DƯƠNG là MÃ HTTP fixture đã trả (200), không phải sự VẮNG MẶT của một câu lỗi.
+    dem.retry409 = true;
+    assert.equal(
+      JOBS.find((j) => j.id === 21)?.state,
+      "failed",
+      "fixture: job 21 phải ĐANG ở trạng thái CHẠY LẠI ĐƯỢC — nếu không thì vế này đo sai ca",
+    );
+    fireEvent.click(phanTu(container, '[data-testid="lai-job-21"]'));
+    await waitFor(
+      () => {
+        assert.equal(dem.retryXong, 1, "lời gọi chạy lại chưa trả về");
+      },
+      { timeout: 5000, interval: 20 },
+    );
+    assert.equal(
+      dem.retryTrangThai,
+      200,
+      "cờ `retry409` KHÔNG được đè lên một trạng thái CHẠY LẠI ĐƯỢC: fixture phải trả 200 "
+      + "(`RETRYABLE_STATES` = failed/interrupted là bất biến của backend thật)",
+    );
+    assert.equal(
+      container.querySelectorAll('[data-testid="loi-lenh-21"]').length,
+      0,
+      "chạy lại được ⇒ giao diện KHÔNG được hiện câu 409 (chưa có lỗi nào để nói)",
+    );
+
+    // (2) VẾ "CÂU CHỮ" + VẾ "TRẠNG THÁI CA" của nhánh 409: trạng thái THẬT không chạy lại được
+    //     (`done`) trong khi client còn thấy `failed` (trạng thái client CŨ) ⇒ ĐÚNG 409, ĐÚNG câu
+    //     NGUYÊN VĂN của `routes_jobs.retry_job`.
+    const job21 = JOBS.find((j) => j.id === 21);
+    assert.ok(job21 !== undefined, "fixture: job 21 phải có trong ảnh chụp /api/jobs");
+    job21.state = "done";
+    fireEvent.click(phanTu(container, '[data-testid="lai-job-21"]'));
+    assert.equal(
+      await choPhanTu(
+        container,
+        '[data-testid="loi-lenh-21"]',
+        (t) => t.length > 0,
+        "không thấy câu lỗi chạy lại",
+      ),
+      "409: chỉ chạy lại được job ở trạng thái ['failed', 'interrupted']",
+      "409 phải hiện NGUYÊN VĂN câu của backend (`routes_jobs.retry_job`)",
+    );
+    assert.equal(dem.retryTrangThai, 409, "trạng thái THẬT không chạy lại được ⇒ fixture phải trả 409");
+
+    assert.deepEqual(tiengOn, [], "ghim guard cua fixture retry khong duoc sinh tieng on console");
+    unmount();
+  });
+
   it("D2 CHAY LAI CHỐNG TRÙNG LẶP: bấm hai lần KHÔNG chờ ⇒ ĐÚNG MỘT request ở PHÍA MÁY CHU", async () => {
     themJobLoi(21, "asr", "failed", 2);
     dem.retryTre = 250;
@@ -4113,6 +4188,90 @@ describe("App: KENH THAT + HANG DOI THAT tu server node:http trong tien trinh", 
     );
 
     assert.deepEqual(tiengOn, [], "huy roi chay lai khong duoc sinh tieng on console");
+    unmount();
+  });
+
+  it("D2 HUY RỒI CHẠY LẠI (MỤC GHI SAU KHI JOB ĐÃ RỜI): lời hứa 'đã yêu cầu huỷ' không được sống sót", async () => {
+    // 🔴 VÌ SAO BÀI NÀY TỒN TẠI (`I-2` của re-review vòng sửa 1): bài ngay trên chỉ chạy trình tự
+    // nơi mục `daYeuCauHuy` được GHI khi job VẪN ở trạng thái lúc gửi — và phép dọn cũ là
+    // EDGE-TRIGGERED theo `[jobs]`, nên nó chỉ loại mục khi `jobs` đổi. Nếu mục được ghi SAU khi
+    // job đã rời trạng thái đó thì KHÔNG lượt dọn nào chạy nữa: mục nằm lại, và khi job quay lại
+    // ĐÚNG trạng thái lúc gửi thì câu SAI hiện lại. Trình tự dưới đây là trình tự của re-review
+    // (`F1-INSERT-AFTER-LEAVE`: lệnh huỷ trả về SAU khi `failed` đã tới), nay là bài ghim thường trực.
+    dem.cancelTre = 400;
+    const { container, unmount } = render(taoPhanTu(App));
+    await choPhanTu(container, '[data-testid="huy-job-7"]', () => true, "job `running` chưa có nút huỷ");
+
+    fireEvent.click(phanTu(container, '[data-testid="huy-job-7"]'));
+    assert.equal(dem.cancelXong, 0, "phép đo chỉ có nghĩa khi lệnh huỷ CÒN BAY (mục chưa được ghi)");
+
+    // (1) worker NÉM LỖI ⇒ `FAILED` tới TRƯỚC khi lệnh huỷ trả về (`worker.py` bỏ qua cờ huỷ ở
+    //     nhánh `except`). Đây là trạng thái CÓ THẬT, không phải một giả định của bài test.
+    //     ⚠️ ĐIỀU KIỆN TIÊN QUYẾT: kênh SSE đã MỞ — đo ở PHÍA MÁY CHỦ (`dem.stream`); phát một
+    //     sự kiện lên một kênh chưa mở là một sự kiện MẤT, và bài test sẽ đỏ vì một lý do khác.
+    await waitFor(
+      () => {
+        assert.ok(dem.stream >= 1, `chưa mở /api/jobs/stream; đo được ${dem.stream}`);
+      },
+      { timeout: 5000, interval: 20 },
+    );
+    await waitFor(
+      () => {
+        assert.equal(
+          dem.cancelXong,
+          0,
+          "lệnh huỷ đã trả về TRƯỚC khi `failed` tới ⇒ bài này mất đúng thứ tự nó cần đo",
+        );
+        if (container.querySelector('[data-testid="lai-job-7"]') === null) {
+          emit(sse({
+            id: 7, state: "failed", progress: 0.4, phase: "asr:faster-whisper-large",
+            error: "model lỗi", log_tail: "",
+          }));
+        }
+        assert.ok(
+          container.querySelector('[data-testid="lai-job-7"]') !== null,
+          "job `failed` chưa có nút chạy lại",
+        );
+      },
+      { timeout: 2000, interval: 20 },
+    );
+
+    // (2) MỤC ĐƯỢC GHI **SAU** KHI JOB ĐÃ RỜI trạng thái lúc gửi. Tín hiệu DƯƠNG rằng client đã
+    //     xử lý xong lệnh huỷ: lệnh `chạy lại` bị guard `dangLenh` giữ trong suốt lúc huỷ CÒN BAY,
+    //     nên nó chỉ tới được máy chủ SAU khi `try/finally` của lệnh huỷ chạy — đúng lượt ghi đã
+    //     đặt mục này. Vòng `waitFor` bấm lại cho tới khi request thật sự đi ra.
+    await waitFor(
+      () => {
+        if (dem.retry === 0) fireEvent.click(phanTu(container, '[data-testid="lai-job-7"]'));
+        assert.equal(dem.cancel, 1, "lệnh huỷ chưa tới máy chủ ⇒ mục `daYeuCauHuy` chưa được ghi");
+        assert.equal(dem.retry, 1, "lệnh chạy lại chưa tới được máy chủ (guard `dangLenh` vẫn giữ?)");
+      },
+      { timeout: 5000, interval: 20 },
+    );
+    assert.equal(
+      container.querySelectorAll('[data-testid="huy-tin-7"]').length,
+      0,
+      "job đang ở `failed` ⇒ KHÔNG được nói 'đã yêu cầu huỷ' (đúng ngay lúc này)",
+    );
+
+    // (3) LƯỢT CHẠY MỚI quay lại ĐÚNG trạng thái LÚC GỬI: mục CŨ không được khiến câu sai hiện lại.
+    emit(sse({
+      id: 7, state: "running", progress: 0, phase: "asr:faster-whisper-large",
+      error: null, log_tail: "",
+    }));
+    await choPhuHop(
+      container,
+      '[data-testid="job-7"]',
+      (el) => (el.textContent ?? "").includes("đang chạy"),
+      "sự kiện SSE không tới được dòng job",
+    );
+    assert.equal(
+      container.querySelectorAll('[data-testid="huy-tin-7"]').length,
+      0,
+      "LƯỢT CHẠY MỚI ở ĐÚNG trạng thái lúc gửi ⇒ giao diện KHÔNG được nói 'đã yêu cầu huỷ' (chưa ai yêu cầu lượt này)",
+    );
+
+    assert.deepEqual(tiengOn, [], "muc ghi sau khi job da roi khong duoc sinh tieng on console");
     unmount();
   });
 
@@ -4393,6 +4552,87 @@ describe("App: KENH THAT + HANG DOI THAT tu server node:http trong tien trinh", 
     assert.ok(Date.now() - truoc >= 0);
 
     assert.deepEqual(tiengOn, [], "nen moi hon khong duoc sinh tieng on console");
+    unmount();
+  });
+
+  it("D1 NỀN MỚI HƠN (CỬA SỔ CHƯA GẮN LẠI): phím thứ hai rơi ĐÚNG lúc DOM đã mới mà effect chưa chạy lại ⇒ vẫn phải gửi nền MỚI", async () => {
+    // 🔴 VÌ SAO BÀI NÀY TỒN TẠI (`I-1` của re-review vòng sửa 1): bài ngay trên chờ bằng `waitFor`
+    // (macrotask) nên nó chỉ đỏ khi lượt flush passive effect của React tới MUỘN hơn vòng poll —
+    // đo được 1/33 lượt. Trong cửa sổ đó listener CŨ còn gắn, `nudgeDoan` đọc `transcript.data`
+    // của closure CŨ ⇒ gửi bản CŨ và XOÁ ÂM THẦM thay đổi của người khác (họ C1). Đây KHÔNG phải
+    // flake: mutant `D1-DEPS-NUDGE-STALE` cho ĐỎ đúng bài ngay trên.
+    // Bài này ĐIỀU KHIỂN THỨ TỰ bằng `MutationObserver`: callback của nó là MICROTASK, chạy ngay
+    // sau lượt commit DOM của React và TRƯỚC lượt flush passive effect ⇒ cửa sổ trở thành TẤT ĐỊNH.
+    // ⚠️ Bài ghim chỉ đọc HÀNH VI (bàn phím ở `window` + body PATCH ở máy chủ + chữ trong DOM),
+    // KHÔNG đọc cấu trúc của listener ⇒ Task 11 đổi nó thành `useShortcuts` vẫn giữ nguyên giá trị.
+    const { container, unmount } = render(taoPhanTu(App));
+    await toiBienTapBonDoan(container);
+    const goc = TRANSCRIPT_CHI_TIET_GOC[3].segments;
+    await moOSua(container, 1);
+
+    // Người ghi KHÁC hạ cánh ngay sau phản hồi PATCH: máy chủ lên `version` và đổi chữ của đoạn 0.
+    dem.nguoiGhiKhac = true;
+    // (2) ĐIỀU KHIỂN THỨ TỰ bằng `MutationObserver`: callback của nó là MICROTASK, chạy ngay sau lượt
+    //     commit DOM của React (lượt đọc lại đã trả bản `version` mới) và TRƯỚC lượt flush passive
+    //     effect — đúng cái cửa sổ mà `waitFor` chỉ bắt được 1/33 lượt. Phím thứ hai được bấm NGAY
+    //     TRONG callback đó.
+    //     ⚠️ `window.MutationObserver` chứ KHÔNG phải global trần: `test/dom.ts` chỉ cài một DANH
+    //     SÁCH global cố định (không có `MutationObserver`) — đo được bằng
+    //     `ReferenceError: MutationObserver is not defined`.
+    const daBamLanHai = { value: false };
+    const theoDoi = new window.MutationObserver(() => {
+      if (daBamLanHai.value) return;
+      const dong = container.querySelector('[data-i="0"]');
+      if (dong === null || !(dong.textContent ?? "").includes("người khác sửa")) return;
+      daBamLanHai.value = true;
+      fireEvent.keyDown(document.body, { key: "[" }); // lần ghi 2: start 2,0 → 1,9
+    });
+    try {
+      theoDoi.observe(container, { subtree: true, childList: true, characterData: true });
+      fireEvent.keyDown(document.body, { key: "]" }); // lần ghi 1: end 4,0 → 4,1
+      await waitFor(
+        () => {
+          assert.equal(dem.patchBodies.length, 2, "phím thứ hai không tới được đường ghi");
+        },
+        { timeout: 5000, interval: 20 },
+      );
+      assert.ok(
+        daBamLanHai.value,
+        "phép đo chỉ có nghĩa khi phím thứ hai được bấm TỪ TRONG cửa sổ DOM-đã-mới",
+      );
+      const b2 = JSON.parse(dem.patchBodies[1]) as { segments: Segment[] };
+      assert.equal(
+        b2.segments[0].text,
+        "bản kênh hai (người khác sửa)",
+        "phím thứ hai rơi trong cửa sổ effect chưa gắn lại ⇒ nền vẫn phải là ảnh chụp "
+        + "MỚI NHẤT của máy chủ; gửi bản CŨ ở đây là XOÁ ÂM THẦM thay đổi của người khác",
+      );
+      assert.ok(
+        Math.abs(b2.segments[1].start - (goc[1].start - 0.1)) < 1e-9,
+        `lần ghi sau vẫn phải mang thay đổi của chính nó; đo được ${b2.segments[1].start}`,
+      );
+      assert.ok(Math.abs(b2.segments[1].end - (goc[1].end + 0.1)) < 1e-9);
+    } finally {
+      theoDoi.disconnect();
+    }
+
+    // (3) DỌN NHỮNG LƯỢT CÒN BAY **TRONG BÀI**. Tín hiệu DƯƠNG: `moc-doan` chỉ đổi khi lượt ĐỌC LẠI
+    //     sau lần ghi thứ hai đã hạ cánh (`transcript.data` là sự thật của máy chủ) — đếm ở PHÍA
+    //     MÁY CHỦ (`dem.patchXong`) là quá sớm: con số đó lên ngay khi fixture trả lời, TRƯỚC khi
+    //     client xử lý phản hồi.
+    //     ⚠️ VÌ SAO PHẢI DỌN: lượt commit cuối để lại một callback của scheduler (`setImmediate`) cho
+    //     `flushPassiveEffects`, và callback đó đọc `window.event` (`react-dom-client.development.js`
+    //     dòng 19555). Nếu nó chạy SAU `teardownDom` thì `window` đã bị xoá ⇒ đo được khi chạy RIÊNG
+    //     tệp này: `ReferenceError: window is not defined` + EXIT=1 dù 57/57 bài xanh (lượt chạy
+    //     chung không lộ, vì `after` cấp tệp bị node:test kéo lên gốc lượt chạy).
+    await choChu(container, "0:01.90 → 0:04.10");
+    // Hai nhịp `waitFor` (mỗi nhịp còn tự drain một `setTimeout(0)`) ⇒ cả pha timers lẫn pha check
+    // của event loop chạy xong TRONG bài. Dùng `waitFor` chứ không `await setTimeout` trần: RTL tắt
+    // `IS_REACT_ACT_ENVIRONMENT` trong lượt chờ, nên một update hạ cánh muộn KHÔNG sinh tiếng on.
+    await waitFor(() => { assert.ok(true, "nhịp dọn 1"); }, { timeout: 2000, interval: 10 });
+    await waitFor(() => { assert.ok(true, "nhịp dọn 2"); }, { timeout: 2000, interval: 10 });
+
+    assert.deepEqual(tiengOn, [], "cua so chua gan lai khong duoc sinh tieng on console");
     unmount();
   });
 });
