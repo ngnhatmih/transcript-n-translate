@@ -38,7 +38,12 @@ const REPO_DIR = fileURLToPath(new URL("../../", import.meta.url));
 
 const DEV_PORT = 3100; // CUNG — xem muc 2 o docblock.
 const BACKEND_PORT = Number(process.env.PHUDE_E2E_PORT ?? 8631);
-const SCRATCH = path.join(REPO_DIR, "_seed-e2e");
+// ⚠️ CANH repo, KHONG PHAI trong repo. Hai lý do, cả hai đều ĐO ĐƯỢC:
+//  (a) scratch không được làm bẩn cây repo;
+//  (b) `seed.py` chép vào đây tính `BACKEND = Path(__file__).parents[1]/"phu-de-lab"/"backend"`
+//      ⇒ `parents[1]` PHẢI là gốc workspace. Để trong repo thì nó thành `<repo>/phu-de-lab/backend`.
+//  Hệ quả kèm theo (đúng ý định): `path.dirname(SCRATCH)` = gốc workspace = nơi `_seed/` thật sự nằm.
+const SCRATCH = path.join(path.dirname(REPO_DIR), "_seed-e2e");
 const BACKEND_DIR = path.join(REPO_DIR, "backend");
 const VENV_PYTHON = process.platform === "win32"
   ? path.join(BACKEND_DIR, ".venv", "Scripts", "python.exe")
@@ -93,7 +98,7 @@ function chayPython(script, args, { env = {} } = {}) {
 function gieo() {
   mkdirSync(SCRATCH, { recursive: true });
   // ⚠️ Chep `seed.py` vao scratch thay vi viet lai: `seed.py` tinh `BACKEND` bang
-  // `parents[1]/"phu-de-lab"/"backend"`, nen mot ban sao trong `<repo>/_seed-e2e/` tro DUNG backend.
+  // `parents[1]/"phu-de-lab"/"backend"`, nen mot ban sao o `_seed-e2e/` CANH repo tro DUNG backend.
   // Chep lai cong thuc gieo o day se la nguon su that thu hai (ERRATA #43 muc 2).
   const seedGoc = path.join(path.dirname(SCRATCH), "_seed", "seed.py");
   if (!existsSync(seedGoc)) {
@@ -122,6 +127,13 @@ async function main() {
     throw new Error(
       `khong thay Chrome o ${CHROME}. Dat bien PHUDE_CHROME tro toi chrome.exe. `
       + "⚠️ Chrome CHI mo duoc voi quyen rong (ERRATA #40).",
+    );
+  }
+  if (SCRATCH.startsWith(path.resolve(REPO_DIR))) {
+    throw new Error(
+      `scratch ${SCRATCH} nam TRONG repo ${REPO_DIR} — trai luat (xem chu thich o \`SCRATCH\`): `
+      + "(a) lam ban cay repo; (b) `seed.py` chep vao do tinh `parents[1]/\"phu-de-lab\"/\"backend\"` "
+      + "nen se tro SAI backend. Sua `SCRATCH` cho dung thay vi bo qua loi nay.",
     );
   }
   if (congDangMo(DEV_PORT)) {
