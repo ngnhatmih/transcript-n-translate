@@ -63,4 +63,7 @@ sandbox bị hạn chế — ERRATA **#40**).
 - **Bảng phím §11.4:** mở bằng **`Shift+?`**, **19 hàng**, đúng **3 hàng `CHƯA NỐI`** (`S`, `M`, `Ctrl+Enter`);
   `[` = *"đặt mốc start tại đầu đọc"*, `]` = *"đặt mốc end tại đầu đọc"*. Ảnh `04/20`.
 - **`.q*`:** `ul.q__danh-sach{list-style:none}`, `li.q__item{display:flex;flex-wrap:wrap;gap:4px/8px}`;
-  khoảng cách đo bằng **toạ độ** (`q__ten` kết thúc 856 → `q__ly-do` bắt đầu 864). Ảnh `03`.
+  **khoảng cách** giữa `span.q__ten` và `span.q__ly-do` = **8 px** (= `column-gap`), đo bằng toạ độ ở **hai**
+  bề rộng khung nhìn khác nhau (kết thúc 856 → bắt đầu 864; và 1218 → 1226 — **khoảng cách 8 khớp**).
+  ⚠️ **Toạ độ TUYỆT ĐỐI phụ thuộc bề rộng khung nhìn ⇒ KHÔNG tái lập được**; chỉ **khoảng cách** là bất biến,
+  nên đây mới là thứ được ghi. Ảnh `03`.

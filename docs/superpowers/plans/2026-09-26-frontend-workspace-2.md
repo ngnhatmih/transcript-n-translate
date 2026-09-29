@@ -2535,6 +2535,51 @@ CDP tiêm ở tầng **renderer** ⇒ `Ctrl+2`/`Ctrl+3` **chạy** (đo được
 `919eeac` + `13e5c98`, re-review **`PASS` 0C/0I/5M**. Đạt: bảng §11.4 render từ **MỘT nguồn** (19 hàng, `chưa nối` đúng 3 hàng `S`/`M`/`Ctrl+Enter`); `[`/`]` = **đặt mốc tại đầu đọc** (ánh xạ sai của `#44` mục 3 đã hết); nudge `Shift+←/→` ±0,1 s + `Alt+←/→` ±1 s; **nghe lại 300 ms có thật**; guard I3 hai vế + bài ghim `G1` **còn răng** sau khi viết lại listener; `.q*` hai chiều còn răng.
 Năm Minor còn lại **đã có chủ** (xem `task-11-fix-round-1-rereview.md`): nhãn `E11` · 300 ms chưa ghim · guard nhường rộng · TRẦN #7 khai sai · `scrollIntoView` tách 2 vế (`currentSegment` KHÔNG được ghim ⇒ "dòng vừa chọn có mặt trong DOM" là mệnh đề **DOM** hiện **SAI** với danh sách dài, **ghim được trong jsdom**).
 
+## ⚠️ ERRATA #48 — TASK 13 (`0672f97`) + ĐÓNG PLAN: **tôi ánh xạ sai một mục nợ và suýt đưa một lời khai "đã đóng" SAI vào README**
+
+Bối cảnh: Task 13 (`0672f97`, 8 tệp `+285/-37`, 7 tệp `frontend/src` **chỉ chú thích**) — cổng `tests 308 / pass 306 / fail 2 / cancelled 0`, EXIT=1, ~32,8 s; `typecheck` 0; `build` 0. Bảy lệch brief dưới đây **đều do phép đo của người làm bác brief của tôi**.
+
+## 1. 🔴 `N-9` ≠ `M-3` — lời khai "đã đóng" của tôi là SAI, và nó suýt vào README
+Tôi đã ra lệnh cho Task 13: *"nợ Giai đoạn 2 «route export ghi tệp trên `GET`» **đã đóng** (M-3) ⇒ **KHÔNG** được ghi nó là còn mở"*.
+**Sự thật (đọc tài liệu gốc + mã):**
+- Mục đó tên là **`N-9`**, **chưa bao giờ được đóng**: design spec `2026-09-26-frontend-workspace-2-design.md` **§7 dòng 111** — *"`N-9` (route export **ghi tệp trên một `GET`**) **chờ người dùng quyết**"*; và **§9 dòng 135** nhắc lại.
+- Plan **dòng 3793** **yêu cầu** README ghi nợ Giai đoạn 2 còn mở, **kể cả mục này**.
+- **Mã vẫn ghi tệp:** `backend/app/api/routes_translations.py:282` (`@export_router.get`) → `:330` `_materialise(...)` → `:354` `out_dir.mkdir(...)` → `:359-360` `target.open("w")` + `write`.
+- **Cái tôi đóng ở Giai đoạn 2 là `containment`** (`resolve_within`, `:355-358`; bài ghim `backend/tests/test_api_export_by_translation.py`), **không phải** gỡ side effect. Hai việc khác nhau; tôi gộp chúng thành một.
+⇒ **Người làm đã tuân chỉ đạo SAI của tôi trong README**, nhưng **đọc mã và phản đối** ⇒ tôi đã sửa `README.md` (thêm `N-9` vào danh sách **còn mở**, kèm đường dẫn mã + đính chính).
+🔴 **LUẬT:** một mục nợ phải được **đối chiếu bằng TÊN + TRÍCH DẪN GỐC** trước khi tuyên bố đóng/mở. **Không** suy ra trạng thái nợ từ ký ức về "việc mình từng làm".
+⚠️ Đây là lần **thứ sáu** trong giai đoạn này phép đo/đọc mã bác brief của tôi (xem #44 mục 3, #47 mục 2, #47 mục 5, #48 mục 1, và hai lần "phím không chạy" ở #47 mục 5).
+
+## 2. ⚠️ **`ERRATA #1` KHÔNG TỒN TẠI** — và tôi đã trích nó suốt giai đoạn
+Plan có **`ERRATA #2…#47`** (46 mục đánh số) + **một mục mở đầu KHÔNG số** (`:33`). Tôi đã viết *"#1–#45"*, *"#1–#46"*, *"#1–#47"* trong nhiều brief. ⇒ Trích dẫn đúng phải là **"ERRATA (mục mở đầu không số) + #2…#48"**.
+🔴 **LUẬT: một khoảng trích dẫn tự chế cũng là một lời khai.** Muốn viết `#a–#b` thì phải `grep` xem hai đầu có thật.
+
+## 3. 🔴 LỚP LỖI MỚI — **TRẦN SAI nguy hơn TRẦN THIẾU**
+Task 13 phải sửa **7** dấu `ponytail:`: **1** thiếu trần, **4** nêu **trần SAI**, **2** thiếu đường nâng cấp. Trần **SAI** tệ hơn trần thiếu vì nó **tuyên bố nợ đã đóng** — đúng lỗi mà chính brief cấm ở README:
+- `EngineSelect.tsx:16` khai *"**CHƯA có người gọi**"* — **SAI**: `CompareScreen.tsx:248` render nó.
+- `CompareScreen.tsx:24` khai thiếu dữ liệu — **SAI**: `App.tsx:1224-1225` truyền dữ liệu **THẬT** (`App.tsx:1196-1199` ghi rõ W1 đã đóng).
+- `GlossaryScreen.tsx:56` + `QueueZone.tsx:30` khai *"tầng đó CHƯA chạy trong lượt Task 12"* — **SAI**: tầng **đã** chạy và **đã** đo.
+🔴 **LUẬT: mỗi dấu `ponytail:` phải được ĐỌC LẠI khi vòng nợ đóng** — một dấu nói "chưa có người gọi" mà nay có người gọi là **lời nói dối trong mã**, không phải văn phong.
+
+## 4. ⚠️ `TIEU-CHI-12.md` §5 — toạ độ TUYỆT ĐỐI không tái lập (đã sửa)
+Tôi ghi khoảng cách `.q__ten`→`.q__ly-do` bằng **toạ độ** (856 → 864). Lượt Task 13 đo lại: **1218 → 1226** — khoảng cách **8 khớp**, nhưng **toạ độ tuyệt đối phụ thuộc bề rộng khung nhìn**. ⇒ Tệp đã được sửa để chỉ ghim **khoảng cách (8 px)**, kèm ghi chú.
+🔴 **LUẬT: bằng chứng hình thức phải là đại lượng BẤT BIẾN theo khung nhìn** (khoảng cách, tỉ lệ, `gap`), không phải toạ độ tuyệt đối.
+
+## 5. 🟢 C1 hoá ra **đã nằm trong tiêu chí nghiệm thu** của chính design spec
+Design spec §8 **tiêu chí 8**: *"Danh sách 2000 dòng vẫn **cuộn mượt** và **không mất focus** khi đang sửa một dòng"*.
+Lỗi **C1** (Critical, ERRATA #47/#48 vòng này: `.ed__khung` không phải khung cuộn ⇒ cuộn là màn hình trắng, hàng 17..600 không tới được) **vi phạm thẳng tiêu chí 8** — mà tiêu chí đó **đã có sẵn trong spec từ đầu**. Nó sống sót qua 13 task vì **mọi** bài test đều là jsdom (không layout) và ảnh chụp đều dùng bản ghi **5 đoạn**.
+⇒ **Bài học đắt nhất của giai đoạn:** tiêu chí nghiệm thu viết đúng **vẫn vô dụng** nếu không có tầng **đo được** nó. Tầng Chrome thật (Task 12) là tầng **đầu tiên** chạm tới tiêu chí 8 — và nó tìm ra lỗi trong **lượt chạy đầu tiên**.
+
+## 6. Số liệu phải trích cho đúng
+- Thời lượng suite: **32,30 s** và **32,84 s** (`duration_ms 32295,5656` / `32844,2782`), wall **32,6/33,1 s**. Con số *"~32,7 s"* tôi viết trong brief **không tồn tại như một phép đo**.
+- Ảnh: `_shots\t12b` = **16 PNG**, `_shots\t12` = **15 PNG** (brief tôi ghi "18 ảnh").
+- `retry_job`: `backend/app/adapters/persist/sqlite_repos.py:525-536` (UPDATE ở `:532-536`), cờ đọc ở `backend/app/worker.py:215-221`.
+- Khối nợ Giai đoạn 2 **không** nằm ở `backend/README.md` (0 hit); nó ở design spec `:111,135` + plan `:3793`.
+
+## 7. Đính chính về Chrome mồ côi (lượt cuối)
+Chrome headless **giữ cờ** `--remote-debugging-port=9222` với `--user-data-dir=…\deepseek\_shots\profile` là **instance của CHÍNH TÔI** (giết xong: chrome **22 → 14** tiến trình). ⚠️ **Nhưng `9222` vẫn `True` sau khi giết** ⇒ **9222 đúng là Chrome của người dùng** (lời khai gốc của tôi đúng), instance của tôi **không bind được** vì cổng đã bị chiếm — và nó sống **6 tiếng** vì chính `close.mjs` (tôi viết để **từ chối** đóng 9222 vì tưởng đó là Chrome của người dùng) đã bảo vệ nó.
+🔴 **LUẬT:** một chốt chặn viết dựa trên **suy đoán về quyền sở hữu tài nguyên** phải kèm **cách kiểm chủ sở hữu** (PID + đường dẫn profile), nếu không nó bảo vệ nhầm thứ và để rò tài nguyên của chính mình.
+
 ## Quy ước thẩm mỹ — spec UI thắng, skill chỉ là checklist
 
 Spec `2026-09-25-phu-de-lab-ui-design.md` là **nguồn có thẩm quyền về hình thức** (bạn đã duyệt). Skill

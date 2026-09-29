@@ -300,5 +300,12 @@ nghĩa này là nợ phải ghi, không phải một quyết định đã chốt
   ranh giới nếu cờ còn**. ⇒ job đã xin huỷ → `failed` → bấm **chạy lại** có thể bị `cancelled` ở
   lượt mới. **Có TRƯỚC D2** (ERRATA **#46 mục 9**). Đây là nợ **`backend/`**: task frontend **không**
   được chạm vào, nên ghi ra chứ không sửa.
-- ⚠️ Nợ Giai đoạn 2 *"route export ghi tệp trên `GET`"* **KHÔNG** được ghi là còn mở ở đây: nó đã
-  được xử lý (**M-3**).
+- **`N-9` — route export GHI TỆP trên một `GET`** (nợ Giai đoạn 2, **CHƯA đóng**, *chờ người dùng quyết* —
+  design spec §7 dòng 111 và §9 dòng 135). Mã vẫn ghi tệp: `backend/app/api/routes_translations.py:282`
+  (`@export_router.get("/{translation_id}")`) → `:330` `_materialise(...)` → `:354` `out_dir.mkdir(...)`
+  → `:359-360` `target.open("w")` + `write`. ⚠️ **ĐÍNH CHÍNH một lời khai SAI của phiên chính:** ở vòng
+  Task 13 tôi đã ra lệnh *"đừng ghi nợ này là còn mở"* vì ánh xạ sai `N-9` → `M-3`. Cái **đã** đóng ở
+  Giai đoạn 2 là **`containment`** (`resolve_within`, `:355-358`, có bài ghim trong
+  `backend/tests/test_api_export_by_translation.py`), **không phải** gỡ side effect. ⇒ Mục này **phải**
+  nằm trong danh sách còn mở (xem ERRATA **#48** mục 1).
+
