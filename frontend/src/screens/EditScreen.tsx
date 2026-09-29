@@ -53,7 +53,7 @@
  *    `fetch`, khong tu sua `Segment`, khong giu ban sao du lieu may chu, va KHONG tu clamp moc
  *    thoi gian (phep kep giay am nam o `formatTimecode`).
  */
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import type { Segment, Transcript } from "../api/types.ts";
 import { formatTimecode } from "../lib/timecode.ts";
@@ -152,11 +152,23 @@ function soDong(text: string): number {
  *
  * ⚠️ GIA PHAI TRA (khai ra, khong che): khi hai dong duoc ghim nam XA nhau, khoang render la
  * khoang giua chung ⇒ so hang trong DOM lon hon `viewportH / rowH` (do dai = khoang cach). Do la
- * danh doi CO Y de giu bat bien "dong dang thao tac luon co MAT trong DOM"; duong nang cap la
- * CUON theo dong duoc chon (`scrollIntoView`, TRẦN cua Task 12 — ve "NHIN THAY duoc" can Chrome)
- * thay vi noi rong khoang. ⚠️ Cach sua nay KHONG them mot CON nao vao luoi cua `.ed`
- * (`grid-template-rows` + `grid-row` giu nguyen) — do la loi bo cuc ERRATA #31 muc 1, va no
- * khong bi tai sinh o day.
+ * danh doi CO Y de giu bat bien "dong dang thao tac luon co MAT trong DOM".
+ *
+ * 🔴 **CÁI GIÁ NAY ĐÃ CÓ TRẦN** (Task 12 vòng sửa 1, `I4`/`I5`). Trước vòng này `pinnedThem` được
+ * ghim **vô điều kiện**, nên khoảng render dài đúng bằng KHOẢNG CÁCH giữa hai mốc — không có trần
+ * nào theo dữ liệu (đo được: `n=6000`, `e=1`, `c=5999` ⇒ 6 000 hàng / 264 000 px). Nay:
+ *  - `pinnedThem` **chỉ** được truyền khi mốc đó nằm trong TRẦN quanh cửa sổ đang nhìn
+ *    (`ghimDuocChon` / `tranGhimThem` — 2 khung nhìn = 32 hàng với số của spec);
+ *  - ngoài trần ⇒ **KHÔNG ghim**, và `EditScreen` **CUỘN khung tới** dòng vừa chọn (hiệu ứng theo
+ *    `currentSegment`), nên dòng đó vào cửa sổ ⇒ vẫn có MẶT trong DOM, và lần này còn **NHÌN
+ *    THẤY được** (đó là mệnh đề người dùng, không chỉ mệnh đề DOM).
+ *  - ⚠️ `editingSegment` **không** đặt trần: gỡ dòng đang gõ ra khỏi DOM là MẤT FOCUS (spec UI
+ *    §8.3/U6). Cái giá còn lại của nó là chuyện của **U6/Task 6**, không phải của `D4` — và nó
+ *    được khai riêng trong báo cáo vòng sửa 1 (kèm số: chỉ ghim `editingSegment` = 495 hàng, có
+ *    thêm `D4` = 500 hàng ⇒ `D4` thêm ~5 hàng ~1 %).
+ *
+ * ⚠️ Cach sua nay KHONG them mot CON nao vao luoi cua `.ed` (`grid-template-rows` + `grid-row`
+ * giu nguyen) — do la loi bo cuc ERRATA #31 muc 1, va no khong bi tai sinh o day.
  */
 export function windowFor(
   scrollTop: number,
@@ -177,6 +189,43 @@ export function windowFor(
     end: Math.min(cuoi.end, soDoan),
     pinned: dau.pinned || cuoi.pinned,
   };
+}
+
+/**
+ * Số hàng được phép GHIM THÊM mỗi phía CỬA SỔ ĐANG NHÌN — TRẦN của `D4` (Task 12 vòng sửa 1, `I4`).
+ *
+ * `2 * (ceil(viewportH / rowH) + overscan)` = **32 hàng** với số của spec (`480/44/5`), tức hai
+ * khung nhìn. Đây là một TRẦN THẬT chứ không phải một lời khai: `src/screens/windowFor.gia.test.ts`
+ * ghim chính con số này, và mọi bản đặt trần rộng hơn/không đặt trần đều làm nó ĐỎ.
+ *
+ * ⚠️ TRẦN này KHÔNG bao gồm `editingSegment` — xem docblock `windowFor`.
+ */
+export function tranGhimThem(viewportH: number, rowH: number, overscan: number): number {
+  return 2 * (Math.ceil(viewportH / rowH) + overscan);
+}
+
+/**
+ * `currentSegment` CHỈ được ghim khi nó nằm trong TRẦN quanh cửa sổ đang nhìn thấy.
+ *
+ * Vì sao mốc so là "cửa sổ đang nhìn" chứ không phải `editingSegment`: khi `editingSegment === null`
+ * thì một phép so với nó sẽ cho ghim **vô điều kiện** — đo được `c=5999, cuon=0, n=6000` ⇒ 6 000
+ * hàng, tức lỗ hổng vẫn còn nguyên. "Gần cửa sổ" là mốc duy nhất có nghĩa ở cả hai trường hợp.
+ *
+ * Ngoài trần ⇒ trả `null` (KHÔNG ghim), và đường bù là **cuộn khung tới nó** — xem `useEffect`
+ * trong `EditScreen`.
+ */
+export function ghimDuocChon(
+  currentSegment: number | null,
+  cuon: number,
+  viewportH: number,
+  rowH: number,
+  soDoan: number,
+  overscan: number,
+): number | null {
+  if (currentSegment === null) return null;
+  const { start, end } = visibleRange(cuon, viewportH, rowH, soDoan, overscan);
+  const tran = tranGhimThem(viewportH, rowH, overscan);
+  return currentSegment >= start - tran && currentSegment < end + tran ? currentSegment : null;
 }
 
 export interface EditScreenProps {
@@ -268,6 +317,43 @@ export function EditScreen({
   // BAN NHAP cua o dang sua: giu trong STATE, khong phai trong DOM (spec UI §5.3). No
   // nam o MAN chu khong o hang, nen ao hoa thao hang ra thi ban nhap van con.
   const [banNhap, setBanNhap] = useState<{ i: number; text: string } | null>(null);
+  /** Khung cuon THAT (`.ed__khung`) — nguon duy nhat cua `scrollTop` trong man nay. */
+  const khung = useRef<HTMLDivElement | null>(null);
+  /**
+   * Moc da duoc CUON toi. ⚠️ Can thiet de mot lan cuon KHONG an (vi du Chrome kep gia tri, hoac
+   * cua so chua kip doi) khong thanh mot vong lap vo han: moi moc chi cuon MOT lan.
+   */
+  const mocDaCuon = useRef<number | null>(null);
+  /** So doan — tinh TRUOC nhanh `transcript === null` vi hook khong duoc goi co dieu kien. */
+  const soDoan = transcript === null ? 0 : transcript.segments.length;
+
+  /**
+   * 🔴 CUỘN KHUNG TỚI DÒNG VỪA CHỌN (Task 12 vòng sửa 1, `I4` — vế "ngoài trần thì cuộn tới").
+   *
+   * Chỉ chạy khi `currentSegment` **KHÔNG ghim được** (`ghimDuocChon` trả `null`, tức nó nằm ngoài
+   * TRẦN quanh cửa sổ). Trong trần thì ghim là đủ và **không** được cuộn — nếu không, hai vế sẽ
+   * không còn phân biệt được, và một cú `N` gần chỗ đang đọc lại làm khung nhảy.
+   *
+   * Vì sao là `scrollTop` số học chứ không phải `element.scrollIntoView`: jsdom **KHÔNG** có
+   * `scrollIntoView` (đo được: `typeof el.scrollIntoView === "undefined"` ⇒ gọi vào là
+   * `TypeError`), nên một đường chỉ có `scrollIntoView` sẽ **không ghim được** ở tầng jsdom —
+   * mà `I4(d)` đòi vế "ngoài trần ⇒ đã cuộn tới" phải có một khẳng định trong jsdom. Đặt
+   * `scrollTop` cho cùng kết quả ở cả hai tầng, và đọc lại giá trị THẬT sau khi đặt (Chrome kẹp
+   * theo `scrollHeight` thật, jsdom giữ nguyên) rồi mới ghi vào state.
+   */
+  useEffect(() => {
+    if (transcript === null || currentSegment === null) return;
+    if (ghimDuocChon(currentSegment, cuon, viewportH, rowH, soDoan, overscan) !== null) return;
+    const k = khung.current;
+    if (k === null) return;
+    if (mocDaCuon.current === currentSegment) return;
+    mocDaCuon.current = currentSegment;
+    const toiDa = Math.max(0, soDoan * rowH - viewportH);
+    const dich = Math.min(toiDa, Math.max(0, currentSegment * rowH - Math.floor(viewportH / 2)));
+    k.scrollTop = dich;
+    const docLai = Number.isFinite(k.scrollTop) ? k.scrollTop : dich;
+    setCuon(docLai);
+  }, [transcript, currentSegment, cuon, viewportH, rowH, soDoan, overscan]);
 
   if (transcript === null) {
     // TRẠNG THÁI RỖNG = KHUNG §4.2 Ở VÙNG GIỮA (spec UI §4.2: *"Vùng giữa là khung kẻ nét
@@ -289,10 +375,11 @@ export function EditScreen({
     );
   }
 
-  const soDoan = transcript.segments.length;
   // HAI chi so duoc ghim: dong DANG SUA (U6 — thao no ra khoi DOM la MAT FOCUS) va dong DANG CHON
-  // (`J`/`K`/`N` — menh de "dong vua chon co MAT trong DOM"); xem docblock `windowFor`.
-  const cuaSo = windowFor(cuon, viewportH, rowH, soDoan, overscan, editingSegment, currentSegment);
+  // (`J`/`K`/`N` — menh de "dong vua chon co MAT trong DOM"), va ve sau chi duoc ghim khi no nam
+  // TRONG TRAN (xem `ghimDuocChon`); ngoai tran thi `useEffect` o tren cuon khung toi no.
+  const ghimThem = ghimDuocChon(currentSegment, cuon, viewportH, rowH, soDoan, overscan);
+  const cuaSo = windowFor(cuon, viewportH, rowH, soDoan, overscan, editingSegment, ghimThem);
   const hang = transcript.segments.slice(cuaSo.start, cuaSo.end);
 
   return (
@@ -346,6 +433,7 @@ export function EditScreen({
       </div>
       <div
         className="ed__khung"
+        ref={khung}
         onScroll={(suKien) => setCuon(suKien.currentTarget.scrollTop)}
       >
         {/* DEM DAU/CUOI: chieu cao cuon phai bang CA danh sach, khong phai bang cua so.

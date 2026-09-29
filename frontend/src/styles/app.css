@@ -53,22 +53,44 @@ body {
   border-bottom: var(--rule-w) solid var(--rule);
 }
 
+/* 🔴 C1 (Task 12 vòng sửa 1) — `.shell__mid` PHẢI LA MOT LUOI CO TRACK HANG TUONG MINH,
+   va phai CAT phan tran ra ngoai. Do duoc trong Chrome THAT (truoc ban va nay): hang IMPLICIT
+   `auto` cua luoi con nay cao bang CA noi dung (26 431 px), nen `.shell__mid` (796 px) tran ra
+   ngoai ⇒ `.shell__work`/`.ed`/`.ed__khung` deu cao 26 400 px, va **KHONG phan tu nao cuon duoc**:
+   `scrollTop` chi nhan tren `window`/`document.scrollingElement`. He qua do duoc: cuon cua so
+   xuong 6 000 px ⇒ `elementFromPoint(720,450)` = `DIV.ed__dem-cuoi` RONG, anh TRANG hoan toan
+   (5 983 B), va `onScroll` cua `.ed__khung` (EditScreen) KHONG BAO GIO chay ⇒ danh sach ao hoa
+   dung yen o hang 1..16, hang 17..600 KHONG toi duoc.
+   ⚠️ LUAT ERRATA #31 muc 1: khai track thi phai khai VI TRI cho TUNG con (`grid-row: 1` o ca ba
+   con ben duoi) — auto-placement la thu da bien "hang co lai" thanh "hang cuop cho" BA LAN. */
 .shell__mid {
   grid-row: 3;
   display: grid;
   grid-template-columns: var(--col-channels) 1fr var(--col-queue);
+  grid-template-rows: 1fr;
   min-height: 0;
+  overflow: hidden;
 }
 
 .shell__channels {
+  grid-row: 1;
+  min-height: 0;
   border-right: var(--rule-w) solid var(--rule);
 }
 
+/* ⚠️ `min-height: 0` + `overflow: hidden` la ve THU HAI cua C1: mot muc luoi mac dinh co
+   `min-height: auto` (= kich thuoc noi dung), nen no VAN no ra theo con du track hang da la `1fr`.
+   Thieu hai dong nay thi `.ed` cao 26 400 px tro lai va khung danh sach mat cho cuon. */
 .shell__work {
+  grid-row: 1;
   min-width: 0;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .shell__queue {
+  grid-row: 1;
+  min-height: 0;
   border-left: var(--rule-w) solid var(--rule);
 }
 

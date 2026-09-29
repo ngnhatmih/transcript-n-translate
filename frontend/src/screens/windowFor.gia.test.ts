@@ -1,110 +1,178 @@
 /**
- * T7 — **CAI GIA CUA BAN VA D4**: `currentSegment` duoc them vao tap GHIM cua danh sach ao hoa.
+ * T7 — **CÁI GIÁ CỦA BẢN VÁ D4, VÀ CÁI TRẦN ĐÃ ĐẶT LÊN NÓ** (Task 12 vòng sửa 1).
  *
- * ## Vi sao tep nay ton tai
+ * ## Vì sao tệp này tồn tại, và vì sao nó đã được VIẾT LẠI
  *
- * Vong gom no Task 11 (`D4`) ghim THEM `currentSegment` (`EditScreen.windowFor(..., pinnedThem)`),
- * va khai gia phai tra trong comment (`EditScreen.tsx`, docblock `windowFor`): *"khi hai dong duoc
- * ghim nam XA nhau, khoang render la khoang giua chung ⇒ so hang trong DOM lon hon
- * `viewportH / rowH`"*. **Gia do CHUA AI DO.** Tep nay do no, va ghim BAT BIEN cua no.
+ * Vòng gom nợ Task 11 (`D4`) ghim THÊM `currentSegment` (`EditScreen.windowFor(..., pinnedThem)`),
+ * và khai giá phải trả trong comment. **Lượt trước** tệp này đóng băng **cái giá VÔ HẠN** của bản
+ * ghim đó: nó khẳng định `soHang == d + 2` như một "BẤT BIẾN của bản vá D4", và đo được `n=6000`
+ * ⇒ **6 000 hàng / 264 000 px**. Review độc lập (`I4`) chỉ ra hai điều, cả hai đều ĐÚNG:
+ *  1. **`d + 2` KHÔNG phải cận trên.** Đo bằng chính `windowFor`: `e=5,c=200` ⇒ **201 = d+6**;
+ *     `e=100,c=295` ⇒ **296 = d+101**; `e=0,c=199` ⇒ 200 = d+1. Công thức đúng là
+ *     `min(n, max(ve, c+1)) − min(vs, e)`, và nó **tăng theo `e`** nữa, không chỉ theo `d`.
+ *  2. Một bài test khẳng định cái giá vô hạn là **biến một khiếm khuyết thành đặc tả**
+ *     (`#44` mục 2): mọi bản đặt trần sau này sẽ làm nó ĐỎ.
+ * ⇒ Vòng sửa 1 **đặt trần** (`tranGhimThem` / `ghimDuocChon` trong `EditScreen.tsx`), và tệp này
+ * nay ghim **CÁI TRẦN**, không ghim cái giá vô hạn.
  *
- * ⚠️ **DAY KHONG PHAI BANG CHUNG HINH THUC.** So hang JSX duoc render trong jsdom chi la MOT PHAN
- * cua cai gia: thoi gian layout/ve that, va chi phi cuon, **chi Chrome that do duoc**
- * (`e2e/plans/ban-ghi-dai-t7.json`). Neu chi doc tep nay ma ket luan "khong sao" thi do la mot ket
- * luan vuot qua phep do.
+ * ## Cái trần là gì (và nó KHÔNG bao gồm cái gì)
  *
- * ## Cong thuc (doc tu `src/lib/window.ts`)
+ * `ghimDuocChon` chỉ trả về mốc khi nó nằm trong `tranGhimThem(...)` hàng quanh **cửa sổ đang
+ * nhìn**; ngoài trần ⇒ `null` (không ghim, và `EditScreen` **cuộn khung tới** mốc đó).
+ * ⇒ Giá của `D4` **có trần theo hằng số**, đo được: thêm **tối đa `TRẦN` hàng** so với không ghim.
+ * ⚠️ Trần này **KHÔNG** bao gồm `editingSegment`: dòng đang gõ phải LUÔN ở trong DOM (U6, spec UI
+ * §8.3 — tháo nó ra là MẤT FOCUS). Cái giá đó **có trước `D4`** (Task 6) và có chủ riêng; các số
+ * `×23`/`×31` mà báo cáo cũ gán cho `D4` thực ra là giá của **bản ghim `editingSegment`** — xem
+ * khối "ĐỐI CHỨNG ĐÚNG NGUỒN" ở cuối tệp (`I5`).
  *
- * `soHang = end - start`, trong do `start = min(visibleStart, pinned, pinnedThem)` va
- * `end = max(visibleEnd, pinned + 1, pinnedThem + 1)` (kep theo `soDoan`).
- * ⇒ Khi hai chi so GHIM cach nhau `d`, `soHang >= d + 1`.
+ * ⚠️ **ĐÂY KHÔNG PHẢI BẰNG CHỨNG HÌNH THỨC.** Số hàng JSX trong jsdom chỉ là MỘT PHẦN của cái
+ * giá: thời gian layout/vẽ thật, và việc khung **cuộn được** (C1), chỉ Chrome thật đo được
+ * (`e2e/plans/ban-ghi-dai-t7.json`).
  */
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 
-import { windowFor } from "./EditScreen.tsx";
+import { ghimDuocChon, tranGhimThem, windowFor } from "./EditScreen.tsx";
 
-/** Tham so THAT cua man: `ROW_H`/`VIEWPORT_H`/`OVERSCAN` (xuat tu `EditScreen.tsx`). */
+/** Tham số THAT cua man: `ROW_H`/`VIEWPORT_H`/`OVERSCAN` (xuat tu `EditScreen.tsx`). */
 const ROW_H = 44;
 const VIEWPORT_H = 480;
 const OVERSCAN = 5;
+/** Cửa sổ thường (không ghim gì) ở `scrollTop = 0`: `ceil(480/44) + 5` = 11 + 5 = 16 hàng. */
+const CUA_SO = 16;
 
-/** So hang `windowFor` se render. */
-function soHang(start, end) {
+/** Số hàng `windowFor` sẽ render. */
+function soHang(start: number, end: number): number {
   return end - start;
 }
 
-describe("T7: cai gia cua D4 — GHIM HAI CHI SO XA NHAU lam no ra khoang giua", () => {
+/** Số hàng render khi CHỈ có (`editingSegment` | `currentSegment`) được ghim, qua đúng đường của màn. */
+function soHangCoGhim(
+  cuon: number,
+  soDoan: number,
+  editing: number | null,
+  current: number | null,
+): number {
+  const ghimThem = ghimDuocChon(current, cuon, VIEWPORT_H, ROW_H, soDoan, OVERSCAN);
+  const k = windowFor(cuon, VIEWPORT_H, ROW_H, soDoan, OVERSCAN, editing, ghimThem);
+  return soHang(k.start, k.end);
+}
+
+describe("T7: TRẦN của bản vá D4 — GHIM CHỈ TRONG MỘT CỬA SỔ CÓ TRẦN", () => {
+  it("🔴 TRẦN ĐO ĐƯỢC: `tranGhimThem(480, 44, 5)` = 32 hàng (2 khung nhìn + overscan)", () => {
+    // Đây là con số mà mọi thứ dưới đây ghim. Đổi nó (rộng hơn ⇒ giá lớn hơn; hoặc bỏ trần)
+    // làm cả tệp này ĐỎ — đó là mục đích: một TRẦN phải là một ĐẶC TẢ, không phải một bình luận.
+    assert.equal(tranGhimThem(VIEWPORT_H, ROW_H, OVERSCAN), 32);
+    // Quan hệ (không phải literal đoán mơ): trần = 2 * (số hàng một khung nhìn + overscan).
+    assert.equal(
+      tranGhimThem(VIEWPORT_H, ROW_H, OVERSCAN),
+      2 * (Math.ceil(VIEWPORT_H / ROW_H) + OVERSCAN),
+    );
+    // Và nó phải là một TRẦN THẬT: lớn hơn 0 (không ghim gì) và hữu hạn.
+    assert.ok(tranGhimThem(VIEWPORT_H, ROW_H, OVERSCAN) > 0);
+  });
+
   it("T7 KHONG GHIM: cua so chi ~ viewportH/rowH + 2*overscan", () => {
     const k = windowFor(0, VIEWPORT_H, ROW_H, 600, OVERSCAN, null, null);
     // ceil((0+480)/44) + 5 = 11 + 5 = 16; start = max(0, 0-5) = 0.
     assert.deepEqual(k, { start: 0, end: 16, pinned: false });
-    assert.equal(soHang(k.start, k.end), 16);
+    assert.equal(soHang(k.start, k.end), CUA_SO);
   });
 
   it("T7 MOT MOC GHIM o dong dau: KHONG no ra (moc nam trong cua so)", () => {
     const k = windowFor(0, VIEWPORT_H, ROW_H, 600, OVERSCAN, 1, null);
-    assert.equal(soHang(k.start, k.end), 16, "ghim mot moc trong cua so thi khong doi gi");
+    assert.equal(soHang(k.start, k.end), CUA_SO, "ghim mot moc trong cua so thi khong doi gi");
   });
 
-  it("🔴 T7 HAI MOC CACH XA `d` ⇒ so hang render >= d + 1 (BAT BIEN cua ban va D4)", () => {
-    // Canh THAT: dang sua doan 1, `J`/`K`/`N` nhay toi doan 500 ⇒ moc cach nhau 499.
-    // `scrollTop = 44 * 480` = 21120 px ~ dong 480 (dung bang "cuon toi noi dong 500").
-    const k = windowFor(44 * 480, VIEWPORT_H, ROW_H, 600, OVERSCAN, 1, 500);
-    assert.equal(k.start, 1, "start phai tut ve moc nho hon");
-    assert.equal(k.end, 501, "end phai nang len moc lon hon + 1");
-    assert.equal(soHang(k.start, k.end), 500);
-    // Bat bien noi dung cua D4 — HAI menh de DOM phai dung:
-    assert.ok(k.start <= 1 && 1 < k.end, "dong dang SUA phai nam trong khoang render");
-    assert.ok(k.start <= 500 && 500 < k.end, "dong dang CHON phai nam trong khoang render");
+  it("🔴 TRONG TRẦN ⇒ mốc vẫn được GHIM (mệnh đề DOM của D4 giữ nguyên trong trần)", () => {
+    // `cuon = 0` ⇒ cửa sổ nhìn thấy là [0, 16); trần 32 ⇒ mốc tới 47 vẫn nằm trong trần.
+    assert.equal(ghimDuocChon(16, 0, VIEWPORT_H, ROW_H, 600, OVERSCAN), 16, "ngay dưới cửa sổ");
+    assert.equal(ghimDuocChon(47, 0, VIEWPORT_H, ROW_H, 600, OVERSCAN), 47, "sát mép trần");
+    assert.equal(ghimDuocChon(48, 0, VIEWPORT_H, ROW_H, 600, OVERSCAN), null, "vượt trần 1 hàng");
+    // Và khi đã ghim thì mốc PHẢI nằm trong khoảng render (bất biến nội dung của D4).
+    const k = windowFor(
+      0, VIEWPORT_H, ROW_H, 600, OVERSCAN, null,
+      ghimDuocChon(47, 0, VIEWPORT_H, ROW_H, 600, OVERSCAN),
+    );
+    assert.ok(k.start <= 47 && 47 < k.end, "dong dang CHON phai nam trong khoang render");
+    assert.equal(soHang(k.start, k.end), 48);
   });
 
-  it("🔴 T7 DO DUOC: khi moc cach xa HON cua so thi render ≈ `d + 2` (khong co tran)", () => {
-    // ⚠️ Hai lan do dau SAI, va day la con so SUA LAI. `visibleRange` cho cua so `[0,16)` (16 hang,
-    // da tinh `overscan`), va `withPinned` chi MO RONG: `end = max(16, moc + 1)`. Voi `moc = 1 + d`
-    // (0-based) thi hang render = `max(16, d + 2)` — KHONG phai `d + 1`.
-    // ⇒ Khang dinh QUAN HE (don dieu + gia tri do duoc), khong phai mot literal doan mo.
-    let truoc = 0;
-    for (const [d, mongDoi] of [[0, 16], [10, 16], [14, 16], [100, 102], [499, 501], [599, 600]]) {
-      const k = windowFor(0, VIEWPORT_H, ROW_H, 600, OVERSCAN, 1, 1 + d);
-      const so = soHang(k.start, k.end);
-      assert.equal(so, mongDoi, `khoang cach ${d} ⇒ do duoc ${so}, ky vong ${mongDoi}`);
-      assert.ok(so >= truoc, `so hang phai DON DIEU TANG theo d: d=${d} ⇒ ${so} < ${truoc}`);
-      truoc = so;
-    }
-    // 🔴 KHANG DINH TRUNG TAM: khi moc cach xa HON cua so (`d > viewportH/rowH`), so hang render
-    // di theo KHOANG CACH ⇒ `viewportH` KHONG chan duoc gi. DAY la cai gia cua D4.
-    for (const d of [20, 100, 499]) {
-      const k = windowFor(0, VIEWPORT_H, ROW_H, 600, OVERSCAN, 1, 1 + d);
+  it("🔴 NGOÀI TRẦN ⇒ KHÔNG ghim (nên giá KHÔNG theo khoảng cách nữa)", () => {
+    // Bốn cảnh mà lượt trước render 200..6000 hàng, nay phải về đúng cửa sổ thường.
+    for (const [c, n] of [[200, 600], [295, 600], [500, 600], [5999, 6000]]) {
       assert.equal(
-        soHang(k.start, k.end),
-        d + 2,
-        `d=${d} > viewportH/rowH ⇒ phai render d+2 hang (do duoc ${soHang(k.start, k.end)})`,
+        ghimDuocChon(c, 0, VIEWPORT_H, ROW_H, n, OVERSCAN),
+        null,
+        `mốc ${c} nằm ngoài trần quanh cửa sổ [0,16) ⇒ KHÔNG được ghim`,
+      );
+      assert.equal(
+        soHangCoGhim(0, n, null, c),
+        CUA_SO,
+        `mốc ${c} ngoài trần ⇒ render đúng cửa sổ thường, KHÔNG theo khoảng cách`,
       );
     }
-    // Ca XAU NHAT do duoc: ban ghi 600 doan, sua doan 1, chon doan 600, KHONG cuon ⇒ render 600.
-    const xauNhat = windowFor(0, VIEWPORT_H, ROW_H, 600, OVERSCAN, 1, 600);
-    assert.equal(soHang(xauNhat.start, xauNhat.end), 600, "ca xau nhat: render CA ban ghi");
+    // Ca XẤU NHẤT mà lượt trước đo được: bản ghi 6000 đoạn, chọn đoạn 5999, KHÔNG cuộn.
+    const xauNhat = windowFor(
+      0, VIEWPORT_H, ROW_H, 6000, OVERSCAN, null,
+      ghimDuocChon(5999, 0, VIEWPORT_H, ROW_H, 6000, OVERSCAN),
+    );
+    assert.equal(
+      soHang(xauNhat.start, xauNhat.end),
+      CUA_SO,
+      "đo được 16 hàng — KHÔNG phải 6 000 hàng / 264 000 px của bản ghim vô điều kiện",
+    );
   });
 
-  it("🔴 T7 CHI PHI DO DUOC: 500 hang = 22 000 px DOM, gap ~31 lan cua so thuong", () => {
-    // `EditScreen` dat `.ed__dem-dau` cao `start * rowH`; phan DUOI chi con `(soDoan - end) * rowH`.
-    // ⇒ khoang render chiem `(end - start) * rowH` px. Do la con so ma Chrome phai layout/ve.
-    // Canh do: dang sua doan 1, CUON toi noi dong 500 (`scrollTop = 44 * 480`), roi chon doan 500.
-    const k = windowFor(44 * 480, VIEWPORT_H, ROW_H, 600, OVERSCAN, 1, 500);
-    assert.equal(soHang(k.start, k.end), 500, "start=1, end=501");
-    const px = soHang(k.start, k.end) * ROW_H;
-    assert.equal(px, 22_000);
-    // ⚠️ Doi chieu DUNG CHO: cua so KHONG ghim o CUNG `scrollTop` la 26 hang (do duoc) — KHONG phai
-    // 16 (16 la o `scrollTop = 0`). Lan do dau cua tep nay so sai cho va bao `704` (do duoc: 924).
-    const cungCho = windowFor(44 * 480, VIEWPORT_H, ROW_H, 600, OVERSCAN, null, null);
-    assert.equal(soHang(cungCho.start, cungCho.end), 21);
-    assert.equal(soHang(cungCho.start, cungCho.end) * ROW_H, 924);
-    // ⇒ Gia cua D4 trong canh nay: gap ~23 lan dien tich DOM phai layout.
-    assert.ok(px / 924 > 23, `ty le phai > 23, do duoc ${px / 924}`);
-    // Va so voi cua so o DAU danh sach (16 hang = 704 px) thi gap ~31 lan.
-    const dauDanhSach = windowFor(0, VIEWPORT_H, ROW_H, 600, OVERSCAN, null, null);
-    assert.equal(soHang(dauDanhSach.start, dauDanhSach.end) * ROW_H, 704);
-    assert.ok(px / 704 > 31, `ty le phai > 31, do duoc ${px / 704}`);
+  it("🔴 BẤT BIẾN CỦA TRẦN: ghim trong trần thêm TỐI ĐA `TRẦN` hàng, với MỌI vị trí cuộn", () => {
+    const TRẦN = tranGhimThem(VIEWPORT_H, ROW_H, OVERSCAN);
+    const N = 6000;
+    let xauNhatThem = 0;
+    for (const cuon of [0, 44 * 3, 44 * 10, 44 * 100, 44 * 480, 44 * 3000, 44 * 5999]) {
+      const khongGhim = soHangCoGhim(cuon, N, null, null);
+      for (const c of [0, 1, 15, 16, 40, 47, 48, 100, 500, 481, 1000, 3000, 5999]) {
+        const coGhim = soHangCoGhim(cuon, N, null, c);
+        const them = coGhim - khongGhim;
+        assert.ok(
+          them <= TRẦN,
+          `cuon=${cuon}, moc=${c}: ghim them ${them} hang > TRAN ${TRẦN} (do duoc ${coGhim} so voi ${khongGhim})`,
+        );
+        if (them > xauNhatThem) xauNhatThem = them;
+      }
+    }
+    // Đối chứng DƯƠNG: trần này có được CHẠM tới — nếu không thì khẳng định trên là rỗng.
+    assert.ok(xauNhatThem > 0, "ít nhất một cấu hình phải dùng tới trần");
+    assert.ok(xauNhatThem <= TRẦN, `do duoc ${xauNhatThem}`);
+  });
+
+  it("🔴 ĐỐI CHỨNG ĐÚNG NGUỒN (I5): ×23/×31 là giá của bản ghim `editingSegment`, D4 thêm ~1%", () => {
+    // `scrollTop = 44 * 480` = 21 120 px — cảnh "cuộn tới nơi dòng 500".
+    const cuon = 44 * 480;
+    // 1) KHÔNG ghim gì: 21 hàng.
+    assert.equal(soHangCoGhim(cuon, 600, null, null), 21, "cua so thuong tai cho cuon nay");
+    // 2) CHỈ ghim `editingSegment` = 1 (bản ghim có từ Task 6/U6): 495 hàng.
+    assert.equal(soHangCoGhim(cuon, 600, 1, null), 495, "giá của `editingSegment` một mình");
+    // 3) THÊM `D4` (chọn đoạn 500): 500 hàng ⇒ D4 chỉ thêm 5 hàng.
+    assert.equal(soHangCoGhim(cuon, 600, 1, 500), 500, "giá khi có cả hai mốc ghim");
+    const them = soHangCoGhim(cuon, 600, 1, 500) - soHangCoGhim(cuon, 600, 1, null);
+    assert.equal(them, 5, "D4 thêm ĐÚNG 5 hàng");
+    assert.ok(them / 495 < 0.02, `D4 thêm ~${Math.round((them / 495) * 100)}% — không phải ×23`);
+    // ⇒ Hai tỉ lệ mà báo cáo cũ gán cho D4 là của bản ghim `editingSegment`:
+    assert.ok(495 / 21 > 23, "×23 so với KHÔNG ghim — nhưng đó là giá của `editingSegment`");
+    assert.ok(500 / 16 > 31, "×31 so với cửa sổ ở ĐẦU danh sách — cũng là giá của `editingSegment`");
+    // Và tỉ lệ ĐÚNG của D4 trong chính cảnh đó:
+    assert.ok((500 - 495) / 495 < 0.011, "D4 thêm ~1 % khi mốc chọn nằm trong tầm cuộn");
+  });
+
+  it("🔴 NGOÀI TRẦN + có `editingSegment` xa: giá còn lại là của U6, ĐÃ KHAI, không phải của D4", () => {
+    // Ca này được khai TRẦN (kèm chủ = U6/Task 6) trong báo cáo vòng sửa 1: dòng đang GÕ phải
+    // luôn ở trong DOM (spec UI §8.3), nên khi người dùng cuộn đi xa thì khoảng render vẫn dài
+    // bằng khoảng cách tới nó. Đo ở đây để con số nằm trong mã, không nằm trong lời kể.
+    const cuon = 44 * 480; // cuộn tới dòng ~480
+    assert.equal(soHangCoGhim(cuon, 600, 1, null), 495, "ghim `editingSegment` = 1 ⇒ 495 hàng");
+    // Nếu người dùng cuộn xuống ĐÁY, giá đó vẫn theo (đây là hệ quả của U6, có TRƯỚC D4):
+    assert.equal(soHangCoGhim(44 * 580, 600, 1, null), 595, "cuộn gần đáy ⇒ ghim dòng 1 ⇒ 595 hàng");
+    // Còn `D4` trong cùng cảnh đó KHÔNG thêm gì (mốc chọn 5999 nằm ngoài trần ⇒ không ghim):
+    assert.equal(soHangCoGhim(44 * 580, 600, 1, 5999), 595, "D4 KHÔNG thêm hàng nào ở cảnh này");
   });
 });

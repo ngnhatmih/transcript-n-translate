@@ -5087,20 +5087,29 @@ describe("App: KENH THAT + HANG DOI THAT tu server node:http trong tien trinh", 
     unmount();
   });
 
-  it("T11 J/K/N trong danh sách DÀI (ảo hoá CẮT dòng ra): dòng vừa chọn phải có MẶT trong DOM", async () => {
-    // 🔴 MỆNH ĐỀ DOM (re-review §7 mục ③, vế (a)). `J`/`K`/`N` đổi `currentSegment`, và dòng vừa
-    // được chọn phải có MẶT trong DOM. Trước lượt gom nợ này `EditScreen` CHỈ ghim `editingSegment`
-    // (`windowFor(..., editingSegment)`), nên với một danh sách đủ dài để ảo hoá THẬT SỰ cắt dòng đó
-    // ra, mệnh đề này **SAI** — đó là lỗi SẢN PHẨM, không phải một bài ghim yếu.
-    // ⚠️ Cửa sổ mặc định (`VIEWPORT_H` 480 / `ROW_H` 44 / `OVERSCAN` 5) chỉ chứa các dòng 0..15;
-    // dòng nghi ngờ thứ hai ở i = 40 nằm NGOÀI cửa sổ. Vế "NHÌN THẤY được" (cuộn/layout) mới cần
-    // Chrome — jsdom không có layout, nên ở đây ghim ĐÚNG vế DOM-presence.
+  it("T11 J/K/N trong danh sách DÀI (ảo hoá CẮT dòng ra): HAI VẾ — trong TRẦN thì GHIM, ngoài TRẦN thì CUỘN tới", async () => {
+    // 🔴 HAI VẾ (Task 12 vòng sửa 1, `I4(d)` — thay cho bài một-vế của lượt trước).
+    //
+    // Mệnh đề của `D4` là mệnh đề **DOM**: dòng vừa chọn phải có MẶT trong DOM. Nhưng bản ghim
+    // VÔ ĐIỀU KIỆN làm khoảng render dài ĐÚNG BẰNG khoảng cách giữa hai mốc — đo được `n=6000`,
+    // `e=1`, `c=5999` ⇒ **6 000 hàng / 264 000 px**, tức giá không có trần theo dữ liệu. Từ vòng
+    // sửa 1, mốc chọn **chỉ được ghim trong TRẦN** (`EditScreen.tranGhimThem` = 2 khung nhìn =
+    // **32 hàng** với `480/44/5`), và NGOÀI trần thì `EditScreen` **CUỘN khung tới** nó.
+    //
+    //  - **VẾ A — TRONG TRẦN** (i = 40, cửa sổ ban đầu [0,16), trần ⇒ tới 47): dòng đó PHẢI có mặt
+    //    trong DOM **và khung KHÔNG được cuộn**. Vế này ghim được TRỌN VẸN trong jsdom (không cần
+    //    layout) — và nó là vế chứng minh bản ghim còn sống.
+    //  - **VẾ B — NGOÀI TRẦN** (i = 500): dòng đó PHẢI có mặt trong DOM **vì khung ĐÃ CUỘN TỚI**
+    //    (khẳng định `scrollTop > 0`). Vế "và nó THẬT SỰ nhìn thấy được trên màn hình" **chỉ
+    //    Chrome thật đo được** (`e2e/plans/ban-ghi-dai-t7.json`, bước `T7-G`) — jsdom không có
+    //    layout, nên ở đây chỉ ghim được *"đã cuộn"* chứ không ghim được *"đã nhìn thấy"*.
     const dai: Segment[] = Array.from(
-      { length: 60 },
+      { length: 600 },
       (_, i) => doan(i, i * 2, i * 2 + 2, `đoạn dài ${i}`),
     );
     dai[1] = { ...dai[1], suspect: true };
     dai[40] = { ...dai[40], suspect: true };
+    dai[500] = { ...dai[500], suspect: true };
     TRANSCRIPT_CHI_TIET = {
       ...TRANSCRIPT_CHI_TIET,
       3: { ...TRANSCRIPT_CHI_TIET_GOC[3], segments: dai },
@@ -5114,8 +5123,8 @@ describe("App: KENH THAT + HANG DOI THAT tu server node:http trong tien trinh", 
     // ⚠️ HAI NHỊP DỌN TRONG BÀI (cùng kỹ thuật đã dùng để đóng rò async ở `c575192`): `useShortcuts`
     // gắn lại listener mỗi lượt render (deps `[xuLy, mode]`), nên listener CŨ trong "cửa sổ
     // một-lượt-commit" đọc `transcript.data` của lượt TRƯỚC (`null`) ⇒ một phím rơi ĐÚNG cửa sổ đó
-    // bị NUỐT IM LẶNG (cùng lớp với `D1 NỀN MỚI HƠN (CỬA SỔ CHƯA GẮN LẠI)`; tôi đã gặp đúng ca này
-    // khi bài còn thiếu hai nhịp). Đây là `waitFor` — một phép cho theo NHỊP, không phải `sleep`.
+    // bị NUỐT IM LẶNG. Đây là `waitFor` — một phép cho theo NHỊP, không phải `sleep`.
+    // ⚠️ Vòng sửa 1 KHÔNG thêm chỗ dùng mới nào cho kỹ thuật này (nó chỉ được giữ nguyên ở đây).
     await waitFor(() => { assert.ok(true, "nhịp dọn 1"); }, { timeout: 2000, interval: 10 });
     await waitFor(() => { assert.ok(true, "nhịp dọn 2"); }, { timeout: 2000, interval: 10 });
     assert.equal(
@@ -5124,12 +5133,20 @@ describe("App: KENH THAT + HANG DOI THAT tu server node:http trong tien trinh", 
       "ca này chỉ có nghĩa khi tiêu điểm ở BODY (guard ô nhập sẽ nuốt phím toàn cục)",
     );
 
-    // ĐỐI CHỨNG DƯƠNG của chính phép đo: khi CHƯA chọn dòng 40 thì ảo hoá phải cắt nó RA. Thiếu vế
-    // này thì "có mặt" có thể đúng một cách vô nghĩa (một danh sách không hề ảo hoá).
+    const khung = container.querySelector(".ed__khung") as HTMLElement;
+    assert.ok(khung !== null, "danh sách phải nằm trong một khung cuộn (C1)");
+
+    // ĐỐI CHỨNG DƯƠNG của cả hai vế: CHƯA chọn thì ảo hoá phải cắt CẢ HAI dòng ra. Thiếu vế này
+    // thì "có mặt" có thể đúng một cách vô nghĩa (một danh sách không hề ảo hoá).
     assert.equal(
       container.querySelector('[data-i="40"]'),
       null,
       "chưa chọn thì dòng 40 phải NGOÀI cửa sổ (nếu không, danh sách này không ảo hoá thật)",
+    );
+    assert.equal(
+      container.querySelector('[data-i="500"]'),
+      null,
+      "chưa chọn thì dòng 500 cũng phải NGOÀI cửa sổ",
     );
 
     // (1) `N` lần đầu ⇒ dòng nghi ngờ ĐẦU (i=1, vẫn TRONG cửa sổ).
@@ -5141,29 +5158,59 @@ describe("App: KENH THAT + HANG DOI THAT tu server node:http trong tien trinh", 
       "`N` phải chọn dòng nghi ngờ đầu (i=1)",
     );
 
-    // (2) `N` lần hai ⇒ dòng NGHI NGỜ KẾ TIẾP (i=40) — và nó phải được GHIM vào DOM.
+    // (2) 🔴 VẾ A — `N` lần hai ⇒ i=40, NGOÀI cửa sổ nhưng TRONG TRẦN (40 < 16 + 32).
     fireEvent.keyDown(document.body, { key: "n" });
     await choPhuHop(
       container,
       '[data-i="40"]',
       (el) => (el.getAttribute("class") ?? "").includes("is-current"),
-      "`N` chọn dòng 40 NGOÀI cửa sổ ⇒ dòng đó phải có MẶT trong DOM",
+      "TRONG TRẦN ⇒ dòng vừa chọn phải có MẶT trong DOM",
+    );
+    assert.equal(
+      khung.scrollTop,
+      0,
+      "TRONG TRẦN thì đường bù là GHIM, KHÔNG phải cuộn — khung phải đứng yên",
+    );
+    assert.ok(
+      container.querySelectorAll("[data-i]").length <= 48,
+      "TRONG TRẦN ⇒ tối đa cửa sổ (16) + TRẦN (32) hàng; đo được "
+        + `${container.querySelectorAll("[data-i]").length}`,
     );
 
-    // (3) `K` (dòng sau) ra khỏi cửa sổ ⇒ cũng phải có mặt; rồi `J` (dòng trước) quay lại.
+    // (3) 🔴 VẾ B — `N` lần ba ⇒ i=500, NGOÀI TRẦN (`500 > 16 + 32 - 1`) ⇒ KHÔNG ghim, và đường bù
+    //     là CUỘN khung tới nó. Sau khi cuộn, dòng đó nằm trong cửa sổ nên vẫn có mặt.
+    fireEvent.keyDown(document.body, { key: "n" });
+    await choPhuHop(
+      container,
+      '[data-i="500"]',
+      (el) => (el.getAttribute("class") ?? "").includes("is-current"),
+      "NGOÀI TRẦN ⇒ phải CUỘN tới dòng 500 (và dòng đó vào cửa sổ nên vẫn có MẶT trong DOM)",
+    );
+    assert.ok(
+      khung.scrollTop > 0,
+      "NGOÀI TRẦN ⇒ khung PHẢI đã cuộn tới (đây là đường bù của bản ghim có trần; "
+        + `đo được scrollTop=${khung.scrollTop})`,
+    );
+    assert.ok(
+      container.querySelectorAll("[data-i]").length <= 48,
+      "NGOÀI TRẦN ⇒ số hàng vẫn là cửa sổ thường, KHÔNG nở theo khoảng cách; đo được "
+        + `${container.querySelectorAll("[data-i]").length}`,
+    );
+
+    // (4) `K`/`J` đi MỘT dòng một lần quanh chỗ đang cuộn ⇒ vẫn trong trần, vẫn phải có mặt.
     fireEvent.keyDown(document.body, { key: "k" });
     await choPhuHop(
       container,
-      '[data-i="41"]',
+      '[data-i="501"]',
       (el) => (el.getAttribute("class") ?? "").includes("is-current"),
-      "`K` chọn dòng 41 (ngoài cửa sổ mặc định) ⇒ dòng đó phải có MẶT trong DOM",
+      "`K` chọn dòng 501 (sát cửa sổ ⇒ trong trần) ⇒ dòng đó phải có MẶT trong DOM",
     );
     fireEvent.keyDown(document.body, { key: "j" });
     await choPhuHop(
       container,
-      '[data-i="40"]',
+      '[data-i="500"]',
       (el) => (el.getAttribute("class") ?? "").includes("is-current"),
-      "`J` phải quay lại dòng 40 (và dòng đó vẫn phải có MẶT trong DOM)",
+      "`J` phải quay lại dòng 500 (và dòng đó vẫn phải có MẶT trong DOM)",
     );
 
     assert.deepEqual(
