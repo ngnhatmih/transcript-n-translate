@@ -37,6 +37,7 @@ import type {
   TranslationCreated,
   TranslationDetail,
 } from "../api/types.ts";
+import { BANG_PHIM, DA_NOI } from "../keys/shortcuts.ts";
 import { setupDom, teardownDom } from "../../test/dom.ts";
 
 /** Du lieu THAT dung hinh dang backend: `Source` (8 khoa) va `Job` (15 khoa). */
@@ -1205,6 +1206,14 @@ let App: () => unknown;
  */
 let taoPhanTu: (type: unknown) => unknown;
 
+/**
+ * `play`/`pause` NGUYÊN BẢN của `HTMLMediaElement` trong jsdom — `before` thay chúng bằng hàm rỗng
+ * (jsdom KHÔNG hiện thực hai hàm này và log `Not implemented` ra `console.error`, mà tệp này ghim
+ * "không tiếng ồn console"), `after` trả lại. Xem comment đầy đủ ở `before`.
+ */
+let playGoc: (() => unknown) | null = null;
+let pauseGoc: (() => unknown) | null = null;
+
 /** Cho chuoi xuat hien trong DOM THAT — `waitFor` co han nen khong treo vo han. */
 async function choChu(container: HTMLElement, chuoi: string): Promise<void> {
   await waitFor(
@@ -1463,6 +1472,35 @@ async function moOSua(container: HTMLElement, i: number): Promise<HTMLTextAreaEl
   return o as HTMLTextAreaElement;
 }
 
+/**
+ * NUDGE bằng bàn phím THEO SPEC: `Shift+←/→` = ±0,1s, `Alt+←/→` = ±1s (spec UI §5.1 dòng 300–301,
+ * §5.2 dòng 309).
+ *
+ * ⚠️ VÌ SAO CÓ HELPER NÀY: trước Task 11, **bảy** bài trong tệp này bấm `[`/`]` cho nudge — ĐÚNG
+ * "bảng phím của brief D1", **SAI nguồn spec** (ERRATA #44 mục 3: `[`/`]` = đặt mốc TẠI ĐẦU ĐỌC).
+ * Ánh xạ mới nằm ở MỘT chỗ, nên lần đổi sau không phải sửa bảy bài bằng tay (và không có bài nào
+ * bị bỏ sót).
+ */
+function bamNudge(moc: "start" | "end", buoc: 0.1 | 1 = 0.1): void {
+  fireEvent.keyDown(document.body, {
+    key: moc === "start" ? "ArrowLeft" : "ArrowRight",
+    shiftKey: buoc === 0.1,
+    altKey: buoc === 1,
+  });
+}
+
+/**
+ * Đặt ĐẦU ĐỌC của phần tử media THẬT trong cây rồi phát `timeupdate` — đúng đường mà trình duyệt
+ * báo vị trí phát. jsdom hiện thực `currentTime` như một thuộc tính THẬT (đo được: gán 3,25 ⇒ đọc
+ * lại 3,25), nên "mốc tại đầu đọc" ĐO ĐƯỢC ở đây; thứ KHÔNG đo được ở đây là ÂM THANH (jsdom không
+ * có codec/`play()`) — xem TRẦN trong báo cáo task-11.
+ */
+function datDauDoc(container: HTMLElement, giay: number): void {
+  const media = phanTu(container, "audio.tp__media") as HTMLAudioElement;
+  media.currentTime = giay;
+  fireEvent.timeUpdate(media);
+}
+
 describe("App: KENH THAT + HANG DOI THAT tu server node:http trong tien trinh", () => {
   before(async () => {
     await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()));
@@ -1481,6 +1519,19 @@ describe("App: KENH THAT + HANG DOI THAT tu server node:http trong tien trinh", 
     const reactModule: any = await import("react");
     const react = reactModule.createElement === undefined ? reactModule.default : reactModule;
     taoPhanTu = react.createElement;
+    // ⚠️ BỊT MỘT LỖ CỦA JSDOM — cùng lý do và cùng cách `Transport.test.tsx` (mục 2 ở đầu tệp đó):
+    // jsdom KHÔNG hiện thực `HTMLMediaElement.play()`/`pause()`; hai hàm đó log
+    // `Not implemented: HTMLMediaElement's play() method` ra `console.error`, và CHÍNH TỆP NÀY ghim
+    // "không tiếng ồn console". Bài `T11 PHÁT / TẠM DỪNG` bấm `Space` nên đường đó được thi hành
+    // THẬT. Đây KHÔNG phải mock nghiệp vụ: `Transport` vẫn gọi `play()`/`pause()` trên CHÍNH phần
+    // tử media đã render — chỉ có phần "phát tiếng" (jsdom không có) là bị bịt.
+    const w: any = (globalThis as any).window;
+    playGoc = w.HTMLMediaElement.prototype.play;
+    pauseGoc = w.HTMLMediaElement.prototype.pause;
+    w.HTMLMediaElement.prototype.play = function (): unknown {
+      return undefined;
+    };
+    w.HTMLMediaElement.prototype.pause = function (): void {};
     batTiengOn();
     const shell: any = await import("./App.tsx");
     App = shell.App;
@@ -1551,6 +1602,13 @@ describe("App: KENH THAT + HANG DOI THAT tu server node:http trong tien trinh", 
 
   after(async () => {
     traTiengOn();
+    // TRẢ `play`/`pause` CỦA JSDOM về nguyên trạng TRƯỚC `teardownDom`: global/suite sau phải thừa
+    // hưởng đúng trạng thái mà tệp này nhận (cùng luật với `Transport.test.tsx`).
+    const w: any = (globalThis as any).window;
+    if (w !== undefined && playGoc !== null && pauseGoc !== null) {
+      w.HTMLMediaElement.prototype.play = playGoc;
+      w.HTMLMediaElement.prototype.pause = pauseGoc;
+    }
     for (const res of [...streams]) {
       try {
         res.end();
@@ -3395,7 +3453,7 @@ describe("App: KENH THAT + HANG DOI THAT tu server node:http trong tien trinh", 
     unmount();
   });
 
-  it("D1 NUDGE: `]` đổi `end` +0,1 và `[` đổi `start` −0,1 (so SỐ trên body máy chủ nhận) — TỚI ĐƯỢC ĐĨA", async () => {
+  it("D1 NUDGE: `Shift+→` đổi `end` +0,1 · `Shift+←` đổi `start` −0,1 · `Alt+→/←` đổi ±1 (so SỐ trên body máy chủ nhận) — TỚI ĐƯỢC ĐĨA", async () => {
     const { container, unmount } = render(taoPhanTu(App));
     await toiBienTapBonDoan(container);
     const goc = TRANSCRIPT_CHI_TIET_GOC[3].segments;
@@ -3404,16 +3462,14 @@ describe("App: KENH THAT + HANG DOI THAT tu server node:http trong tien trinh", 
     // Mốc NHÌN THẤY được của dòng đang sửa: nudge mà không thấy kết quả là một phép đo MÙ.
     assert.equal(chu(container, '[data-testid="moc-doan"]'), "0:02.00 → 0:04.00");
 
-    // ⚠️ PHÍM ĐƯỢC BẤM Ở `document.body`, KHÔNG ở `textarea` (vòng sửa I3). Trước vòng sửa, bài
-    // này dispatch `[`/`]` NGAY TRÊN `textarea` rồi khẳng định `dem.patch === 1` — tức nó ghi lại
-    // LỖI (gõ ký tự trong ô sửa là GHI vào máy chủ) như thể là đặc tả ĐÚNG. Phím nóng cấp `window`
-    // nay BỎ QUA mọi phím phát ra từ ô nhập; hành vi đúng có bài riêng: `D1 GÕ TRONG Ô SỬA`.
-    const phim = (k: string): void => {
-      fireEvent.keyDown(document.body, { key: k });
-    };
+    // 🔴 BẢNG PHÍM ĐÃ ĐỔI Ở TASK 11 (ERRATA #44 mục 3): nudge = `Shift+←/→` (±0,1s) và `Alt+←/→`
+    // (±1s) — ĐÚNG spec §5.1 dòng 300–301; còn `[`/`]` = **đặt mốc tại ĐẦU ĐỌC** (bài riêng
+    // `T11 MỐC TẠI ĐẦU ĐỌC`). Bảy bài trong tệp này từng bấm `[`/`]` cho nudge: đúng BẢNG PHÍM CỦA
+    // BRIEF D1, SAI NGUỒN SPEC. ⚠️ Phím vẫn phát Ở `document.body`, KHÔNG ở `textarea` (vòng sửa
+    // I3): phím phát ra từ ô nhập bị bỏ qua, và hành vi đó có bài riêng `D1 GÕ TRONG Ô SỬA`.
 
-    // (1) `]` ⇒ `end` +0,1.
-    phim("]");
+    // (1) `Shift+→` ⇒ `end` +0,1.
+    bamNudge("end");
     await choChu(container, "0:02.00 → 0:04.10");
     assert.equal(dem.patch, 1, "nudge `]` phải TỚI ĐƯỢC ĐĨA (đếm ở phía máy chủ)");
     const sau1 = dem.patchBody?.segments ?? [];
@@ -3426,23 +3482,46 @@ describe("App: KENH THAT + HANG DOI THAT tu server node:http trong tien trinh", 
     assert.equal(sau1[1].text, goc[1].text, "nudge KHÔNG được đụng tới chữ");
     assert.deepEqual(sau1[3], goc[3], "nudge cũng phải giữ NGUYÊN mọi trường của dòng khác");
 
-    // (2) `[` ⇒ `start` −0,1 — vế "KHÔNG CHỒNG LẤN": phép chờ DOM ở giữa bảo đảm lần ghi thứ
+    // (2) `Shift+←` ⇒ `start` −0,1 — vế "KHÔNG CHỒNG LẤN": phép chờ DOM ở giữa bảo đảm lần ghi thứ
     //     nhất đã ĐỌC LẠI xong trước khi bấm lần hai. ⚠️ Vế CHỒNG LẤN (đúng ca đang hỏng ở C1)
     //     KHÔNG được ghim ở đây — xem bài `D1 CHỒNG LẤN` ngay dưới, bài đó bỏ phép chờ và làm
     //     chậm phản hồi PATCH. Tên/comment cũ của mục này khai nó ghim "đọc lại sau khi ghi" ở ca
     //     chồng lấn — lời khai đó MẠNH HƠN thứ bài ghim (I4 của review, ERRATA #44 mục 1).
-    phim("[");
+    bamNudge("start");
     await choChu(container, "0:01.90 → 0:04.10");
     assert.equal(dem.patch, 2, "hai lần nudge ⇒ HAI lần ghi");
     const sau2 = dem.patchBody?.segments ?? [];
     assert.ok(
       Math.abs(sau2[1].start - (goc[1].start - 0.1)) < 1e-9,
-      `\`[\` phải đổi \`start\` −0,1; đo được ${sau2[1].start}`,
+      `\`Shift+←\` phải đổi \`start\` −0,1; đo được ${sau2[1].start}`,
     );
     assert.ok(
       Math.abs(sau2[1].end - (goc[1].end + 0.1)) < 1e-9,
       `nudge thứ hai (KHÔNG chồng lấn) phải GIỮ \`end\` = 4,1; đo được ${sau2[1].end}`,
     );
+
+    // (3) `Alt+→` ⇒ `end` **+1** (KHÔNG phải +0,1): vế thứ hai của spec §5.1 dòng 301 — vế mà bảng
+    //     phím cũ của sản phẩm KHÔNG có. Đây là chỗ một mutant "dùng chung bước 0,1" phải ĐỎ.
+    bamNudge("end", 1);
+    await choChu(container, "0:01.90 → 0:05.10");
+    assert.equal(dem.patch, 3, "ba lần nudge ⇒ BA lần ghi");
+    const sau3 = dem.patchBody?.segments ?? [];
+    assert.ok(
+      Math.abs(sau3[1].end - (goc[1].end + 0.1 + 1)) < 1e-9,
+      `\`Alt+→\` phải đổi \`end\` +1 so với giá trị ĐÃ LƯU (4,1); đo được ${sau3[1].end}`,
+    );
+    assert.equal(sau3[1].start, sau2[1].start, "`Alt+→` KHÔNG được đụng tới `start`");
+
+    // (4) `Alt+←` ⇒ `start` −1.
+    bamNudge("start", 1);
+    await choChu(container, "0:00.90 → 0:05.10");
+    assert.equal(dem.patch, 4, "bốn lần nudge ⇒ BỐN lần ghi");
+    const sau4 = dem.patchBody?.segments ?? [];
+    assert.ok(
+      Math.abs(sau4[1].start - (goc[1].start - 0.1 - 1)) < 1e-9,
+      `\`Alt+←\` phải đổi \`start\` −1 so với giá trị ĐÃ LƯU (1,9); đo được ${sau4[1].start}`,
+    );
+    assert.deepEqual(sau4[3], goc[3], "nudge ±1 cũng phải giữ NGUYÊN mọi trường của dòng khác");
 
     assert.deepEqual(tiengOn, [], "nudge khong duoc sinh tieng on console");
     unmount();
@@ -3461,8 +3540,8 @@ describe("App: KENH THAT + HANG DOI THAT tu server node:http trong tien trinh", 
     // review): làm CHẬM phản hồi PATCH (250 ms) + KHÔNG chờ gì giữa hai lần bấm.
     dem.patchTre = 250;
     const truoc = Date.now();
-    fireEvent.keyDown(document.body, { key: "]" }); // lần ghi 1: end 4,0 → 4,1
-    fireEvent.keyDown(document.body, { key: "[" }); // lần ghi 2: start 2,0 → 1,9 — KHÔNG chờ
+    bamNudge("end"); // lần ghi 1: end 4,0 → 4,1
+    bamNudge("start"); // lần ghi 2: start 2,0 → 1,9 — KHÔNG chờ
     // CHỨNG NHÂN CHỒNG LẤN: lúc bấm phím thứ hai, CHƯA một phản hồi PATCH nào xong (đo đồng bộ ⇒
     // không phụ thuộc tốc độ máy). Không có dòng này thì bài có thể "xanh vì hai lần ghi KHÔNG
     // chồng nhau" — đúng thứ I4 của review cảnh báo.
@@ -3525,14 +3604,14 @@ describe("App: KENH THAT + HANG DOI THAT tu server node:http trong tien trinh", 
     const goc = TRANSCRIPT_CHI_TIET_GOC[3].segments;
     await moOSua(container, 1);
 
-    // ĐỐI CHỨNG DƯƠNG — CÙNG bài, CÙNG phím `]`, CÙNG server; chỉ khác NƠI phát phím: bấm ở
-    // `document.body` (không phải ô nhập) ⇒ phím nóng PHẢI tới được đĩa. Và ĐỘ TRỄ THẬT của nó
-    // được ĐO ⇒ khoảng lặng ở vế âm là khoảng lặng ĐÃ HIỆU CHUẨN (ERRATA #39 mục 1).
+    // ĐỐI CHỨNG DƯƠNG — CÙNG bài, CÙNG phím nudge (`Shift+→`), CÙNG server; chỉ khác NƠI phát
+    // phím: bấm ở `document.body` (không phải ô nhập) ⇒ phím nóng PHẢI tới được đĩa. Và ĐỘ TRỄ THẬT
+    // của nó được ĐO ⇒ khoảng lặng ở vế âm là khoảng lặng ĐÃ HIỆU CHUẨN (ERRATA #39 mục 1).
     const truocDuong = Date.now();
-    fireEvent.keyDown(document.body, { key: "]" });
+    bamNudge("end");
     await choChu(container, "0:02.00 → 0:04.10");
     const doTre = Date.now() - truocDuong;
-    assert.equal(dem.patch, 1, "đối chứng dương: phím `]` NGOÀI ô nhập phải tới được đĩa");
+    assert.equal(dem.patch, 1, "đối chứng dương: phím nudge NGOÀI ô nhập phải tới được đĩa");
 
     // VẾ ÂM (I3): gõ `[`/`]` NHƯ KÝ TỰ trong ô sửa — người dùng đang viết phụ đề, ví dụ
     // `[nhạc nền]`. Danh sách phím nóng ở `window` KHÔNG được cướp ký tự ⇒ **0 request**.
@@ -3563,14 +3642,14 @@ describe("App: KENH THAT + HANG DOI THAT tu server node:http trong tien trinh", 
     const { container, unmount } = render(taoPhanTu(App));
     await toiBienTapBonDoan(container);
 
-    // ĐỐI CHỨNG DƯƠNG — CÙNG bài, CÙNG phím, CÙNG server, chỉ khác "có dòng đang sửa": phím `]`
-    // CÓ đường tới đĩa, và ĐỘ TRỄ THẬT của nó được ĐO ⇒ khoảng lặng ở vế âm là khoảng lặng ĐÃ
-    // HIỆU CHUẨN (ERRATA #39 muc 1: mot phep do khong phan biet duoc "da sua" voi "tiem nham cho"
-    // la phep do vo gia tri). ⚠️ Bấm ở `document.body` (KHÔNG ở `textarea`): từ vòng sửa I3, phím
-    // phát ra từ ô nhập bị bỏ qua, còn phím ngoài ô mới là đường nudge thật.
+    // ĐỐI CHỨNG DƯƠNG — CÙNG bài, CÙNG phím nudge, CÙNG server, chỉ khác "có dòng đang sửa": phím
+    // `Shift+→` CÓ đường tới đĩa, và ĐỘ TRỄ THẬT của nó được ĐO ⇒ khoảng lặng ở vế âm là khoảng
+    // lặng ĐÃ HIỆU CHUẨN (ERRATA #39 muc 1: mot phep do khong phan biet duoc "da sua" voi "tiem
+    // nham cho" la phep do vo gia tri). ⚠️ Bấm ở `document.body` (KHÔNG ở `textarea`): từ vòng sửa
+    // I3, phím phát ra từ ô nhập bị bỏ qua, còn phím ngoài ô mới là đường nudge thật.
     await moOSua(container, 1);
     const truocDuong = Date.now();
-    fireEvent.keyDown(document.body, { key: "]" });
+    bamNudge("end");
     await choChu(container, "0:02.00 → 0:04.10");
     const doTre = Date.now() - truocDuong;
     assert.equal(dem.patch, 1, "đối chứng dương: nudge khi ĐANG sửa phải tới được đĩa");
@@ -3587,6 +3666,10 @@ describe("App: KENH THAT + HANG DOI THAT tu server node:http trong tien trinh", 
     // M5 cua review: reset PHAI du qua bon bo dem (`patchBody`/`versionTruocPatch` truoc day bi bo
     // sot ⇒ mot khang dinh sau moc nay doc body CU va XANH gia) — nay di qua MOT helper.
     xoaDemGhi();
+    // CẢ HAI HỌ phím của màn Biên tập đều phải TRƠ khi không có dòng đang sửa: nudge (`Shift+←/→`)
+    // và "đặt mốc tại đầu đọc" (`[`/`]`).
+    bamNudge("end");
+    bamNudge("start");
     fireEvent.keyDown(document.body, { key: "]" });
     fireEvent.keyDown(document.body, { key: "[" });
     await choHaiNhip();
@@ -4480,16 +4563,16 @@ describe("App: KENH THAT + HANG DOI THAT tu server node:http trong tien trinh", 
     o.blur();
     assert.notEqual(document.activeElement, o, "đối chứng dương phải có tiêu điểm NGOÀI ô nhập");
     const truocDuong = Date.now();
-    fireEvent.keyDown(document.body, { key: "]" });
+    bamNudge("end");
     await choChu(container, "0:02.00 → 0:04.10");
     const doTre = Date.now() - truocDuong;
-    assert.equal(dem.patch, 1, "đối chứng dương: tiêu điểm ngoài ô ⇒ phím `]` tới được đĩa");
+    assert.equal(dem.patch, 1, "đối chứng dương: tiêu điểm ngoài ô ⇒ phím nudge tới được đĩa");
 
     // VE DUOC GHIM: tieu diem O TRONG o nhap, nhung phim duoc PHAT RA tu NGOAI o (`target` = body).
     xoaDemGhi();
     o.focus();
     assert.equal(document.activeElement, o, "ca này chỉ có nghĩa khi tiêu điểm Ở TRONG ô nhập");
-    fireEvent.keyDown(document.body, { key: "]" });
+    bamNudge("end");
     await choHaiNhip();
     assert.equal(dem.patch, 0, "tiêu điểm trong ô nhập ⇒ KHÔNG được ghi gì");
     await choNhip(Math.max(doTre, 50) + 100);
@@ -4518,7 +4601,7 @@ describe("App: KENH THAT + HANG DOI THAT tu server node:http trong tien trinh", 
     // cua doan 0 da doi.
     dem.nguoiGhiKhac = true;
     const truoc = Date.now();
-    fireEvent.keyDown(document.body, { key: "]" }); // lần ghi 1: end 4,0 → 4,1
+    bamNudge("end"); // lần ghi 1: end 4,0 → 4,1
     // TIN HIEU: DOM doc lai thay CHU CUA NGUOI KHAC ⇒ `transcript.data` da la ban `version` 3.
     await choPhuHop(
       container,
@@ -4531,7 +4614,7 @@ describe("App: KENH THAT + HANG DOI THAT tu server node:http trong tien trinh", 
     assert.equal(chu(container, '[data-testid="moc-doan"]'), "0:02.00 → 0:04.10", "nudge thứ nhất phải còn trong DOM");
 
     // LAN GHI THU HAI phai tinh tu ban MOI (version 3) ⇒ giu nguyen thay doi cua nguoi khac.
-    fireEvent.keyDown(document.body, { key: "[" }); // lần ghi 2: start 2,0 → 1,9
+    bamNudge("start"); // lần ghi 2: start 2,0 → 1,9
     await waitFor(
       () => {
         assert.equal(dem.patchBodies.length, 2, "hai lần bấm ⇒ HAI lần ghi (không lần nào bị bỏ)");
@@ -4585,11 +4668,11 @@ describe("App: KENH THAT + HANG DOI THAT tu server node:http trong tien trinh", 
       const dong = container.querySelector('[data-i="0"]');
       if (dong === null || !(dong.textContent ?? "").includes("người khác sửa")) return;
       daBamLanHai.value = true;
-      fireEvent.keyDown(document.body, { key: "[" }); // lần ghi 2: start 2,0 → 1,9
+      bamNudge("start"); // lần ghi 2: start 2,0 → 1,9
     });
     try {
       theoDoi.observe(container, { subtree: true, childList: true, characterData: true });
-      fireEvent.keyDown(document.body, { key: "]" }); // lần ghi 1: end 4,0 → 4,1
+      bamNudge("end"); // lần ghi 1: end 4,0 → 4,1
       await waitFor(
         () => {
           assert.equal(dem.patchBodies.length, 2, "phím thứ hai không tới được đường ghi");
@@ -4633,6 +4716,297 @@ describe("App: KENH THAT + HANG DOI THAT tu server node:http trong tien trinh", 
     await waitFor(() => { assert.ok(true, "nhịp dọn 2"); }, { timeout: 2000, interval: 10 });
 
     assert.deepEqual(tiengOn, [], "cua so chua gan lai khong duoc sinh tieng on console");
+    unmount();
+  });
+
+  // ===========================================================================
+  // TASK 11 — BÀN PHÍM §5.1 + BẢNG PHÍM §11.4 + CHUỖI §12.5 ĐI BẰNG BÀN PHÍM.
+  //
+  // ⚠️ Bàn phím KHÔNG phải thứ được dựng từ số 0 ở task này: `App.tsx` đã có một listener ở
+  // `window` nhận `[`/`]` và gọi `nudgeDoan`, đã được đo bằng bàn phím THẬT trong Chrome thật
+  // (ERRATA #46 mục 5). Việc của task là HỢP NHẤT nó thành `src/keys/useShortcuts.ts` (MỘT
+  // listener ở `document`, guard HAI vế giữ nguyên) và TRẢ NỢ ÁNH XẠ: `[`/`]` = đặt mốc tại đầu
+  // đọc, nudge = `Shift+←/→` (±0,1s) và `Alt+←/→` (±1s) — ERRATA #44 mục 3.
+  // ===========================================================================
+
+  it("T11 MỐC TẠI ĐẦU ĐỌC: `[`/`]` đặt mốc = `media.currentTime` (KHÔNG phải nudge) — và đọc đầu đọc LÚC BẤM", async () => {
+    const { container, unmount } = render(taoPhanTu(App));
+    await toiBienTapBonDoan(container);
+    const goc = TRANSCRIPT_CHI_TIET_GOC[3].segments;
+    await moOSua(container, 1);
+
+    // (1) `]` ⇒ mốc `end` = ĐẦU ĐỌC 3,2. Ba vế phủ định đi kèm là thứ phân biệt "đặt mốc" với
+    //     "nudge": không phải `end + 0,1`, và `start` không bị đụng tới.
+    datDauDoc(container, 3.2);
+    fireEvent.keyDown(document.body, { key: "]" });
+    await choChu(container, "0:02.00 → 0:03.20");
+    assert.equal(dem.patch, 1, "`]` phải TỚI ĐƯỢC ĐĨA (đếm ở phía máy chủ)");
+    const sau1 = dem.patchBody?.segments ?? [];
+    assert.ok(
+      Math.abs(sau1[1].end - 3.2) < 1e-9,
+      `\`]\` phải đặt \`end\` = ĐẦU ĐỌC 3,2; đo được ${sau1[1].end}`,
+    );
+    assert.ok(
+      Math.abs(sau1[1].end - (goc[1].end + 0.1)) > 1e-9,
+      "`]` KHÔNG được hành xử như nudge (+0,1) — đó là bảng phím của brief D1, đã bị bác",
+    );
+    assert.equal(sau1[1].start, goc[1].start, "`]` KHÔNG được đụng tới `start`");
+    assert.deepEqual(sau1[3], goc[3], "đặt mốc cũng phải giữ NGUYÊN mọi trường của dòng khác");
+
+    // (2) `[` ⇒ mốc `start` = đầu đọc 1,5, và mốc `end` đã đặt (3,2) phải CÒN.
+    datDauDoc(container, 1.5);
+    fireEvent.keyDown(document.body, { key: "[" });
+    await choChu(container, "0:01.50 → 0:03.20");
+    assert.equal(dem.patch, 2, "hai lần đặt mốc ⇒ HAI lần ghi");
+    const sau2 = dem.patchBody?.segments ?? [];
+    assert.ok(Math.abs(sau2[1].start - 1.5) < 1e-9, `\`[\` phải đặt \`start\` = 1,5; đo được ${sau2[1].start}`);
+    assert.ok(Math.abs(sau2[1].end - 3.2) < 1e-9, `mốc \`end\` đã đặt phải CÒN; đo được ${sau2[1].end}`);
+
+    // (3) ĐẦU ĐỌC ĐƯỢC ĐỌC **LÚC BẤM**, KHÔNG phải lúc hàng đợi thi hành. Đây là ca mà một bản cài
+    //     "đọc `currentTime` trong việc đã xếp hàng" sẽ sai: PATCH đầu đang BAY (250 ms), đầu đọc
+    //     chạy tiếp ngay sau cú bấm, nên mốc phải là 2,5 chứ không phải 4,4.
+    dem.patchTre = 250;
+    datDauDoc(container, 2.5);
+    fireEvent.keyDown(document.body, { key: "]" });
+    datDauDoc(container, 4.4);
+    await choChu(container, "0:01.50 → 0:02.50");
+    assert.equal(dem.patch, 3, "ba lần đặt mốc ⇒ BA lần ghi");
+    const sau3 = dem.patchBody?.segments ?? [];
+    assert.ok(
+      Math.abs(sau3[1].end - 2.5) < 1e-9,
+      `mốc phải là ĐẦU ĐỌC LÚC BẤM (2,5), không phải vị trí sau đó (4,4); đo được ${sau3[1].end}`,
+    );
+
+    assert.deepEqual(tiengOn, [], "dat moc tai dau doc khong duoc sinh tieng on console");
+    unmount();
+  });
+
+  it("T11 PHÁT / TẠM DỪNG: `Space` đổi `aria-pressed` false → true → false (vế THỨ HAI mới là vế ghim)", async () => {
+    const { container, unmount } = render(taoPhanTu(App));
+    // Có kênh đang chọn ⇒ thanh transport có nguồn, tức đường `play()`/`pause()` được thi hành THẬT.
+    await toiBienTapBonDoan(container);
+    assert.equal(
+      phanTu(container, ".tp__phat").getAttribute("aria-pressed"),
+      "false",
+      "chưa phát thì `aria-pressed` phải là false",
+    );
+
+    fireEvent.keyDown(document.body, { key: " " });
+    await choPhuHop(
+      container,
+      ".tp__phat",
+      (el) => el.getAttribute("aria-pressed") === "true",
+      "`Space` phải PHÁT",
+    );
+    // 🔴 VẾ GHIM: lần bấm THỨ HAI. Một bản cài "phím phát luôn đặt `playing = true`" đi qua được vế
+    // thứ nhất và ĐỔ ở đây (mutant `P4`).
+    fireEvent.keyDown(document.body, { key: " " });
+    await choPhuHop(
+      container,
+      ".tp__phat",
+      (el) => el.getAttribute("aria-pressed") === "false",
+      "`Space` lần thứ hai phải TẠM DỪNG (trạng thái phải đảo, không phải luôn `true`)",
+    );
+
+    assert.deepEqual(tiengOn, [], "phat/tam dung bang ban phim khong duoc sinh tieng on console");
+    unmount();
+  });
+
+  it("T11 CHUYỂN ĐOẠN + SỬA DÒNG: `K`/`J` đổi dòng đang chọn (KẸP ở hai đầu), `Enter` mở ô sửa CỦA NÓ", async () => {
+    const { container, unmount } = render(taoPhanTu(App));
+    await toiBienTapBonDoan(container);
+    assert.deepEqual(
+      [...container.querySelectorAll(".ed__item.is-current")].map((el) => el.getAttribute("data-i")),
+      [],
+      "chưa bấm gì thì KHÔNG dòng nào đang chọn",
+    );
+
+    // (1) `K` = dòng sau. Chưa chọn gì ⇒ dòng ĐẦU.
+    fireEvent.keyDown(document.body, { key: "k" });
+    await choPhuHop(
+      container,
+      '[data-i="0"]',
+      (el) => (el.getAttribute("class") ?? "").includes("is-current"),
+      "`K` phải chọn dòng ĐẦU khi chưa có dòng nào đang chọn",
+    );
+
+    // (2) KẸP Ở ĐẦU: `J` tại dòng 0 KHÔNG được VÒNG xuống dòng cuối. Vế phủ định mới là vế phân
+    //     biệt "kẹp" với "vòng" — một bản cài vòng sẽ làm dòng 3 thành `is-current` và bài ĐỎ.
+    fireEvent.keyDown(document.body, { key: "j" });
+    await choPhuHop(
+      container,
+      '[data-i="0"]',
+      (el) => (el.getAttribute("class") ?? "").includes("is-current"),
+      "`J` tại dòng ĐẦU phải KẸP (dòng 0 vẫn đang chọn)",
+    );
+    assert.equal(
+      container.querySelector('[data-i="3"].is-current'),
+      null,
+      "`J` tại dòng đầu KHÔNG được VÒNG xuống dòng cuối",
+    );
+
+    // (3) Đi tiếp tới dòng 2, rồi `Enter` mở ô sửa CỦA DÒNG ĐANG CHỌN (không phải dòng 0).
+    fireEvent.keyDown(document.body, { key: "k" });
+    await choPhuHop(
+      container,
+      '[data-i="1"]',
+      (el) => (el.getAttribute("class") ?? "").includes("is-current"),
+      "`K` phải đi tới dòng 1",
+    );
+    fireEvent.keyDown(document.body, { key: "k" });
+    await choPhuHop(
+      container,
+      '[data-i="2"]',
+      (el) => (el.getAttribute("class") ?? "").includes("is-current"),
+      "`K` phải đi tới dòng 2",
+    );
+    fireEvent.keyDown(document.body, { key: "Enter" });
+    await choPhuHop(
+      container,
+      '[data-i="2"]',
+      (el) => (el.getAttribute("class") ?? "").includes("is-editing"),
+      "`Enter` phải mở ô sửa của DÒNG ĐANG CHỌN",
+    );
+    assert.equal(
+      container.querySelector('[data-i="0"].is-editing'),
+      null,
+      "`Enter` KHÔNG được mở ô sửa của một dòng khác",
+    );
+    assert.equal(
+      (phanTu(container, '[data-i="2"] textarea') as HTMLTextAreaElement).value,
+      "dòng ba",
+      "ô sửa phải mang chữ của DÒNG ĐANG CHỌN",
+    );
+
+    assert.deepEqual(tiengOn, [], "chuyen doan bang ban phim khong duoc sinh tieng on console");
+    unmount();
+  });
+
+  it("T11 N: `N` nhảy tới đoạn NGHI NGỜ kế tiếp (bỏ qua các dòng không nghi ngờ)", async () => {
+    const { container, unmount } = render(taoPhanTu(App));
+    await toiBienTapBonDoan(container);
+
+    // Bản ghi #3 chỉ có MỘT dòng nghi ngờ (`i = 3`). Một bản cài "đi tuần tự" sẽ dừng ở dòng 0 ⇒ ĐỎ.
+    fireEvent.keyDown(document.body, { key: "n" });
+    await choPhuHop(
+      container,
+      '[data-i="3"]',
+      (el) => (el.getAttribute("class") ?? "").includes("is-current"),
+      "`N` phải nhảy tới dòng NGHI NGỜ (i=3), không phải dòng kế tiếp",
+    );
+    assert.equal(
+      container.querySelector(".ed__item.is-current")?.getAttribute("data-i"),
+      "3",
+      "chỉ ĐÚNG MỘT dòng được đang chọn",
+    );
+
+    assert.deepEqual(tiengOn, [], "nhay toi doan nghi ngo khong duoc sinh tieng on console");
+    unmount();
+  });
+
+  it("T11 ĐỔI CHẾ ĐỘ: `Ctrl+2` / `Ctrl+3` / `Ctrl+1` đổi MÀN (quan sát trên ĐẦU RA ĐÃ RENDER)", async () => {
+    const { container, unmount } = render(taoPhanTu(App));
+    await toiBienTapBonDoan(container);
+    assert.ok(container.querySelector(".ed") !== null, "bắt đầu ở màn Biên tập");
+
+    fireEvent.keyDown(document.body, { key: "2", ctrlKey: true });
+    await choPhuHop(container, ".cmp", () => true, "`Ctrl+2` phải hiện màn Đối chiếu");
+    assert.equal(container.querySelector(".ed"), null, "màn Biên tập phải BIẾN MẤT (không chỉ thêm màn mới)");
+
+    fireEvent.keyDown(document.body, { key: "3", ctrlKey: true });
+    await choPhuHop(container, ".gl", () => true, "`Ctrl+3` phải hiện tab Thuật ngữ");
+    assert.equal(container.querySelector(".cmp"), null, "màn Đối chiếu phải biến mất");
+
+    // Vế ngược: `Ctrl+1` phải QUAY VỀ được — nếu không thì vào Thuật ngữ là KHÔNG RA.
+    fireEvent.keyDown(document.body, { key: "1", ctrlKey: true });
+    await choPhuHop(container, ".ed", () => true, "`Ctrl+1` phải quay về màn Biên tập");
+    assert.equal(container.querySelector(".gl"), null, "tab Thuật ngữ phải biến mất");
+
+    assert.deepEqual(tiengOn, [], "doi che do bang ban phim khong duoc sinh tieng on console");
+    unmount();
+  });
+
+  it("T11 BẢNG PHÍM §11.4: `?` mở bảng TỪ CHÍNH bảng dữ liệu, `Esc` ĐÓNG bảng (không thoát ô sửa), và bảng chặn phím khác", async () => {
+    const { container, unmount } = render(taoPhanTu(App));
+    await toiBienTapBonDoan(container);
+    await moOSua(container, 1);
+
+    // (1) `?` mở bảng. Đo được TRƯỚC task (Chrome thật): chuỗi `Phím tắt` KHÔNG tồn tại trong DOM.
+    fireEvent.keyDown(document.body, { key: "?", shiftKey: true });
+    await choPhuHop(container, ".bp", () => true, "`?` phải mở bảng phím tắt");
+    assert.match(container.textContent ?? "", /Phím tắt/, "bảng phải TỰ NÓI nó là gì");
+    const hang = [...container.querySelectorAll(".bp__dong")];
+    assert.equal(
+      hang.length,
+      BANG_PHIM.length,
+      "bảng §11.4 phải in ĐÚNG số hàng của bảng dữ liệu (một nguồn, không chép tay)",
+    );
+    assert.deepEqual(
+      hang.map((el) => el.querySelector(".bp__to-hop")?.textContent ?? ""),
+      BANG_PHIM.map((pt) => pt.toHop),
+      "từng nhãn phím trong DOM phải là nhãn của bảng dữ liệu, cùng thứ tự",
+    );
+
+    // (2) BẢNG ĐANG MỞ ⇒ nó CHẶN các phím khác. `[` lúc này có một dòng đang sửa, nên nếu nó lọt
+    //     qua thì đó là một lượt GHI vào bản ghi sau lưng một lớp phủ đang che màn hình.
+    xoaDemGhi();
+    fireEvent.keyDown(document.body, { key: "[" });
+    fireEvent.keyDown(document.body, { key: "]" });
+    await choHaiNhip();
+    assert.equal(dem.patch, 0, "bảng đang mở ⇒ phím của màn Biên tập KHÔNG được ghi gì");
+
+    // (3) `Esc` ĐÓNG BẢNG, và KHÔNG nuốt luôn ô sửa: `Esc` lần hai mới là "thoát sửa".
+    fireEvent.keyDown(document.body, { key: "Escape" });
+    // ⚠️ Đọc NGAY sau `fireEvent`: RTL bọc nó trong `act`, nên lượt commit của React đã xong — cùng
+    // cách các khẳng định phủ định khác của tệp này đọc DOM (không chờ theo đồng hồ).
+    assert.equal(container.querySelector(".bp"), null, "`Esc` phải đóng bảng phím tắt");
+    assert.ok(
+      (phanTu(container, '[data-i="1"]').getAttribute("class") ?? "").includes("is-editing"),
+      "`Esc` đóng bảng KHÔNG được thoát ô sửa (một phím, một việc)",
+    );
+    fireEvent.keyDown(document.body, { key: "Escape" });
+    await choPhuHop(
+      container,
+      '[data-i="1"]',
+      (el) => !(el.getAttribute("class") ?? "").includes("is-editing"),
+      "`Esc` lần hai (bảng đã đóng) phải THOÁT ô sửa",
+    );
+
+    assert.deepEqual(tiengOn, [], "bang phim khong duoc sinh tieng on console");
+    unmount();
+  });
+
+  it("T11 PHÍM CHƯA CÓ ĐÍCH: `S` / `M` / `Ctrl+Enter` (spec CÓ, sản phẩm CHƯA có đích) ⇒ 0 request và DOM không đổi", async () => {
+    // ⚠️ Danh sách phím lấy TỪ CHÍNH BẢNG (`BANG_PHIM` trừ `DA_NOI`) — không liệt kê tay. Nhờ vậy
+    // nếu sau này một phím trong số đó ĐƯỢC NỐI mà quên bỏ khỏi `DA_NOI`, bài này ĐỎ (bảng đang
+    // nói dối), và nếu một phím ĐÃ NỐI bị bỏ nối thì bài của chính nó ĐỎ.
+    const chuaNoi = BANG_PHIM.filter((pt) => !DA_NOI.has(pt.action.type));
+    assert.deepEqual(
+      chuaNoi.map((pt) => pt.toHop).sort(),
+      ["Ctrl+Enter", "M", "S"],
+      "TRẦN đã khai: đúng ba phím của spec chưa có đích trong sản phẩm",
+    );
+
+    const { container, unmount } = render(taoPhanTu(App));
+    await toiBienTapBonDoan(container);
+    await moOSua(container, 1);
+    xoaDemGhi();
+    const truoc = container.innerHTML;
+
+    for (const pt of chuaNoi) {
+      fireEvent.keyDown(document.body, {
+        key: pt.key,
+        ctrlKey: pt.ctrl ?? false,
+        altKey: pt.alt ?? false,
+        shiftKey: pt.shift ?? false,
+      });
+    }
+    await choHaiNhip();
+    assert.equal(dem.patch, 0, "phím chưa có đích KHÔNG được ghi gì");
+    assert.equal(dem.postTranslations, 0, "phím chưa có đích KHÔNG được tạo bản dịch/job nào");
+    assert.equal(container.innerHTML, truoc, "phím chưa có đích KHÔNG được đổi DOM");
+
+    assert.deepEqual(tiengOn, [], "phim chua co dich khong duoc sinh tieng on console");
     unmount();
   });
 });

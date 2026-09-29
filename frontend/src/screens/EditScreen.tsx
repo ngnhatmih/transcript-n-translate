@@ -43,9 +43,11 @@
  *    cua trang thai rong la `<IntakeFrame/>` — khung ke net dut + dong mono §4.2.
  *    ⚠️ Man nay **KHONG** tu goi API: no chi TRUYEN `onNapTep` xuong (MOT ham nap o `App`,
  *    dung cho ca hai loi vao — xem `src/shell/IntakeFrame.tsx`).
- *  - **Khong xu ly BANG PHIM DAY DU** (`J`/`K`/`Space`/`N`, spec UI §5.1): do la Task 11. Man nay
- *    chi co HAI phim gan voi CHINH o dang mo (`Enter` luu, `Esc` huy) va duong CHUOT (bam dong ⇒
- *    xin mo o sua). ⚠️ `[`/`]` (nudge moc) do `App` bat o cap `window` — cung MOT duong GHI
+ *  - **Khong xu ly BANG PHIM DAY DU** (`J`/`K`/`Space`/`N`, spec UI §5.1): do la Task 11, va no
+ *    nam o `src/keys/` — MỘT listener cấp `document` cho cả app (`useShortcuts`), không phải một
+ *    listener trong màn này. Man nay chi co HAI phim gan voi CHINH o dang mo (`Enter` luu, `Esc`
+ *    huy) va duong CHUOT (bam dong ⇒ xin mo o sua). ⚠️ `[`/`]` (đặt mốc tại đầu đọc) và
+ *    `Shift/Alt+←/→` (nudge) do `App` bat qua bảng phím — cung MOT duong GHI
  *    (`PATCH /api/transcripts/{id}`) voi nut `luu`, va man nay chi BAO bang `onNudge`.
  *  - **Khong GHI gi**: moi thao tac ghi (`luu`, `nudge`) la mot CALLBACK ra ngoai. Man nay khong
  *    `fetch`, khong tu sua `Segment`, khong giu ban sao du lieu may chu, va KHONG tu clamp moc
@@ -177,11 +179,12 @@ export interface EditScreenProps {
    */
   onCancelEdit?: () => void;
   /**
-   * Nudge mot MOC cua dong DANG SUA: `"start"` = mốc bắt đầu −0,1s, `"end"` = mốc kết thúc +0,1s.
-   * ⚠️ Bảng phím này là **của BRIEF D1**, KHÔNG phải của spec UI: spec UI §5.1 gán `[`/`]` cho
-   * *"đặt mốc tại đầu đọc"* và nudge cho `Shift/Alt+←/→` (ERRATA #44 mục 3) — việc đổi khoá thuộc
-   * **Task 11**. ⚠️ Man nay KHONG tu sua mốc: nó chỉ BÁO, còn ben goi mới là người GHI
-   * (`PATCH /api/transcripts/{id}`) — và khi KHÔNG có dòng nào đang sửa thì ben goi KHÔNG LÀM GÌ.
+   * Nudge một MỐC của dòng ĐANG SỬA, bước ±0,1s (spec UI §5.1 dòng 300 + §5.2 dòng 309: nudge =
+   * `Shift+←/→`; `Alt+←/→` = ±1s là vế CHỈ có ở bàn phím — xem TRẦN trong báo cáo task-11).
+   * ⚠️ `"start"` = mốc bắt đầu LÙI 0,1s, `"end"` = mốc kết thúc TIẾN 0,1s: chiều nằm ở ĐÂY, còn
+   * phím nào gọi nó là việc của `App` (bảng phím ở `src/keys/shortcuts.ts`). ⚠️ Màn này KHÔNG tự
+   * sửa mốc: nó chỉ BÁO, còn bên gọi mới là người GHI (`PATCH /api/transcripts/{id}`) — và khi
+   * KHÔNG có dòng nào đang sửa thì bên gọi KHÔNG LÀM GÌ.
    */
   onNudge?: (moc: "start" | "end") => void;
   /** Đang ghi (PATCH đang bay) — trạng thái phải NÓI RA, không chỉ đổi màu. */
@@ -372,10 +375,14 @@ export function EditScreen({
                       {`${formatTimecode(seg.start)} → ${formatTimecode(seg.end)}`}
                     </p>
                     <div className="ed__sua-thanh">
-                      {/* DẤU NUDGE: `[` = mốc BẮT ĐẦU −0,1s; `]` = mốc KẾT THÚC +0,1s (BẢNG PHÍM CỦA
-                          BRIEF D1 — spec UI §5.1 gán `[`/`]` cho "đặt mốc tại đầu đọc", xem ERRATA
-                          #44 mục 3; đổi khoá là việc của Task 11). Hai nút này là lối CHUỘT của
-                          cùng hai phím `[`/`]` — và cả hai đều đi qua CÙNG một hàng đợi ghi của `App`. */}
+                      {/* DẤU NUDGE — và chữ trên nút là PHÍM CỦA SPEC: nudge = `Shift+←/→` (±0,1s,
+                          spec UI §5.1 dòng 300 + §5.2 dòng 309). Trước Task 11 hai nút này ghi
+                          `[ −0,1s` / `] +0,1s` — bảng phím của brief D1, SAI nguồn spec (ERRATA #44
+                          mục 3): `[`/`]` nay là "ĐẶT MỐC TẠI ĐẦU ĐỌC". Một nhãn nút nói sai phím là
+                          một lời nói dối NGAY CẠNH ô sửa. Hai nút này là lối CHUỘT của cùng hai phím
+                          `Shift+←/→`, và cả hai đều đi qua CÙNG một hàng đợi ghi của `App`.
+                          (Đường CHUỘT cho `Alt+←/→` = ±1s KHÔNG được thêm ở đây: nó là một affordance
+                          mới không task nào sở hữu — xem TRẦN trong báo cáo task-11.) */}
                       <button
                         type="button"
                         className="ed__nudge"
@@ -384,7 +391,7 @@ export function EditScreen({
                         disabled={dangLuu}
                         onClick={() => onNudge?.("start")}
                       >
-                        [ −0,1s
+                        Shift+← −0,1s
                       </button>
                       <button
                         type="button"
@@ -394,7 +401,7 @@ export function EditScreen({
                         disabled={dangLuu}
                         onClick={() => onNudge?.("end")}
                       >
-                        ] +0,1s
+                        Shift+→ +0,1s
                       </button>
                       <button
                         type="button"

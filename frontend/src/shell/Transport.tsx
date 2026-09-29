@@ -10,7 +10,9 @@
  * `segment.end` (vi du `currentSegment` con la doan cu) ⇒ lan `timeupdate` ke tiep dat
  * lai vi tri ve `start` cua doan KE, ke ca khi do la mot buoc LUI. Do la chu "tu nhay
  * doan" chu khong phai loi, nhung no chi dung khi `currentSegment` duoc cap nhat theo
- * nguoi dung — viec do thuoc ve duong CHON DOAN (Task 11), chua co o day.
+ * nguoi dung. ⚠️ CAU CU O DAY ("viec do thuoc ve duong CHON DOAN (Task 11), chua co o
+ * day") NAY SAI: Task 11 da noi duong do qua BAN PHIM — `J`/`K` (dong truoc / dong sau,
+ * spec UI §5.1) va `N` (doan nghi ngo ke tiep) dispatch `setCurrentSegment` tu `App`.
  *
  * ## `ponytail:` TRAN — dung phan tu media GOC, khong dung player library
  *
@@ -133,6 +135,23 @@ export interface TransportProps {
   onPlayingChange?: (playing: boolean) => void;
   /** Bao da nhay sang doan `i` — BEN GOI ghi lai vao `UiState.currentSegment`. */
   onSegmentChange?: (i: number) => void;
+  /**
+   * BÁO VỊ TRÍ ĐẦU ĐỌC (giây) cho `App` — thanh này là nơi DUY NHẤT chạm `currentTime` của phần
+   * tử media.
+   *
+   * ⚠️ VÌ SAO `App` CẦN (Task 11): `[`/`]` = **đặt mốc start/end TẠI ĐẦU ĐỌC** (spec UI §5.1 dòng
+   * 296 + §5.2 dòng 310) — muốn vậy phải có `media.currentTime`, mà phần tử media sống ở ĐÂY.
+   * `App` giữ nó trong một `useRef` (KHÔNG phải `useState`): `timeupdate` bắn ~4 lần/giây, và một
+   * luồng action vào reducer cho mỗi nhịp là một đường không ai đọc (cùng lý do `viTriPhat` ở đây
+   * là state CỤC BỘ).
+   *
+   * ⚠️ TRẦN đã khai: giá trị `App` giữ là nhịp `timeupdate` **GẦN NHẤT** (≤250 ms cũ), KHÔNG phải
+   * một lần đọc `currentTime` ĐỒNG BỘ lúc bấm phím. Đường đồng bộ tuyệt đối sẽ là một tham chiếu
+   * thứ hai tới chính phần tử media (hai đường vào cùng một dữ liệu), và jsdom không có audio để
+   * đo cái nào đúng — nên nó được KHAI ra thay vì thêm vào. Chưa phát lần nào ⇒ đầu đọc là 0, tức
+   * đúng `currentTime` ban đầu của phần tử.
+   */
+  onDauDoc?: (giay: number) => void;
 }
 
 export function Transport({
@@ -147,6 +166,7 @@ export function Transport({
   bilingual = false,
   onPlayingChange,
   onSegmentChange,
+  onDauDoc,
 }: TransportProps) {
   // Xem ghi chu o `TransportProps.exportableId`: khong truyen ⇒ "ban dang xem la ban xuat duoc".
   const idXuatDuoc = exportableId === undefined ? translationId : exportableId;
@@ -207,6 +227,8 @@ export function Transport({
     const el = suKien.currentTarget;
     const giay = giayAnToan(el.currentTime);
     datViTriPhat(giay);
+    // BÁO LÊN `App` đầu đọc GẦN NHẤT (`[`/`]` đặt mốc tại đây — xem `TransportProps.onDauDoc`).
+    onDauDoc?.(giay);
 
     const ke = nextSegmentAfter(giay, segments, currentSegment);
     // Kiem lai bang SO: `segments[ke] === undefined` la mot phep so sanh ma kieu o day

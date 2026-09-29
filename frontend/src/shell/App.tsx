@@ -14,6 +14,9 @@ import { useEffect, useReducer, useRef, useState } from "react";
 
 import { endpoints } from "../api/endpoints.ts";
 import type { JobState, Segment, SourceLang, Transcript } from "../api/types.ts";
+import { BangPhim } from "../keys/BangPhim.tsx";
+import type { KeyAction } from "../keys/shortcuts.ts";
+import { useShortcuts } from "../keys/useShortcuts.ts";
 import { CompareScreen } from "../screens/CompareScreen.tsx";
 import { EditScreen } from "../screens/EditScreen.tsx";
 import { GlossaryScreen } from "../screens/GlossaryScreen.tsx";
@@ -64,16 +67,26 @@ function coChuyen(truoc: Set<number>, sau: Set<number>): boolean {
 }
 
 /**
- * Phím nóng cấp `window` KHÔNG được cướp ký tự của ô nhập (I3, ERRATA #44 mục 2).
+ * ---------------------------------------------------------------------------
+ * BÀN PHÍM (Task 11) — `App` là NƠI NỐI, `src/keys/` là nơi TRA.
  *
- * `closest` đi LÊN cây DOM, nên nó bắt cả `textarea`/`input`/`select`/`[contenteditable]` và mọi
- * con của chúng. Trả `false` cho `null`/`body`/phần tử khác: đó là những ca phím nóng PHẢI chạy.
+ * ĐO ĐƯỢC TRƯỚC TASK 11 (đính chính brief bản 2): bàn phím **ĐÃ TỒN TẠI** ở đây — một listener ở
+ * **`window`**, guard hai vế, chỉ nhận `[`/`]` và gọi thẳng `nudgeDoan`. Nó đã được đo bằng **bàn
+ * phím THẬT trong Chrome thật** (ERRATA #46 mục 5: gõ `[` trong ô sửa ⇒ server `v1 → v1`; cùng
+ * phím đó khi tiêu điểm ở `BODY` ⇒ `v1 → v2`). Việc của task này là **hợp nhất** nó vào
+ * `src/keys/useShortcuts.ts` (MỘT listener ở `document`, guard GIỮ NGUYÊN hai vế) và **trả nợ ánh
+ * xạ**: `[`/`]` = đặt mốc TẠI ĐẦU ĐỌC, nudge = `Shift+←/→` (±0,1s) và `Alt+←/→` (±1s) — ERRATA
+ * #44 mục 3.
+ *
+ * ⚠️ (Chỗ này từng có `dangGoTrongONhap` — nó đã CHUYỂN vào `src/keys/useShortcuts.ts`, không bị
+ * bỏ: ba bài ghim `D1 GÕ TRONG Ô SỬA` / `D1 TIÊU ĐIỂM TRONG Ô NHẬP` canh đúng hành vi đó.)
+ *
+ * ⚠️ `xuLyPhim` là MỘT HÀM MỚI ở mỗi lượt render, và đó là điều `useShortcuts` dựa vào: effect của
+ * nó chạy lại mỗi lượt render ⇒ listener cũ vẫn gắn trong đúng cửa sổ một-lượt-commit mà bài
+ * `D1 NỀN MỚI HƠN (CỬA SỔ CHƯA GẮN LẠI)` đo. NỀN của lệnh ghi vì thế vẫn phải đọc từ
+ * `banGhiMoiNhat.current` (ảnh chụp mới nhất), không phải từ closure.
+ * ---------------------------------------------------------------------------
  */
-function dangGoTrongONhap(dich: EventTarget | null): boolean {
-  return dich instanceof HTMLElement
-    && dich.closest("input, textarea, select, [contenteditable]") !== null;
-}
-
 export function App() {
   // TRẠNG THÁI CLIENT: MỘT reducer cho cả shell (spec/plan: `src/state/reducer.ts`).
   // Task 7 là người gọi THẬT đầu tiên của nó: thanh transport ĐỌC `playing` +
@@ -367,6 +380,33 @@ export function App() {
   banGhiMoiNhat.current = transcript.data;
 
   /**
+   * ĐẦU ĐỌC (giây) — nhịp `timeupdate` GẦN NHẤT của phần tử media, do `Transport` BÁO LÊN
+   * (`TransportProps.onDauDoc`).
+   *
+   * ⚠️ VÌ SAO `useRef` chứ không `useState`: `timeupdate` bắn ~4 lần/giây; đưa nó vào state là một
+   * lượt render cho mỗi nhịp, và reducer thì **không có trường giây nào** (`UiState` bảy trường
+   * phẳng) — đúng lý do `Transport.viTriPhat` là state CỤC BỘ ở đó.
+   *
+   * ⚠️ VÌ SAO `App` GIỮ NÓ: `[`/`]` = *"đặt mốc start/end TẠI ĐẦU ĐỌC"* (spec §5.1 dòng 296), và
+   * phần tử media nằm trong `Transport`.
+   *
+   * ⚠️ **ĐỌC LÚC BẤM, KHÔNG ĐỌC TRONG HÀNG ĐỢI**: giá trị được chốt ngay ở `xuLyPhim` rồi mới
+   * `xepHangGhi`. Đọc nó bên trong việc đã xếp hàng là lấy vị trí đầu đọc SAU khi người dùng bấm
+   * (đo được ở bài `T11 MỐC TẠI ĐẦU ĐỌC`, vế (3): PATCH đầu đang bay 250 ms, đầu đọc chạy tiếp ⇒
+   * mốc vẫn phải là vị trí lúc bấm).
+   */
+  const dauDocRef = useRef(0);
+
+  /**
+   * BẢNG PHÍM TẮT §11.4 đang MỞ hay không. Mặc định ĐÓNG (nó che màn hình).
+   *
+   * ⚠️ Khi mở, `xuLyPhim` CHẶN mọi phím khác trừ chính nó và `Esc`: một lớp phủ `aria-modal` đang
+   * che màn hình mà phím `[` vẫn ghi vào bản ghi phía sau là một thao tác người dùng KHÔNG NHÌN
+   * THẤY.
+   */
+  const [moBangPhim, datMoBangPhim] = useState(false);
+
+  /**
    * MỘT chỗ GHI duy nhất cho cả hai thao tác của D1 (`luu` và `nudge`).
    *
    * `sua` là hàm THUẦN áp lên ĐÚNG đoạn cần sửa; mọi đoạn khác đi lên NGUYÊN VẸN.
@@ -652,58 +692,180 @@ export function App() {
   }
 
   /**
-   * NUDGE mốc của **dòng ĐANG SỬA**: `[` = mốc bắt đầu −0,1s; `]` = mốc kết thúc +0,1s. Nudge
-   * cũng đi qua `ghiDoan` ⇒ **TỚI ĐƯỢC ĐĨA**, không chỉ đổi state cục bộ.
+   * NUDGE mốc của **dòng ĐANG SỬA** — `by` là **SỐ GIÂY** được CỘNG vào mốc (`-0,1` · `+0,1` ·
+   * `-1` · `+1`). Nudge đi qua `ghiDoan` ⇒ **TỚI ĐƯỢC ĐĨA**, không chỉ đổi state cục bộ.
    *
-   * ⚠️ **BẢNG PHÍM NÀY LÀ CỦA BRIEF D1, KHÔNG PHẢI CỦA SPEC UI.** Spec UI §5.1 gán `[`/`]` cho
-   * *"đặt mốc start/end TẠI ĐẦU ĐỌC"*, và nudge cho `Shift+←/→` (±0,1s) / `Alt+←/→` (±1s)
-   * (ERRATA #44 mục 3 — brief VÀ plan cùng sai nguồn spec). Sản phẩm đang theo brief; việc đổi
-   * khoá thuộc **Task 11**, nên ở vòng sửa này bảng phím KHÔNG được đổi.
+   * 🔴 BẢNG PHÍM ĐÃ TRẢ VỀ ĐÚNG NGUỒN SPEC Ở TASK 11 (ERRATA #44 mục 3): spec UI §5.1 dòng
+   * 300–301 + §5.2 dòng 309 gán nudge cho **`Shift+←/→` (±0,1s)** và **`Alt+←/→` (±1s)**; còn
+   * `[`/`]` = *"đặt mốc start/end TẠI ĐẦU ĐỌC"*, nay là hàm `datMocTaiDauDoc` ngay dưới. Trước
+   * task này hàm này bị gọi bởi `[`/`]` với bước CỨNG 0,1s — đúng bảng phím của brief D1, sai
+   * nguồn spec.
+   *
+   * ⚠️ `by` mang DẤU: `resolveKey` đã chốt chiều (`start` đi cùng số âm, `end` cùng số dương), nên
+   * ở đây chỉ có MỘT phép cộng — thêm một `if (moc === "start")` nữa là định nghĩa chiều lần thứ
+   * hai (và nó sẽ âm thầm bỏ qua `Alt+←` = −1).
    *
    * ⚠️ **KHÔNG có dòng nào đang sửa ⇒ KHÔNG LÀM GÌ** (0 request — bài `D1 NUDGE KHÔNG CÓ DÒNG
    * ĐANG SỬA` đếm ở PHÍA MÁY CHỦ). Guard `i === null` là **phòng thủ TRÙNG LẶP CÓ CHỦ Ý**, KHÔNG
-   * phải thứ đang chặn việc ghi: mutant bỏ nó ra (`P9`) cho **0 bài đỏ** vì `ghiDoan` CŨNG từ chối
-   * (`!nen.some(seg => seg.i === i)` không khớp đoạn nào khi `i === null`). Comment cũ ở đây khai
-   * *"bỏ guard ra là mỗi lần bấm `[`/`]` lại ghi"* — **SAI CƠ CHẾ**, đã sửa tại chỗ (ERRATA #44
-   * mục 6 / `M2`).
+   * phải thứ đang chặn việc ghi: mutant bỏ nó ra (`P9` của D1) cho **0 bài đỏ** vì `ghiDoan` CŨNG
+   * từ chối (`!nen.some(seg => seg.i === i)` không khớp đoạn nào khi `i === null`).
    *
    * ⚠️ **KHÔNG clamp** mốc: `formatTimecode` đã kẹp giây âm về 0 (và có bài ghim riêng ở
    * `timecode.test.ts`), nên kẹp lần hai ở đây là hai định nghĩa cho một luật.
    */
-  async function nudgeDoan(moc: "start" | "end"): Promise<void> {
+  async function nudgeDoan(moc: "start" | "end", by: number): Promise<void> {
     const i = ui.editingSegment;
     if (i === null) return;
     const hienTai = transcript.data;
     if (hienTai === null) return;
     await ghiDoan(hienTai.id, i, (seg) =>
-      moc === "start" ? { ...seg, start: seg.start - 0.1 } : { ...seg, end: seg.end + 0.1 },
+      moc === "start" ? { ...seg, start: seg.start + by } : { ...seg, end: seg.end + by },
     );
   }
 
   /**
-   * `[`/`]` ở cấp `window` — hai phím này KHÔNG thuộc ô nhập nào, nên chúng phải sống ngoài ô.
-   * Handler đọc bản mới nhất qua closure của effect (deps là hai thứ nó THẬT SỰ đọc) và được gỡ
-   * trong cleanup: mọi hiệu ứng đều phải thu hồi được.
+   * ĐẶT MỐC của dòng ĐANG SỬA **TẠI ĐẦU ĐỌC** (`[` = start, `]` = end) — spec UI §5.1 dòng 296 +
+   * §5.2 dòng 310: *"`[` và `]` đặt mốc tại vị trí đầu đọc — nhanh hơn kéo chuột rất nhiều"*.
    *
-   * ⚠️ **GUARD Ô NHẬP (I3, ERRATA #44 mục 2):** một listener ở `window` nhận được CẢ những phím
-   * gõ vào ô nhập. Không có guard này thì người dùng gõ ký tự `[`/`]` trong phụ đề (ví dụ
-   * `[nhạc nền]`) là **GHI vào máy chủ** mỗi ký tự: `version` tăng, bản dịch thành `stale`, mốc bị
-   * dịch 0,1s. ⚠️ Trước vòng sửa, CHÍNH bài test của commit này dispatch `[` trên `textarea` rồi
-   * khẳng định `dem.patch === 1` — tức nó ghi lại LỖI như thể là đặc tả ĐÚNG. Bài `D1 GÕ TRONG Ô
-   * SỬA` nay khẳng định điều đúng: **0 request**.
+   * ⚠️ `giay` là THAM SỐ, không phải một lần đọc `dauDocRef` ở đây: xem docblock của `dauDocRef`
+   * — giá trị phải được chốt LÚC BẤM. Và đây KHÔNG phải nudge: mốc được GÁN BẰNG, không cộng
+   * thêm (mutant `P9` — `[` gọi lại `nudgeDoan` — là bài `T11 MỐC TẠI ĐẦU ĐỌC` ĐỎ).
+   *
+   * ⚠️ Không có dòng đang sửa ⇒ không làm gì (0 request), cùng luật với `nudgeDoan`.
    */
-  useEffect(() => {
-    function khiBamPhim(suKien: KeyboardEvent): void {
-      if (suKien.key !== "[" && suKien.key !== "]") return;
-      // `suKien.target` là NƠI phím được gõ; `document.activeElement` là nơi đang có tiêu điểm.
-      // Kiểm CẢ HAI: một phím phát ra từ ô nhập phải bị bỏ qua qua bất kỳ đường nào.
-      if (dangGoTrongONhap(suKien.target) || dangGoTrongONhap(document.activeElement)) return;
-      xepHangGhi(() => nudgeDoan(suKien.key === "[" ? "start" : "end"));
+  async function datMocTaiDauDoc(moc: "start" | "end", giay: number): Promise<void> {
+    const i = ui.editingSegment;
+    if (i === null) return;
+    const hienTai = transcript.data;
+    if (hienTai === null) return;
+    await ghiDoan(hienTai.id, i, (seg) =>
+      moc === "start" ? { ...seg, start: giay } : { ...seg, end: giay },
+    );
+  }
+
+  /**
+   * CHỌN ĐOẠN kề (`J` = dòng trước, `K` = dòng sau — spec UI §5.1 dòng 297).
+   *
+   * Đây là đường BÀN PHÍM cho bước "chuyển đoạn" của §12.5; nó chỉ dispatch `setCurrentSegment`,
+   * tức CÙNG đường mà cú bấm/nhảy đoạn của thanh transport đã dùng — không mở đường ghi nào.
+   *
+   * ⚠️ **KẸP hai đầu, KHÔNG vòng**: `J` ở dòng ĐẦU giữ nguyên dòng đầu. Một vòng lặp làm người
+   * dùng đang soát xuôi bị ném về dòng cuối — và bài `T11 CHUYỂN ĐOẠN` ghim đúng vế đó.
+   * ⚠️ Chưa chọn dòng nào ⇒ chọn dòng ĐẦU cho cả hai phím: "dòng trước" của một lựa chọn rỗng
+   * không có nghĩa, còn nhảy vào dòng cuối thì bất ngờ.
+   */
+  function nhayDoan(buoc: number): void {
+    const doan = transcript.data?.segments ?? [];
+    if (doan.length === 0) return;
+    const viTri = ui.currentSegment === null
+      ? -1
+      : doan.findIndex((seg) => seg.i === ui.currentSegment);
+    const ke = viTri < 0 ? 0 : Math.min(Math.max(viTri + buoc, 0), doan.length - 1);
+    dispatch({ type: "setCurrentSegment", i: doan[ke].i });
+  }
+
+  /**
+   * NHẢY TỚI ĐOẠN NGHI NGỜ KẾ TIẾP (`N` — spec UI §5.1 dòng 299).
+   *
+   * "Kế tiếp" = chỉ số LỚN HƠN dòng đang chọn; `suspect` là cờ **của MÁY CHỦ** (`Segment.suspect`,
+   * backend tính) — client KHÔNG suy lại từ `no_speech_prob`/`avg_logprob` (Global Constraints).
+   *
+   * ⚠️ Hết dòng nghi ngờ ⇒ **KHÔNG LÀM GÌ** (không vòng về dòng nghi ngờ đầu): đây là phép soát
+   * XUÔI, một cú nhảy ngược là mất chỗ đang đọc. ⚠️ TRẦN: vế "không vòng" KHÔNG có bài ghim phân
+   * biệt được với bản cài vòng (fixture chỉ có MỘT dòng nghi ngờ, và khi đã ở dòng đó thì cả hai
+   * cách đều đứng yên) — xem danh sách TRẦN trong báo cáo task-11.
+   */
+  function nhayNghiNgo(): void {
+    const doan = transcript.data?.segments ?? [];
+    const viTri = ui.currentSegment === null
+      ? -1
+      : doan.findIndex((seg) => seg.i === ui.currentSegment);
+    const ke = doan.find((seg, k) => k > viTri && seg.suspect === true);
+    if (ke === undefined) return;
+    dispatch({ type: "setCurrentSegment", i: ke.i });
+  }
+
+  /**
+   * NƠI DUY NHẤT biến một `KeyAction` thành việc thật. `App` là người biết state và các đường
+   * ghi, nên `src/keys/` chỉ TRA bảng còn nối dây nằm ở đây (ERRATA #33 mục 1).
+   *
+   * ⚠️ **GUARD Ô NHẬP (I3, ERRATA #44 mục 2) KHÔNG nằm ở đây** — nó nằm ở `useShortcuts` (và ở
+   * `resolveKey` qua tham số `inField`), và điều đó có chủ ý: một phím gõ trong ô sửa phải không
+   * tới được hàm NÀY, chứ không phải tới rồi mới bị bỏ. Không có guard thì người dùng gõ `[` trong
+   * phụ đề (`[nhạc nền]`) là **GHI vào máy chủ** mỗi ký tự: `version` tăng, bản dịch thành `stale`,
+   * mốc bị dịch. ⚠️ Trước vòng sửa D1, CHÍNH bài test của commit đó dispatch `[` trên `textarea`
+   * rồi khẳng định `dem.patch === 1` — tức nó ghi lại LỖI như thể là đặc tả ĐÚNG.
+   */
+  function xuLyPhim(hanhDong: KeyAction): void {
+    // BẢNG ĐANG MỞ ⇒ nó CHẶN mọi phím khác (trừ chính nó và `Esc`): một lớp phủ đang che màn hình
+    // mà phím `[` vẫn ghi vào bản ghi phía sau là một thao tác người dùng KHÔNG NHÌN THẤY.
+    if (moBangPhim && hanhDong.type !== "toggleShortcuts" && hanhDong.type !== "endEdit") return;
+    switch (hanhDong.type) {
+      case "toggleShortcuts":
+        datMoBangPhim((cu) => !cu);
+        return;
+      case "togglePlay":
+        dispatch({ type: "setPlaying", playing: !ui.playing });
+        return;
+      case "segmentPrev":
+        nhayDoan(-1);
+        return;
+      case "segmentNext":
+        nhayDoan(1);
+        return;
+      case "nextSuspect":
+        nhayNghiNgo();
+        return;
+      case "startEdit":
+        // `Enter` = sửa DÒNG ĐANG CHỌN (spec §5.1 dòng 298 + §5.2 dòng 307). Không có dòng đang
+        // chọn ⇒ không mở ô sửa nào (mở dòng 0 là đoán ý người dùng). Dọn lỗi ghi của lượt trước —
+        // CÙNG việc mà lối chuột làm (`EditScreen.onStartEdit` ở dưới).
+        if (ui.currentSegment === null) return;
+        datLoiGhiDoan(null);
+        dispatch({ type: "startEdit", i: ui.currentSegment });
+        return;
+      case "endEdit":
+        // `Esc` khi bảng đang mở = ĐÓNG BẢNG, không phải thoát ô sửa: một phím, một việc, và việc
+        // gần nhất với thứ đang che màn hình. `Esc` lần hai mới thoát ô sửa (bài ghim hai vế).
+        if (moBangPhim) {
+          datMoBangPhim(false);
+          return;
+        }
+        dispatch({ type: "endEdit" });
+        return;
+      case "setMode":
+        dispatch({ type: "setMode", mode: hanhDong.mode });
+        return;
+      case "setEdgeAtPlayhead": {
+        // 🔴 CHỐT ĐẦU ĐỌC **LÚC BẤM** (xem `dauDocRef`), rồi mới xếp hàng. Đọc bên trong việc đã
+        // xếp hàng là lấy vị trí SAU cú bấm.
+        const giay = dauDocRef.current;
+        xepHangGhi(() => datMocTaiDauDoc(hanhDong.edge, giay));
+        return;
+      }
+      case "nudge":
+        xepHangGhi(() => nudgeDoan(hanhDong.edge, hanhDong.by));
+        return;
+      // BA PHÍM SPEC CÓ MÀ SẢN PHẨM CHƯA CÓ ĐÍCH. Chúng VẪN được `resolveKey` trả về (bảng §11.4
+      // phải phủ bảng §5.1) nhưng KHÔNG được nối: `S` tách dòng và `M` gộp dòng cần một phép biến
+      // đổi danh sách đoạn (đánh lại số `i`) mà không endpoint nào sở hữu; `Ctrl+Enter` ("chạy job
+      // cho kênh đang chọn") không có đường nào trong app (`createTranslation` là DỊCH, một việc
+      // khác). `BangPhim` in dấu `chưa nối` cho đúng ba hàng này (nguồn: `DA_NOI`), và bài
+      // `T11 PHÍM CHƯA CÓ ĐÍCH` ghim rằng chúng vẫn TRƠ (0 request, DOM không đổi).
+      // ⚠️ KHÔNG có `default`: union `KeyAction` là ĐÓNG, nên thêm một hành động mới mà quên nối
+      // thì TypeScript báo ngay ở đây.
+      case "splitAtPlayhead":
+      case "mergeWithNext":
+      case "runJob":
+        return;
     }
-    window.addEventListener("keydown", khiBamPhim);
-    return () => window.removeEventListener("keydown", khiBamPhim);
-    // eslint khong co trong repo; deps duoi day la HAI gia tri ma `nudgeDoan` doc.
-  }, [ui.editingSegment, transcript.data]);
+  }
+
+  // MỘT listener `keydown` cho cả app, ở `document` (trước Task 11 nó ở `window` và chỉ nhận
+  // `[`/`]`). `ui.mode` đi vào KHOÁ TRA của `resolveKey`: phím của màn Biên tập không bắn ở màn
+  // khác — `setMode` không xoá `editingSegment`, nên thiếu vế đó thì một phím `[` ở màn Đối chiếu
+  // vẫn GHI vào bản ghi trong khi không có ô sửa nào trên màn hình.
+  useShortcuts(xuLyPhim, ui.mode);
 
   // ---------------------------------------------------------------------------
   // ĐIỀU **KHÔNG** LÀM Ở ĐÂY — một "ngòi nổ đọc lại bảo hiểm" (đã đo, đừng thêm lại)
@@ -1063,7 +1225,10 @@ export function App() {
               }}
               onCommitEdit={(i, text) => xepHangGhi(() => luuDoan(i, text))}
               onCancelEdit={() => dispatch({ type: "endEdit" })}
-              onNudge={(moc) => xepHangGhi(() => nudgeDoan(moc))}
+              /* Lối CHUỘT của nudge = bước ±0,1s (cùng bước với `Shift+←/→`). `±1s` (`Alt+←/→`)
+                 CHỈ có ở bàn phím — thêm hai nút nữa là một affordance mới không task nào sở hữu,
+                 và mọi đường mới phải có bài ghim (ERRATA #43 mục 1). Đã khai trong báo cáo. */
+              onNudge={(moc) => xepHangGhi(() => nudgeDoan(moc, moc === "start" ? -0.1 : 0.1))}
               dangLuu={dangLuuDoan}
               loiGhi={loiGhiDoan}
               cauLoiThoi={cauLoiThoi}
@@ -1124,9 +1289,22 @@ export function App() {
           currentSegment={ui.currentSegment}
           onPlayingChange={(playing) => dispatch({ type: "setPlaying", playing })}
           onSegmentChange={(i) => dispatch({ type: "setCurrentSegment", i })}
+          /* TASK 11: đầu đọc BÁO LÊN để `[`/`]` đặt được mốc "tại đầu đọc" (spec §5.1 dòng 296).
+             Nó vào một `useRef`, KHÔNG vào state: `timeupdate` bắn ~4 lần/giây và reducer không có
+             trường giây nào — cùng lý do `Transport.viTriPhat` là state cục bộ ở đó. */
+          onDauDoc={(giay) => {
+            dauDocRef.current = giay;
+          }}
         />
       </footer>
       <div className="grain" aria-hidden />
+      {/* BẢNG PHÍM TẮT §11.4 — CON CUỐI của `.shell`, nhưng **KHÔNG phải một grid item**:
+          `.bp` là lớp phủ `position: fixed` (bài ghim CSS trong `src/keys/BangPhim.test.tsx`
+          khẳng định đúng khai báo đó), nên nó ra khỏi luồng và **không** tiêu thụ track nào —
+          CÙNG cách `.grain` ở trên. ⚠️ Nếu ai bỏ `position: fixed` thì nó thành con thứ năm của
+          một lưới khai BỐN track: đó là ERRATA #31 mục 1, và bài ghim CSS là chỗ chặn.
+          Chỉ render khi MỞ (mặc định đóng — nó che màn hình). */}
+      {moBangPhim ? <BangPhim onDong={() => datMoBangPhim(false)} /> : null}
     </div>
   );
 }

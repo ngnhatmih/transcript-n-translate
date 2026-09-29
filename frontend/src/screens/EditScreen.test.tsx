@@ -488,11 +488,25 @@ describe("EditScreen: §4.1 danh sach doan ao hoa + GHIM dong dang sua + suspect
     // Hai MOC cua dong dang sua phai NHIN THAY duoc: nudge ma khong thay ket qua la mot phep do mu.
     assert.equal(chu(container, '[data-testid="moc-doan"]'), "0:02.00 → 0:04.00");
 
-    // (2) HAI DAU NUDGE: `[` cho moc BAT DAU, `]` cho moc KET THUC — chu tren nut NOI RA chieu.
-    assert.match(chu(container, '[data-testid="nudge-start"]'), /\[/);
+    // (2) HAI ĐẦU NUDGE — và chữ trên nút phải là PHÍM CỦA SPEC (spec UI §5.1 dòng 300–301 + §5.2
+    //     dòng 309: nudge = `Shift+←/→` ±0,1s, `Alt+←/→` ±1s; `[`/`]` = đặt mốc TẠI ĐẦU ĐỌC —
+    //     ERRATA #44 mục 3). Trước Task 11, hai nút này ghi `[ −0,1s` / `] +0,1s`: một nhãn NGAY
+    //     CẠNH ô sửa nói SAI phím, và nói sai theo hướng tệ nhất — bấm `[` sẽ ĐẶT MỐC, không nudge.
+    //     Hai vế: ĐÚNG phím bổ trợ, ĐÚNG chiều.
+    assert.match(chu(container, '[data-testid="nudge-start"]'), /Shift\+←/);
     assert.match(chu(container, '[data-testid="nudge-start"]'), /0,1s/);
-    assert.match(chu(container, '[data-testid="nudge-end"]'), /\]/);
+    assert.match(chu(container, '[data-testid="nudge-end"]'), /Shift\+→/);
     assert.match(chu(container, '[data-testid="nudge-end"]'), /0,1s/);
+    assert.doesNotMatch(
+      chu(container, '[data-testid="nudge-start"]'),
+      /\[/,
+      "nhãn nút nudge KHÔNG được nói `[` — phím đó giờ đặt mốc tại đầu đọc",
+    );
+    assert.doesNotMatch(
+      chu(container, '[data-testid="nudge-end"]'),
+      /\]/,
+      "nhãn nút nudge KHÔNG được nói `]` — phím đó giờ đặt mốc tại đầu đọc",
+    );
 
     // (3) NUT HUY: goi `onCancelEdit`, va TUYET DOI khong goi `onCommitEdit`.
     fireEvent.click(phanTu(container, '[data-testid="huy-doan"]'));

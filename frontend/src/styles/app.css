@@ -34,7 +34,7 @@ body {
    ⚠️ LUẬT (ERRATA #31 mục 1): khai BỐN track thì phải khai VỊ TRÍ (`grid-row`) cho TỪNG
    con — auto-placement biến "hàng co lại" thành "hàng cướp chỗ". Bốn con là `.shell__head`
    (hàng 1) · `.od` (hàng 2, track `auto` của panel §4.8) · `.shell__mid` (hàng 3, `1fr`) ·
-   `footer.shell__transport` (hàng 4). `.grain` là `position:fixed` nên KHÔNG phải grid item.
+   `footer.shell__transport` (hàng 4). `.grain` VÀ bảng phím tắt §11.4 (`.bp`, Task 11) là `position:fixed` nên KHÔNG phải grid item — đó là lý do lớp phủ được phép nằm trong `.shell` mà KHÔNG tiêu thụ track nào.
    Vì sao phải tường minh: khi panel VẮNG (Ollama `up`, hoặc `status === null` lúc đang nạp
    — `OllamaDown.tsx` trả `null`) DOM chỉ còn BA con; auto-placement đẩy `.shell__mid` vào
    track `auto` và thanh transport vào `1fr`, còn track `--transport-h` bỏ trống. */
@@ -1587,4 +1587,115 @@ body {
 /* Kết quả trong lối gọn xuống HÀNG RIÊNG: một khối chữ nằm cạnh ô chọn tệp sẽ bị bóp méo. */
 .ch__nap .nap__ket-qua {
   flex-basis: 100%;
+}
+/* ── §5.1/§11.4 BẢNG PHÍM TẮT (Task 11) — lớp phủ mở bằng `?`, đóng bằng `Esc` hoặc nút `đóng` ──
+   Vì sao KHÔNG phải một con của lưới `.shell`: lưới đó khai BỐN track và mọi con khai `grid-row`
+   tường minh; thêm con thứ năm là tái sinh ERRATA #31 mục 1 (lỗi đã sai THẬT hai lần). `App`
+   render bảng này như CON CUỐI của `.shell`, và `.bp` là lớp phủ `position: fixed`
+   ⇒ nó ra khỏi luồng và không tiêu thụ track nào (cùng cách `.grain`).
+   ⚠️ HÌNH THỨC CHỈ ẢNH CHỤP CHROME THẬT XÁC NHẬN ĐƯỢC: jsdom không có layout, không nạp `app.css`
+   và không có `z-index` thật. Bài ghim trong `src/keys/BangPhim.test.tsx` khẳng định KHAI BÁO +
+   QUAN HỆ luật ↔ lớp (ERRATA #43 mục 2), KHÔNG khẳng định trình duyệt VẼ đúng. */
+.bp {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-bang-phim);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--sp-5);
+  background: var(--nen-phu);
+}
+
+.bp__khung {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  width: 100%;
+  max-width: var(--bp-rong);
+  max-height: 100%;
+  overflow-y: auto;
+  padding: var(--sp-4);
+  background: var(--panel-1);
+  border: var(--rule-w) solid var(--rule);
+  border-radius: var(--radius);
+}
+
+.bp__dau {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-3);
+  padding-bottom: var(--sp-2);
+  border-bottom: var(--rule-w) solid var(--rule);
+}
+
+.bp__tieu-de {
+  margin: 0;
+  font-family: var(--font-label);
+  font-size: var(--fs-label);
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  color: var(--ink-0);
+}
+
+.bp__dong-nut {
+  margin-left: auto;
+  padding: var(--sp-1) var(--sp-2);
+  font-family: var(--font-label);
+  font-size: var(--fs-label);
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  color: var(--ink-1);
+  background: var(--panel-2);
+  border: var(--rule-w) solid var(--rule);
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+
+.bp__dong-nut:hover {
+  border-color: var(--ink-2);
+}
+
+/* Reset `<ul>` — thiếu nó thì trình duyệt vẽ DẤU ĐẦU DÒNG + thụt lề mặc định (đúng lớp lỗi
+   `.q__danh-sach` mà `I1` của review D2 đã đo được). */
+.bp__danh-sach {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* MỘT hàng phím: CỐ Ý FLEX, KHÔNG GRID. `grid-template-*` là lưới track CỐ ĐỊNH ⇒ thêm con thứ N
+   là tái sinh ERRATA #31 mục 1; `flex` + `flex-wrap` không có danh sách track nên nó KHÔNG THỂ
+   "cướp chỗ" của hàng khác. */
+.bp__dong {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--sp-1) var(--sp-3);
+  padding: var(--sp-1) 0;
+  border-bottom: var(--rule-w) solid var(--rule);
+}
+
+/* Nhãn phím là GIÁ TRỊ DỮ LIỆU (tên phím của trình duyệt) ⇒ mono, mực sáng nhất trong hàng; cột
+   nhãn rộng cố định để các hàng thẳng nhau. */
+.bp__to-hop {
+  min-width: var(--bp-phim-rong);
+  font-family: var(--font-mono);
+  font-size: var(--fs-num);
+  color: var(--ink-0);
+}
+
+.bp__viec {
+  color: var(--ink-1);
+}
+
+/* Phím spec CÓ mà sản phẩm CHƯA có ĐÍCH — nói RA bằng chữ, không giấu (§7: thông tin không được
+   chỉ nằm ở màu, và màu chỉ là tín hiệu thứ hai). */
+.bp__chua-noi {
+  margin-left: auto;
+  font-family: var(--font-label);
+  font-size: var(--fs-label);
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  color: var(--fault);
 }

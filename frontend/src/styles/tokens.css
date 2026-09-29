@@ -66,6 +66,14 @@
   --grain-opacity: 0.028;
   --grain-size: 140px; /* CHỌN — ô nhiễu lặp */
   --z-grain: 1; /* lớp phủ nằm trên nội dung nhưng không bắt chuột */
+  /* CHỌN — bảng phím tắt §11.4 nằm TRÊN lớp grain: nó là NỘI DUNG, không phải trang trí. */
+  --z-bang-phim: 2;
+  /* CHỌN — nền lớp phủ của bảng phím: CÙNG sắc `--panel-0` nhưng trong suốt, để lớp phủ vẫn là
+     "graphite ấm" chứ không phải một tấm đen lạ. */
+  --nen-phu: rgb(18 17 15 / 72%);
+  /* CHỌN — bề rộng khung bảng phím, và bề rộng cột nhãn phím (nhãn dài nhất: `Ctrl+Enter`). */
+  --bp-rong: 560px;
+  --bp-phim-rong: 96px;
 
   /* ── §2.6 Chuyển động — tổng số chuyển động có chủ đích: HAI ───────────── */
   --dur-1: 120ms; /* transition duy nhất cho hover/focus */
