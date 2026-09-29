@@ -172,12 +172,22 @@ describe("dev-server.mjs: khong chet khi backend mat, va cong backend cau hinh d
 
   after(async () => {
     await choToi(async () => !(await congDangMo(DEV_PORT)), 5000, 200);
-    // ⚠️ TAM THOI: chua don ban sao, de con soi duoc khi phep do sai. Xem `T12` trong bao cao.
+    // Don TEP TAM minh tao ra. ⚠️ LIEET KÊ DUONG DAN, khong quet theo mau: mot glob o day co the
+    // xoa nham thu khac; va ⚠️ KHONG bao gio xoa de quy mot thu muc co junction/symlink
+    // (ERRATA #47 muc 8 — da xoa nham `frontend/node_modules` mot lan).
+    // ⚠️ DO DUOC: ban dau cho nay chi xoa `dev-server.t12-dbg.mjs` (ten CU), nen hai ban sao
+    // `dev-server.goc.mjs`/`dev-server.nguyen.mjs` o lai ⇒ `git status` BAN sau luot `npm test`.
+    // Giu `PHUDE_GIU_BAN_SAO=1` de con soi khi phep do sai.
     if (process.env.PHUDE_GIU_BAN_SAO !== "1") {
-      // Don TEP TAM (khong phai thu muc long nhau): chi xoa dung hai duong dan minh tao ra.
-      // ⚠️ KHONG bao gio xoa de quy mot thu muc co junction/symlink (ERRATA #47 muc 8 — da xoa
-      // nham `frontend/node_modules` mot lan).
-      rmSync(`${FRONTEND_DIR}dev-server.t12-dbg.mjs`, { force: true });
+      for (const ten of [
+        "dev-server.goc.mjs",
+        "dev-server.nguyen.mjs",
+        "dev-server.t12-dbg.mjs",
+        "dev-server.t12-goc.mjs",
+        "dev-server.t12-nguyen.mjs",
+      ]) {
+        rmSync(`${FRONTEND_DIR}${ten}`, { force: true });
+      }
       rmSync(`${FRONTEND_DIR}.t12-tam`, { recursive: true, force: true });
     }
   });
