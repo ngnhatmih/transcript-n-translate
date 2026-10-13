@@ -67,6 +67,55 @@ segment ids and return non-empty Vietnamese for every source segment. Failed
 validation is recorded as a failed stage; it must not silently substitute a
 partial result.
 
+## Post-processing rules
+
+Post-processing is explicit, deterministic where possible, and records both the
+input and output of every change:
+
+- Normalize whitespace and punctuation without changing lexical content before
+  scoring. Keep original text in artifacts so normalization never destroys
+  evidence.
+- ASR correction uses the independent hypotheses, nearby transcript context,
+  glossary, and confidence/suspect signals. It may resolve a homophone only
+  when the acoustic hypotheses and context support the choice. If evidence is
+  weak, preserve the best raw hypothesis and mark the segment for review.
+- Visual context may disambiguate visible names, objects, or setting; it cannot
+  add speech or override audio evidence. Store extracted visual facts separately
+  from corrected transcript text.
+- Translation editing must preserve meaning, negation, numbers, names, speaker
+  attribution, and glossary terms. It may improve Vietnamese fluency and
+  cross-segment coherence, but cannot add explanations absent from the source.
+- Every transformation must preserve segment ids and timestamps. Validate exact
+  id/order coverage, non-empty text, and glossary constraints after each stage;
+  invalid output fails that stage and leaves the raw result intact.
+- Apply existing subtitle readability/QA rules after translation. QA findings
+  are reported and do not trigger an unbounded rewrite loop.
+
+## Tests and error-improvement loop
+
+Build a test suite around the shared contracts and post-processing rules using
+fake ASR/MT/VLM clients; unit tests must not require CUDA, Ollama, network access,
+or downloaded model weights. Cover malformed JSON, missing/duplicate/reordered
+segment ids, empty output, forbidden timing changes, glossary violations,
+unsupported ASR edits, visual facts inventing speech, cancellation/failure
+cleanup, and model release between stages. Metric tests use tiny fixed
+references with hand-computable CER/chrF values.
+
+Run an explicit quality-improvement cycle on real media when available:
+
+1. Run the selected variants on identical inputs and save raw stage outputs,
+   metrics, model ids, prompts, and environment/runtime details.
+2. Inspect failures and regressions by stage: ASR homophones/omissions,
+   translation meaning/terminology, alignment, hallucination, and output format.
+3. Convert each reproducible failure into a regression fixture and a narrow
+   post-processing rule or prompt change. Do not add a rule based only on one
+   anecdote if it could alter unrelated segments.
+4. Rerun the full deterministic test suite and the affected real-media variants;
+   compare metrics and manually review changed segments. Keep the previous raw
+   output so regressions remain attributable.
+5. Record the outcome and known limitations in the comparison report. Do not
+   claim improvement when scores are unavailable or the reviewed sample regresses.
+
 ## Data flow and files
 
 Add a focused package under `backend/experiments/accuracy_pipelines/`:
@@ -133,6 +182,9 @@ versions, reference path/hash when supplied, and runtime measurements.
 - Optional references produce CER and chrF; absent references produce manual
   comparison outputs without fabricated scores.
 - Output shape, ids, timestamps, and non-empty translations are validated.
+- Unit tests cover the post-processing and failure contracts without requiring
+  model downloads; reproducible real-media errors can be promoted to regression
+  fixtures and rerun after a rule change.
 - The visual model is optional and missing-model errors explain how to enable
   that variant.
 - The application API, existing registry defaults, and production pipeline
