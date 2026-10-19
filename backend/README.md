@@ -1,5 +1,12 @@
 # phu-de-lab · backend
 
+## Thử nghiệm pipeline ưu tiên độ chính xác
+
+Các biến thể ASR/dịch thuật và runner so sánh độc lập được mô tả tại
+[`experiments/accuracy_pipelines/README.md`](experiments/accuracy_pipelines/README.md).
+Chúng không đổi engine mặc định hay API production; kết quả không có reference
+chỉ phục vụ review thủ công, không được coi là bằng chứng cải thiện độ chính xác.
+
 ## Cài đặt
 
 ```powershell
@@ -56,22 +63,22 @@ GPU. Nó tự ép UTF-8 cho stdout (console Windows mặc định cp1252, còn s
 tiếng Trung/Việt) và tự đặt cache model trước khi nạp `faster_whisper`.
 
 Con số nền của lần chạy mặc định, đo sau khi xoá `__pycache__` (lệnh ở mục
-"Kiểm thử" trên, chạy từ trong `backend\`). Thứ có nghĩa là **921 / 15**, không
+"Kiểm thử" trên, chạy từ trong `backend\`). Thứ có nghĩa là **1029 / 15**, không
 phải số giây — thời gian trôi giữa các lần chạy (đã thấy 24,00–30,94 s) còn con
 số bài thì không:
 
 ```
-921 passed, 15 deselected, 1 warning
+1029 passed, 15 deselected, 1 warning
 ```
 
 Hai con số đó là SỐ BÀI ĐƯỢC CHỌN, và chúng khớp với số mà `--collect-only` báo
 (`tests/test_backend_readme.py::test_readme_baseline_matches_the_tests_actually_
 collected` đối chiếu mỗi lần chạy).
 
-Máy này **CÓ** `ffmpeg 8.1.1` + `ffprobe` trên PATH (đã đo), nên `921/15` ở trên
+Máy này **CÓ** `ffmpeg 8.1.1` + `ffprobe` trên PATH (đã đo), nên `1029/15` ở trên
 là số THẬT của nó. Máy **không có** `ffmpeg`/`ffprobe` cho một kết quả KHÁC: cả
 `tests/test_ingest.py` bị `skipif` ở cấp module — **9** bài cùng skip một lượt —
-nên dòng tổng kết của máy đó là **`912 passed, 9 skipped, 15 deselected`**. Đó là
+nên dòng tổng kết của máy đó là **`978 passed, 9 skipped, 15 deselected`**. Đó là
 con số của máy thiếu ffmpeg, **không phải** con số máy này từng in ra; đừng chép
 nó vào khối nền ở trên, và đừng "sửa" số nền xuống chỉ vì thiếu ffmpeg.
 
