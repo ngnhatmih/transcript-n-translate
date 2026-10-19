@@ -9,7 +9,7 @@ from pathlib import Path
 
 BACKEND_DIR = Path(__file__).resolve().parents[2]
 SCRIPT = BACKEND_DIR / "scripts" / "freeze_ocr_reference.py"
-V3_SHA256 = "8e1c948a8ad33a4f44bd5b2df6c26687756b78c309b5ee992d0a261035fd6e67"
+V4_SHA256 = "fa35ddb2718bf897a97b3711ce8c3cc04ce113ad259d418928200c839a7909ad"
 HISTORICAL_V2_SHA256 = "9c8bd23a80523a1fa79745f16557744c8f1a1d6c1ae612abcc0fdbc4b9f26b8e"
 
 
@@ -57,10 +57,10 @@ def test_freeze_records_density_scan_and_model_support(tmp_path: Path) -> None:
         assert rows[index]["model_support"] == ["SenseVoice", "ElevenLabs Scribe"]
 
 
-def test_freeze_v3_has_reproducible_identity_and_does_not_replace_v2(tmp_path: Path) -> None:
-    """A version-only release must be byte-stable and leave the v2 artifact intact."""
-    output = tmp_path / "reference-v3.json"
-    second_output = tmp_path / "reference-v3-second-run.json"
+def test_freeze_v4_has_reproducible_identity_and_does_not_replace_v2(tmp_path: Path) -> None:
+    """A split-bearing release must be byte-stable and leave old artifacts intact."""
+    output = tmp_path / "reference-v4.json"
+    second_output = tmp_path / "reference-v4-second-run.json"
     subprocess.run(
         [sys.executable, "-B", str(SCRIPT), "--output", str(output)],
         cwd=BACKEND_DIR,
@@ -78,8 +78,8 @@ def test_freeze_v3_has_reproducible_identity_and_does_not_replace_v2(tmp_path: P
 
     document = json.loads(output.read_text(encoding="utf-8"))
     assert document["dataset_id"] == "ocr-caption-reference-v2"
-    assert document["version"] == 3
-    assert hashlib.sha256(output.read_bytes()).hexdigest() == V3_SHA256
+    assert document["version"] == 4
+    assert hashlib.sha256(output.read_bytes()).hexdigest() == V4_SHA256
     assert output.read_bytes() == second_output.read_bytes()
 
     historical_v2 = (
@@ -87,3 +87,24 @@ def test_freeze_v3_has_reproducible_identity_and_does_not_replace_v2(tmp_path: P
         / "data/experiments/accuracy-pipelines/20261015-ocr-reference-v2/reference.json"
     )
     assert hashlib.sha256(historical_v2.read_bytes()).hexdigest() == HISTORICAL_V2_SHA256
+
+
+def test_freeze_assigns_the_chronological_dev_test_split(tmp_path: Path) -> None:
+    output = tmp_path / "reference-v4.json"
+    subprocess.run(
+        [sys.executable, "-B", str(SCRIPT), "--output", str(output)],
+        cwd=BACKEND_DIR,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    document = json.loads(output.read_text(encoding="utf-8"))
+    rows = document["metadata"]["caption_observations"]
+    split = document["metadata"]["evaluation_split"]
+    assert split == {
+        "method": "chronological half split; first 42 scoreable captions are dev, last 42 are test",
+        "dev_count": 42,
+        "test_count": 42,
+    }
+    assert [row["evaluation_split"] for row in rows] == ["dev"] * 42 + ["test"] * 42

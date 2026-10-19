@@ -20,6 +20,8 @@ def main(argv=None) -> int:
                         help="pipeline JSON containing metadata.caption_observations")
     parser.add_argument("hypothesis", type=pathlib.Path,
                         help="ASR JSON containing segments or source_segments")
+    parser.add_argument("--split", choices=("dev", "test"),
+                        help="score only the frozen evaluation split")
     parser.add_argument("--output", type=pathlib.Path,
                         help="optional path to save the score JSON")
     args = parser.parse_args(argv)
@@ -34,7 +36,13 @@ def main(argv=None) -> int:
     segments = hypothesis.get("segments", hypothesis.get("source_segments"))
     if not isinstance(observations, list) or not isinstance(segments, list):
         parser.error("reference/hypothesis JSON has no caption_observations/segments list")
+    if args.split:
+        observations = [row for row in observations
+                        if row.get("evaluation_split") == args.split]
+        if not observations:
+            parser.error(f"reference has no {args.split!r} evaluation split")
     score = score_caption_observations(observations, segments, opencc=OpenCC("t2s"))
+    score["evaluation_split"] = args.split or "all"
     score["reference_provenance"] = {
         "dataset_id": reference.get("dataset_id"),
         "version": reference.get("version"),

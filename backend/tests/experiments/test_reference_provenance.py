@@ -33,6 +33,28 @@ def test_caption_scorer_records_the_reference_bytes(tmp_path):
     }
 
 
+def test_caption_scorer_can_score_only_the_held_out_split(tmp_path):
+    reference, hypothesis, output = tmp_path / "reference.json", tmp_path / "hypothesis.json", tmp_path / "score.json"
+    payload = {
+        "dataset_id": "ocr-caption-reference-v2", "version": 3,
+        "metadata": {"caption_observations": [
+            {"i": 0, "start": 0, "end": 1, "ocr": "你好世界", "evaluation_split": "dev"},
+            {"i": 1, "start": 2, "end": 3, "ocr": "再见世界", "evaluation_split": "test"},
+        ]},
+    }
+    reference.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+    hypothesis.write_text(json.dumps({"segments": [
+        {"start": 0, "end": 1, "text": "你好世界"},
+        {"start": 2, "end": 3, "text": "再见世界"},
+    ]}, ensure_ascii=False), encoding="utf-8")
+
+    assert score_caption_ocr.main([str(reference), str(hypothesis), "--split", "test", "--output", str(output)]) == 0
+
+    score = json.loads(output.read_text(encoding="utf-8"))
+    assert score["evaluation_split"] == "test"
+    assert score["timed"]["n"] == score["global"]["n"] == 1
+
+
 def test_diagnostic_records_the_reference_bytes(tmp_path, monkeypatch):
     audio, reference, output = tmp_path / "audio.wav", tmp_path / "reference.json", tmp_path / "diagnostic.json"
     audio.write_bytes(b"audio")

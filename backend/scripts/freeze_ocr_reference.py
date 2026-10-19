@@ -83,12 +83,12 @@ def sha256(path: pathlib.Path) -> str:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Freeze the reviewed OCR caption reference v3 with its frame audit.")
+    parser = argparse.ArgumentParser(description="Freeze the reviewed OCR caption reference v4 with its frame audit.")
     parser.add_argument(
         "--output",
         type=pathlib.Path,
         default=pathlib.Path(
-            "backend/experiments/accuracy_pipelines/references/ocr-caption-reference-v3.json"
+            "backend/experiments/accuracy_pipelines/references/ocr-caption-reference-v4.json"
         ),
     )
     args = parser.parse_args()
@@ -171,6 +171,10 @@ def main() -> int:
             }
         included.append(entry)
 
+    included.sort(key=lambda row: (float(row["start"]), float(row["end"]), int(row["i"])))
+    for position, row in enumerate(included):
+        row["evaluation_split"] = "dev" if position < len(included) // 2 else "test"
+
     density_rows = [
         {
             "i": int(row["i"]),
@@ -197,7 +201,7 @@ def main() -> int:
 
     result = {
         "dataset_id": "ocr-caption-reference-v2",
-        "version": 3,
+        "version": 4,
         "metadata": {
             "source_media": "data/media/8f4b5304daf42569.mp4",
             "source_observations": SOURCE.as_posix(),
@@ -208,6 +212,11 @@ def main() -> int:
             "scoring_protocol": "For each caption midpoint, concatenate ASR segments intersecting ±2.0 seconds; choose best substring within reference length ±3 characters.",
             "included_count": len(included),
             "excluded_count": len(excluded),
+            "evaluation_split": {
+                "method": "chronological half split; first 42 scoreable captions are dev, last 42 are test",
+                "dev_count": len(included) // 2,
+                "test_count": len(included) - len(included) // 2,
+            },
             "evidence_policy": "Only frame/audio-supported evidence may change reference text. Unchanged OCR rows without a frame audit remain unverified. ASR output is never used as reference-edit evidence.",
             "ocr_density_scan": {
                 "population": len(density_rows),
