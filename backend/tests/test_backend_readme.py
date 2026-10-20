@@ -76,12 +76,12 @@ def _readme_baseline(text: str | None = None) -> tuple[int, int]:
 
 
 #: Dòng tổng kết của `--collect-only` khi `addopts = -q` đang bật (xem
-#: `pytest.ini`), nay là `1192/1207 tests collected (15 deselected)`. Đọc
-#: CẢ HAI vế của phân số chứ không chỉ một con số: `1192` là số bài lần chạy mặc
+#: `pytest.ini`), nay là `1200/1215 tests collected (15 deselected)`. Đọc
+#: CẢ HAI vế của phân số chứ không chỉ một con số: `1200` là số bài lần chạy mặc
 #: định CHỌN, còn `15` là số bài `live` bị bỏ. Trên máy có `ffmpeg`/`ffprobe` thì
-#: cả `1192` bài đó chạy (dòng tổng kết: `1192 passed, 15 deselected`); máy THIẾU
+#: cả `1200` bài đó chạy (dòng tổng kết: `1200 passed, 15 deselected`); máy THIẾU
 #: chúng thì `tests/test_ingest.py` skip cả module — **9** bài cùng skip một lượt —
-#: và dòng tổng kết thành `1183 passed, 9 skipped, 15 deselected`. Vì vậy "số bài
+#: và dòng tổng kết thành `1191 passed, 9 skipped, 15 deselected`. Vì vậy "số bài
 #: chọn được" không bằng "số bài passed", và tệp này chỉ được phép khẳng định thứ
 #: nó đo được: `--collect-only` (không chạy bài nào, nên không phụ thuộc ffmpeg).
 #:

@@ -421,7 +421,29 @@ def run_one(transcript: pathlib.Path, glossary: pathlib.Path,
             out_dir: pathlib.Path, batch_items: int,
             style: str = STYLE_DEFAULT, *, config: str | None = None,
             first_batch_items: int | None = None,
-            unload: bool = True) -> dict:
+            unload: bool = True, handler_cls: type = TranslateHandler,
+            handler_kwargs: dict | None = None,
+            artifact_name: str | None = None) -> dict:
+    """Một lượt đo trên clip thật; ghi artifact và trả kết quả.
+
+    Ba tham số cuối tồn tại cho ĐÚNG một lượt đo khác (`scripts/smoke_echo_halving.py`),
+    lượt đo CHIA ĐÔI lô bị chép, và cả ba đều KHÔNG đổi hành vi mặc định:
+
+    * `handler_cls` — lớp handler cần dựng (mặc định `TranslateHandler`, tức đường
+      ship). Lượt chia đôi truyền một lớp CON chỉ override `_guard_echoes`, nên nó
+      dùng lại nguyên vẹn batching/alignment/`llm_calls`/bảo vệ thuật ngữ của sản
+      phẩm thay vì một driver thứ hai gọi thẳng `engine.chat`;
+    * `handler_kwargs` — tham số thêm cho lớp đó (`max_depth` của phép chia);
+    * `artifact_name` — tên tệp artifact, vì `_artifact_name` chỉ phân biệt được
+      theo (config, style, lô) và lượt chia đôi có HAI cấu hình cùng lô 30
+      (`control` và `halving`) sẽ ghi đè nhau. Lượt mặc định vẫn ra
+      `batch-30.json` như cũ.
+
+    Số đo của lượt đó (cùng clip 115 đoạn, prompt v0, `echo_guard` BẬT): lô 30 với
+    cổng cũ **89** lần dịch lại / 93 lời gọi / 78,91 s; lô 30 chia đôi **7** lời
+    gọi một mục (cả 7 là hạ cấp alignment, không phải cổng) / 25 lời gọi / 95,72 s
+    — xem `smoke_echo_halving.py` và artifact `20261019-echo-halving/`.
+    """
     terms = smoke._load_terms(glossary)
     segments = smoke._load_segments(transcript, None)
     spec, engine = smoke._engine_and_capabilities(smoke.ENGINE_ID)
@@ -436,12 +458,13 @@ def run_one(transcript: pathlib.Path, glossary: pathlib.Path,
                         prompt_version=prompt_version)
 
     def _handler(items: int) -> TranslateHandler:
-        return TranslateHandler(
+        return handler_cls(
             repos, {spec.id: recorder},
             engine_capabilities={spec.id: capabilities},
             # Số cụ thể THẮNG `capabilities.max_items_per_call` — đúng đường mà
             # `sweep_mt_batch.py` dùng để quét lô, và không đổi mặc định sản phẩm.
             batch_items=items,
+            **(handler_kwargs or {}),
         )
 
     def _report(_progress: float, line: str) -> None:
@@ -563,7 +586,8 @@ def run_one(transcript: pathlib.Path, glossary: pathlib.Path,
                        "qa": list(s.qa)} for s in accepted],
     }
     out_dir.mkdir(parents=True, exist_ok=True)
-    (out_dir / _artifact_name(config, style, batch_items)).write_text(
+    (out_dir / (artifact_name or _artifact_name(config, style, batch_items))
+     ).write_text(
         json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return result
 

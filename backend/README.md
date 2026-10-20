@@ -63,38 +63,46 @@ GPU. Nó tự ép UTF-8 cho stdout (console Windows mặc định cp1252, còn s
 tiếng Trung/Việt) và tự đặt cache model trước khi nạp `faster_whisper`.
 
 Con số nền của lần chạy mặc định, đo sau khi xoá `__pycache__` (lệnh ở mục
-"Kiểm thử" trên, chạy từ trong `backend\`). Thứ có nghĩa là **1192 / 15**, không
+"Kiểm thử" trên, chạy từ trong `backend\`). Thứ có nghĩa là **1200 / 15**, không
 phải số giây — thời gian trôi giữa các lần chạy (đã thấy 24,00–30,94 s) còn con
 số bài thì không:
 
 ```
-1192 passed, 15 deselected, 1 warning
+1200 passed, 15 deselected, 1 warning
 ```
 
 Hai con số đó là SỐ BÀI ĐƯỢC CHỌN, và chúng khớp với số mà `--collect-only` báo
-(`1192/1207`, 15 bài `live` bị bỏ;
+(`1200/1215`, 15 bài `live` bị bỏ;
 `tests/test_backend_readme.py::test_readme_baseline_matches_the_tests_actually_
 collected` đối chiếu mỗi lần chạy).
 
-Máy này **CÓ** `ffmpeg 8.1.1` + `ffprobe` trên PATH (đã đo), nên `1192/15` ở trên
+Máy này **CÓ** `ffmpeg 8.1.1` + `ffprobe` trên PATH (đã đo), nên `1200/15` ở trên
 là số THẬT của nó. Máy **không có** `ffmpeg`/`ffprobe` cho một kết quả KHÁC: cả
 `tests/test_ingest.py` bị `skipif` ở cấp module — **9** bài cùng skip một lượt —
-nên dòng tổng kết của máy đó là **`1183 passed, 9 skipped, 15 deselected`** (=
-`1192 − 9`; con số này TỪNG ghi `978`, tức một baseline rất cũ, và nó lệch phép
+nên dòng tổng kết của máy đó là **`1191 passed, 9 skipped, 15 deselected`** (=
+`1200 − 9`; con số này TỪNG ghi `978`, tức một baseline rất cũ, và nó lệch phép
 trừ của chính khối nền ngay trên nó). Đó là
 con số của máy thiếu ffmpeg, **không phải** con số máy này từng in ra; đừng chép
 nó vào khối nền ở trên, và đừng "sửa" số nền xuống chỉ vì thiếu ffmpeg.
 
 ⚠️ Con số `856` ở đây TỪNG không khớp phép trừ của chính nó: `865 − 9 = 856`, tức
 nó là số của lượt TRƯỚC `V1` (+3 bài) còn sót lại. Phép trừ của khối nền hiện tại
-là `1192 − 9` = `1183`.
+là `1200 − 9` = `1191`.
 
 (Con số này từng bị ghi là `798`: bài `test_a_failed_translation_leaves_the_
 transcript_reviewed` được thêm ở `a428334` — **cùng commit đã sửa tệp này** — mà
 số nền không được bump. Nó tồn tại để phát hiện TRÔI, nên một số sai làm mọi lần
 chạy báo dương tính giả.
 
-Lần bump gần nhất, `1194/15` → `1192/15` (**−2 bài**), do **xoá seam "sưởi trước
+Lần bump gần nhất, `1192/15` → `1200/15` (**+8 bài**), do lượt đo **chia đôi lô bị
+chép**: `tests/test_echo_halving.py` (**+8**) ghim phép chia THUẦN
+`scripts/echo_halving.py` — lô sạch không chia, lô 30 -> 15/15, nửa đầu nhận mục
+lẻ (15 -> 8/7), trần độ sâu hạ xuống từng mục, lô MỘT mục trả về chính nó (không
+trả rỗng), trần mặc định sâu hơn 5 tầng mà lô 30 cần, và đường đi TỆ NHẤT từ 1..30
+mục không làm mất hay nhân đôi mục nào. Lượt đo đó **không ship gì** — xem mục
+echo bên dưới.
+
+Trước đó, `1194/15` → `1192/15` (**−2 bài**), do **xoá seam "sưởi trước
 lô đầu"** khỏi `app/pipeline/translate.py`: **−4** bài ghim seam đó bị gỡ cùng nó,
 **ba** bài ghim `scripts/smoke_echo_guard.py::echo_by_batch` (kế toán theo lô: echo
 của lô nào nằm ở lô đó, một lời gọi một mục đứng TRƯỚC lô đầu không bị tính vào lô
@@ -150,6 +158,38 @@ chép nguồn ở lô 30 cũ: 32,89 s). Kết luận: không cấu hình nào đ
 C và E đạt hai tiêu chí đầu (0 dịch lại, 0 `EchoProblem`) nhưng wall time 56,90 s
 và 103,91 s, và C KHÔNG tái lập được (lượt lặp: 29 lần dịch lại) — nên đòn bẩy còn
 lại vẫn là kiến trúc hybrid, không phải prompt và không phải sưởi.
+
+Lượt đo **chia đôi lô bị chép** (cùng clip, cùng 5 thuật ngữ, prompt v0,
+`echo_guard` BẬT, mỗi cấu hình một tiến trình, `/api/ps` rỗng trước mỗi lượt;
+artifact ở `data/experiments/accuracy-pipelines/20261019-echo-halving/`) hỏi thẳng
+một câu: khi lô 30 bị chép, VỨT nó và dịch lại thành HAI NỬA có rẻ hơn 89 lời gọi
+singleton không. `pipeline/translate.py` KHÔNG bị sửa: driver
+`scripts/smoke_echo_halving.py` override `_guard_echoes` để chia đôi, còn
+`scripts/echo_halving.py` là phép chia THUẦN (có test, xem mục "Kiểm thử"):
+
+    cấu hình                    | dịch lại 1 mục | tổng lời gọi | lô hỏng | echo còn lại | chữ Hán | giây
+    control · lô 30 (đang ship) | 89             | 93           | 0       | 0            | 0       | 78,91
+    halving · lô 30, chia đôi   | 7              | 25           | 0       | 0            | 0       | 95,72
+    half-straight · lô 15 thẳng | 29             | 37           | 0       | 0            | 0       | 59,09
+    (lặp halving)               | 7              | 24           | 0       | 0            | 0       | 88,67
+
+**Đối chứng tái lập đúng** pattern đã ghim (`29/30 -> 30/30 -> 30/30 -> 0/25`, 89
+lần dịch lại), nên bốn cột trên so được với nhau. **Chia đôi THOÁT được echo**
+(0 echo còn lại, 0 `EchoProblem`, 115/115 `done`), và **7/7** lời gọi một mục của
+nó là hạ cấp ALIGNMENT — nửa 7 mục của lô 60–89 trả 6/7 mục HAI lần rồi mới hạ
+xuống từng mục — **không** phải cổng echo dịch lại đoạn nào. Nhưng nó **không
+rẻ**: 25 lời gọi vẫn trên mục tiêu "< ~20", và wall time 95,72 s tệ hơn đối chứng
+vì lượt chia dịch **287 mục-lượt** (tổng số mục của mọi lời gọi, kể cả lô 30 bị
+vứt) so với 204 của đối chứng. Cây chia giải thích tại sao (`repeat-halving/` lặp
+lại y hệt): các NỬA cũng bị chép — ở 15 mục 5/14 lô (2/8 lô của lượt 15 thẳng +
+3/6 nửa của lượt chia), ở 8 mục 1/2, ở 4 mục 0/2 — nên chế độ này bám vào LỜI GỌI
+với xác suất tăng theo độ dài, không phải một ngưỡng mà phép chia cắt ngang được;
+phép chia chỉ rẻ khi nửa đầu tình cờ sạch. Vì vậy **không nối phép chia vào sản
+phẩm**: con số quyết định là 95,72 s / 88,67 s so với 78,91 s của đường đang ship
+(và 59,09 s của lô 15 thẳng — phép chia chỉ rẻ hơn về SỐ LỜI GỌI). Ghi chú cho
+lượt sau: mọi lời gọi **25 mục** đo được tới nay đều sạch (`0/25` ở ba lượt đối
+chứng v0 và hai lượt chia), nhưng lô 25 là ĐUÔI của clip trong mọi lượt nên độ dài
+và nội dung còn lẫn nhau — muốn coi đó là ngưỡng thì phải đo một phép chia 25/5.
 
 Smoke của lượt đo đó (cùng clip 115 đoạn, cùng 5 thuật ngữ, cùng engine, lô 30,
 `echo_guard` BẬT, mỗi style MỘT lượt qua `TranslateHandler`, artifact ở
