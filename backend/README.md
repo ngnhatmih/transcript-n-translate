@@ -63,38 +63,46 @@ GPU. Nó tự ép UTF-8 cho stdout (console Windows mặc định cp1252, còn s
 tiếng Trung/Việt) và tự đặt cache model trước khi nạp `faster_whisper`.
 
 Con số nền của lần chạy mặc định, đo sau khi xoá `__pycache__` (lệnh ở mục
-"Kiểm thử" trên, chạy từ trong `backend\`). Thứ có nghĩa là **1200 / 15**, không
+"Kiểm thử" trên, chạy từ trong `backend\`). Thứ có nghĩa là **1202 / 15**, không
 phải số giây — thời gian trôi giữa các lần chạy (đã thấy 24,00–30,94 s) còn con
 số bài thì không:
 
 ```
-1200 passed, 15 deselected, 1 warning
+1202 passed, 15 deselected, 1 warning
 ```
 
 Hai con số đó là SỐ BÀI ĐƯỢC CHỌN, và chúng khớp với số mà `--collect-only` báo
-(`1200/1215`, 15 bài `live` bị bỏ;
+(`1202/1217`, 15 bài `live` bị bỏ;
 `tests/test_backend_readme.py::test_readme_baseline_matches_the_tests_actually_
 collected` đối chiếu mỗi lần chạy).
 
-Máy này **CÓ** `ffmpeg 8.1.1` + `ffprobe` trên PATH (đã đo), nên `1200/15` ở trên
+Máy này **CÓ** `ffmpeg 8.1.1` + `ffprobe` trên PATH (đã đo), nên `1202/15` ở trên
 là số THẬT của nó. Máy **không có** `ffmpeg`/`ffprobe` cho một kết quả KHÁC: cả
 `tests/test_ingest.py` bị `skipif` ở cấp module — **9** bài cùng skip một lượt —
-nên dòng tổng kết của máy đó là **`1191 passed, 9 skipped, 15 deselected`** (=
-`1200 − 9`; con số này TỪNG ghi `978`, tức một baseline rất cũ, và nó lệch phép
+nên dòng tổng kết của máy đó là **`1193 passed, 9 skipped, 15 deselected`** (=
+`1202 − 9`; con số này TỪNG ghi `978`, tức một baseline rất cũ, và nó lệch phép
 trừ của chính khối nền ngay trên nó). Đó là
 con số của máy thiếu ffmpeg, **không phải** con số máy này từng in ra; đừng chép
 nó vào khối nền ở trên, và đừng "sửa" số nền xuống chỉ vì thiếu ffmpeg.
 
 ⚠️ Con số `856` ở đây TỪNG không khớp phép trừ của chính nó: `865 − 9 = 856`, tức
 nó là số của lượt TRƯỚC `V1` (+3 bài) còn sót lại. Phép trừ của khối nền hiện tại
-là `1200 − 9` = `1191`.
+là `1202 − 9` = `1193`.
 
 (Con số này từng bị ghi là `798`: bài `test_a_failed_translation_leaves_the_
 transcript_reviewed` được thêm ở `a428334` — **cùng commit đã sửa tệp này** — mà
 số nền không được bump. Nó tồn tại để phát hiện TRÔI, nên một số sai làm mọi lần
 chạy báo dương tính giả.
 
-Lần bump gần nhất, `1192/15` → `1200/15` (**+8 bài**), do lượt đo **chia đôi lô bị
+Lần bump gần nhất, `1200/15` → `1202/15` (**+2 bài**), do lượt đo **VRAM**:
+`tests/test_vram_sample.py` (**+2**) ghim (a) hàm THUẦN `summarize_vram` của
+`scripts/smoke_echo_guard.py` — nền phẳng rồi bàn ổn định, một gai đơn lẻ (peak
+bắt nó, steady thì không; gai trong NỀN không được đọc thành "đã nạp"), và mảng
+rỗng trả `None` chứ không phải `0` — và (b) cờ `--sample-vram` TẮT thì artifact
+KHÔNG có khoá `vram` và không chạm `nvidia-smi`. Lượt đo đó **không ship gì**:
+cờ mặc định tắt, đường dịch không đổi — xem mục VRAM bên dưới.
+
+Trước đó, `1192/15` → `1200/15` (**+8 bài**), do lượt đo **chia đôi lô bị
 chép**: `tests/test_echo_halving.py` (**+8**) ghim phép chia THUẦN
 `scripts/echo_halving.py` — lô sạch không chia, lô 30 -> 15/15, nửa đầu nhận mục
 lẻ (15 -> 8/7), trần độ sâu hạ xuống từng mục, lô MỘT mục trả về chính nó (không
@@ -451,6 +459,50 @@ riêng, model đã nạp sẵn trong tiến trình), **KHÔNG** phải của `sm
 21,48 s — đo được **3,7 s**, vì tiến trình mới còn phải nạp model. Sau **mọi** lần
 `release()`, `ollama ps` **rỗng** — model dịch thật sự rời VRAM, không chỉ được
 đánh dấu là đã rời.
+
+#### VRAM của lượt dịch (`--sample-vram`) — có artifact, trích dẫn được
+
+Lượt trước báo *peak 6830 MiB / headroom 1362 / steady ~6433 / model 100% GPU*
+nhưng **không tệp nào trên đĩa** chứa những số đó. Lượt `20261019-vram-sample`
+(cùng clip 115 đoạn, 5 thuật ngữ, prompt v0, lô 30, `echo_guard` BẬT, RTX 3070
+8 GB) ghi từng mẫu `nvidia-smi --query-gpu=memory.used` (~1 Hz) vào khối `vram`
+của `data/experiments/accuracy-pipelines/20261019-vram-sample/batch-30.json`:
+
+```powershell
+.\.venv\Scripts\python.exe -B scripts\smoke_echo_guard.py --batches 30 --sample-vram `
+    --transcript ..\data\experiments\accuracy-pipelines\20261019-name-patch-smoke\large-v3-beam5-prevfalse.json `
+    --glossary ..\data\experiments\accuracy-pipelines\20261019-term-placeholder-smoke\glossary.json `
+    --out-dir ..\data\experiments\accuracy-pipelines\20261019-vram-sample
+```
+
+| nền idle | đỉnh | ổn định | headroom | mẫu | giây |
+|---|---|---|---|---|---|
+| 1781 MiB (5 mẫu) | 7258 | 7013 | 934 | 87 (81 sau khi nạp) | 85,49 |
+
+`ollama ps` **trong** lượt (sau lời gọi đầu, lúc 9,41 s):
+
+```
+hy-mt1.5-7b:q4_K_M    5f79e49d4ed2    5.3 GB    100% GPU    4096    llamacpp
+```
+
+`/api/ps` cùng lúc cho `size_vram == size == 5.279.842.303` byte, tức model
+**không** bị chia sang CPU — con số, không phải nhãn.
+
+* **"Đã nạp"** = mẫu đầu tiên cao hơn TRUNG VỊ nền idle ít nhất **512 MiB** VÀ
+  mẫu KẾ TIẾP cũng trên ngưỡng (2 mẫu liên tiếp). Một gai đơn lẻ không phải một
+  lần nạp model 4,9 GB: trong lượt này mẫu `1933` MiB bị bỏ qua, `6318` MiB mới
+  là mẫu đầu của lần nạp.
+* **peak** = max phần đã nạp. `7258` rơi vào pha **hạ cấp alignment của lô 2**
+  (30 lời gọi một mục), nên nó là đỉnh của ĐƯỜNG XẤU NHẤT, không phải của lúc
+  dịch bình thường. **steady** = MODE phần đã nạp: `7013` giữ từ khoảng giây 50
+  tới cuối lượt, còn `7258` chỉ là một mẫu.
+* idle `1781` MiB **không phải GPU trống**: đó là nền của máy này (desktop +
+  trình duyệt) với `ollama ps` rỗng trước khi nạp (`unloaded_before_idle: false`,
+  `model_loaded_before: []`). Headroom `934` MiB là headroom thật của cấu hình
+  đang chạy.
+* Cờ **mặc định TẮT**: không có lời gọi `nvidia-smi` nào và artifact **không** có
+  khoá `vram` — `tests/test_vram_sample.py` ghim cả hai vế (khối vắng mặt + hàm
+  THUẦN `summarize_vram`).
 
 ### Giới hạn — đọc trước khi tin bất cứ con số nào ở trên
 

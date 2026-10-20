@@ -153,6 +153,48 @@ Quét BIẾN THỂ PROMPT (`--styles`, lượt đo `20261019-prompt-echo-sweep`)
     sưởi. Artifact ghi `model_loaded_before` để lần đọc lại biết điều đó đã được
     kiểm hay chưa.
 
+ĐO VRAM (`--sample-vram`, lượt đo `20261019-vram-sample`)
+    Lượt đo trước báo "VRAM peak 6830 MiB, headroom 1362, steady ~6433, model
+    100% GPU", nhưng KHÔNG tệp nào trên đĩa chứa những số đó — nên báo cáo không
+    trích dẫn được. Cờ này biến chúng thành dữ liệu: trong lúc dịch, một luồng
+    nền lấy `nvidia-smi --query-gpu=memory.used` ~1 Hz và artifact nhận khối
+    `vram` (idle / peak / steady / headroom / số mẫu / dãy mẫu THÔ).
+
+    SỐ ĐO (clip 115 đoạn, 5 thuật ngữ, prompt v0, lô 30, `echo_guard` BẬT, RTX
+    3070 8 GB, artifact
+    `data/experiments/accuracy-pipelines/20261019-vram-sample/batch-30.json`):
+
+        nền idle 1781 MiB (5 mẫu) | đỉnh 7258 | ổn định 7013 | headroom 934
+        87 mẫu (81 mẫu sau khi nạp) | 85,49 s | model 5.279.842.303 byte, 100% GPU
+
+    `ollama ps` TRONG lượt (sau lời gọi đầu, lúc 9,41 s):
+
+        hy-mt1.5-7b:q4_K_M  5f79e49d4ed2  5.3 GB  100% GPU  4096  llamacpp
+
+    Cách đọc ba con số đó:
+
+    * **"đã nạp model"** = mẫu đầu tiên cao hơn TRUNG VỊ của nền idle ít nhất
+      `VRAM_LOAD_MARGIN_MIB = 512` MiB VÀ mẫu KẾ TIẾP cũng trên ngưỡng ấy (2 mẫu
+      liên tiếp). Một gai đơn lẻ — video decode, cửa sổ trình duyệt — không phải
+      một lần nạp model 4,9 GB, nên nó không được mở đầu "bàn ổn định"; trong
+      lượt này mẫu 1933 MiB ở giây thứ 5 bị bỏ qua đúng theo luật đó, và mẫu
+      6318 MiB mới là mẫu đầu của lần nạp.
+    * **peak** = max của phần ĐÃ NẠP. 7258 MiB rơi vào pha hạ cấp alignment của
+      lô 2 (30 lời gọi một mục), tức đỉnh của lượt này KHÔNG phải đỉnh của lúc
+      dịch bình thường — nó là đỉnh của đường xấu nhất.
+    * **steady** = MODE của phần đã nạp, không phải max: 7013 MiB giữ từ khoảng
+      giây 50 tới cuối lượt, còn 7258 chỉ là một mẫu.
+    * `idle_mib` = 1781 MiB KHÔNG phải "GPU trống": đó là mức nền của máy này
+      (desktop + trình duyệt) với `ollama ps` RỖNG trước khi nạp. Vì vậy headroom
+      934 MiB cũng là headroom thật của cấu hình đang chạy, không phải của một
+      card trắng.
+
+    Flag TẮT (mặc định) giữ nguyên hành vi: không có lời gọi `nvidia-smi` nào và
+    artifact KHÔNG có khoá `vram` —
+    `tests/test_vram_sample.py::test_the_vram_block_is_absent_from_the_artifact_when_the_flag_is_off`
+    ghim đúng điều đó. Hàm THUẦN `summarize_vram` (dãy mẫu -> khối `vram`) có bài
+    riêng, chạy được trên máy không GPU.
+
 Ví dụ:
     python -B scripts\\smoke_echo_guard.py --batches 30 15 8 \\
         --transcript ..\\data\\experiments\\accuracy-pipelines\\20261019-name-patch-smoke\\large-v3-beam5-prevfalse.json \\
@@ -168,6 +210,11 @@ Ví dụ:
         --transcript ..\\data\\experiments\\accuracy-pipelines\\20261019-name-patch-smoke\\large-v3-beam5-prevfalse.json \\
         --glossary ..\\data\\experiments\\accuracy-pipelines\\20261019-term-placeholder-smoke\\glossary.json \\
         --out-dir ..\\data\\experiments\\accuracy-pipelines\\20261019-echo-warmup
+
+    python -B scripts\\smoke_echo_guard.py --batches 30 --sample-vram \\
+        --transcript ..\\data\\experiments\\accuracy-pipelines\\20261019-name-patch-smoke\\large-v3-beam5-prevfalse.json \\
+        --glossary ..\\data\\experiments\\accuracy-pipelines\\20261019-term-placeholder-smoke\\glossary.json \\
+        --out-dir ..\\data\\experiments\\accuracy-pipelines\\20261019-vram-sample
 """
 from __future__ import annotations
 
@@ -176,9 +223,13 @@ import json
 import os
 import pathlib
 import re
+import statistics
+import subprocess
 import sys
+import threading
 import time
 import types
+from collections import Counter
 
 SCRIPTS_DIR = pathlib.Path(__file__).resolve().parent
 if str(SCRIPTS_DIR) not in sys.path:
@@ -199,6 +250,301 @@ from app.pipeline.translate import EchoProblem, TranslateHandler  # noqa: E402
 HAN = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff]")
 #: Dòng cổng in ra: `echo_guard:<n>/<m>` — nguồn số của "đoạn dịch lại" ở đây.
 _GUARD_LINE = re.compile(r"^echo_guard:(\d+)/(\d+)")
+
+
+# ---------------------------------------------------------------------------
+# Đo VRAM (`--sample-vram`) — opt-in, mặc định TẮT
+# ---------------------------------------------------------------------------
+#
+# Vì sao phải đo lại thay vì chép con số cũ
+#     Lượt đo trước báo "peak 6830 MiB, headroom 1362, steady ~6433, model 100%
+#     GPU", nhưng KHÔNG tệp nào trên đĩa chứa những số đó — chúng chỉ nằm trong
+#     một báo cáo. Một con số không có artifact thì không trích dẫn được, và
+#     không ai kiểm lại được nó được đo trên máy nào, với nền idle nào. Khối này
+#     biến nó thành dữ liệu: mỗi mẫu `memory.used` được ghi thô vào artifact.
+#
+# Vì sao TẮT mặc định
+#     Đường ship của smoke này (và test artifact của nó) không được đổi vì một
+#     phép đo phụ: khi cờ vắng mặt, `run_one` không gọi `nvidia-smi` lần nào và
+#     dict kết quả KHÔNG có khoá `vram` — tức tệp artifact giống hệt bản trước.
+
+#: Mẫu chỉ được coi là "model đã nạp" khi nó CAO hơn nền idle ít nhất chừng này.
+VRAM_LOAD_MARGIN_MIB = 512
+#: ... và phải giữ trên ngưỡng đó ở mẫu KẾ TIẾP (`VRAM_LOAD_STREAK` mẫu liên
+#: tiếp). Một gai đơn lẻ — video decode, cửa sổ trình duyệt — không phải một lần
+#: nạp model 4,9 GB, nên nó không được phép mở đầu "bàn ổn định".
+VRAM_LOAD_STREAK = 2
+#: Số mẫu nền idle lấy TRƯỚC khi nạp model (đề bài đòi ≥ 5).
+VRAM_IDLE_SAMPLES = 5
+#: Chu kỳ lấy mẫu trong lúc dịch.
+VRAM_SAMPLE_INTERVAL_S = 1.0
+#: Timeout cho mỗi lần gọi `nvidia-smi` / `ollama ps`.
+_SMI_TIMEOUT_S = 10
+_PS_TIMEOUT_S = 20
+
+
+def _median(values: list[int]) -> int:
+    """Trung vị làm số nguyên MiB (mẫu là số nguyên, nên trung vị .0/.5)."""
+    return int(statistics.median(values))
+
+
+def _mode(values: list[int]) -> int:
+    """Giá trị XUẤT HIỆN NHIỀU NHẤT; hoà thì lấy giá trị LỚN HƠN.
+
+    "Steady" là mức VRAM chiếm phần LỚN THỜI GIAN, tức mode, không phải max: một
+    khung hình 4K thoáng qua không làm mức ổn định nhảy 500 MiB. Lấy giá trị lớn
+    hơn khi hoà là để headroom không bị báo CAO hơn sự thật.
+    """
+    counts = Counter(values)
+    top = max(counts.values())
+    return max(value for value, count in counts.items() if count == top)
+
+
+def _load_index(values: list[int], margin_mib: int,
+                streak: int) -> int | None:
+    """Chỉ số của mẫu ĐẦU TIÊN thuộc một lần "nạp model" thật; None nếu không có.
+
+    Mẫu thứ `i` được coi là đã nạp khi nó cao hơn TRUNG VỊ của mọi mẫu TRƯỚC nó
+    ít nhất `margin_mib`, VÀ `streak` mẫu liên tiếp (kể từ `i`) đều trên ngưỡng
+    đó. Trung vị của phần trước chứ không phải mẫu đầu: một gai ngay đầu mảng
+    (ví dụ lúc mở trình duyệt) sẽ không đẩy nền idle lên.
+
+    Trả về chỉ số của mẫu ĐẦU chuỗi, nên cả đoạn DỐC của lần nạp (3000 -> 5000 ->
+    6400) vẫn nằm trong phần "đã nạp" và peak không bỏ sót đỉnh của chính nó.
+    """
+    for index in range(1, len(values)):
+        head = values[:index]
+        if not head:
+            continue
+        threshold = _median(head) + margin_mib
+        run = values[index:index + streak]
+        if len(run) == streak and all(value >= threshold for value in run):
+            return index
+    return None
+
+
+def summarize_vram(samples: list[int], total_mib: int | None = None, *,
+                   idle_count: int | None = None,
+                   margin_mib: int = VRAM_LOAD_MARGIN_MIB,
+                   streak: int = VRAM_LOAD_STREAK) -> dict:
+    """`[... MiB ...]` -> khối `vram` của artifact. Hàm THUẦN, không GPU.
+
+    Hàm này tách khỏi luồng lấy mẫu để pin được bằng mảng GIẢ: nó không gọi
+    `nvidia-smi`, không đọc đồng hồ, không biết gì về Ollama. Đầu vào duy nhất là
+    dãy số đo; nhờ vậy "mode của phần đã nạp" và "ngưỡng nạp" kiểm được trên máy
+    không có GPU.
+
+    `idle_count` (tuỳ chọn) = số mẫu ĐẦU do lượt chạy lấy TRƯỚC khi nạp model.
+    Có nó thì nền idle là trung vị của ĐÚNG phần đó (không phụ thuộc ngưỡng), còn
+    "đã nạp" vẫn phải vượt nền + `margin_mib`. Không có nó (đường của test) thì
+    nền idle là phần ĐẦU mảng trước lần vượt ngưỡng đầu tiên.
+
+    Trả về (đủ cho phần "acceptance" của lượt đo):
+        idle_mib, peak_mib, steady_mib, samples, idle_samples, loaded_samples,
+        loaded_at, margin_mib, load_streak, total_mib, headroom_mib, raw_mib
+    """
+    values = [int(value) for value in samples]
+    block = {
+        "idle_mib": None,
+        "peak_mib": None,
+        "steady_mib": None,
+        "samples": len(values),
+        "idle_samples": 0,
+        "loaded_samples": 0,
+        "loaded_at": None,
+        "margin_mib": margin_mib,
+        "load_streak": streak,
+        "total_mib": None if total_mib is None else int(total_mib),
+        "headroom_mib": None,
+        "raw_mib": values,
+    }
+    if not values:
+        # Không có mẫu nào thì KHÔNG có số nào: mọi trường đo để None, không 0 —
+        # "0 MiB" là một phép đo, còn "không đo được" là chuyện khác.
+        return block
+
+    if idle_count is None:
+        loaded_at = _load_index(values, margin_mib, streak)
+        idle_values = values if loaded_at is None else values[:loaded_at]
+    else:
+        idle_count = max(1, min(int(idle_count), len(values)))
+        idle_values = values[:idle_count]
+        threshold = _median(idle_values) + margin_mib
+        loaded_at = None
+        for index in range(idle_count, len(values) - streak + 1):
+            run = values[index:index + streak]
+            if all(value >= threshold for value in run):
+                loaded_at = index
+                break
+
+    block["idle_samples"] = len(idle_values)
+    if idle_values:
+        block["idle_mib"] = _median(idle_values)
+    if loaded_at is None:
+        return block
+
+    loaded = values[loaded_at:]
+    block["loaded_at"] = loaded_at
+    block["loaded_samples"] = len(loaded)
+    block["peak_mib"] = max(loaded)
+    block["steady_mib"] = _mode(loaded)
+    if block["total_mib"] is not None:
+        block["headroom_mib"] = block["total_mib"] - block["peak_mib"]
+    return block
+
+
+def _smi_mib(field: str) -> int | None:
+    """`nvidia-smi --query-gpu=memory.<field>` (MiB) của GPU ĐẦU TIÊN.
+
+    None = không có `nvidia-smi`, nó lỗi, hoặc nó không in số nào. Ba ca đó KHÁC
+    nhau về nguyên nhân nhưng giống nhau ở đúng một điểm: không có số đo, nên
+    không được thay bằng 0 hay bằng một con số ước lượng.
+    """
+    try:
+        completed = subprocess.run(
+            ["nvidia-smi", f"--query-gpu=memory.{field}",
+             "--format=csv,noheader,nounits"],
+            capture_output=True, text=True, timeout=_SMI_TIMEOUT_S,
+            encoding="utf-8", errors="replace",
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if completed.returncode != 0:
+        return None
+    for line in completed.stdout.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            return int(float(line))
+        except ValueError:
+            continue
+    return None
+
+
+def _gpu_used_mib() -> int | None:
+    """`memory.used` ngay lúc này — mẫu DUY NHẤT mà cả phép đo đứng trên."""
+    return _smi_mib("used")
+
+
+def _ollama_ps_text() -> dict:
+    """`ollama ps` = SIZE + PROCESSOR (GPU/CPU) của model ĐANG nạp.
+
+    Phải đọc TRONG lúc lượt chạy còn nóng: sau khi `release()` thì bảng rỗng và
+    câu "model nằm 100% GPU" không còn gì chứng minh. Ghi cả `stdout` thô để
+    người đọc artifact thấy đúng dòng mà lệnh in ra, không phải bản diễn giải.
+    """
+    entry: dict = {"command": "ollama ps", "returncode": None, "stdout": "",
+                   "error": None}
+    try:
+        completed = subprocess.run(["ollama", "ps"], capture_output=True,
+                                   text=True, timeout=_PS_TIMEOUT_S,
+                                   encoding="utf-8", errors="replace")
+    except (OSError, subprocess.SubprocessError) as exc:
+        entry["error"] = f"{type(exc).__name__}: {exc}"
+        return entry
+    entry["returncode"] = completed.returncode
+    entry["stdout"] = completed.stdout
+    if completed.returncode != 0:
+        entry["stderr"] = completed.stderr
+    return entry
+
+
+def _ollama_ps_api() -> dict:
+    """`/api/ps` — cùng thông tin, nhưng `size`/`size_vram` là SỐ đọc được.
+
+    Cột PROCESSOR của CLI đã nói "100% GPU"; hai trường này nói nó chiếm bao nhiêu
+    byte, tức phần chia GPU/CPU có một con số chứ không phải một nhãn.
+    """
+    try:
+        payload = httpx.get(f"{DEFAULT_BASE_URL}/api/ps", timeout=10).json()
+    except Exception as exc:              # noqa: BLE001 - chỉ là số đo phụ
+        return {"error": f"{type(exc).__name__}: {exc}"}
+    return {"models": [{"name": item.get("name") or item.get("model"),
+                        "size": item.get("size"),
+                        "size_vram": item.get("size_vram"),
+                        "expires_at": item.get("expires_at")}
+                       for item in payload.get("models") or []]}
+
+
+def _unload_models(names: list[str]) -> None:
+    """Đổ model đang nạp bằng ĐÚNG thân `release()` của adapter (`keep_alive: 0`).
+
+    Cần riêng ở đây vì `OllamaMtEngine.release()` NO-OP khi tiến trình này CHƯA
+    tự nạp gì — mà model của lượt TRƯỚC lại nằm trong VRAM tới 30 phút. Không đổ
+    thì "nền idle" của lượt này là mức ĐÃ NẠP và mọi số dưới nó đều lệch.
+    """
+    for name in names:
+        try:
+            httpx.post(f"{DEFAULT_BASE_URL}/api/chat",
+                       json={"model": name, "messages": [], "keep_alive": 0},
+                       timeout=30)
+        except Exception:                 # noqa: BLE001 - không đổ được thì thôi
+            pass
+
+
+def _wait_until_stable(timeout_s: float = 15.0, tolerance_mib: int = 128) -> None:
+    """Chờ VRAM LẮNG sau khi đổ model: hai mẫu liên tiếp lệch ≤ 128 MiB.
+
+    Chỉ CHỜ, không ghi mẫu: các mẫu trong lúc VRAM đang TỤT (6000 -> 1800) không
+    phải nền idle, đưa chúng vào trung vị là làm hỏng đúng con số cần đo.
+    """
+    deadline = time.monotonic() + timeout_s
+    previous = _gpu_used_mib()
+    while time.monotonic() < deadline:
+        time.sleep(VRAM_SAMPLE_INTERVAL_S)
+        current = _gpu_used_mib()
+        if current is None:
+            return
+        if previous is not None and abs(current - previous) <= tolerance_mib:
+            return
+        previous = current
+
+
+class _VramSampler:
+    """Lấy mẫu `memory.used` ~1 Hz: `VRAM_IDLE_SAMPLES` mẫu nền rồi cả lượt dịch.
+
+    Luồng nền thay vì chèn vào vòng dịch: mỗi lời gọi engine mất 0,5–25 s, nên
+    lấy mẫu "giữa các lời gọi" sẽ bỏ qua đúng khoảnh khắc model được nạp và đỉnh
+    VRAM đi kèm. Một luồng 1 Hz không phụ thuộc hình dạng lời gọi.
+
+    `values` chỉ được GHI bởi luồng này (và bởi `sample_idle` trước khi nó chạy),
+    rồi được ĐỌC sau `stop()` — nên không cần khoá.
+    """
+
+    def __init__(self, interval: float = VRAM_SAMPLE_INTERVAL_S) -> None:
+        self.interval = interval
+        self.values: list[int] = []
+        self.total_mib = _smi_mib("total")
+        self._stop = threading.Event()
+        self._thread: threading.Thread | None = None
+
+    def sample(self) -> int | None:
+        value = _gpu_used_mib()
+        if value is not None:
+            self.values.append(value)
+        return value
+
+    def sample_idle(self, count: int = VRAM_IDLE_SAMPLES) -> None:
+        for index in range(count):
+            if index:
+                time.sleep(self.interval)
+            self.sample()
+
+    def start(self) -> None:
+        self._thread = threading.Thread(target=self._run, name="vram-sampler",
+                                        daemon=True)
+        self._thread.start()
+
+    def _run(self) -> None:
+        while not self._stop.wait(self.interval):
+            self.sample()
+
+    def stop(self) -> None:
+        self._stop.set()
+        if self._thread is not None:
+            self._thread.join(timeout=5)
+            self._thread = None
 
 
 # ---------------------------------------------------------------------------
@@ -252,6 +598,10 @@ class _CallRecorder:
         #: không có nhãn này thì bảng theo lô không phân biệt được "lô nhỏ đầu"
         #: với "một lô 4 mục bình thường".
         self.phase = 1
+        #: Hook chạy SAU mỗi lời gọi engine, nhận chính dict của lời gọi đó. Chỗ
+        #: duy nhất biết "model vừa nạp xong" là lời gọi engine ĐẦU TIÊN, nên
+        #: `ollama ps` được chụp từ đây chứ không theo giờ (xem `run_one`).
+        self.on_call = None
 
     @property
     def sizes(self) -> list[int]:
@@ -288,6 +638,12 @@ class _CallRecorder:
         except Exception as exc:
             self.calls[-1]["error"] = type(exc).__name__
             raise
+        finally:
+            # `finally`: một lời gọi NÉM vẫn có thể đã nạp model, nên `ollama ps`
+            # phải chụp được ở CẢ hai đường — nếu không, lượt hỏng sẽ ghi "chưa
+            # nạp" cho một model đang nằm trong VRAM.
+            if self.on_call is not None:
+                self.on_call(self.calls[-1])
         stats = getattr(self._inner, "last_stats", None)
         self.calls[-1]["duration_ms"] = getattr(stats, "duration_ms", None)
         return out
@@ -423,11 +779,13 @@ def run_one(transcript: pathlib.Path, glossary: pathlib.Path,
             first_batch_items: int | None = None,
             unload: bool = True, handler_cls: type = TranslateHandler,
             handler_kwargs: dict | None = None,
-            artifact_name: str | None = None) -> dict:
+            artifact_name: str | None = None,
+            sample_vram: bool = False) -> dict:
     """Một lượt đo trên clip thật; ghi artifact và trả kết quả.
 
-    Ba tham số cuối tồn tại cho ĐÚNG một lượt đo khác (`scripts/smoke_echo_halving.py`),
-    lượt đo CHIA ĐÔI lô bị chép, và cả ba đều KHÔNG đổi hành vi mặc định:
+    Ba tham số `handler_cls`/`handler_kwargs`/`artifact_name` tồn tại cho ĐÚNG một
+    lượt đo khác (`scripts/smoke_echo_halving.py`), lượt đo CHIA ĐÔI lô bị chép,
+    và cả ba đều KHÔNG đổi hành vi mặc định:
 
     * `handler_cls` — lớp handler cần dựng (mặc định `TranslateHandler`, tức đường
       ship). Lượt chia đôi truyền một lớp CON chỉ override `_guard_echoes`, nên nó
@@ -443,11 +801,18 @@ def run_one(transcript: pathlib.Path, glossary: pathlib.Path,
     cổng cũ **89** lần dịch lại / 93 lời gọi / 78,91 s; lô 30 chia đôi **7** lời
     gọi một mục (cả 7 là hạ cấp alignment, không phải cổng) / 25 lời gọi / 95,72 s
     — xem `smoke_echo_halving.py` và artifact `20261019-echo-halving/`.
+
+    `sample_vram=True` (cờ CLI `--sample-vram`) bật phép đo VRAM. Nó KHÔNG đổi
+    đường dịch, không đổi prompt, không đổi tên artifact; nó chỉ thêm khối `vram`
+    vào dict kết quả. Mặc định `False` thì không có lời gọi `nvidia-smi` nào và
+    artifact giống hệt bản trước — có bài test ghim đúng điều đó.
     """
     terms = smoke._load_terms(glossary)
     segments = smoke._load_segments(transcript, None)
     spec, engine = smoke._engine_and_capabilities(smoke.ENGINE_ID)
     log: list[str] = []
+    #: Các lần chụp `ollama ps` — chỉ có khi `sample_vram` (xem dưới).
+    ollama_ps: list[dict] = []
     recorder = _CallRecorder(engine, log)
     prompt_version = smoke._prompt_version(spec)
     #: Capability nguyên bản của `registry.json`: seam sưởi từng được bật Ở ĐÂY
@@ -474,7 +839,48 @@ def run_one(transcript: pathlib.Path, glossary: pathlib.Path,
     job = smoke._Job()
     error: dict | None = None
     model_loaded_before = _loaded_models()
+    # -- VRAM: CHỈ khi cờ bật (mặc định TẮT ⇒ không chạm nvidia-smi lần nào) ----
+    sampler: _VramSampler | None = None
+    idle_samples = 0
+    unloaded_before = False
+    if sample_vram:
+        sampler = _VramSampler()
+        if sampler.total_mib is None or _gpu_used_mib() is None:
+            # Không có số đo thì DỪNG: một artifact thiếu VRAM là chuyện nhỏ, một
+            # artifact có số bịa là chuyện lớn.
+            raise RuntimeError(
+                "nvidia-smi không có hoặc không trả `memory.used`: dừng, "
+                "không dựng số VRAM. (Cần máy có GPU NVIDIA đọc được.)")
+        # Model của lượt TRƯỚC có thể còn trong VRAM tới 30 phút; "nền idle" chỉ
+        # có nghĩa khi VRAM thật sự trống, nên đổ trước rồi CHỜ lắng.
+        stale = [name for name in model_loaded_before if not name.startswith("(")]
+        if stale:
+            _unload_models(stale)
+            _wait_until_stable()
+            unloaded_before = True
+        sampler.sample_idle(VRAM_IDLE_SAMPLES)
+        idle_samples = len(sampler.values)
+
+        def _capture_ollama_ps(call: dict, _entries: list[dict] = ollama_ps) -> None:
+            """Chụp `ollama ps` sau lời gọi ĐẦU TIÊN — lúc model vừa nạp xong.
+
+            Đọc ở đây chứ không theo giờ vì lời gọi đầu là mốc DUY NHẤT mà ta biết
+            chắc model đã nạp; đọc trước nó thì bảng còn rỗng, đọc sau khi
+            `release()` thì cũng rỗng.
+            """
+            if _entries:                  # chỉ chụp một lần, sau lời gọi đầu
+                return
+            entry = _ollama_ps_text()
+            entry["at_seconds"] = round(time.perf_counter() - started, 2)
+            entry["at_call"] = {"phase": call.get("phase"),
+                                "size": call.get("size")}
+            entry["api"] = _ollama_ps_api()
+            _entries.append(entry)
+
+        recorder.on_call = _capture_ollama_ps
     started = time.perf_counter()
+    if sampler is not None:
+        sampler.start()
     # HATCH: đặt biến môi trường ĐÚNG một lần cho cả lượt (mọi lần dịch lại
     # singleton bên trong `echo_guard` cũng đọc nó), rồi TRẢ LẠI giá trị cũ ở
     # `finally`. Chỉ engine của `smoke.ENGINE_ID` đọc biến này (xem
@@ -501,6 +907,15 @@ def run_one(transcript: pathlib.Path, glossary: pathlib.Path,
             _handler(batch_items).translate(
                 translation_id=1, transcript_id=1, engine_id=spec.id,
                 source_lang="zh", target_lang="vi", job=job, report=_report)
+        if sampler is not None:
+            # Chụp THỨ HAI, ngay sau lời gọi cuối và TRƯỚC khi đổ model: đây là
+            # trạng thái mà người đọc muốn trích ("model nằm 100% GPU") và nó chỉ
+            # tồn tại trong khoảng này.
+            entry = _ollama_ps_text()
+            entry["at_seconds"] = round(time.perf_counter() - started, 2)
+            entry["at_call"] = "sau lời gọi CUỐI, trước khi đổ model"
+            entry["api"] = _ollama_ps_api()
+            ollama_ps.append(entry)
     except EchoProblem as exc:
         error = {"type": "EchoProblem", "ids": exc.ids, "echoed": exc.echoed,
                  "batch": exc.batch, "message": str(exc)}
@@ -511,6 +926,11 @@ def run_one(transcript: pathlib.Path, glossary: pathlib.Path,
             os.environ.pop(EXPERIMENT_PROMPT_STYLE_ENV, None)
         else:
             os.environ[EXPERIMENT_PROMPT_STYLE_ENV] = previous_style
+        # Dừng lấy mẫu TRƯỚC khi đổ model: mẫu của pha TỤT VRAM sau `release()`
+        # không phải VRAM của lúc dịch, và một mẫu 1800 MiB lọt vào `peak`/`steady`
+        # sẽ làm headroom báo cao hơn sự thật.
+        if sampler is not None:
+            sampler.stop()
         # Đo xong thì ĐỔ model khỏi VRAM: lượt SAU phải bắt đầu từ đúng trạng thái
         # mà lượt này bắt đầu, nếu không "sưởi" của lượt sau là vô nghĩa (model
         # đã nóng sẵn vì `keep_alive` 30 phút).
@@ -521,6 +941,16 @@ def run_one(transcript: pathlib.Path, glossary: pathlib.Path,
                 print(f"(không đổ được model: {type(exc).__name__}: {exc})",
                       flush=True)
     seconds = round(time.perf_counter() - started, 2)
+    vram = None
+    if sampler is not None:
+        vram = summarize_vram(sampler.values, sampler.total_mib,
+                              idle_count=idle_samples)
+        vram["sample_interval_s"] = sampler.interval
+        #: True = đã đổ model của lượt trước TRƯỚC khi lấy nền idle; False = VRAM
+        #: vốn đã trống. Không có trường này thì người đọc không biết nền idle có
+        #: bị nhiễm model cũ hay không.
+        vram["unloaded_before_idle"] = unloaded_before
+        vram["ollama_ps"] = ollama_ps
 
     accepted = repos._translation.segments
     source = {s.i: s.text for s in segments}
@@ -585,6 +1015,10 @@ def run_one(transcript: pathlib.Path, glossary: pathlib.Path,
         "sentences": [{"i": s.i, "zh": source.get(s.i, ""), "vi": s.text,
                        "qa": list(s.qa)} for s in accepted],
     }
+    # Khoá `vram` CHỈ xuất hiện khi cờ bật: đường mặc định phải giữ nguyên từng
+    # khoá của artifact cũ (xem `tests/test_vram_sample.py`).
+    if vram is not None:
+        result["vram"] = vram
     out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / (artifact_name or _artifact_name(config, style, batch_items))
      ).write_text(
@@ -672,7 +1106,16 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--no-unload", action="store_true",
                         help="KHÔNG đổ model sau mỗi lượt (mặc định là đổ, để lượt "
                              "sau bắt đầu từ cùng trạng thái VRAM)")
+    parser.add_argument("--sample-vram", action="store_true",
+                        help="lấy mẫu `nvidia-smi memory.used` ~1 Hz (5 mẫu nền "
+                             "idle TRƯỚC khi nạp model, rồi suốt lượt dịch) và "
+                             "ghi khối `vram` vào artifact; TẮT mặc định")
     args = parser.parse_args(argv)
+    if args.sample_vram and _gpu_used_mib() is None:
+        # Không có số đo thì DỪNG — không có nhánh nào dựng số thay nvidia-smi.
+        print("nvidia-smi không có hoặc không trả `memory.used`: dừng, "
+              "không dựng số VRAM.", file=sys.stderr)
+        return 2
 
     rows: list[dict] = []
     #: Bảng theo lô của TỪNG lượt, đánh khoá theo nhãn cấu hình (hoặc
@@ -702,7 +1145,8 @@ def main(argv: list[str] | None = None) -> int:
                          plan["batch_items"], plan["style"],
                          config=plan["config"],
                          first_batch_items=plan["first_batch_items"],
-                         unload=not args.no_unload)
+                         unload=not args.no_unload,
+                         sample_vram=args.sample_vram)
         rows.append(_row(result))
         tables[plan["config"] or f"{plan['style']}-{plan['batch_items']}"] = (
             result["echo_by_batch"])
