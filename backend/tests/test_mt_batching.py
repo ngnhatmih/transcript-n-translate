@@ -6,8 +6,9 @@ bỏ sẽ làm bản dịch lệch phụ đề mà không ai thấy.
 """
 import pytest
 
+from app.domain.batching import MAX_SEGMENTS_PER_BATCH
 from app.domain.models import Segment
-from app.domain.mt import DEFAULT_MAX_CHARS, batch_segments
+from app.domain.mt import DEFAULT_MAX_CHARS, DEFAULT_MAX_ITEMS, batch_segments
 
 
 def seg(i: int, text: str) -> Segment:
@@ -123,3 +124,60 @@ def test_packing_restarts_after_a_flush():
     """
     a, b, c, d, e = seg(1, "a" * 6), seg(2, "b" * 6), seg(3, "c"), seg(4, "d"), seg(5, "e")
     assert batch_segments([a, b, c, d, e], max_chars=6) == [[a], [b], [c, d, e]]
+
+
+# ---------------------------------------------------------------------------
+# Ngân sách SỐ MỤC — trần thứ hai, độc lập với ký tự (xem `mt.DEFAULT_MAX_ITEMS`).
+# ---------------------------------------------------------------------------
+
+def test_max_items_caps_the_number_of_items_per_batch():
+    """Trần số mục: lô đầu tiên ĐẦY thì xả, dù còn thừa ngân sách ký tự."""
+    segs = [seg(i, "x") for i in range(1, 8)]
+    out = batch_segments(segs, max_chars=10_000, max_items=3)
+    assert [len(b) for b in out] == [3, 3, 1]
+    assert [s for batch in out for s in batch] == segs, "không mục nào bị mất/đổi thứ tự"
+
+
+def test_max_items_never_drops_a_segment():
+    """Trần số mục chỉ chặn việc GHÉP THÊM — không bao giờ bỏ mục, kể cả khi lô
+    chỉ còn một chỗ và segment kế tiếp dài hơn ngân sách ký tự."""
+    segs = [seg(1, "a" * 50), seg(2, "b"), seg(3, "c")]
+    out = batch_segments(segs, max_chars=2, max_items=2)
+    assert [s for batch in out for s in batch] == segs
+    assert all(batch for batch in out)
+
+
+def test_max_items_none_keeps_the_character_budget_alone():
+    """`None` = hành vi CŨ (chỉ ký tự). Người gọi không quan tâm số mục không bị
+    đổi hành vi âm thầm."""
+    segs = [seg(i, "x") for i in range(1, 40)]
+    assert batch_segments(segs, max_chars=10_000, max_items=None) == [segs]
+    assert batch_segments(segs, max_chars=10_000) == [segs]
+
+
+def test_non_positive_max_items_is_rejected():
+    with pytest.raises(ValueError):
+        batch_segments([seg(1, "a")], max_chars=10, max_items=0)
+    with pytest.raises(ValueError):
+        batch_segments([seg(1, "a")], max_chars=10, max_items=-3)
+
+
+def test_default_item_budget_is_the_number_the_project_already_declared():
+    """HAI con số cho CÙNG một khái niệm ("bao nhiêu mục thì lô quá to") phải là
+    MỘT con số.
+
+    `domain/batching.MAX_SEGMENTS_PER_BATCH` là chỗ dự án đã khai trần đó (kèm
+    test riêng) nhưng cơ chế ấy CHƯA được nối vào đường dịch; trần thật của đường
+    dịch nằm ở `mt.DEFAULT_MAX_ITEMS`. Bài này ghim ĐẲNG THỨC giữa hai chỗ, không
+    ghim một literal: đổi một bên mà không đổi bên kia là ĐỎ.
+    """
+    assert DEFAULT_MAX_ITEMS == MAX_SEGMENTS_PER_BATCH
+    assert isinstance(DEFAULT_MAX_ITEMS, int) and DEFAULT_MAX_ITEMS > 0
+
+
+def test_default_item_budget_stays_under_the_measured_breaking_threshold():
+    """Biên an toàn ĐO ĐƯỢC, ghim bằng QUAN HỆ: cỡ lô lớn nhất còn đo được là ĐỦ
+    với `qwen2.5-7b` là 64 mục; trần phải ≤ một nửa của nó (xem
+    `mt.DEFAULT_MAX_ITEMS`). 135 mục ⇒ model bỏ mục (`engine trả 100/101 mục,
+    cần 135`)."""
+    assert DEFAULT_MAX_ITEMS <= 64 // 2

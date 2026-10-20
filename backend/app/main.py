@@ -283,8 +283,17 @@ def build_components():
         # Task 12: cùng lớp lỗi với `publish=` bị bỏ quên ở Giai đoạn 1a — dựng
         # `TranslateHandler` mà KHÔNG trao `mt_engines` thì mọi job dịch tự sinh
         # `KeyError` trong handler, và bóc băng xong chẳng có bản dịch nào.
-        "translate": TranslateHandler(repos, mt_engines, chimera=chimera_plan,
-                                      chimera_merge=chimera_merge),
+        #
+        # `engine_capabilities` là CÙNG dict `capabilities` mà route đọc (đã có
+        # `available`/`prompt_version`), nên "engine nào được che thuật ngữ bằng
+        # token" chỉ có MỘT nguồn sự thật là `registry.json`. Handler không được
+        # import `app.adapters` lẫn không tự đọc registry (có test canh tầng API):
+        # composition root là chỗ duy nhất biết registry.
+        "translate": TranslateHandler(
+            repos, mt_engines, chimera=chimera_plan,
+            chimera_merge=chimera_merge,
+            engine_capabilities={spec.id: dict(spec.capabilities)
+                                 for spec in specs if spec.kind == "mt"}),
         "export": ExportHandler(repos, out_dir=OUTPUT_DIR),
     }
     broker = JobEventBroker()

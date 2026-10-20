@@ -38,6 +38,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
 import type { EngineSpec, Segment, Transcript, TranslationDetail } from "../api/types.ts";
+import { ApiError } from "../api/client.ts";
 import { setupDom, teardownDom } from "../../test/dom.ts";
 
 /**
@@ -193,6 +194,7 @@ const tiengOn: string[] = [];
 let render: (ui: unknown) => { container: HTMLElement; unmount: () => void };
 let fireEvent: { click: (el: Element) => void; change: (el: Element, init: unknown) => void };
 let cleanup: () => void;
+let waitFor: (cb: () => void, options?: { timeout?: number; interval?: number }) => Promise<void>;
 let taoPhanTu: (type: unknown, props?: unknown) => unknown;
 let CompareScreen: (props: unknown) => unknown;
 let getByRole: (container: HTMLElement, role: string, options?: { name?: RegExp | string }) => Element;
@@ -247,6 +249,7 @@ describe("CompareScreen: §4.3 hai cot + cot CPS + segmented control + ghim ban 
     render = api.render;
     fireEvent = api.fireEvent;
     cleanup = api.cleanup;
+    waitFor = api.waitFor;
     getByRole = api.getByRole;
     const reactModule: any = await import("react");
     const react = reactModule.createElement === undefined ? reactModule.default : reactModule;
@@ -1023,7 +1026,14 @@ describe("CompareScreen: §4.3 hai cot + cot CPS + segmented control + ghim ban 
         },
       },
     ] as (Record<string, unknown> & { bamGhim?: boolean })[]) {
-      const { container } = render(taoPhanTu(CompareScreen, { onTaoBanDich: () => {}, ...props }));
+      const { container } = render(taoPhanTu(CompareScreen, {
+        onTaoBanDich: () => {},
+        // ⚠️ `onXoa` PHAI co mat: nút xoá hai bước chỉ render khi có đường xoá, nên thiếu nó
+        // thì ba luật `.cmp__ban`/`.cmp__xoa`/`.cmp__xoa-loi` (và `.cmp__bans`) thành LUẬT
+        // MỒ CÔI oan — đúng phép đo SAI mà khối chú thích đầu bài này cảnh báo.
+        onXoa: async () => {},
+        ...props,
+      }));
       if (props.bamGhim === true) fireEvent.click(phanTuTu(container, '[data-testid="ghim"]'));
       for (const el of container.querySelectorAll("*")) {
         for (const lop of el.classList) if (lop.startsWith("cmp")) lopTrongDom.add(lop);
@@ -1087,5 +1097,208 @@ describe("CompareScreen: §4.3 hai cot + cot CPS + segmented control + ghim ban 
     for (const token of dung) {
       assert.ok(tokensCss.includes(`${token}:`), `token ${token} duoc dung nhung KHONG dinh nghia trong tokens.css`);
     }
+  });
+
+  // -------------------------------------------------------------------------
+  // XOÁ MỘT BẢN DỊCH — HAI BƯỚC, và thanh công cụ KHÔNG tràn
+  //
+  // ⚠️ VÌ SAO NÚT XOÁ NẰM Ở MỘT HÀNG RIÊNG (`.cmp__bans`) chứ không trong `.cmp__thanh`:
+  // nhét nút xoá vào đúng chip bản dịch trong thanh cộng thêm HAI phần tử mỗi bản vào một
+  // thanh đã có ô chọn engine + nút "dịch" + chip `◆ CHIMERA` + nút ghim ⇒ chip CHIMERA bị
+  // đẩy ra ngoài `clientWidth` và người dùng mất đường vào chế độ Chimera. Đây là quyết
+  // định HÌNH THỨC, nên nó được ghim ngay dưới đây bằng một bài đọc DOM (thứ tự + lớp), và
+  // phần "không tràn" chỉ đo được trên TRÌNH DUYỆT THẬT (`getBoundingClientRect` vs
+  // `clientWidth`), không đo được trong jsdom.
+  // -------------------------------------------------------------------------
+
+  it("XOÁ BẢN DỊCH: cú bấm ĐẦU chỉ mở bước xác nhận (`xóa?` + `hủy`), KHÔNG gọi API", () => {
+    const goi: number[] = [];
+    const t = banGhi([doan(1, "你好")]);
+    const tr = banDich(11, ["Xin chao"], [{ i: 1, cps: 4, over: false }]);
+    const { container, unmount } = render(taoPhanTu(CompareScreen, {
+      transcript: t,
+      translations: [tr],
+      specs: SPECS,
+      onXoa: async (id: number) => { goi.push(id); },
+    }));
+
+    const nut = phanTuTu(container, '[data-testid="xoa-ban-11"]') as HTMLButtonElement;
+    assert.equal(nut.tagName, "BUTTON", "nút xoá phải là NÚT thật (Tab/Enter/Space)");
+    assert.equal(nut.getAttribute("type"), "button", "`type=button`: không được submit form nào");
+    assert.equal((nut.textContent ?? "").trim(), "xóa", "trạng thái đầu nói ra bằng CHỮ `xóa`");
+
+    fireEvent.click(nut);
+
+    assert.equal((nut.textContent ?? "").trim(), "xóa?", "cú bấm đầu phải hỏi lại bằng CHỮ `xóa?`");
+    assert.ok(
+      container.querySelector('[data-testid="xoa-ban-11-huy"]') !== null,
+      "bước xác nhận phải có ĐƯỜNG HUỶ (một điều khiển thật, không phải 'bấm ra ngoài')",
+    );
+    assert.deepEqual(goi, [], "cú bấm ĐẦU KHÔNG được gọi API — xoá là việc của cú bấm thứ hai");
+    unmount();
+  });
+
+  it("XOÁ BẢN DỊCH: cú bấm THỨ HAI gọi ĐÚNG MỘT lần; đường HUỶ gọi 0 lần", async () => {
+    const goi: number[] = [];
+    const t = banGhi([doan(1, "你好")]);
+    const tr = banDich(11, ["Xin chao"], [{ i: 1, cps: 4, over: false }]);
+    const { container, unmount } = render(taoPhanTu(CompareScreen, {
+      transcript: t,
+      translations: [tr],
+      specs: SPECS,
+      onXoa: async (id: number) => { goi.push(id); },
+    }));
+
+    const nut = phanTuTu(container, '[data-testid="xoa-ban-11"]') as HTMLButtonElement;
+    fireEvent.click(nut);
+    fireEvent.click(nut);
+    // ⚠️ Chờ ĐÚNG tín hiệu "lời gọi đã XONG", không phải "bộ đếm đã tăng": `goi` tăng ngay
+    // trong handler (đồng bộ), còn nút chỉ rời `đang xóa…` sau khi promise settle. Chờ bộ đếm
+    // thôi thì lần bấm sau rơi vào một nút CÒN KHOÁ và phép đo "đường huỷ" sẽ đỏ vì lý do
+    // không liên quan tới đường huỷ.
+    await waitFor(() => {
+      assert.deepEqual(goi, [11], "phải gọi ĐÚNG MỘT lần với đúng id 11");
+      assert.equal((nut.textContent ?? "").trim(), "xóa", "nút phải trở về trạng thái thường");
+    });
+
+    // ĐƯỜNG HUỶ: mở bước xác nhận rồi bấm `hủy` ⇒ KHÔNG có lời gọi nào thêm.
+    goi.length = 0;
+    fireEvent.click(nut);
+    fireEvent.click(phanTuTu(container, '[data-testid="xoa-ban-11-huy"]'));
+    assert.equal((nut.textContent ?? "").trim(), "xóa", "huỷ phải đóng bước xác nhận");
+    assert.equal(container.querySelector('[data-testid="xoa-ban-11-huy"]'), null, "nút huỷ phải biến mất");
+    assert.deepEqual(goi, [], "đường HUỶ không được gọi API");
+    unmount();
+  });
+
+  it("XOÁ BẢN DỊCH: `đang xóa…` khi lời gọi đang bay (nút bị khoá), lỗi là NGUYÊN VĂN `ApiError.message`", async () => {
+    const t = banGhi([doan(1, "你好")]);
+    const tr = banDich(11, ["Xin chao"], [{ i: 1, cps: 4, over: false }]);
+    const { container, unmount } = render(taoPhanTu(CompareScreen, {
+      transcript: t,
+      translations: [tr],
+      specs: SPECS,
+      // Lời gọi KHÔNG BAO GIỜ xong: cửa sổ "đang bay" là xác định, không phụ thuộc tốc độ máy.
+      onXoa: () => new Promise<void>(() => {}),
+    }));
+
+    const nut = phanTuTu(container, '[data-testid="xoa-ban-11"]') as HTMLButtonElement;
+    fireEvent.click(nut);
+    fireEvent.click(nut);
+    await waitFor(() => {
+      assert.equal((nut.textContent ?? "").trim(), "đang xóa…",
+        "trạng thái ĐANG BAY phải nói ra bằng chữ, không chỉ bằng việc nút mờ đi");
+    });
+    assert.equal(nut.disabled, true, "nút bị khoá trong lúc bay (cú bấm thứ ba không thành lời gọi thứ hai)");
+    unmount();
+
+    // NHÁNH LỖI: câu 409 NGUYÊN VĂN của backend (`delete_guard.mot_loi_409`) phải hiện y nguyên.
+    const cau = "409: không xoá được bản dịch 11: job #12 đang xếp hàng hoặc đang chạy trên nó — huỷ job đó trước rồi xoá";
+    const lo = render(taoPhanTu(CompareScreen, {
+      transcript: t,
+      translations: [tr],
+      specs: SPECS,
+      onXoa: async () => { throw new ApiError(409, cau.slice("409: ".length)); },
+    }));
+    const nut2 = phanTuTu(lo.container, '[data-testid="xoa-ban-11"]') as HTMLButtonElement;
+    fireEvent.click(nut2);
+    fireEvent.click(nut2);
+    await waitFor(() => {
+      assert.equal(
+        (phanTuTu(lo.container, '[data-testid="xoa-ban-11-loi"]').textContent ?? "").trim(),
+        cau,
+        "lỗi phải hiện NGUYÊN VĂN `ApiError.message` (mã HTTP + câu tiếng Việt của backend)",
+      );
+    });
+    assert.equal((nut2.textContent ?? "").trim(), "xóa", "sau lỗi nút về trạng thái thường để bấm lại");
+    assert.deepEqual(tiengOn, [], "luồng xoá không được sinh tiếng ồn console");
+    lo.unmount();
+  });
+
+  it("HINH THUC (XOÁ): chip CHIMERA ở LẠI trong thanh công cụ, dải chọn bản dịch ở HÀNG RIÊNG ngay dưới", () => {
+    // ⚠️ PHÉP ĐO NÀY ĐO ĐƯỢC GÌ, VÀ KHÔNG ĐO ĐƯỢC GÌ (nói trước, không giả vờ):
+    //   · ĐO ĐƯỢC: SỰ HIỆN DIỆN + THỨ TỰ + LỚP của chip CHIMERA và của dải chọn bản dịch
+    //     trong DOM THẬT; chip nằm TRONG `.cmp__thanh`, dải bản dịch nằm NGOÀI nó (hàng kế
+    //     tiếp của lưới `.cmp`); thanh công cụ chỉ còn BỐN điều khiển cố định.
+    //   · KHÔNG ĐO ĐƯỢC: "chip có bị đẩy ra ngoài `clientWidth` không". jsdom KHÔNG có
+    //     layout ⇒ `getBoundingClientRect()` trả toàn 0 và `scrollWidth == clientWidth`
+    //     luôn đúng. Một `assert` kiểu đó ở đây là một bài test GIẢ. Phép đo tràn ngang chỉ
+    //     đứng vững trên Chrome thật; nếu chưa chạy được trình duyệt thì câu trả lời đúng là
+    //     "chưa đo được", không phải "đã ổn".
+    const t = banGhi([doan(1, "你好")]);
+    const tr = banDich(11, ["Xin chao"], [{ i: 1, cps: 4, over: false }]);
+    const { container, unmount } = render(taoPhanTu(CompareScreen, {
+      transcript: t,
+      translations: [tr],
+      specs: SPECS,
+      chimera: true,
+      chiPhi: {
+        segments: 1, declared: 6, runnable: 4, calls_per_batch: 5, multiplier: 5,
+        merge_engine: "qwen2.5-3b",
+        candidates: [
+          { id: "c1", engine: "opus-mt", label: "OPUS-MT", temperature: null,
+            quality_note: null, available: true, reason: null },
+        ],
+        baseline: null, estimate: null,
+        estimate_basis: "chua do duoc", estimate_hint: null,
+      },
+      onXoa: async () => {},
+    }));
+
+    const thanh = phanTuTu(container, ".cmp__thanh");
+    const chip = thanh.querySelector('[data-testid="chimera-chip"]');
+    assert.ok(chip !== null, "chip CHIMERA PHAI nam trong thanh cong cu — ngoai do thi khong ai thay no");
+    // BA điều khiển cố định khi ĐÃ có bản dịch: khối ô chọn engine + nút "dịch" (`.cmp__tao`),
+    // chip CHIMERA, nút ghim. Con số này là VẾ CỦA QUYẾT ĐỊNH "thanh không mọc thêm phần tử
+    // theo số bản dịch": nó KHÔNG phụ thuộc `translations.length` — bài dưới ghim đúng điều đó.
+    assert.equal(
+      thanh.querySelectorAll(":scope > *").length,
+      3,
+      `thanh công cụ chỉ được có 3 con TRỰC TIẾP (.cmp__tao + chip + ghim); `
+      + `đo được ${JSON.stringify([...thanh.children].map((el) => el.getAttribute("class")))}`,
+    );
+
+    const bans = phanTuTu(container, ".cmp__bans");
+    assert.equal(bans.getAttribute("role"), "radiogroup", "dải chọn bản dịch giữ role MÁY đọc được");
+    assert.equal(thanh.contains(bans), false, "dải chọn bản dịch KHÔNG được nằm trong thanh công cụ");
+    assert.equal(
+      bans.querySelectorAll('[data-testid="xoa-ban-11"]').length,
+      1,
+      "nút xoá phải nằm trong dòng của CHÍNH bản dịch đó",
+    );
+    // Thứ tự DOM: thanh công cụ TRƯỚC, dải bản dịch SAU — đây là thứ tự mà lưới `.cmp` dùng
+    // (`grid-row: 1` vs `grid-row: 2`), nên "chip ở trên" không phải chuyện thẩm mỹ mà là
+    // chuyện của luật lưới.
+    const conCuaCmp = [...phanTuTu(container, ".cmp").children]
+      .map((el) => (el.getAttribute("class") ?? "").trim());
+    assert.equal(conCuaCmp[0], "cmp__thanh", `con dau cua .cmp phai la thanh cong cu; do duoc ${JSON.stringify(conCuaCmp)}`);
+    assert.equal(conCuaCmp[1], "cmp__bans", `con thu hai phai la dai chon ban dich; do duoc ${JSON.stringify(conCuaCmp)}`);
+    // DẢI CHI PHÍ của §4.5 vẫn là con kế tiếp và vẫn là MỘT con của lưới (hàng 3) — nó từng
+    // là hàng 2 và bị dời xuống khi `.cmp__bans` lấy hàng 2. Ghim THỨ TỰ + LỚP, không ghim
+    // toạ độ: `getBoundingClientRect()` là phép đo của trình duyệt thật.
+    assert.equal(conCuaCmp[2], "cmp__chi-phi",
+      `dai canh bao chi phi phai dung sau dai chon ban dich; do duoc ${JSON.stringify(conCuaCmp)}`);
+    assert.ok(container.querySelector('[data-testid="chimera-chi-phi"]') !== null,
+      "dải cảnh báo chi phí phải render khi chip BẬT");
+
+    unmount();
+  });
+
+  it("HINH THUC (XOÁ): số con của THANH CÔNG CỤ KHÔNG đổi theo SỐ BẢN DỊCH (đó là điều kiện để chip không bị đẩy ra ngoài)", () => {
+    const t = banGhi([doan(1, "你好")]);
+    const mot = banDich(11, ["Xin chao"], [{ i: 1, cps: 4, over: false }]);
+    const hai = banDich(12, ["Tam biet"], [{ i: 1, cps: 4, over: false }]);
+    const demCon = (translations: TranslationDetail[]): number => {
+      const { container } = render(taoPhanTu(CompareScreen, {
+        transcript: t, translations, specs: SPECS, onXoa: async () => {},
+      }));
+      const n = phanTuTu(container, ".cmp__thanh").querySelectorAll(":scope > *").length;
+      cleanup();
+      return n;
+    };
+    // HAI vs MOT ban dich: nếu nút xoá (hay chip bản dịch) nằm trong thanh thì con số này
+    // TĂNG theo số bản dịch — đúng cơ chế làm chip CHIMERA trôi ra ngoài.
+    assert.equal(demCon([mot]), demCon([mot, hai]),
+      "thanh công cụ KHÔNG được mọc thêm phần tử theo số bản dịch");
   });
 });

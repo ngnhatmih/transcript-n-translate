@@ -75,7 +75,7 @@ def segments():
         id="fw-large-v3-turbo", label="Faster-Whisper large-v3-turbo", kind="asr",
         runtime="inprocess", model_ref="large-v3-turbo", vram_mb=1600,
         langs=("zh", "en"),
-        capabilities={"timestamps": True, "word_timestamps": True, "batch_infer": True},
+        capabilities={"timestamps": True, "word_timestamps": True},
         opts={"batch_size": 8,
               "compute_type": os.environ.get("DSH_ASR_COMPUTE", "int8")},
     )

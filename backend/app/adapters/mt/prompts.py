@@ -7,6 +7,7 @@ cả giai đoạn để bắt lỗi mà engine thật sinh ra.
 from __future__ import annotations
 
 import json
+import os
 import re
 from dataclasses import replace
 
@@ -27,6 +28,19 @@ PROMPT_VERSION: dict[str, str] = {
     "qwen2.5-3b": "qwen-json-p2",
     "qwen2.5-7b": "qwen-json-p2",
     "opus-mt": "raw-p1",
+    # HY-MT 1.5 (Ollama) đi CÙNG đường JSON-batch với hai engine qwen ở trên —
+    # `system_prompt`/`user_prompt` là hàm DÙNG CHUNG, không có biến thể riêng cho
+    # từng model. Vì vậy hậu tố `-p2` phải trôi cùng chúng: đổi câu CẤM chép
+    # nguyên văn trong `system_prompt` mà không đổi cả ba chuỗi thì
+    # `translations.prompt_version` không còn phân biệt được bản dịch sinh trước
+    # và sau khi đổi prompt.
+    #
+    # 🔴 Trước lượt này khoá này KHÔNG có, nên `main.py` đóng dấu `"unknown"` vào
+    # MỌI hàng dịch của HY-MT (đo trên DB thật: engine `hy-mt-1.5-7b`,
+    # `prompt_version = "unknown"`), trong khi engine này là một trong hai engine
+    # dịch được chữ ASR. Tiền tố khác `qwen-` để một hàng `translations` tự nói
+    # được nó do MODEL nào sinh ra, chứ không chỉ nói prompt đời nào.
+    "hy-mt-1.5-7b": "hymt-json-p2",
 }
 
 #: Phiên bản prompt của LƯỢT PHA Chimera. Tách khỏi `PROMPT_VERSION` vì nó là
@@ -35,6 +49,252 @@ PROMPT_VERSION: dict[str, str] = {
 #: với một lượt dịch thường — và cột đó tồn tại đúng để trả lời câu "bản dịch này
 #: sinh từ prompt nào".
 MERGE_PROMPT_VERSION = "chimera-merge-p1"
+
+# ---------------------------------------------------------------------------
+# HATCH THÍ NGHIỆM: các BIẾN THỂ prompt dịch, chọn theo ENGINE + biến môi trường
+# ---------------------------------------------------------------------------
+#
+# Vì sao cần một hatch chứ không sửa thẳng `system_prompt`/`user_prompt`
+#     Hai hàm đó DÙNG CHUNG với `qwen2.5-3b`/`qwen2.5-7b`, và số của hai engine
+#     đó đã được ghim (`p2`: 5/5 ra tiếng Việt, 0 echo). Một biến thể prompt viết
+#     thẳng vào đây là đổi prompt của cả ba engine trong một phép đo chỉ nói về
+#     `hy-mt-1.5-7b` — đúng kiểu "sửa mặc định để đo rồi quên sửa lại".
+#
+# Vì sao là BIẾN MÔI TRƯỜNG chứ không phải một tham số của `TranslateHandler`
+#     Prompt được dựng SÂU trong adapter, dưới `TranslateHandler` và dưới cả
+#     `_guard_echoes` (mỗi lần dịch lại một đoạn là một prompt mới). Xuyên một
+#     tham số qua cả bốn tầng chỉ để đo là sửa chữ ký của code đã ship; biến môi
+#     trường thì không xuyên gì cả. Cái giá là nó KHÔNG được phép đọc bừa: đọc
+#     theo `engine_id` (xem `experiment_prompt_style`) nên `qwen2.5-3b` nhận
+#     prompt mặc định y nguyên từng byte dù biến môi trường có đặt gì.
+#
+# Vì sao KHÔNG bump `PROMPT_VERSION` cho các biến thể
+#     Chưa có biến thể nào được ship (đây là lượt ĐO, việc nhận một biến thể là
+#     quyết định riêng). Ghi một chuỗi mới vào `PROMPT_VERSION` là công bố một
+#     prompt đã ship; ngược lại, nhận một biến thể mà KHÔNG bump là đúng lỗi mà
+#     `PROMPT_VERSION` tồn tại để chặn. Nhãn của lượt đo nằm ở artifact
+#     (`prompt_style` trong `data/experiments/.../20261019-prompt-echo-sweep/*.json`).
+#     ⇒ Nhận biến thể nào thì bump chuỗi của `hy-mt-1.5-7b` NGAY trong commit đó.
+#
+# Số đo (clip 115 đoạn `20261019-name-patch-smoke`, 5 thuật ngữ,
+# `hy-mt-1.5-7b`, lô 30, `echo_guard` BẬT, mỗi style MỘT lượt qua
+# `TranslateHandler`, artifact ở
+# `data/experiments/accuracy-pipelines/20261019-prompt-echo-sweep/`):
+#
+#     style | đoạn phải dịch lại | lô hỏng (EchoProblem) | echo còn lại | chữ Hán | giây
+#     v0    | 89                | 0                     | 0            | 0       | 83,03
+#     v1    | 89                | 0                     | 0            | 0       | 76,01
+#     v2    | 29                | 0                     | 0            | 0       | 68,16
+#     v3    | 0                 | 1                     | 0            | 0       | 32,92
+#
+# Đọc bảng đó, theo đúng thứ tự tin được:
+#
+# * **V0 tái lập đúng số đã ghim (89)** nên bốn cột so được với nhau. Không tái
+#   lập được thì cả lượt đo vô nghĩa — và nó là cột đầu tiên phải đọc.
+# * **V1 = V0 (89/89)**: dời câu cấm xuống cuối KHÔNG đổi gì. Đây là phép BÁC BỎ
+#   giả thuyết "model bỏ chỉ dẫn nằm ở đầu prompt dài": chính câu đó có tác dụng
+#   khi gọi MỘT MÌNH (0/115 đoạn echo ở lô 1), nên thứ làm model chép nguồn là
+#   KÍCH THƯỚC LÔ, không phải vị trí chỉ dẫn.
+# * **V2 = 89 -> 29**: một cặp mẫu Hán -> Việt cắt 60 lần dịch lại, và 29 lần còn
+#   lại nằm HẾT ở lô ĐẦU (ba lô sau 0 đoạn echo; lần chạy lặp lại vẫn đúng 29 nên
+#   không phải may). Vẫn ≥ 10 nên CHƯA đạt, và 29 lời gọi singleton giữ wall time
+#   ở 60–68 s. Tức ví dụ dạy được phép biến đổi, nhưng không sửa được lô đầu.
+# * **V3 hỏng theo kiểu khác**: bỏ mảng JSON làm model trả 22/30 rồi 25/30 mục,
+#   `TranslateHandler` hạ cấp xuống dịch từng segment, và một segment vẫn echo ->
+#   `EchoProblem`, hàng `failed`, **0** segment được nhận. "0 đoạn dịch lại" của
+#   V3 KHÔNG phải thành tích: lượt đó chết trước khi kịp đo, và 32,92 s là thời
+#   gian của một lượt hỏng.
+
+#: Style mặc định = ĐÚNG prompt đang ship (`hymt-json-p2`), từng byte. Mọi giá
+#: trị khác là biến thể của lượt đo, không phải mặc định.
+STYLE_DEFAULT = "v0"
+#: V1: câu CẤM chép nguyên văn + nhắc hợp đồng JSON dời xuống CUỐI `user_prompt`,
+#: ngay trước khối dữ liệu. Giả thuyết: model nhỏ BỎ chỉ dẫn nằm ở đầu một prompt
+#: dài 30 mục; đưa chỉ dẫn tới sát dữ liệu là chỗ nó còn đọc. ĐO: 89 -> 89 lần
+#: dịch lại, tức giả thuyết SAI với engine này (xem bảng ở khối trên).
+STYLE_INSTRUCTION_LAST = "v1"
+#: V2: thêm ĐÚNG MỘT cặp input/output vào cuối `system_prompt`, chữ Hán -> tiếng
+#: Việt, GIỮ NGUYÊN CON SỐ. Giả thuyết: model chép nguồn vì nó chưa thấy một lần
+#: "chuỗi Hán ở khoá `text` vẫn phải thành tiếng Việt kèm số" — ví dụ là chỉ dẫn
+#: rẻ hơn một câu cấm. Cặp mẫu KHÔNG lấy từ clip (xem `_FEW_SHOT_LINES`). ĐO:
+#: 89 -> 29 lần dịch lại, và 29 lần đó nằm HẾT ở lô đầu.
+STYLE_FEW_SHOT = "v2"
+#: V3: khối dữ liệu đổi từ một mảng JSON sang các dòng `[i] <nguồn>`, và prompt
+#: đòi đầu ra mang đúng `i` đó; hợp đồng JSON khác nguyên xi. Giả thuyết: mảng
+#: JSON dài là thứ model "chép lại" được nguyên khối, còn dòng có nhãn thì buộc
+#: nó đọc từng mục và map sang — cùng lý do người ta đánh số dòng bản gốc. ĐO:
+#: 22/30 rồi 25/30 mục -> lệch alignment -> hạ cấp -> 1 `EchoProblem`. LOẠI.
+STYLE_NUMBERED = "v3"
+
+#: Tập giá trị hợp lệ của hatch, theo đúng thứ tự V0–V3 của lượt đo.
+PROMPT_STYLES: tuple[str, ...] = (
+    STYLE_DEFAULT, STYLE_INSTRUCTION_LAST, STYLE_FEW_SHOT, STYLE_NUMBERED)
+
+#: Engine DUY NHẤT được phép nhận biến thể. Không phải sở thích: số đo của lượt
+#: này (và của `echo_guard`) chỉ có trên `hy-mt-1.5-7b`, còn `opus-mt` echo 0/115
+#: nên một biến thể cho nó là một phép đo chưa từng chạy.
+EXPERIMENT_PROMPT_ENGINE = "hy-mt-1.5-7b"
+
+#: Tên biến môi trường của hatch. `scripts/smoke_echo_guard.py` đặt nó cho TỪNG
+#: lượt chạy (`--styles`); vắng mặt hoặc rỗng = `STYLE_DEFAULT`.
+EXPERIMENT_PROMPT_STYLE_ENV = "PHU_DE_MT_PROMPT_STYLE"
+
+
+def experiment_prompt_style(engine_id: str | None) -> str:
+    """Style prompt của MỘT engine: `STYLE_DEFAULT` trừ khi hatch bật cho nó.
+
+    Hàm này là chỗ DUY NHẤT đọc `EXPERIMENT_PROMPT_STYLE_ENV`, và nó đọc biến đó
+    SAU khi đã loại mọi engine không phải `EXPERIMENT_PROMPT_ENGINE`. Nhờ thứ tự
+    đó, "engine không chọn biến thể thì nhận prompt mặc định" là một tính chất
+    của code, không phải một lời hứa: `qwen2.5-3b` (và `engine_id=None`, tức mọi
+    người gọi cũ không truyền gì) không đi qua nhánh đọc biến môi trường nào cả.
+
+    Giá trị LẠ ném `ValueError` chứ không lặng lẽ rơi về mặc định. Một lượt đo
+    gõ nhầm `v3` thành `v03` mà vẫn chạy sẽ sinh ra bốn artifact, trong đó một
+    cái mang nhãn `v03` nhưng là prompt mặc định — và mọi kết luận rút từ bảng
+    đó đều sai trong im lặng. Ở đây "không đo được" phải ồn hơn "đo sai".
+    """
+    if engine_id != EXPERIMENT_PROMPT_ENGINE:
+        return STYLE_DEFAULT
+    raw = (os.environ.get(EXPERIMENT_PROMPT_STYLE_ENV) or "").strip().lower()
+    if not raw:
+        return STYLE_DEFAULT
+    if raw not in PROMPT_STYLES:
+        raise ValueError(
+            f"{EXPERIMENT_PROMPT_STYLE_ENV}={raw!r} không phải style đã đo; "
+            f"chỉ nhận {list(PROMPT_STYLES)} (rỗng = mặc định)")
+    return raw
+
+
+#: Dòng hợp đồng JSON của lượt dịch. Là HẰNG, không phải f-string, vì nó phải
+#: giống NGUYÊN VĂN ở cả mặc định lẫn V3 ("hợp đồng JSON khác nguyên xi" là định
+#: nghĩa của V3 — nếu biến thể tự viết lại dòng này thì nó đã đổi hai thứ).
+_FORMAT_LINE = 'Định dạng: {"translations": [{"i": <số>, "text": "<bản dịch>"}]}'
+
+#: Câu CẤM CHÉP NGUYÊN VĂN (vá lỗi echo `p1` -> `p2`, xem `PROMPT_VERSION`).
+#: Hàm chứ không phải hằng vì nó mang `target_lang`; `system_prompt` và V1 dùng
+#: CÙNG một chuỗi, nên câu này không thể trôi thành hai dị bản.
+def _no_copy_lines(target_lang: str) -> list[str]:
+    return [
+        f"TUYỆT ĐỐI không sao chép nguyên văn bản gốc: mỗi 'text' phải là câu "
+        f"{target_lang}, không được để lại chữ của bản gốc."
+    ]
+
+
+def _role_lines(target_lang: str) -> list[str]:
+    """Ba dòng VAI + quy tắc, phần chung của mọi style."""
+    return [
+        f"Bạn là dịch giả chuyên nghiệp sang {target_lang}.",
+        "Dịch sát nghĩa, giữ nguyên văn phong và mức trang trọng của bản gốc.",
+        "Trả về DUY NHẤT một đối tượng JSON, không thêm chữ nào khác.",
+    ]
+
+
+def _glossary_lines(glossary: list[Term]) -> list[str]:
+    """Các dòng glossary của prompt dịch.
+
+    Người gọi chỉ gọi hàm này khi `glossary` KHÁC rỗng (`system_prompt`): nhắc tới
+    thuật ngữ khi không có cái nào là mời model bịa ra ràng buộc.
+    """
+    lines = ["Bắt buộc dùng đúng các thuật ngữ sau:"]
+    lines.extend(f"- {t.term} => {t.translation}" for t in glossary)
+    return lines
+
+
+#: Cặp input/output DUY NHẤT của V2: chữ Hán -> tiếng Việt, và CON SỐ `12000`
+#: nằm nguyên ở đầu ra. Ba tính chất, mỗi tính chất một lý do:
+#:
+#: * **Giữ số** — đây là thứ model hay làm hỏng nhất khi nó "dịch" một câu có
+#:   giá tiền; một ví dụ bỏ số là ví dụ dạy đúng cái sai cần tránh.
+#: * **Không lấy từ clip** — `不到路费2000` là nội dung của chính clip đang đo;
+#:   dùng nó làm mẫu là rò rỉ đáp án vào prompt và mọi con số của lượt này không
+#:   còn so sánh được với lượt trước (prompt khác đi vì dữ liệu, không vì biến
+#:   thể). Câu ở đây là một câu bịa, ngữ cảnh hàng rau ngoài chợ.
+#: * **Đúng hợp đồng** — mẫu viết ra ĐÚNG hình dạng `{"translations": [...]}` mà
+#:   `parse_batch_response` đọc, nếu không nó dạy model một định dạng thứ hai.
+_FEW_SHOT_LINES = [
+    "Ví dụ (đầu vào -> đầu ra; số 12000 phải giữ nguyên):",
+    'Đầu vào: {"translations": [{"i": 1, "text": "市场上青菜一斤12000"}]}',
+    'Đầu ra: {"translations": [{"i": 1, "text": "Ở chợ, rau cải một cân '
+    'giá 12000"}]}',
+]
+
+
+def system_prompt(glossary: list[Term], *, target_lang: str,
+                  engine_id: str | None = None) -> str:
+    """Vai trò + quy tắc + glossary. Rỗng glossary thì KHÔNG nhắc tới thuật ngữ.
+
+    Nhắc tới glossary khi không có thuật ngữ nào là mời model bịa ra ràng buộc.
+
+    Câu CUỐI là bản vá lỗi DỊCH IM LẶNG (xem `PROMPT_VERSION`: `p1` -> `p2`). Ba
+    dòng đầu chỉ nói VAI và ĐỊNH DẠNG; không dòng nào nói "đầu ra phải ở ngôn ngữ
+    đích", mà `user_prompt` thì kết thúc bằng một mảng JSON toàn chữ Trung — với
+    `qwen2.5:3b` (Q4), continuation rẻ nhất là chép lại chính mảng đó. Đo được:
+    `p1` echo 6/6, `p2` ra tiếng Việt 5/5, cùng batch, cùng `temperature=0.1`.
+
+    Câu này để CUỐI (không phải ngay sau dòng đầu) vì đó ĐÚNG là vị trí đã đo:
+    đặt giữa prompt là một biến thể CHƯA đo, và một phép sửa prompt không có số
+    đo thì không được phép tự nhận là đã sửa.
+
+    `engine_id` chỉ để mở hatch biến thể (`experiment_prompt_style`). Không truyền
+    ⇒ mặc định, byte-identical với trước lượt đo; đó là đường MỌI engine khác đi.
+
+    Hai biến thể chạm vào hàm này, và mỗi cái đổi ĐÚNG một thứ:
+    `STYLE_INSTRUCTION_LAST` BỎ câu cấm ở đây (nó được dời xuống cuối
+    `user_prompt` — dời, không phải nhân bản, nếu không thì phép đo vị trí không
+    còn là phép đo vị trí); `STYLE_FEW_SHOT` GIỮ NGUYÊN mọi dòng rồi NỐI thêm cặp
+    mẫu, nên prompt mặc định là tiền tố của nó.
+    """
+    style = experiment_prompt_style(engine_id)
+    lines = _role_lines(target_lang)
+    if glossary:
+        lines.extend(_glossary_lines(glossary))
+    if style != STYLE_INSTRUCTION_LAST:
+        lines.extend(_no_copy_lines(target_lang))
+    if style == STYLE_FEW_SHOT:
+        lines.extend(_FEW_SHOT_LINES)
+    return "\n".join(lines)
+
+
+
+def user_prompt(batch: list[Segment], *, source_lang: str, target_lang: str,
+                engine_id: str | None = None) -> str:
+    """Lượt người dùng: chỉ dẫn ngắn + khối dữ liệu.
+
+    Mặc định (không `engine_id`, hoặc engine không bật hatch) giống NGUYÊN VĂN
+    từng byte bản trước lượt đo — có bài test ghim cả hai chuỗi.
+
+    Biến thể chạm vào hàm này:
+    * `STYLE_INSTRUCTION_LAST` chèn câu cấm chép + dòng hợp đồng JSON vào CUỐI,
+      ngay trước `Dữ liệu:` (câu cấm bị bỏ khỏi `system_prompt` để đây là phép
+      dời vị trí, không phải phép thêm chỉ dẫn).
+    * `STYLE_NUMBERED` đổi khối dữ liệu từ mảng JSON sang các dòng `[i] <nguồn>`
+      và thêm MỘT câu đòi đầu ra mang đúng `i`; dòng `Định dạng:` giữ nguyên
+      (`_FORMAT_LINE`) nên hợp đồng JSON không đổi.
+    """
+    style = experiment_prompt_style(engine_id)
+    if style == STYLE_NUMBERED:
+        head = [
+            f"Dịch từng mục từ {source_lang} sang {target_lang}.",
+            "Giữ nguyên `i` của từng mục và trả đúng bấy nhiêu mục.",
+            _FORMAT_LINE,
+            "Mỗi dòng dữ liệu bắt đầu bằng `[i]`; trả về đúng `i` đó trong từng "
+            "mục.",
+        ]
+        payload = "\n".join(f"[{s.i}] {s.text}" for s in batch)
+        return "\n".join(head) + f"\nDữ liệu:\n{payload}"
+
+    items = [{"i": s.i, "text": s.text} for s in batch]
+    lines = [
+        f"Dịch từng mục từ {source_lang} sang {target_lang}.",
+        "Giữ nguyên `i` của từng mục và trả đúng bấy nhiêu mục.",
+    ]
+    if style == STYLE_INSTRUCTION_LAST:
+        lines.extend(_no_copy_lines(target_lang))
+    lines.append(_FORMAT_LINE)
+    lines.append(f"Dữ liệu: {json.dumps(items, ensure_ascii=False)}")
+    return "\n".join(lines)
+
 
 #: Model thật hay bọc JSON trong ```json ... ``` — đây là failure mode phổ biến
 #: chứ không phải đầu vào bất thường, nên nó phải parse được.
@@ -56,46 +316,6 @@ _FENCE = re.compile(r"^\s*```[a-zA-Z]*\s*|\s*```\s*$")
 _I_KEYS = ("i", "index", "id")
 _TEXT_KEYS = ("text", "translation")
 
-
-
-def system_prompt(glossary: list[Term], *, target_lang: str) -> str:
-    """Vai trò + quy tắc + glossary. Rỗng glossary thì KHÔNG nhắc tới thuật ngữ.
-
-    Nhắc tới glossary khi không có thuật ngữ nào là mời model bịa ra ràng buộc.
-
-    Câu CUỐI là bản vá lỗi DỊCH IM LẶNG (xem `PROMPT_VERSION`: `p1` -> `p2`). Ba
-    dòng đầu chỉ nói VAI và ĐỊNH DẠNG; không dòng nào nói "đầu ra phải ở ngôn ngữ
-    đích", mà `user_prompt` thì kết thúc bằng một mảng JSON toàn chữ Trung — với
-    `qwen2.5:3b` (Q4), continuation rẻ nhất là chép lại chính mảng đó. Đo được:
-    `p1` echo 6/6, `p2` ra tiếng Việt 5/5, cùng batch, cùng `temperature=0.1`.
-
-    Câu này để CUỐI (không phải ngay sau dòng đầu) vì đó ĐÚNG là vị trí đã đo:
-    đặt giữa prompt là một biến thể CHƯA đo, và một phép sửa prompt không có số
-    đo thì không được phép tự nhận là đã sửa.
-    """
-    lines = [
-        f"Bạn là dịch giả chuyên nghiệp sang {target_lang}.",
-        "Dịch sát nghĩa, giữ nguyên văn phong và mức trang trọng của bản gốc.",
-        "Trả về DUY NHẤT một đối tượng JSON, không thêm chữ nào khác.",
-    ]
-    if glossary:
-        lines.append("Bắt buộc dùng đúng các thuật ngữ sau:")
-        lines.extend(f"- {t.term} => {t.translation}" for t in glossary)
-    lines.append(
-        f"TUYỆT ĐỐI không sao chép nguyên văn bản gốc: mỗi 'text' phải là câu "
-        f"{target_lang}, không được để lại chữ của bản gốc.")
-    return "\n".join(lines)
-
-
-
-def user_prompt(batch: list[Segment], *, source_lang: str, target_lang: str) -> str:
-    items = [{"i": s.i, "text": s.text} for s in batch]
-    return (
-        f"Dịch từng mục từ {source_lang} sang {target_lang}.\n"
-        "Giữ nguyên `i` của từng mục và trả đúng bấy nhiêu mục.\n"
-        'Định dạng: {"translations": [{"i": <số>, "text": "<bản dịch>"}]}\n'
-        f"Dữ liệu: {json.dumps(items, ensure_ascii=False)}"
-    )
 
 
 def _normalised_keys(item: dict) -> dict:

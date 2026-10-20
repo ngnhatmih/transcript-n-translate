@@ -58,6 +58,28 @@
  *
  * ⚠️ **KHÔNG tự áp `status === "done"` ở đây** (xem `macDinhId`), và **KHÔNG tự chọn bản
  * `done` mới nhất**: quyết định đó là của `App` (một chỗ, truyền xuống).
+ *
+ * ── DẢI CHỌN BẢN DỊCH RỜI KHỎI THANH CÔNG CỤ (nút xoá bản dịch) ─────────────────────
+ *
+ * Mỗi bản dịch có thêm một nút XOÁ hai bước (`NutXoa`). Chỗ đặt nó là một quyết định hình
+ * thức, và lý do là một phép ĐO chứ không phải thẩm mỹ:
+ *
+ * * Nhét nút xoá vào đúng chip bản dịch trong `.cmp__thanh` ⇒ mỗi bản dịch thêm HAI phần tử
+ *   vào thanh công cụ, cùng chỗ với ô chọn engine, nút "dịch", chip `◆ CHIMERA` và nút ghim.
+ *   Với vài bản dịch, thanh đó tràn ngang và **chip CHIMERA bị đẩy ra ngoài `clientWidth`** —
+ *   người dùng mất luôn đường vào chế độ Chimera mà không có dấu hiệu nào cho biết nó còn
+ *   tồn tại.
+ * * Vì vậy dải chọn bản dịch thành MỘT HÀNG RIÊNG của lưới `.cmp` (`.cmp__bans`, hàng 2),
+ *   mỗi bản một dòng `bản dịch #N · engine · status` + `[xóa]`. Thanh công cụ vì thế KHÔNG
+ *   mọc thêm phần tử nào — nó còn BỚT đi N chip.
+ * * `getBoundingClientRect()`/`scrollWidth` là phép đo của TRÌNH DUYỆT THẬT; jsdom không có
+ *   layout, nên bài ghim trong `CompareScreen.test.tsx` chỉ khẳng định được SỰ HIỆN DIỆN +
+ *   THỨ TỰ + LỚP của chip CHIMERA và dải chi phí (xem bài `HINH THUC (XOÁ)`), không khẳng
+ *   định được "không tràn". Một khẳng định về tràn ngang chỉ đứng vững khi đo trên Chrome
+ *   thật — đừng thay nó bằng một `assert` trong jsdom.
+ *
+ * Nút xoá KHÔNG gọi API: `onXoa` là của `App` (gọi `DELETE /api/translations/{id}` rồi
+ * `translations.reload()`), cùng khuôn "màn không tự `fetch`" của cả file này.
  */
 import { useEffect, useState } from "react";
 
@@ -70,6 +92,7 @@ import type {
   Transcript,
 } from "../api/types.ts";
 import { EngineSelect } from "../shell/EngineSelect.tsx";
+import { NutXoa } from "../ui/NutXoa.tsx";
 import { KhungRong } from "../ui/TrangRong.tsx";
 
 interface Props {
@@ -154,6 +177,19 @@ interface Props {
   dangDocChiPhi?: boolean;
   /** Lỗi của lần đọc — NGUYÊN VĂN `ApiError.message`; UI không được đoán thay backend. */
   loiChiPhi?: string | null;
+  /**
+   * XOÁ MỘT BẢN DỊCH — **của `App`**: nó gọi `DELETE /api/translations/{id}` rồi
+   * `translations.reload()`, nên danh sách mới là của MÁY CHỦ, không phải một bản
+   * cục bộ đã cắt tay.
+   *
+   * ⚠️ Trả `Promise` vì nút xoá hai bước phải nói ra `đang xóa…` và lỗi NGUYÊN
+   * VĂN của backend (`NutXoa`) — 409 `job #k đang xếp hàng` là câu người dùng cần
+   * đọc để biết phải huỷ job nào.
+   *
+   * `undefined` ⇒ không có nút xoá nào: đó là trạng thái của nơi dựng màn này chỉ
+   * để ĐỌC (bài test cũ, hoặc vỏ chưa nối đường xoá).
+   */
+  onXoa?: (id: number) => Promise<void>;
 }
 
 /**
@@ -251,6 +287,7 @@ export function CompareScreen({
   chiPhi = null,
   dangDocChiPhi = false,
   loiChiPhi = null,
+  onXoa,
 }: Props) {
   const [chonId, datChonId] = useState<number | null>(null);
   const [ghim, datGhim] = useState(false);
@@ -347,33 +384,12 @@ export function CompareScreen({
 
   return (
     <section className="cmp">
-      {/* Segmented control (U7: KHÔNG phải N tab) + nút ghim + CỬA VÀO "bắt đầu dịch". */}
-      <div className="cmp__thanh" role="radiogroup" aria-label="Bản dịch">
-        {translations.map((tr) => (
-          <button
-            key={tr.id}
-            type="button"
-            role="radio"
-            aria-checked={tr.id === chon?.id}
-            className="cmp__chon"
-            data-testid={`pick-${tr.id}`}
-            data-stale={String(tr.stale)}
-            onClick={() => {
-              datChonId(tr.id);
-              // BÁO LÊN `App`: lựa chọn này phải trở thành `banDangXemId` (xem prop
-              // `onChonBanDich`), nếu không thì `Transport` và nhãn job vẫn bám bản VỪA TẠO.
-              if (onChonBanDich !== undefined) onChonBanDich(tr.id);
-            }}
-          >
-            {/* NHÃN BỀN (D2) — KHÔNG đánh số theo VỊ TRÍ MẢNG.
-                ĐO ĐƯỢC TRƯỚC (ảnh chụp thật, ERRATA #41 mục 3a): nhãn cũ là `bản dịch {k + 1} ·
-                {engine}`, tức DANH TÍNH của một bản dịch là CHỖ ĐỨNG của nó trong mảng — thêm/bớt
-                một bản dịch là mọi nhãn sau đổi số, và cùng một bản dịch mang hai tên khác nhau ở
-                hai lần đọc. Nay danh tính lấy từ CHÍNH DỮ LIỆU CỦA HÀNG: `id` (duy nhất), `engine`
-                và `status` (đều của máy chủ). */}
-            {`bản dịch #${tr.id} · ${tr.engine} · ${tr.status}${tr.stale ? " · lỗi thời" : ""}`}
-          </button>
-        ))}
+      {/* THANH CÔNG CỤ — hàng 1 của lưới `.cmp`. BỐN điều khiển CỐ ĐỊNH: ô chọn engine,
+          nút "dịch", chip CHIMERA, nút ghim. ⚠️ Dải chọn bản dịch KHÔNG còn ở đây (nó ở
+          `.cmp__bans`, hàng 2): mỗi bản dịch thêm một nút xoá, nên nhét chúng vào thanh này
+          sẽ đẩy chip CHIMERA ra ngoài vùng nhìn thấy — một điều khiển không thấy được là
+          một điều khiển mất tích (xem `app.css` `.cmp__bans`). */}
+      <div className="cmp__thanh">
         {coBanDich ? nutDich : null}
         {/* §4.5 NGUYÊN VĂN: *"Bật bằng chip amber trên thanh công cụ."* Chip này là
             CÙNG một phần tử ở cả hai trạng thái (bật/tắt) — `aria-pressed` là thứ nói
@@ -404,13 +420,60 @@ export function CompareScreen({
         </button>
       </div>
 
+      {/* DẢI CHỌN BẢN DỊCH — hàng 2: mỗi bản dịch MỘT DÒNG `bản dịch #N · engine · status`
+          (nút chọn) + nút XOÁ hai bước cạnh nó. Hai nút là ANH EM, không lồng nhau:
+          `<button>` KHÔNG được chứa `<button>` (trình duyệt tự đóng thẻ ngoài ⇒ DOM thật
+          khác JSX, và cú bấm rơi vào phần tử khác).
+          MỌI trạng thái của bước xoá NÓI RA bằng chữ (`xóa` → `xóa?` + `hủy` → `đang xóa…`,
+          và lỗi là NGUYÊN VĂN `ApiError.message`) — không chỉ bằng màu. */}
+      <div className="cmp__bans" role="radiogroup" aria-label="Bản dịch">
+        {translations.map((tr) => (
+          <div key={tr.id} className="cmp__ban">
+            <button
+              type="button"
+              role="radio"
+              aria-checked={tr.id === chon?.id}
+              className="cmp__chon"
+              data-testid={`pick-${tr.id}`}
+              data-stale={String(tr.stale)}
+              onClick={() => {
+                datChonId(tr.id);
+                // BÁO LÊN `App`: lựa chọn này phải trở thành `banDangXemId` (xem prop
+                // `onChonBanDich`), nếu không thì `Transport` và nhãn job vẫn bám bản VỪA TẠO.
+                if (onChonBanDich !== undefined) onChonBanDich(tr.id);
+              }}
+            >
+              {/* NHÃN BỀN (D2) — KHÔNG đánh số theo VỊ TRÍ MẢNG.
+                  ĐO ĐƯỢC TRƯỚC (ảnh chụp thật, ERRATA #41 mục 3a): nhãn cũ là `bản dịch {k + 1} ·
+                  {engine}`, tức DANH TÍNH của một bản dịch là CHỖ ĐỨNG của nó trong mảng — thêm/bớt
+                  một bản dịch là mọi nhãn sau đổi số, và cùng một bản dịch mang hai tên khác nhau ở
+                  hai lần đọc. Nay danh tính lấy từ CHÍNH DỮ LIỆU CỦA HÀNG: `id` (duy nhất), `engine`
+                  và `status` (đều của máy chủ). */}
+              {`bản dịch #${tr.id} · ${tr.engine} · ${tr.status}${tr.stale ? " · lỗi thời" : ""}`}
+            </button>
+            {onXoa === undefined ? null : (
+              <NutXoa
+                doiTuong={`bản dịch #${tr.id}`}
+                className="cmp__xoa"
+                classNameLoi="cmp__xoa-loi"
+                testid={`xoa-ban-${tr.id}`}
+                onXoa={() => onXoa(tr.id)}
+              />
+            )}
+          </div>
+        ))}
+      </div>
+
       {/* §4.5 NGUYÊN VĂN: *"Dải cảnh báo chéo chạy ngang"*, và `app.css` khai **BẢY**
           track cho `.cmp` (`auto auto auto auto auto auto 1fr`) với `grid-row` tường minh
-          cho MỌI con: `.cmp__thanh` 1 · `.cmp__chi-phi` 2 · `.cmp__tin` 3 ·
-          `.cmp__nguong`/`.cmp__rong` 4 · `.cmp__dau` 5 · `.cmp__danh-sach` 7 (hàng `1fr`
-          DUY NHẤT — chỗ cuộn). Đây là ERRATA #31 mục 1: thêm một con vào lưới có
-          `grid-template-rows` cố định mà không khai track + `grid-row` là một lỗi IM LẶNG
-          (đã sai ba lần trong dự án này).
+          cho MỌI con: `.cmp__thanh` 1 · `.cmp__bans` 2 · `.cmp__chi-phi` 3 ·
+          `.cmp__tin` 4 · `.cmp__nguong`/`.cmp__rong` 5 · `.cmp__dau` 6 ·
+          `.cmp__danh-sach` 7 (hàng `1fr` DUY NHẤT — chỗ cuộn). Đây là ERRATA #31 mục 1:
+          thêm một con vào lưới có `grid-template-rows` cố định mà không khai track +
+          `grid-row` là một lỗi IM LẶNG (đã sai ba lần trong dự án này). `.cmp__bans` là con
+          MỚI của lưới này (dải chọn bản dịch, tách khỏi thanh công cụ) và nó lấy hàng 2, nên
+          MỌI hàng phía dưới dời xuống MỘT bậc — con số ở trên là con số ĐANG CHẠY, không phải
+          con số cũ.
           Chi phí hiện TRƯỚC khi bấm là điều kiện để chế độ này dùng được: `estimate` là
           số ĐO ĐƯỢC từ một bản dịch thật đã chạy xong, và `null` là câu trả lời hợp lệ
           ("chưa đo được") — KHÔNG bịa một con số. */}
@@ -433,8 +496,8 @@ export function CompareScreen({
                 {chiPhi.multiplier}× · VRAM không tăng (chạy tuần tự)
               </p>
               <p data-testid="chimera-so-ung-vien">
-                {chiPhi.runnable}/{chiPhi.declared} ứng viên chạy được · engine pha{" "}
-                <code>{chiPhi.merge_engine}</code>
+                {chiPhi.runnable}/{chiPhi.declared} ứng viên chạy được NGAY BÂY GIỜ · engine
+                pha <code>{chiPhi.merge_engine}</code>
               </p>
               {engineThieu(chiPhi).length === 0 ? null : (
                 <p data-testid="chimera-thieu">
@@ -475,16 +538,18 @@ export function CompareScreen({
           cách sửa. Bài học §4.8 / ERRATA #30: đổi màu là KHÔNG ĐỦ — người dùng không được
           đoán. `available === true` là thuận tiện của client; **backend mới là thẩm quyền**
           (nó trả 409 nếu engine chưa sẵn sàng), nên lỗi của backend ở dưới vẫn phải hiện.
-          ⚠️ Hai nhánh dưới đây nằm TRONG một `div` `.cmp__tin` — con THỨ NĂM của lưới `.cmp`,
-          chứ không phải hai con rời. `app.css` khai **SÁU** track cho `.cmp`
-          (`grid-template-rows: auto auto auto auto auto 1fr`) và MỖI con có `grid-row` tường
-          minh: `.cmp__thanh` 1 · `.cmp__tin` 2 (co lại khi `:empty`) · `.cmp__nguong`/`.cmp__rong`
-          3 · `.cmp__dau` 4 · `.cmp__danh-sach` 6 (hàng `1fr` **DUY NHẤT** — chỗ cuộn).
-          ĐÓNG LÝ DO CỦA KHỐI NÀY: nếu hai nhánh dưới là hai con RỜI thì chúng là con thứ năm và
-          thứ sáu, và hàng `1fr` (chỗ cuộn của danh sách) rơi vào một trong hai nhánh đó — đúng
-          lỗi `Critical` C1 của ERRATA #36 mục 3. Khối chú thích này từng nói "BỐN con" khi
-          `app.css` đã khai SÁU (đo được ở re-review W3 #1, `Minor` F3): chú thích mâu thuẫn với
-          chính mã nó giải thích là một lời khai sai, nên nó được sửa cho khớp sự thật. */}
+          ⚠️ Hai nhánh dưới đây nằm TRONG một `div` `.cmp__tin` — MỘT con của lưới `.cmp`
+          (hàng 4), chứ không phải hai con rời. `app.css` khai **BẢY** track cho `.cmp`
+          (`grid-template-rows: auto auto auto auto auto auto 1fr`) và MỖI con có `grid-row`
+          tường minh: `.cmp__thanh` 1 · `.cmp__bans` 2 · `.cmp__chi-phi` 3 · `.cmp__tin` 4
+          (co lại khi `:empty`) · `.cmp__nguong`/`.cmp__rong` 5 · `.cmp__dau` 6 ·
+          `.cmp__danh-sach` 7 (hàng `1fr` **DUY NHẤT** — chỗ cuộn).
+          ĐÓNG LÝ DO CỦA KHỐI NÀY: nếu hai nhánh dưới là hai con RỜI thì chúng chiếm thêm hai
+          hàng, và hàng `1fr` (chỗ cuộn của danh sách) rơi vào một trong hai nhánh đó — đúng
+          lỗi `Critical` C1 của ERRATA #36 mục 3. ⚠️ Con số ở khối này TỪNG lệch với chính
+          `app.css` (nói "BỐN con" khi CSS khai SÁU; rồi nói SÁU khi CSS khai BẢY): nó được
+          sửa lại theo đúng số track ĐANG CHẠY khi `.cmp__bans` được thêm vào lưới — chú thích
+          mâu thuẫn với mã nó giải thích là một lời khai sai. */}
       <div className="cmp__tin">
         {dungDuoc.length === 0 ? (
           <p className="cmp__ly-do-khong-dich" data-testid="ly-do-khong-dich">
@@ -594,7 +659,17 @@ export function CompareScreen({
                         >
                           <span className="cmp__uv-nhan">{ungVien.id}</span>
                           <span className="cmp__uv-chu">
-                            {chuUv ?? ungVien.skipped ?? "không chạy"}
+                            {/* ⚠️ `skipped` là trạng thái LÚC LƯỢT CHẠY ĐÓ, còn dải
+                                `chimera-so-ung-vien` ở trên là kế hoạch NGAY BÂY GIỜ.
+                                Hai câu đúng ở hai thời điểm khác nhau, nên câu này phải
+                                NÓI RA mốc của nó: đo được trên DB thật, dải ghi
+                                "6/6 ứng viên chạy được" trong khi ô c6 của bản đang xem
+                                ghi "engine chưa được pull" — người đọc thấy mâu thuẫn mà
+                                không có gì giải thích. */}
+                            {chuUv ??
+                              (typeof ungVien.skipped === "string"
+                                ? `trong lượt này: ${ungVien.skipped}`
+                                : "không chạy")}
                           </span>
                         </span>
                       );

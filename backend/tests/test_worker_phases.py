@@ -381,17 +381,17 @@ _JOB_TYPE_OF_KIND = {"asr": "asr", "mt": "translate"}
 
 
 def test_every_shipped_engine_phase_key_finds_the_stored_job_phase(repos):
-    """Khoá giai đoạn của CẢ 8 engine phải tra ra job đã lưu `Job.phase`.
+    """Khoá giai đoạn của CẢ 9 engine phải tra ra job đã lưu `Job.phase`.
 
     Đây là mắt còn thiếu của Task 8: `test_registry.py` chỉ so `phase_key` với
     `phase_of`, tức so công thức với công thức. Test này đi hết đường: ghi job
     xuống SQLite với `phase = phase_of(job_type, spec.id)` rồi tra lại bằng
     `next_queued_for_phase(spec.phase_key)` — đúng câu truy vấn mà worker dùng.
     Lệch một chữ cái ở `phase_key` thì `next_queued_for_phase` trả None và hàng
-    đợi đứng im mà không ném exception, nên phải khoá lại bằng 8/8.
+    đợi đứng im mà không ném exception, nên phải khoá lại bằng 9/9.
     """
     specs = load_registry()
-    assert len(specs) == 8, f"registry phải có 8 engine, thấy {len(specs)}"
+    assert len(specs) == 9, f"registry phải có 9 engine, thấy {len(specs)}"
 
     not_found: list[str] = []
     for spec in specs:
@@ -408,7 +408,7 @@ def test_every_shipped_engine_phase_key_finds_the_stored_job_phase(repos):
         "phase_key không khớp phase đã lưu nên hàng đợi sẽ đứng im cho: "
         + ", ".join(not_found)
     )
-    assert len(specs) - len(not_found) == 8, "phải là 8/8, không được sót engine nào"
+    assert len(specs) - len(not_found) == 9, "phải là 9/9, không được sót engine nào"
 
 
 # ---------------------------------------------------------------------------

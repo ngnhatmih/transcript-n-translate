@@ -49,13 +49,28 @@
  *    huy) va duong CHUOT (bam dong ⇒ xin mo o sua). ⚠️ `[`/`]` (đặt mốc tại đầu đọc) và
  *    `Shift/Alt+←/→` (nudge) do `App` bat qua bảng phím — cung MOT duong GHI
  *    (`PATCH /api/transcripts/{id}`) voi nut `luu`, va man nay chi BAO bang `onNudge`.
- *  - **Khong GHI gi**: moi thao tac ghi (`luu`, `nudge`) la mot CALLBACK ra ngoai. Man nay khong
- *    `fetch`, khong tu sua `Segment`, khong giu ban sao du lieu may chu, va KHONG tu clamp moc
- *    thoi gian (phep kep giay am nam o `formatTimecode`).
+ *  - **Khong GHI gi**: moi thao tac ghi (`luu`, `nudge`) va moi thao tac XEP JOB (`boc lại`) la
+ *    mot CALLBACK ra ngoai. Man nay khong `fetch`, khong tu sua `Segment`, khong giu ban sao du
+ *    lieu may chu, va KHONG tu clamp moc thoi gian (phep kep giay am nam o `formatTimecode`).
+ *
+ * ## RAIL in CA HAI DAU MOC — va vi sao no can CHO (khong chi mot chuoi)
+ *
+ * Rail cua MOT hang truoc day chi in `seg.start`; nay in `${start} → ${end}`, DUNG ky tu mui ten
+ * va DUNG ham `formatTimecode` cua o sua ngay duoi (`ed__moc`). Ly do KHONG phai "cho dep": nguoi
+ * bien tap phai thay DO DAI cua tung doan de biet dong nao bi cat cut — mot moc bat dau mot minh
+ * khong noi duoc gi ve do dai, va phai bam vao dong moi doc duoc moc cuoi la mot phep do MU.
+ *
+ * ⚠️ HE QUA BO CUC DO DUOC: chuoi hai moc dai 17 ky tu mono o `--fs-num` (10,5 px, be rong moi ky
+ * tu ≈ 0,6 em ⇒ ≈ 6,3 px) ≈ 107 px, ma `--rail` cua tokens la **72 px** (du cho MOT moc: `0:02.00`
+ * la 7 ky tu ≈ 44 px). Voi rail cu, chu se tran ra
+ * ngoai track; `text-align: right` lam no tran ve phia TRAI, tuc ra ngoai khung cuon. Vi the
+ * `app.css` khai lai cot cua `.ed__item` (x2 `--rail`) va `white-space: nowrap` cho `.ed__rail` —
+ * do la mot thay doi BO CUC that, khong phai trang tri, va no co bai ghim rieng
+ * (`EditScreen.test.tsx`, bai "RAIL hai moc: ...").
  */
 import { useEffect, useRef, useState } from "react";
 
-import type { Segment, Transcript } from "../api/types.ts";
+import type { EngineSpec, Segment, Transcript } from "../api/types.ts";
 import { formatTimecode } from "../lib/timecode.ts";
 import { visibleRange, withPinned } from "../lib/window.ts";
 import { IntakeFrame } from "../shell/IntakeFrame.tsx";
@@ -278,6 +293,33 @@ export interface EditScreenProps {
   /** Lỗi duyệt, **NGUYÊN VĂN `ApiError.message`** (`"<status>: <detail>"`). `null` = không có. */
   loiDuyet?: string | null;
   /**
+   * MỌI spec của `/api/registry` (đã gộp `asr` + `mt`, do `App` đọc) — màn này LỌC `kind === "asr"`.
+   *
+   * ⚠️ Vì sao màn LỌC chứ không nhận sẵn một mảng ASR: cùng lý do `EngineSelect` (*"lọc ở ĐÂY, không
+   * lọc ở nơi gọi"*) — `App` giữ ĐÚNG một lượt `GET /api/registry` cho cả app, và mỗi màn tự trả lời
+   * câu "tôi cần loại engine nào". Mặc định `[]` để màn vẫn render được khi registry chưa về.
+   *
+   * ⚠️ KHÔNG dùng `<EngineSelect/>` ở đây (dù nó là ô chọn engine sẵn có): nó lọc
+   * `capabilities.available === true`, mà `_mark_availability` của backend chỉ ghi khoá đó cho
+   * `kind == "mt"` ⇒ MỌI spec ASR thiếu khoá, và `EngineSelect` sẽ vẽ ra **0 lựa chọn**. Đó không
+   * phải một giả thuyết: khối đầu `src/shell/EngineSelect.tsx` đã ghi đúng hệ quả này. Nới
+   * `EngineSelect` để ASR lọt qua sẽ đổi nghĩa của nó cho màn Đối chiếu (nơi `available` là luật
+   * THẬT về engine dịch chạy được ngay), nên ở đây dùng một `<select>` trần.
+   */
+  specs?: EngineSpec[];
+  /**
+   * Gọi khi người dùng bấm `bóc lại` ở THANH TRÊN, kèm `id` engine ASR **ĐANG CHỌN**.
+   *
+   * ⚠️ Màn này KHÔNG tự gọi API (xem khối đầu tệp): nó chỉ BÁO, còn `App` mới gọi
+   * `endpoints.createJob` (`POST /api/jobs`, `type: "asr"`, `payload.source_id` của bản ghi đang
+   * mở) rồi để SSE + ngòi nổ `/api/transcripts` làm phần còn lại.
+   */
+  onBocLai?: (engine: string) => void;
+  /** Lời gọi `bóc lại` đang bay — trạng thái phải NÓI RA bằng CHỮ (`đang bóc lại…`), không chỉ đổi màu. */
+  dangBocLai?: boolean;
+  /** Lỗi `bóc lại`, **NGUYÊN VĂN `ApiError.message`** (`"<status>: <detail>"`). `null` = không có. */
+  loiBocLai?: string | null;
+  /**
    * Câu nói ra rằng BẢN DỊCH ĐÃ LỖI THỜI so với bản ghi — do `App` QUYẾT và truyền CÂU xuống
    * (cùng khuôn `Transport.xuatCho`): truyền `stale` xuống sẽ để màn này quyết lần thứ hai.
    */
@@ -306,6 +348,10 @@ export function EditScreen({
   onDuyet,
   dangDuyet = false,
   loiDuyet = null,
+  specs = [],
+  onBocLai,
+  dangBocLai = false,
+  loiBocLai = null,
   cauLoiThoi = null,
   scrollTop = 0,
   viewportH = VIEWPORT_H,
@@ -327,6 +373,41 @@ export function EditScreen({
   const mocDaCuon = useRef<number | null>(null);
   /** So doan — tinh TRUOC nhanh `transcript === null` vi hook khong duoc goi co dieu kien. */
   const soDoan = transcript === null ? 0 : transcript.segments.length;
+
+  // ---------------------------------------------------------------------------
+  // ENGINE ASR ĐANG CHỌN cho lượt `bóc lại` — state CỤC BỘ của màn này.
+  //
+  // ⚠️ Vì sao state ở ĐÂY chứ không ở `App` (đối chiếu `loiTao`/`dangTao` của W3, vốn ở `App`):
+  // giá trị này KHÔNG đi vào bất cứ quyết định nào của `App` cho tới lúc bấm nút — lúc đó nó đi
+  // lên qua `onBocLai(engine)`. Giữ nó ở `App` là một trạng thái thứ hai không ai đọc
+  // (`CompareScreen` đã chốt đúng khuôn này cho ô chọn engine DỊCH).
+  // ---------------------------------------------------------------------------
+  const [engineAsr, datEngineAsr] = useState("");
+  /**
+   * Spec ASR của registry. **KHÔNG lọc `capabilities.available`** — xem docblock prop `specs`:
+   * khoá đó KHÔNG TỒN TẠI trên spec ASR, nên lọc theo nó ra **0 lựa chọn**.
+   */
+  const specsAsr = specs.filter((s) => s.kind === "asr");
+  // Phụ thuộc của effect dưới đây là CHUỖI ID đã join, không phải mảng: mảng là đối tượng MỚI ở
+  // mỗi lần render ⇒ effect chạy lại vô ích (cùng lý do `CompareScreen.khoaDungDuoc`).
+  const khoaAsr = specsAsr.map((s) => s.id).join(",");
+  /** Engine ĐÃ SINH RA bản ghi đang mở — mặc định của ô chọn, xem effect dưới. */
+  const engineCuaBanGhi = transcript === null ? "" : transcript.engine;
+
+  /**
+   * Chọn sẵn engine khi danh sách registry về (hoặc đổi), và BỎ lựa chọn cũ khi nó không còn
+   * trong registry.
+   *
+   * Ưu tiên `transcript.engine` khi nó CÓ trong danh sách: bấm `bóc lại` mà không đụng ô chọn là
+   * "chạy lại y như cũ" — đúng nghĩa đen của nút. Không có nó trong registry (bản ghi cũ, engine
+   * đã bị gỡ) thì lấy engine ASR ĐẦU TIÊN, vì một `<select>` không có lựa chọn hợp lệ là một ô
+   * trống và nút sẽ vô hiệu vĩnh viễn.
+   */
+  useEffect(() => {
+    const co = khoaAsr === "" ? [] : khoaAsr.split(",");
+    if (co.includes(engineAsr)) return;
+    datEngineAsr(co.includes(engineCuaBanGhi) ? engineCuaBanGhi : (co[0] ?? ""));
+  }, [khoaAsr, engineAsr, engineCuaBanGhi]);
 
   /**
    * 🔴 CUỘN KHUNG TỚI DÒNG VỪA CHỌN (Task 12 vòng sửa 1, `I4` — vế "ngoài trần thì cuộn tới").
@@ -411,12 +492,64 @@ export function EditScreen({
           track 2, khung danh sách lùi xuống track 3). Thêm một con vào một lưới có số track cố
           định là một thay đổi BỐ CỤC (ERRATA #31 mục 1 / #36 mục 3); thiếu `grid-row` thì track
           `auto` không co lại đúng và khung danh sách mất chỗ cuộn.
-          Nội dung: TRẠNG THÁI BẢN GHI (dữ liệu của máy chủ, `Transcript.status`) + nút `duyệt` +
-          hai câu NÓI RA trạng thái của chính lời gọi (`đang duyệt…` / lỗi nguyên văn). */}
+          Nội dung: TRẠNG THÁI BẢN GHI (dữ liệu của máy chủ, `Transcript.status`) + ô chọn ENGINE
+          ASR kèm nút `bóc lại` + nút `duyệt` + các câu NÓI RA trạng thái của từng lời gọi
+          (`đang bóc lại…` / `đang duyệt…` / lỗi nguyên văn).
+          ⚠️ THỨ TỰ có nghĩa: `duyệt` mang `margin-left: auto` (`.lenh--duyet`), nên mọi thứ đặt
+          TRƯỚC nó dồn về trái và nó ở sát phải. Ô chọn ASR vì thế đứng SAU câu trạng thái và
+          TRƯỚC `duyệt`. */}
       <div className="ed__thanh">
         <span className="ed__trang-thai" data-testid="trang-thai-ban-ghi">
           {`trạng thái: ${transcript.status}`}
         </span>
+        {/* BÓC LẠI BẰNG ENGINE ASR KHÁC — xếp một job `asr` MỚI cho CHÍNH nguồn của bản ghi này.
+            Vì sao cần: engine quyết định chất lượng chữ (turbo nhanh, large-v3 chính xác hơn), và
+            trước điều khiển này thì cách DUY NHẤT để đổi engine là sửa `registry.json` rồi nạp lại
+            tệp — tức mất toàn bộ bản ghi đang có.
+            ⚠️ Đây là `<select>` TRẦN, không phải `<EngineSelect/>`: xem docblock prop `specs` —
+            `EngineSelect` lọc `capabilities.available`, mà spec ASR KHÔNG có khoá đó.
+            ⚠️ Ô chọn VÔ HIỆU khi lời gọi đang bay hoặc khi registry không có engine ASR nào: một
+            điều khiển bấm được mà không gửi gì đi là một lời nói dối. */}
+        <label className="eng">
+          <span className="eng__nhan">ASR</span>
+          <select
+            className="eng__chon"
+            data-testid="chon-engine-asr"
+            aria-label="engine ASR cho lượt bóc lại"
+            value={engineAsr}
+            disabled={dangBocLai || specsAsr.length === 0}
+            onChange={(suKien) => datEngineAsr(suKien.target.value)}
+          >
+            {specsAsr.length === 0 ? (
+              <option value="">không có engine ASR nào trong registry</option>
+            ) : (
+              specsAsr.map((spec) => (
+                <option key={spec.id} value={spec.id}>
+                  {spec.label}
+                </option>
+              ))
+            )}
+          </select>
+        </label>
+        <button
+          type="button"
+          className="lenh"
+          data-testid="boc-lai"
+          disabled={dangBocLai || engineAsr === ""}
+          onClick={() => onBocLai?.(engineAsr)}
+        >
+          bóc lại
+        </button>
+        {dangBocLai ? (
+          <span className="lenh__tin" data-testid="dang-boc-lai">
+            đang bóc lại…
+          </span>
+        ) : null}
+        {loiBocLai === null ? null : (
+          <span className="lenh__tin" data-testid="loi-boc-lai">
+            {loiBocLai}
+          </span>
+        )}
         <button
           type="button"
           className="lenh lenh--duyet"
@@ -461,12 +594,15 @@ export function EditScreen({
             const chuHienTai = banNhap !== null && banNhap.i === seg.i ? banNhap.text : seg.text;
             return (
               <li key={seg.i} data-i={seg.i} className={lop.join(" ")}>
-                <span className="ed__rail">{formatTimecode(seg.start)}</span>
+                {/* HAI ĐẦU MỐC, không phải một: cùng ký tự mũi tên và cùng `formatTimecode` với
+                    `ed__moc` của ô sửa ngay dưới, nên hai con số ở hai chỗ KHÔNG THỂ lệch nhau về
+                    cách in. Độ dài của đoạn nhìn thấy được mà không phải bấm vào dòng nào. */}
+                <span className="ed__rail">{`${formatTimecode(seg.start)} → ${formatTimecode(seg.end)}`}</span>
                 {dangSua ? (
                   // Ô SỬA + NÚT + DẤU NUDGE + CÂU TRẠNG THÁI nằm trong MỘT con (`.ed__sua-boc`)
-                  // của hàng: `.ed__item` khai BA cột (`var(--rail) 1fr auto`) và hai con đầu là
-                  // rail + ô sửa — thêm ba con nữa làm hàng thứ tư rơi vào CỘT ẩn (ERRATA #31
-                  // mục 1). Một con bọc giữ nguyên số con của lưới.
+                  // của hàng: `.ed__item` khai BA cột (`calc(var(--rail) * 2) 1fr auto`) và hai
+                  // con đầu là rail + ô sửa — thêm ba con nữa làm hàng thứ tư rơi vào CỘT ẩn
+                  // (ERRATA #31 mục 1). Một con bọc giữ nguyên số con của lưới.
                   //
                   // `<textarea>` chu KHONG `contentEditable` (plan Task 6 Step 4): kiem soat
                   // duoc focus, khong de HTML nguoi dung dan vao thanh DOM cua app.

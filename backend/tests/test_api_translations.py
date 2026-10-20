@@ -610,6 +610,16 @@ def test_build_components_exposes_prompt_version_next_to_available(wired):
             f"{spec.id}: prompt_version phải tính ở build_components(); "
             f"nhận được {spec.capabilities.get('prompt_version')!r}"
         )
+        # 🔴 `"unknown"` KHÔNG phải một version: nó là dấu hiệu engine đã ship
+        # trong `registry.json` mà `PROMPT_VERSION` quên khoá. Đo được trước lượt
+        # này: `hy-mt-1.5-7b` rơi đúng vào đó, nên mọi hàng `translations` của
+        # engine dịch được chữ ASR mang `prompt_version = "unknown"` — cột đó
+        # không còn trả lời được câu "bản dịch này sinh từ prompt nào".
+        assert spec.capabilities.get("prompt_version") != "unknown", (
+            f"{spec.id} có trong registry.json nhưng thiếu khoá trong "
+            f"`adapters/mt/prompts.py::PROMPT_VERSION` — thêm khoá đó, đừng đóng "
+            f'dấu "unknown"'
+        )
     assert by_id(specs, INPROCESS_ENGINE_ID).capabilities["prompt_version"] == "raw-p1"
 
 

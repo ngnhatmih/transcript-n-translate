@@ -269,3 +269,56 @@ def test_the_language_check_is_on_by_default():
                             limits=QaLimits())
     assert any(i.startswith("lang:1=source:") for i in issues), issues
 
+
+
+# ---------------------------------------------------------------------------
+# Bảo vệ thuật ngữ bằng token: hai cờ QA từng nói SAI khi cơ chế này bật
+# ---------------------------------------------------------------------------
+
+
+def test_an_enforced_glossary_silences_the_no_glossary_flag():
+    """`engine_no_glossary` là thông tin SAI khi thuật ngữ đã được ép bằng token.
+
+    `hy-mt-1.5-7b` khai `glossary_prompt: false`, nên engine KHÔNG nhận glossary
+    qua prompt — nhưng pipeline che thuật ngữ bằng token rồi khôi phục bằng đúng
+    chuỗi glossary. Giữ cờ này là báo cho người dùng một ràng buộc "không tồn
+    tại", và smoke thật của tính năng đã cho ra đúng cờ sai đó.
+    """
+    terms = [term("曹磊", "Tào Lôi")]
+    src, out = [seg(1, "曹磊")], [seg(1, "Tào Lôi")]
+    assert "engine_no_glossary" in qa_translation(
+        src, out, glossary=terms, supports_glossary=False)
+    assert "engine_no_glossary" not in qa_translation(
+        src, out, glossary=terms, supports_glossary=False, glossary_enforced=True)
+
+
+def test_a_long_glossary_rendering_is_not_counted_as_model_verbosity():
+    """Rendering dài theo policy không phải model lan man.
+
+    Đo trên smoke thật: `小儿放纸鸢图` (6 chữ) render thành 46 ký tự có ngoặc, tỉ
+    lệ 7,75 trên ngưỡng 5,0 — bản dịch đúng vẫn bị gắn `length:`. Sau khi quy
+    rendering về độ dài chữ nguồn, tỉ lệ còn ~2,2 và cờ biến mất.
+    """
+    title = "Tranh thả diều của trẻ nhỏ (Tiểu Nhi Phóng Chỉ Diên Đồ)"
+    src = [seg(1, "小儿放纸鸢图", dur=5.0)]
+    out = [seg(1, f"Đây là {title}", dur=5.0)]
+    # Chốt rằng phép so THÔ thật sự vượt ngưỡng — nếu không, bài này xanh vì lý do
+    # khác và không chứng minh được gì.
+    assert len(out[0].text) / len(src[0].text) > QaLimits().max_len_ratio
+    issues = qa_translation(src, out, glossary=[term("小儿放纸鸢图", title)],
+                            supports_glossary=True)
+    assert not [i for i in issues if i.startswith("length:")], issues
+
+
+def test_a_rendering_of_a_term_absent_from_the_source_is_not_forgiven():
+    """Chỉ quy đổi rendering của thuật ngữ CÓ trong câu nguồn.
+
+    Một rendering tình cờ nằm trong câu khác không phải chỗ glossary được áp; quy
+    nó về chữ nguồn là bịa ra một phép so không có thật và sẽ dung túng đúng loại
+    lan man mà luật `length:` sinh ra để bắt.
+    """
+    src = [seg(1, "con rồng", dur=1.0)]
+    out = [seg(1, "con rồng Tào Lôi " + "x" * 25, dur=1.0)]
+    issues = qa_translation(src, out, glossary=[term("曹磊", "Tào Lôi")],
+                            supports_glossary=True)
+    assert any(i.startswith("length:") for i in issues), issues

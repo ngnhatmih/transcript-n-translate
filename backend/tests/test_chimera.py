@@ -110,12 +110,17 @@ def test_shipped_registry_declares_six_chimera_candidates():
 def test_the_engines_missing_a_prompt_version_are_the_ones_already_declared():
     """`llm_calls.prompt_version` phải CÓ NGHĨA, và chỗ còn thiếu phải là chỗ ĐÃ KHAI.
 
-    `PROMPT_VERSION` hôm nay phủ ba trong bốn engine dịch. Engine còn thiếu là
-    `hy-mt-1.5-7b` — model CHƯA được pull ở máy này, nên nhánh đó chưa từng chạy và
-    một chuỗi `prompt_version` cho nó sẽ là một lời khai không có phép đo nào đứng
-    sau. Bài này biến khoảng trống đó thành DỮ LIỆU: thêm một engine mới vào
-    `chimera.candidates` mà quên `prompt_version` thì nó đỏ, và người sửa phải chọn
-    — khai một version thật, hay khai thêm vào danh sách "đã biết là thiếu".
+    🔴 ĐÍNH CHÍNH (lượt này): bài này từng ghim `missing == ["hy-mt-1.5-7b"]` với lý do
+    *"model CHƯA được pull ở máy này, nên một chuỗi `prompt_version` cho nó sẽ là một lời
+    khai không có phép đo nào đứng sau"*. Lý do đó **hết đúng**: HY-MT1.5 đã có trong kho
+    Ollama (`hy-mt1.5-7b:q4_K_M`, manifest `5f79e49d4ed2`) và đã được ĐO — trên 44 đoạn
+    ASR thật nó dịch 44/44, 0% chép nguồn, 0 chữ Hán còn lại, trong khi `qwen2.5:7b` chép
+    8/8 trên cùng đầu vào. Vì vậy khoảng trống đã được lấp bằng một version THẬT
+    (`hymt-json-p2`), và danh sách "đã biết là thiếu" nay RỖNG.
+
+    Vì sao vẫn giữ bài: nó biến khoảng trống thành DỮ LIỆU. Thêm một engine mới vào
+    `chimera.candidates` mà quên `prompt_version` thì nó đỏ, và người sửa phải chọn —
+    khai một version thật, hay khai thêm vào danh sách "đã biết là thiếu".
     """
     from app.adapters.mt.prompts import MERGE_PROMPT_VERSION, PROMPT_VERSION
 
@@ -123,10 +128,14 @@ def test_the_engines_missing_a_prompt_version_are_the_ones_already_declared():
                       / "registry.json").read_text(encoding="utf-8"))
     used = {entry["engine"] for entry in raw["chimera"]["candidates"]}
     missing = sorted(used - set(PROMPT_VERSION))
-    assert missing == ["hy-mt-1.5-7b"], (
-        "danh sách engine CHƯA có `prompt_version` đã đổi. Hôm nay đúng một engine "
-        "— HY-MT1.5, model chưa được pull trên máy này. Thiếu: "
+    assert missing == [], (
+        "danh sách engine CHƯA có `prompt_version` đã đổi. Sau lượt này mọi ứng viên "
+        "Chimera đều có version thật, nên danh sách phải RỖNG. Thiếu: "
         f"{missing}"
+    )
+    assert MERGE_PROMPT_VERSION not in set(PROMPT_VERSION.values()), (
+        "prompt của LƯỢT PHA phải KHÁC prompt dịch: dùng chung một chuỗi thì không "
+        "phân biệt được một lượt pha với một lượt dịch thường"
     )
     assert MERGE_PROMPT_VERSION not in set(PROMPT_VERSION.values()), (
         "prompt của LƯỢT PHA phải KHÁC prompt dịch: dùng chung một chuỗi thì không "

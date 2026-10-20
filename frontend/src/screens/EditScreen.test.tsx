@@ -34,7 +34,7 @@ import { after, afterEach, before, beforeEach, describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
-import type { Segment, Transcript } from "../api/types.ts";
+import type { EngineSpec, Segment, Transcript } from "../api/types.ts";
 import { withPinned } from "../lib/window.ts";
 import { setupDom, teardownDom } from "../../test/dom.ts";
 
@@ -780,5 +780,253 @@ describe("EditScreen: §4.1 danh sach doan ao hoa + GHIM dong dang sua + suspect
     kiem("draft", false);
     kiem("translated", false);
     kiem("reviewed", true);
+  });
+
+  // ===========================================================================
+  // ITEM 5 — RAIL IN CẢ HAI ĐẦU MỐC · Ô CHỌN ENGINE ASR + NÚT `bóc lại`
+  //
+  // HAI MỆNH ĐỀ, và mỗi cái có một cái bẫy riêng đã đo được:
+  //  (1) Rail phải in `${start} → ${end}` — không phải chỉ `start`. Bẫy: bài cũ chỉ khẳng định
+  //      `moc-doan` CỦA Ô SỬA (`0:02.00 → 0:04.00`), nên một rail in MỘT mốc vẫn đi qua xanh.
+  //  (2) Ô chọn ASR phải liệt kê engine lấy từ registry — kể cả engine KHÔNG có
+  //      `capabilities.available`. Bẫy: spec ASR của `/api/registry` THẬT **thiếu** khoá đó
+  //      (`_mark_availability` chỉ ghi cho `kind == "mt"`), nên một fixture có `available: true`
+  //      sẽ KHÔNG bắt được lỗi "lọc theo `available` ⇒ 0 lựa chọn". Fixture ở đây vì thế mang
+  //      ĐÚNG hình dạng API: `capabilities` chỉ có cờ của engine ASR.
+  // ===========================================================================
+
+  /**
+   * Mot spec ASR theo DUNG hinh dang `/api/registry` tra ve: `capabilities` **KHONG** co
+   * `available` (xem khoi comment dau `src/shell/EngineSelect.tsx`). Ham khong dung `as`.
+   */
+  function specAsr(id: string, label: string): EngineSpec {
+    return {
+      id,
+      label,
+      kind: "asr",
+      runtime: "inprocess",
+      model_ref: `model/${id}`,
+      vram_mb: 0,
+      langs: ["zh", "en"],
+      // ĐÚNG khoá mà `registry.json` khai cho engine ASR — KHÔNG có `available`.
+      capabilities: { timestamps: true, word_timestamps: true },
+      opts: {},
+    };
+  }
+
+  it("RAIL hai mốc: mỗi hàng in `begin → end` (cùng mũi tên và cùng `formatTimecode` với ô sửa)", () => {
+    const { container, unmount } = render(
+      taoPhanTu(EditScreen, {
+        transcript: banGhi([doan(0, 0, 2, "câu 1"), doan(1, 2.5, 4.25, "câu 2")]),
+        // Dòng 1 MỞ SẴN ô sửa: `editingSegment` là state của BÊN GỌI, nên chỉ bấm vào dòng là
+        // không đủ để ô sửa xuất hiện — và bài này cần cả hai chỗ in mốc CÙNG một lúc.
+        editingSegment: 1,
+      }),
+    );
+
+    // (a) NGUYÊN VĂN, kể cả mũi tên và hai dấu cách — đây là điều người dùng ĐỌC.
+    assert.equal(
+      chu(container, '[data-i="0"] .ed__rail'),
+      "0:00.00 → 0:02.00",
+      "rail phải in CẢ HAI đầu mốc, không chỉ `begin`",
+    );
+    // (b) Dòng thứ hai KHÁC mốc: một phép so chỉ ở hàng 0 sẽ xanh với một rail in cứng.
+    assert.equal(chu(container, '[data-i="1"] .ed__rail'), "0:02.50 → 0:04.25");
+
+    // (c) Tên lớp và hình dạng KHÔNG đổi: `.ed__rail` vẫn là một span mono trong hàng; đổi tên
+    //     lớp mà giữ luật CSS là luật mồ côi (`TrangRong`/`ChannelZone` đã trả giá cho lớp lỗi đó).
+    assert.equal(phanTu(container, '[data-i="0"] .ed__rail').tagName, "SPAN");
+
+    // (d) CÙNG MỘT CHUỖI với ô sửa của dòng đó — hai chỗ in hai mốc mà lệch nhau về cách in là
+    //     nguồn sự thật thứ hai cho cùng một giá trị.
+    assert.equal(chu(container, '[data-testid="moc-doan"]'), chu(container, '[data-i="1"] .ed__rail'));
+
+    assert.deepEqual(tiengOn, [], "rail hai mốc khong duoc sinh tieng on console");
+    unmount();
+  });
+
+  it("HÌNH THỨC (rail): cột rail đủ chỗ cho HAI mốc và rail KHÔNG được ngắt dòng giữa hai mốc", () => {
+    // Hai khai báo dưới đây là thứ làm cho mệnh đề "in cả hai mốc" KHÔNG mất chữ trên màn hình:
+    // 17 ký tự mono ở `--fs-num` ≈ 107 px > `--rail` 72 px ⇒ thiếu cột rộng hơn thì chữ tràn ra
+    // ngoài track (và `text-align: right` làm nó tràn về phía TRÁI, ra ngoài khung cuộn); thiếu
+    // `nowrap` thì trình duyệt ngắt dòng ngay chỗ dấu cách quanh `→` và hàng cao lên, phá nhịp
+    // `ROW_H` mà toàn bộ phép tính cửa sổ của ảo hoá dựa vào.
+    const appCss = readFileSync(new URL("../styles/app.css", import.meta.url), "utf8");
+    const cot = khaiBaoCua(appCss, ".ed__item").get("grid-template-columns") ?? "";
+    assert.match(cot, /--rail/, `cột đầu của \`.ed__item\` phải suy từ token \`--rail\`; đo được ${cot}`);
+    assert.match(
+      cot,
+      /calc\(\s*var\(--rail\)\s*\*\s*2\s*\)/,
+      `cột rail phải RỘNG GẤP ĐÔI \`--rail\` (một mốc không còn là thứ duy nhất được in); đo được ${cot}`,
+    );
+    assert.equal(
+      khaiBaoCua(appCss, ".ed__rail").get("white-space"),
+      "nowrap",
+      "rail phải `nowrap`: chuỗi hai mốc có dấu cách ở giữa nên nó bị ngắt dòng khi hẹp",
+    );
+
+    // BÓNG MA của trạng thái rỗng phải theo CÙNG bề rộng rail, nếu không nó là bóng của một danh
+    // sách không tồn tại.
+    const ma = khaiBaoCua(appCss, ".rong__ma").get("padding-left") ?? "";
+    assert.match(
+      ma,
+      /calc\(\s*var\(--rail\)\s*\*\s*2/,
+      `\`.rong__ma\` phải thụt lề theo bề rộng rail MỚI; đo được ${ma}`,
+    );
+  });
+
+  it("Ô CHỌN ASR: liệt kê ĐÚNG các engine `kind === \"asr\"` của registry, kể cả engine THIẾU `capabilities.available`", () => {
+    const specs: EngineSpec[] = [
+      specAsr("fw-large-v3-turbo", "Faster-Whisper large-v3-turbo"),
+      specAsr("fw-large-v3", "Faster-Whisper large-v3 (chính xác hơn turbo)"),
+      specAsr("sensevoice-small", "SenseVoice-Small"),
+      // Một engine DỊCH (có `available: true`) để chứng minh màn LỌC theo `kind`: id MT mà lọt vào
+      // ô chọn ASR thì backend trả 422 cho job `asr` (engine không phải ASR).
+      {
+        id: "opus-mt",
+        label: "OPUS-MT",
+        kind: "mt",
+        runtime: "inprocess",
+        model_ref: "model/opus-mt",
+        vram_mb: 0,
+        langs: ["zh", "en"],
+        capabilities: { available: true },
+        opts: {},
+      },
+    ];
+
+    // TIỀN ĐỀ của chính bài này: fixture mang ĐÚNG hình dạng API (thiếu `available`), nếu không
+    // thì nó không bắt được lỗi mà nó sinh ra để bắt (`ERRATA #31 mục 3`).
+    assert.equal(
+      "available" in (specs[0]?.capabilities ?? {}),
+      false,
+      "fixture phải là spec ASR THẬT: `capabilities` KHÔNG có khoá `available`",
+    );
+
+    const { container, unmount } = render(
+      taoPhanTu(EditScreen, { transcript: banGhi([doan(0, 0, 2, "câu 1")]), specs }),
+    );
+
+    const chon = phanTu(container, '[data-testid="chon-engine-asr"]') as HTMLSelectElement;
+    assert.equal(chon.tagName, "SELECT", "ô chọn engine ASR phải là một `<select>` thật");
+    const giaTri = [...chon.querySelectorAll("option")].map((o) => o.getAttribute("value"));
+    assert.deepEqual(
+      giaTri,
+      ["fw-large-v3-turbo", "fw-large-v3", "sensevoice-small"],
+      "ô chọn phải liệt kê ĐÚNG các engine ASR theo thứ tự registry — thiếu một engine là người "
+      + "dùng không chọn được nó, và `opus-mt` (kind MT) KHÔNG được có mặt",
+    );
+    const nhan = [...chon.querySelectorAll("option")].map((o) => o.textContent ?? "");
+    assert.deepEqual(nhan, [
+      "Faster-Whisper large-v3-turbo",
+      "Faster-Whisper large-v3 (chính xác hơn turbo)",
+      "SenseVoice-Small",
+    ], "nhãn của từng lựa chọn phải là `label` của spec (nguồn: registry, không hard-code)");
+
+    // CHỌN SẴN: registry chưa về (mặc định `[]`) thì ô chọn RỖNG và nút VÔ HIỆU — một lựa chọn
+    // không có gì để chọn là một điều khiển nói dối.
+    unmount();
+    const chuaCo = render(taoPhanTu(EditScreen, { transcript: banGhi([doan(0, 0, 2, "câu 1")]) }));
+    const chonRong = phanTu(chuaCo.container, '[data-testid="chon-engine-asr"]') as HTMLSelectElement;
+    assert.equal(chonRong.value, "", "chưa có spec ASR nào ⇒ không được chọn sẵn một id bịa");
+    assert.equal(chonRong.disabled, true, "không có engine nào để chọn ⇒ ô chọn phải VÔ HIỆU");
+    assert.equal(
+      (phanTu(chuaCo.container, '[data-testid="boc-lai"]') as HTMLButtonElement).disabled,
+      true,
+      "không có engine nào để chọn ⇒ nút `bóc lại` phải VÔ HIỆU (bấm mà không gửi gì là nói dối)",
+    );
+    chuaCo.unmount();
+
+    assert.deepEqual(tiengOn, [], "o chon ASR khong duoc sinh tieng on console");
+  });
+
+  it("BÓC LẠI: bấm nút ⇒ BÁO LÊN bằng ĐÚNG id engine ĐANG CHỌN (màn không tự gọi API)", () => {
+    const daGoi: string[] = [];
+    const specs = [specAsr("fw-large-v3-turbo", "turbo"), specAsr("fw-large-v3", "large-v3")];
+    const { container, unmount } = render(
+      taoPhanTu(EditScreen, {
+        transcript: banGhi([doan(0, 0, 2, "câu 1")]),
+        specs,
+        onBocLai: (engine: string): void => {
+          daGoi.push(engine);
+        },
+      }),
+    );
+
+    const chon = phanTu(container, '[data-testid="chon-engine-asr"]') as HTMLSelectElement;
+    // Mặc định = engine ĐẦU TIÊN khi `transcript.engine` không có trong registry.
+    assert.equal(chon.value, "fw-large-v3-turbo", "mặc định phải là engine ASR đầu tiên của registry");
+
+    // ĐỔI LỰA CHỌN rồi mới bấm: đây là vế mà một nút gửi một id CỐ ĐỊNH sẽ trượt.
+    fireEvent.change(chon, { target: { value: "fw-large-v3" } });
+    assert.equal(chon.value, "fw-large-v3", "ô chọn phải nhận lựa chọn của người dùng (state cục bộ)");
+    fireEvent.click(phanTu(container, '[data-testid="boc-lai"]'));
+    assert.deepEqual(daGoi, ["fw-large-v3"], "nút phải báo ĐÚNG id engine ĐANG CHỌN");
+    unmount();
+
+    // Ưu tiên `transcript.engine` khi nó CÓ trong registry: bấm mà không đụng ô chọn = "chạy lại
+    // y như cũ", đúng nghĩa đen của nút. (Và nó khác hẳn "engine đầu tiên của registry".)
+    const cuaBanGhi = [specAsr("fw-large-v3-turbo", "turbo"), specAsr("fw-large-v3", "large-v3")];
+    const khac = render(
+      taoPhanTu(EditScreen, {
+        transcript: { ...banGhi([doan(0, 0, 2, "câu 1")]), engine: "fw-large-v3" },
+        specs: cuaBanGhi,
+      }),
+    );
+    assert.equal(
+      (phanTu(khac.container, '[data-testid="chon-engine-asr"]') as HTMLSelectElement).value,
+      "fw-large-v3",
+      "engine ĐÃ SINH RA bản ghi phải được chọn sẵn khi nó còn trong registry",
+    );
+    khac.unmount();
+  });
+
+  it("BÓC LẠI: `đang bóc lại…` và lỗi NGUYÊN VĂN nói ra bằng CHỮ, và hai điều khiển VÔ HIỆU khi đang bay", () => {
+    const specs = [specAsr("fw-large-v3", "large-v3")];
+    const { container, unmount } = render(
+      taoPhanTu(EditScreen, {
+        transcript: banGhi([doan(0, 0, 2, "câu 1")]),
+        specs,
+        dangBocLai: true,
+        loiBocLai: "422: engine 'fw-large-v3' không có trong registry",
+      }),
+    );
+
+    // CHỮ, không phải màu (§7). Và nó là CÂU CỦA CHÍNH LỜI GỌI đó.
+    assert.equal(chu(container, '[data-testid="dang-boc-lai"]'), "đang bóc lại…");
+    assert.equal(
+      chu(container, '[data-testid="loi-boc-lai"]'),
+      "422: engine 'fw-large-v3' không có trong registry",
+      "lỗi phải là NGUYÊN VĂN `ApiError.message` (`<status>: <detail>`) của backend",
+    );
+
+    // VÔ HIỆU khi đang bay: một điều khiển bấm được mà không gửi gì đi là một lời nói dối.
+    assert.equal(
+      (phanTu(container, '[data-testid="boc-lai"]') as HTMLButtonElement).disabled,
+      true,
+      "đang bay ⇒ nút `bóc lại` phải VÔ HIỆU",
+    );
+    assert.equal(
+      (phanTu(container, '[data-testid="chon-engine-asr"]') as HTMLSelectElement).disabled,
+      true,
+      "đang bay ⇒ ô chọn engine phải VÔ HIỆU",
+    );
+    unmount();
+
+    // KHÔNG có gì đang bay và không lỗi ⇒ KHÔNG có câu nào (nếu không thì câu "đang bóc lại…" là
+    // một lời khai thường trực, và người dùng không phân biệt được trạng thái nào).
+    const yen = render(
+      taoPhanTu(EditScreen, { transcript: banGhi([doan(0, 0, 2, "câu 1")]), specs }),
+    );
+    khongCo(yen.container, '[data-testid="dang-boc-lai"]', "không có lời gọi nào đang bay");
+    khongCo(yen.container, '[data-testid="loi-boc-lai"]', "không có lỗi nào để nói");
+    assert.equal(
+      (phanTu(yen.container, '[data-testid="boc-lai"]') as HTMLButtonElement).disabled,
+      false,
+      "không bay, không lỗi, CÓ engine ⇒ nút phải bấm được",
+    );
+    yen.unmount();
+
+    assert.deepEqual(tiengOn, [], "trang thai cua boc lai khong duoc sinh tieng on console");
   });
 });

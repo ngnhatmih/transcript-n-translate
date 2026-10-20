@@ -26,9 +26,9 @@ Hai ruling được cài ở đây:
   `sensevoice-small` bị chạy bằng sai adapter và script báo hỏng sai. Dispatch
   dùng chung với production là cách duy nhất để hai bên không trôi khỏi nhau.
 
-CHƯA kiểm chứng (R62): hình dạng THẬT của khoá `timestamp` mà FunASR trả về chỉ
-xác nhận được bằng một lần chạy `SenseVoiceEngine` thật (`funasr` không có trong
-venv này). Đừng suy ra từ đây — đọc `docs`/report của Task 20.
+R62 đã được xác minh với FunASR 1.2.6 trên SenseVoiceSmall: adapter yêu cầu
+`output_timestamp=True`, nếu không kết quả chỉ có `key`/`text` và phải báo lỗi
+thay vì tạo phụ đề sai thời gian.
 """
 from __future__ import annotations
 

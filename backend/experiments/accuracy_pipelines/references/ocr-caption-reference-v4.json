@@ -1,0 +1,1624 @@
+{
+  "dataset_id": "ocr-caption-reference-v2",
+  "version": 4,
+  "metadata": {
+    "source_media": "data/media/8f4b5304daf42569.mp4",
+    "source_observations": "data/experiments/accuracy-pipelines/20261014-caption-ocr-observations/caption_ocr.json",
+    "source_sha256": "a71df14a8cd044cfbe82a0343d1b4675ad79c53b693bcc7d6a187508837cc2b8",
+    "created_date": "2026-10-15",
+    "normalization_for_inclusion": "NFKC; exclude Unicode punctuation and whitespace; require at least four characters",
+    "scoring_normalization": "OpenCC t2s; NFKC; strip whitespace and Unicode punctuation",
+    "scoring_protocol": "For each caption midpoint, concatenate ASR segments intersecting ±2.0 seconds; choose best substring within reference length ±3 characters.",
+    "included_count": 84,
+    "excluded_count": 21,
+    "evaluation_split": {
+      "method": "chronological half split; first 42 scoreable captions are dev, last 42 are test",
+      "dev_count": 42,
+      "test_count": 42
+    },
+    "evidence_policy": "Only frame/audio-supported evidence may change reference text. Unchanged OCR rows without a frame audit remain unverified. ASR output is never used as reference-edit evidence.",
+    "ocr_density_scan": {
+      "population": 84,
+      "character_count_normalization": "NFKC; strip Unicode punctuation and whitespace",
+      "metric": "normalized OCR characters per caption duration second",
+      "percentile": 10,
+      "threshold_method": "nearest_rank; flag values <= P10",
+      "threshold_chars_per_second": 2.941176,
+      "flagged_count": 9,
+      "flagged_indices": [
+        3,
+        5,
+        38,
+        43,
+        47,
+        48,
+        56,
+        68,
+        78
+      ],
+      "review": "The nine flagged rows were inspected at start, midpoint, and end frames; their midpoint images matched original OCR and no text edits were made. This audit only validates these nine rows and does not establish that the full reference is complete or OCR-error-free.",
+      "row_26_original_ocr_sensitivity": {
+        "source_ocr": "一定可以把成本",
+        "chars": 7,
+        "chars_per_second": 4.216867,
+        "p10_threshold_chars_per_second": 2.941176,
+        "would_be_flagged_at_p10": false
+      }
+    },
+    "repeated_character_scan": {
+      "population": 84,
+      "source_text_scanned": "source_ocr",
+      "normalization": "NFKC; strip Unicode punctuation and whitespace",
+      "rule": "inspect every consecutive repeated-character run of length 2 or more",
+      "flagged_indices": [
+        13,
+        14,
+        24,
+        25,
+        40,
+        49,
+        51,
+        57,
+        64,
+        65,
+        79
+      ],
+      "frame_checked_indices": [
+        13,
+        14,
+        24,
+        25,
+        40,
+        49,
+        51,
+        57,
+        64,
+        65,
+        79
+      ],
+      "review": "All repeated-character candidates were frame-checked. Numeric runs and lexical reduplication matched the subtitle; the duplicated OCR characters in rows 57 and 64 were corrected from frame evidence."
+    },
+    "caption_observations": [
+      {
+        "i": 0,
+        "start": 0.0,
+        "end": 1.08,
+        "asr": "作为一个搞艺术",
+        "ocr": "作为一个搞艺术的",
+        "selected": "作为一个搞艺术",
+        "source_ocr": "作为一个搞艺术的",
+        "evidence": "original_ocr",
+        "evidence_detail": "Preserved from the original OCR observation; not independently confirmed against audio or frame.",
+        "evaluation_split": "dev"
+      },
+      {
+        "i": 3,
+        "start": 3.44,
+        "end": 5.8,
+        "asr": "那我画上了赔了",
+        "ocr": "弄我画上了！",
+        "selected": "那我画上了赔了",
+        "source_ocr": "弄我画上了！",
+        "evidence": "original_ocr_and_video_frame_scan",
+        "evidence_detail": "Original OCR was unchanged; the low-density caption was checked in frames at its start, midpoint, and end. Midpoint frame visibly matches the original OCR phrase. Start/end samples show neighboring caption states at cue boundaries; no added or missing text was evident in the reviewed caption.",
+        "verification_status": "frame_checked_no_edit",
+        "frame_audit": {
+          "sample_positions": [
+            "start",
+            "middle",
+            "end"
+          ],
+          "sample_times_s": [
+            3.49,
+            4.62,
+            5.75
+          ],
+          "assessment": "Midpoint frame visibly matches the original OCR phrase. Start/end samples show neighboring caption states at cue boundaries; no added or missing text was evident in the reviewed caption."
+        },
+        "evaluation_split": "dev"
+      },
+      {
+        "i": 4,
+        "start": 5.8,
+        "end": 7.1,
+        "asr": "这值几个钱",
+        "ocr": "这值几个钱",
+        "selected": "这值几个钱",
+        "source_ocr": "这值几个钱",
+        "evidence": "original_ocr",
+        "evidence_detail": "Preserved from the original OCR observation; not independently confirmed against audio or frame.",
+        "evaluation_split": "dev"
+      },
+      {
+        "i": 5,
+        "start": 7.1,
+        "end": 11.18,
+        "asr": "要经常证明自己的作品是有价值的长加宽",
+        "ocr": "自己的作品是有价值的",
+        "selected": "要经常证明自己的作品是有价值的长加宽",
+        "source_ocr": "自己的作品是有价值的",
+        "evidence": "original_ocr_and_video_frame_scan",
+        "evidence_detail": "Original OCR was unchanged; the low-density caption was checked in frames at its start, midpoint, and end. Midpoint frame visibly matches the original OCR phrase. Start/end samples show neighboring caption states at cue boundaries; no added or missing text was evident in the reviewed caption.",
+        "verification_status": "frame_checked_no_edit",
+        "frame_audit": {
+          "sample_positions": [
+            "start",
+            "middle",
+            "end"
+          ],
+          "sample_times_s": [
+            7.15,
+            9.14,
+            11.13
+          ],
+          "assessment": "Midpoint frame visibly matches the original OCR phrase. Start/end samples show neighboring caption states at cue boundaries; no added or missing text was evident in the reviewed caption."
+        },
+        "evaluation_split": "dev"
+      },
+      {
+        "i": 6,
+        "start": 11.18,
+        "end": 12.32,
+        "asr": "成细数",
+        "ocr": "（+宽）x系数",
+        "selected": "成细数",
+        "source_ocr": "（+宽）x系数",
+        "evidence": "original_ocr",
+        "evidence_detail": "Preserved from the original OCR observation; not independently confirmed against audio or frame.",
+        "evaluation_split": "dev"
+      },
+      {
+        "i": 8,
+        "start": 14.16,
+        "end": 15.36,
+        "asr": "那赶紧赔我了",
+        "ocr": "那该你赔我了",
+        "selected": "那该你赔我了",
+        "source_ocr": "那该你赔我了",
+        "evidence": "original_ocr",
+        "evidence_detail": "Preserved from the original OCR observation; not independently confirmed against audio or frame.",
+        "evaluation_split": "dev"
+      },
+      {
+        "i": 9,
+        "start": 15.88,
+        "end": 17.74,
+        "asr": "你不就画了一根线吗",
+        "ocr": "你不就画了一根线吗",
+        "selected": "你不就画了一根线吗",
+        "source_ocr": "你不就画了一根线吗",
+        "evidence": "original_ocr",
+        "evidence_detail": "Preserved from the original OCR observation; not independently confirmed against audio or frame.",
+        "evaluation_split": "dev"
+      },
+      {
+        "i": 10,
+        "start": 17.74,
+        "end": 18.76,
+        "asr": "能值多少钱",
+        "ocr": "能值多少钱",
+        "selected": "能值多少钱",
+        "source_ocr": "能值多少钱",
+        "evidence": "original_ocr",
+        "evidence_detail": "Preserved from the original OCR observation; not independently confirmed against audio or frame.",
+        "evaluation_split": "dev"
+      },
+      {
+        "i": 11,
+        "start": 18.76,
+        "end": 19.78,
+        "asr": "看清楚了啊",
+        "ocr": "看清楚了啊",
+        "selected": "看清楚了啊",
+        "source_ocr": "看清楚了啊",
+        "evidence": "original_ocr",
+        "evidence_detail": "Preserved from the original OCR observation; not independently confirmed against audio or frame.",
+        "evaluation_split": "dev"
+      },
+      {
+        "i": 12,
+        "start": 19.78,
+        "end": 20.98,
+        "asr": "这是小儿放指缘图",
+        "ocr": "这是《小儿放纸鸢图》",
+        "selected": "这是小儿放指缘图",
+        "source_ocr": "这是《小儿放纸鸢图》",
+        "evidence": "original_ocr",
+        "evidence_detail": "Preserved from the original OCR observation; not independently confirmed against audio or frame.",
+        "evaluation_split": "dev"
+      },
+      {
+        "i": 13,
+        "start": 20.98,
+        "end": 21.8,
+        "asr": "一瓶值2000",
+        "ocr": "一平尺2,000",
+        "selected": "一瓶值2000",
+        "source_ocr": "一平尺2,000",
+        "evidence": "original_ocr_and_video_frame_repeat_scan",
+        "evidence_detail": "Frame at 21.39s confirms the repeated zeros are part of the displayed amount 2,000; no edit.",
+        "verification_status": "frame_checked_no_edit",
+        "frame_audit": {
+          "sample_positions": [
+            "middle"
+          ],
+          "sample_times_s": [
+            21.39
+          ],
+          "assessment": "Frame at 21.39s confirms the repeated zeros are part of the displayed amount 2,000; no edit."
+        },
+        "evaluation_split": "dev"
+      },
+      {
+        "i": 14,
+        "start": 25.54,
+        "end": 27.88,
+        "asr": "你还欠我18万7712",
+        "ocr": "你还欠我187,712",
+        "selected": "你还欠我18万7712",
+        "source_ocr": "你还欠我187,712",
+        "evidence": "original_ocr_and_video_frame_repeat_scan",
+        "evidence_detail": "Frame at 26.71s confirms the repeated sevens are part of the displayed amount 187,712; no edit.",
+        "verification_status": "frame_checked_no_edit",
+        "frame_audit": {
+          "sample_positions": [
+            "middle"
+          ],
+          "sample_times_s": [
+            26.71
+          ],
+          "assessment": "Frame at 26.71s confirms the repeated sevens are part of the displayed amount 187,712; no edit."
+        },
+        "evaluation_split": "dev"
+      },
+      {
+        "i": 15,
+        "start": 29.27,
+        "end": 30.93,
+        "asr": "有时为了给作品上价值",
+        "ocr": "有时为了给作品上价值",
+        "selected": "有时为了给作品上价值",
+        "source_ocr": "有时为了给作品上价值",
+        "evidence": "original_ocr",
+        "evidence_detail": "Preserved from the original OCR observation; not independently confirmed against audio or frame.",
+        "evaluation_split": "dev"
+      },
+      {
+        "i": 16,
+        "start": 30.93,
+        "end": 31.87,
+        "asr": "会显得不太聪明",
+        "ocr": "会显得不太聪明",
+        "selected": "会显得不太聪明",
+        "source_ocr": "会显得不太聪明",
+        "evidence": "original_ocr",
+        "evidence_detail": "Preserved from the original OCR observation; not independently confirmed against audio or frame.",
+        "evaluation_split": "dev"
+      },
+      {
+        "i": 17,
+        "start": 31.87,
+        "end": 33.27,
+        "asr": "比如这个写书法的",
+        "ocr": "比如这个写书法的",
+        "selected": "比如这个写书法的",
+        "source_ocr": "比如这个写书法的",
+        "evidence": "original_ocr",
+        "evidence_detail": "Preserved from the original OCR observation; not independently confirmed against audio or frame.",
+        "evaluation_split": "dev"
+      },
+      {
+        "i": 18,
+        "start": 33.27,
+        "end": 35.01,
+        "asr": "都说写字太容易了不值钱",
+        "ocr": "都说写字太容易了",
+        "selected": "都说写字太容易了不值钱",
+        "source_ocr": "都说写字太容易了",
+        "evidence": "original_ocr",
+        "evidence_detail": "Preserved from the original OCR observation; not independently confirmed against audio or frame.",
+        "evaluation_split": "dev"
+      },
+      {
+        "i": 19,
+        "start": 35.01,
+        "end": 36.33,
+        "asr": "但我直接去扇头",
+        "ocr": "但我直接去汕头",
+        "selected": "但我直接去汕头",
+        "source_ocr": "但我直接去汕头",
+        "evidence": "original_ocr",
+        "evidence_detail": "Preserved from the original OCR observation; not independently confirmed against audio or frame.",
+        "evaluation_split": "dev"
+      },
+      {
+        "i": 20,
+        "start": 36.33,
+        "end": 37.49,
+        "asr": "找了螺垫搓字",
+        "ocr": "找人螺钿搓字",
+        "selected": "找人螺钿搓字",
+        "source_ocr": "找人螺钿搓字",
+        "evidence": "original_ocr",
+        "evidence_detail": "Preserved from the original OCR observation; not independently confirmed against audio or frame.",
+        "evaluation_split": "dev"
+      },
+      {
+        "i": 21,
+        "start": 37.49,
+        "end": 38.49,
+        "asr": "然后金线钩边",
+        "ocr": "然后金线勾边",
+        "selected": "然后金线勾边",
+        "source_ocr": "然后金线勾边",
+        "evidence": "original_ocr",
+        "evidence_detail": "Preserved from the original OCR observation; not independently confirmed against audio or frame.",
+        "evaluation_split": "dev"
+      },
+      {
+        "i": 22,
+        "start": 38.49,
+        "end": 40.11,
+        "asr": "再缝在高级衬衫上",
+        "ocr": "再缝在高级衬衫上",
+        "selected": "再缝在高级衬衫上",
+        "source_ocr": "再缝在高级衬衫上",
+        "evidence": "original_ocr",
+        "evidence_detail": "Preserved from the original OCR observation; not independently confirmed against audio or frame.",
+        "evaluation_split": "dev"
+      },
+      {
+        "i": 23,
+        "start": 40.11,
+        "end": 41.13,
+        "asr": "你现在成本多少",
+        "ocr": "你这件成本多少",
+        "selected": "你这件成本多少",
+        "source_ocr": "你这件成本多少",
+        "evidence": "original_ocr",
+        "evidence_detail": "Preserved from the original OCR observation; not independently confirmed against audio or frame.",
+        "evaluation_split": "dev"
+      },
+      {
+        "i": 24,
+        "start": 41.13,
+        "end": 42.43,
+        "asr": "不算路费2000是路费5000",
+        "ocr": "不算路费2,000",
+        "selected": "不算路费2000是路费5000",
+        "source_ocr": "不算路费2,000",
+        "evidence": "original_ocr_and_video_frame_repeat_scan",
+        "evidence_detail": "Frame at 41.78s confirms the repeated zeros are part of the displayed amount 2,000; no edit.",
+        "verification_status": "frame_checked_no_edit",
+        "frame_audit": {
+          "sample_positions": [
+            "middle"
+          ],
+          "sample_times_s": [
+            41.78
+          ],
+          "assessment": "Frame at 41.78s confirms the repeated zeros are part of the displayed amount 2,000; no edit."
+        },
+        "evaluation_split": "dev"
+      },
+      {
+        "i": 25,
+        "start": 42.43,
+        "end": 43.61,
+        "asr": "但如果一次多100G",
+        "ocr": "但如果一次做100件",
+        "selected": "但如果一次做100件",
+        "source_ocr": "但如果一次做100件",
+        "evidence": "original_ocr_and_video_frame_repeat_scan",
+        "evidence_detail": "Frame at 43.02s confirms the repeated zeros are part of the displayed amount 100; no edit.",
+        "verification_status": "frame_checked_no_edit",
+        "frame_audit": {
+          "sample_positions": [
+            "middle"
+          ],
+          "sample_times_s": [
+            43.02
+          ],
+          "assessment": "Frame at 43.02s confirms the repeated zeros are part of the displayed amount 100; no edit."
+        },
+        "evaluation_split": "dev"
+      },
+      {
+        "i": 26,
+        "start": 43.61,
+        "end": 45.27,
+        "asr": "一定可以把成本压在2000以内",
+        "ocr": "一定可以把成本压在2,000以内",
+        "selected": "一定可以把成本压在2000以内",
+        "source_ocr": "一定可以把成本",
+        "evidence": "video_frame",
+        "evidence_detail": "The two successive burned-in caption states are visible in frame_44_2s.jpg (一定可以把成本) and frame_44_8s.jpg (压在2,000以内). Together they complete this speech/caption segment.",
+        "verification_status": "frame_checked_edit",
+        "frame_audit": {
+          "sample_positions": [
+            "caption_state_1",
+            "caption_state_2"
+          ],
+          "sample_times_s": [
+            44.2,
+            44.8
+          ],
+          "assessment": "The two successive burned-in caption states are visible in frame_44_2s.jpg (一定可以把成本) and frame_44_8s.jpg (压在2,000以内). Together they complete this speech/caption segment."
+        },
+        "evaluation_split": "dev"
+      },
+      {
+        "i": 27,
+        "start": 45.79,
+        "end": 47.17,
+        "asr": "你直接卖字多少钱",
+        "ocr": "你直接卖字儿多少钱",
+        "selected": "你直接卖字多少钱",
+        "source_ocr": "你直接卖字儿多少钱",
+        "evidence": "original_ocr",
+        "evidence_detail": "Preserved from the original OCR observation; not independently confirmed against audio or frame.",
+        "model_support": [
+          "SenseVoice",
+          "ElevenLabs Scribe"
+        ],
+        "model_support_outputs": {
+          "SenseVoice": "你直接卖字儿多少钱",
+          "ElevenLabs Scribe": "字儿多少钱啊"
+        },
+        "model_support_note": "These ASR transcripts were reported by the user. Agreement with OCR is corroboration between automated systems, not proof from listening; retain verification status as unverified.",
+        "verification_status": "unverified",
+        "evaluation_split": "dev"
+      },
+      {
+        "i": 28,
+        "start": 48.49,
+        "end": 50.13,
+        "asr": "有时又会显得很荒诞",
+        "ocr": "有时又会显得很荒诞",
+        "selected": "有时又会显得很荒诞",
+        "source_ocr": "有时又会显得很荒诞",
+        "evidence": "original_ocr",
+        "evidence_detail": "Preserved from the original OCR observation; not independently confirmed against audio or frame.",
+        "evaluation_split": "dev"
+      },
+      {
+        "i": 29,
+        "start": 50.13,
+        "end": 51.41,
+        "asr": "比如这个搞雕塑的",
+        "ocr": "比如这个搞雕塑的",
+        "selected": "比如这个搞雕塑的",
+        "source_ocr": "比如这个搞雕塑的",
+        "evidence": "original_ocr",
+        "evidence_detail": "Preserved from the original OCR observation; not independently confirmed against audio or frame.",
+        "evaluation_split": "dev"
+      },
+      {
+        "i": 30,
+        "start": 51.41,
+        "end": 52.85,
+        "asr": "你拿水泥造石头呢",
+        "ocr": "你拿水泥造石头呢",
+        "selected": "你拿水泥造石头呢",
+        "source_ocr": "你拿水泥造石头呢",
+        "evidence": "original_ocr",
+        "evidence_detail": "Preserved from the original OCR observation; not independently confirmed against audio or frame.",
+        "evaluation_split": "dev"
+      },
+      {
+        "i": 32,
+        "start": 53.87,
+        "end": 55.41,
+        "asr": "油祸能保存几百年",
+        "ocr": "油画能保存几百年",
+        "selected": "油画能保存几百年",
+        "source_ocr": "油画能保存几百年",
+        "evidence": "original_ocr",
+        "evidence_detail": "Preserved from the original OCR observation; not independently confirmed against audio or frame.",
+        "evaluation_split": "dev"
+      },
+      {
+        "i": 33,
+        "start": 55.41,
+        "end": 56.83,
+        "asr": "雕塑能保存上千年",
+        "ocr": "雕塑能保存上千年",
+        "selected": "雕塑能保存上千年",
+        "source_ocr": "雕塑能保存上千年",
+        "evidence": "original_ocr",
+        "evidence_detail": "Preserved from the original OCR observation; not independently confirmed against audio or frame.",
+        "evaluation_split": "dev"
+      },
+      {
+        "i": 34,
+        "start": 56.83,
+        "end": 58.77,
+        "asr": "我直接用水泥造石头",
+        "ocr": "我直接用水泥",
+        "selected": "我直接用水泥造石头",
+        "source_ocr": "我直接用水泥",
+        "evidence": "original_ocr",
+        "evidence_detail": "Preserved from the original OCR observation; not independently confirmed against audio or frame.",
+        "evaluation_split": "dev"
+      },
+      {
+        "i": 35,
+        "start": 58.99,
+        "end": 60.11,
+        "asr": "与天地同寿",
+        "ocr": "与天地同寿",
+        "selected": "与天地同寿",
+        "source_ocr": "与天地同寿",
+        "evidence": "original_ocr",
+        "evidence_detail": "Preserved from the original OCR observation; not independently confirmed against audio or frame.",
+        "evaluation_split": "dev"
+      },
+      {
+        "i": 36,
+        "start": 60.11,
+        "end": 61.77,
+        "asr": "什么能比我的作品更有价值",
+        "ocr": "什么能比我的作品",
+        "selected": "什么能比我的作品更有价值",
+        "source_ocr": "什么能比我的作品",
+        "evidence": "original_ocr",
+        "evidence_detail": "Preserved from the original OCR observation; not independently confirmed against audio or frame.",
+        "evaluation_split": "dev"
+      },
+      {
+        "i": 37,
+        "start": 61.77,
+        "end": 64.03,
+        "asr": "随便找一块石头都几十亿年",
+        "ocr": "这随便找一块石头",
+        "selected": "随便找一块石头都几十亿年",
+        "source_ocr": "这随便找一块石头",
+        "evidence": "original_ocr",
+        "evidence_detail": "Preserved from the original OCR observation; not independently confirmed against audio or frame.",
+        "evaluation_split": "dev"
+      },
+      {
+        "i": 38,
+        "start": 66.31,
+        "end": 68.29,
+        "asr": "你这费心巴拉用现代材料",
+        "ocr": "用现代材料",
+        "selected": "你这费心巴拉用现代材料",
+        "source_ocr": "用现代材料",
+        "evidence": "original_ocr_and_video_frame_scan",
+        "evidence_detail": "Original OCR was unchanged; the low-density caption was checked in frames at its start, midpoint, and end. Midpoint frame visibly matches the original OCR phrase. Start/end samples show neighboring caption states at cue boundaries; no added or missing text was evident in the reviewed caption.",
+        "verification_status": "frame_checked_no_edit",
+        "frame_audit": {
+          "sample_positions": [
+            "start",
+            "middle",
+            "end"
+          ],
+          "sample_times_s": [
+            66.36,
+            67.3,
+            68.24
+          ],
+          "assessment": "Midpoint frame visibly matches the original OCR phrase. Start/end samples show neighboring caption states at cue boundaries; no added or missing text was evident in the reviewed caption."
+        },
+        "evaluation_split": "dev"
+      },
+      {
+        "i": 39,
+        "start": 68.29,
+        "end": 70.15,
+        "asr": "临摹了个本来是有的东西",
+        "ocr": "临摹了个本来就有的东西",
+        "selected": "临摹了个本来就有的东西",
+        "source_ocr": "临摹了个本来就有的东西",
+        "evidence": "original_ocr",
+        "evidence_detail": "Preserved from the original OCR observation; not independently confirmed against audio or frame.",
+        "evaluation_split": "dev"
+      },
+      {
+        "i": 40,
+        "start": 70.15,
+        "end": 71.51,
+        "asr": "那你画画不也是吗",
+        "ocr": "那你画画不也是吗",
+        "selected": "那你画画不也是吗",
+        "source_ocr": "那你画画不也是吗",
+        "evidence": "original_ocr_and_video_frame_repeat_scan",
+        "evidence_detail": "Frame at 70.83s visibly reads 画画; lexical repetition is intentional, no edit.",
+        "verification_status": "frame_checked_no_edit",
+        "frame_audit": {
+          "sample_positions": [
+            "middle"
+          ],
+          "sample_times_s": [
+            70.83
+          ],
+          "assessment": "Frame at 70.83s visibly reads 画画; lexical repetition is intentional, no edit."
+        },
+        "evaluation_split": "dev"
+      },
+      {
+        "i": 41,
+        "start": 75.49,
+        "end": 78.21,
+        "asr": "所以年轻的艺术家们经常通过拉彩的方式",
+        "ocr": "经常通过拉踩的方式",
+        "selected": "所以年轻的艺术家们经常通过拉彩的方式",
+        "source_ocr": "经常通过拉踩的方式",
+        "evidence": "original_ocr",
+        "evidence_detail": "Preserved from the original OCR observation; not independently confirmed against audio or frame.",
+        "evaluation_split": "dev"
+      },
+      {
+        "i": 42,
+        "start": 78.21,
+        "end": 79.49,
+        "asr": "来体现作品的价值",
+        "ocr": "来体现作品的价值",
+        "selected": "来体现作品的价值",
+        "source_ocr": "来体现作品的价值",
+        "evidence": "original_ocr",
+        "evidence_detail": "Preserved from the original OCR observation; not independently confirmed against audio or frame.",
+        "evaluation_split": "dev"
+      },
+      {
+        "i": 43,
+        "start": 79.49,
+        "end": 84.25,
+        "asr": "能够搬动石头的人才配悠悠C位",
+        "ocr": "能够搬动石头的人",
+        "selected": "能够搬动石头的人才配悠悠C位",
+        "source_ocr": "能够搬动石头的人",
+        "evidence": "original_ocr_and_video_frame_scan",
+        "evidence_detail": "Original OCR was unchanged; the low-density caption was checked in frames at its start, midpoint, and end. Midpoint frame visibly matches the original OCR phrase. Start/end samples show neighboring caption states at cue boundaries; no added or missing text was evident in the reviewed caption.",
+        "verification_status": "frame_checked_no_edit",
+        "frame_audit": {
+          "sample_positions": [
+            "start",
+            "middle",
+            "end"
+          ],
+          "sample_times_s": [
+            79.54,
+            81.87,
+            84.2
+          ],
+          "assessment": "Midpoint frame visibly matches the original OCR phrase. Start/end samples show neighboring caption states at cue boundaries; no added or missing text was evident in the reviewed caption."
+        },
+        "evaluation_split": "dev"
+      },
+      {
+        "i": 44,
+        "start": 93.05,
+        "end": 94.27,
+        "asr": "这样下去不是办法",
+        "ocr": "这样下去不是办法",
+        "selected": "这样下去不是办法",
+        "source_ocr": "这样下去不是办法",
+        "evidence": "original_ocr",
+        "evidence_detail": "Preserved from the original OCR observation; not independently confirmed against audio or frame.",
+        "evaluation_split": "dev"
+      },
+      {
+        "i": 45,
+        "start": 94.27,
+        "end": 96.09,
+        "asr": "怎么才能让创作回归纯粹",
+        "ocr": "怎么才能让创作回归纯粹",
+        "selected": "怎么才能让创作回归纯粹",
+        "source_ocr": "怎么才能让创作回归纯粹",
+        "evidence": "original_ocr",
+        "evidence_detail": "Preserved from the original OCR observation; not independently confirmed against audio or frame.",
+        "evaluation_split": "dev"
+      },
+      {
+        "i": 46,
+        "start": 96.09,
+        "end": 97.33,
+        "asr": "不考虑什么价值呢",
+        "ocr": "不考虑什么价值呢",
+        "selected": "不考虑什么价值呢",
+        "source_ocr": "不考虑什么价值呢",
+        "evidence": "original_ocr",
+        "evidence_detail": "Preserved from the original OCR observation; not independently confirmed against audio or frame.",
+        "evaluation_split": "test"
+      },
+      {
+        "i": 47,
+        "start": 97.33,
+        "end": 99.59,
+        "asr": "这天我们在旅游时突然想到",
+        "ocr": "我们在旅游时",
+        "selected": "这天我们在旅游时突然想到",
+        "source_ocr": "我们在旅游时",
+        "evidence": "original_ocr_and_video_frame_scan",
+        "evidence_detail": "Original OCR was unchanged; the low-density caption was checked in frames at its start, midpoint, and end. Midpoint frame visibly matches the original OCR phrase. Start/end samples show neighboring caption states at cue boundaries; no added or missing text was evident in the reviewed caption.",
+        "verification_status": "frame_checked_no_edit",
+        "frame_audit": {
+          "sample_positions": [
+            "start",
+            "middle",
+            "end"
+          ],
+          "sample_times_s": [
+            97.38,
+            98.46,
+            99.54
+          ],
+          "assessment": "Midpoint frame visibly matches the original OCR phrase. Start/end samples show neighboring caption states at cue boundaries; no added or missing text was evident in the reviewed caption."
+        },
+        "evaluation_split": "test"
+      },
+      {
+        "i": 48,
+        "start": 99.59,
+        "end": 101.63,
+        "asr": "如果能直接把作品放在大鸡小巷",
+        "ocr": "放在大街小巷",
+        "selected": "如果能直接把作品放在大鸡小巷",
+        "source_ocr": "放在大街小巷",
+        "evidence": "original_ocr_and_video_frame_scan",
+        "evidence_detail": "Original OCR was unchanged; the low-density caption was checked in frames at its start, midpoint, and end. Midpoint frame visibly matches the original OCR phrase. Start/end samples show neighboring caption states at cue boundaries; no added or missing text was evident in the reviewed caption.",
+        "verification_status": "frame_checked_no_edit",
+        "frame_audit": {
+          "sample_positions": [
+            "start",
+            "middle",
+            "end"
+          ],
+          "sample_times_s": [
+            99.64,
+            100.61,
+            101.58
+          ],
+          "assessment": "Midpoint frame visibly matches the original OCR phrase. Start/end samples show neighboring caption states at cue boundaries; no added or missing text was evident in the reviewed caption."
+        },
+        "evaluation_split": "test"
+      },
+      {
+        "i": 49,
+        "start": 101.63,
+        "end": 103.23,
+        "asr": "那岂不是处处都是C位",
+        "ocr": "那岂不是处处都是c位",
+        "selected": "那岂不是处处都是c位",
+        "source_ocr": "那岂不是处处都是c位",
+        "evidence": "original_ocr_and_video_frame_repeat_scan",
+        "evidence_detail": "Frame at 102.43s visibly reads 处处; lexical repetition is intentional, no edit.",
+        "verification_status": "frame_checked_no_edit",
+        "frame_audit": {
+          "sample_positions": [
+            "middle"
+          ],
+          "sample_times_s": [
+            102.43
+          ],
+          "assessment": "Frame at 102.43s visibly reads 处处; lexical repetition is intentional, no edit."
+        },
+        "evaluation_split": "test"
+      },
+      {
+        "i": 50,
+        "start": 104.95,
+        "end": 106.33,
+        "asr": "而且看长的都是路人",
+        "ocr": "而且看展的都是路人",
+        "selected": "而且看展的都是路人",
+        "source_ocr": "而且看展的都是路人",
+        "evidence": "original_ocr",
+        "evidence_detail": "Preserved from the original OCR observation; not independently confirmed against audio or frame.",
+        "evaluation_split": "test"
+      },
+      {
+        "i": 51,
+        "start": 106.33,
+        "end": 108.15,
+        "asr": "也没有夜内人士的指指点点",
+        "ocr": "也没有业内人士的指指点点",
+        "selected": "也没有业内人士的指指点点",
+        "source_ocr": "也没有业内人士的指指点点",
+        "evidence": "original_ocr_and_video_frame_repeat_scan",
+        "evidence_detail": "Frame at 107.24s visibly reads 指指点点; lexical repetition is intentional, no edit.",
+        "verification_status": "frame_checked_no_edit",
+        "frame_audit": {
+          "sample_positions": [
+            "middle"
+          ],
+          "sample_times_s": [
+            107.24
+          ],
+          "assessment": "Frame at 107.24s visibly reads 指指点点; lexical repetition is intentional, no edit."
+        },
+        "evaluation_split": "test"
+      },
+      {
+        "i": 52,
+        "start": 108.15,
+        "end": 109.21,
+        "asr": "那该有多开心",
+        "ocr": "那该有多开心",
+        "selected": "那该有多开心",
+        "source_ocr": "那该有多开心",
+        "evidence": "original_ocr",
+        "evidence_detail": "Preserved from the original OCR observation; not independently confirmed against audio or frame.",
+        "evaluation_split": "test"
+      },
+      {
+        "i": 53,
+        "start": 109.21,
+        "end": 111.81,
+        "asr": "于是我找到了福州烟台山的市场负责人",
+        "ocr": "福州烟台山的市场负责人",
+        "selected": "于是我找到了福州烟台山的市场负责人",
+        "source_ocr": "福州烟台山的市场负责人",
+        "evidence": "original_ocr",
+        "evidence_detail": "Preserved from the original OCR observation; not independently confirmed against audio or frame.",
+        "evaluation_split": "test"
+      },
+      {
+        "i": 54,
+        "start": 111.81,
+        "end": 112.83,
+        "asr": "经过一番沟通",
+        "ocr": "经过一番沟通",
+        "selected": "经过一番沟通",
+        "source_ocr": "经过一番沟通",
+        "evidence": "original_ocr",
+        "evidence_detail": "Preserved from the original OCR observation; not independently confirmed against audio or frame.",
+        "evaluation_split": "test"
+      },
+      {
+        "i": 55,
+        "start": 112.83,
+        "end": 113.85,
+        "asr": "获得了许可",
+        "ocr": "获得了许可",
+        "selected": "获得了许可",
+        "source_ocr": "获得了许可",
+        "evidence": "original_ocr",
+        "evidence_detail": "Preserved from the original OCR observation; not independently confirmed against audio or frame.",
+        "evaluation_split": "test"
+      },
+      {
+        "i": 56,
+        "start": 113.85,
+        "end": 116.05,
+        "asr": "我们是接受过高等艺术教育的",
+        "ocr": "我们是接受过",
+        "selected": "我们是接受过高等艺术教育的",
+        "source_ocr": "我们是接受过",
+        "evidence": "original_ocr_and_video_frame_scan",
+        "evidence_detail": "Original OCR was unchanged; the low-density caption was checked in frames at its start, midpoint, and end. Midpoint frame visibly matches the original OCR phrase. Start/end samples show neighboring caption states at cue boundaries; no added or missing text was evident in the reviewed caption.",
+        "verification_status": "frame_checked_no_edit",
+        "frame_audit": {
+          "sample_positions": [
+            "start",
+            "middle",
+            "end"
+          ],
+          "sample_times_s": [
+            113.9,
+            114.95,
+            116.0
+          ],
+          "assessment": "Midpoint frame visibly matches the original OCR phrase. Start/end samples show neighboring caption states at cue boundaries; no added or missing text was evident in the reviewed caption."
+        },
+        "evaluation_split": "test"
+      },
+      {
+        "i": 57,
+        "start": 116.05,
+        "end": 117.05,
+        "asr": "教育我们您放心",
+        "ocr": "交给我们您放心",
+        "selected": "教育我们您放心",
+        "source_ocr": "交给给我们您放心",
+        "evidence": "video_frame",
+        "evidence_detail": "Subtitle read directly from frame_row57.png (video time 116.55s); original OCR duplicated 给.",
+        "verification_status": "frame_checked_edit",
+        "frame_audit": {
+          "sample_positions": [
+            "middle"
+          ],
+          "sample_times_s": [
+            116.55
+          ],
+          "assessment": "Subtitle read directly from frame_row57.png (video time 116.55s); original OCR duplicated 给."
+        },
+        "evaluation_split": "test"
+      },
+      {
+        "i": 58,
+        "start": 117.05,
+        "end": 118.23,
+        "asr": "随地都可以啊",
+        "ocr": "随地都可以啊",
+        "selected": "随地都可以啊",
+        "source_ocr": "随地都可以啊",
+        "evidence": "original_ocr",
+        "evidence_detail": "Preserved from the original OCR observation; not independently confirmed against audio or frame.",
+        "evaluation_split": "test"
+      },
+      {
+        "i": 59,
+        "start": 118.23,
+        "end": 119.41,
+        "asr": "大的小的都可以吗",
+        "ocr": "大的小的都可以吗",
+        "selected": "大的小的都可以吗",
+        "source_ocr": "大的小的都可以吗",
+        "evidence": "original_ocr",
+        "evidence_detail": "Preserved from the original OCR observation; not independently confirmed against audio or frame.",
+        "evaluation_split": "test"
+      },
+      {
+        "i": 60,
+        "start": 119.41,
+        "end": 121.03,
+        "asr": "我反正要来一场大的",
+        "ocr": "我反正要来一串",
+        "selected": "我反正要来一场大的",
+        "source_ocr": "我反正要来一串",
+        "evidence": "original_ocr",
+        "evidence_detail": "Preserved from the original OCR observation; not independently confirmed against audio or frame.",
+        "evaluation_split": "test"
+      },
+      {
+        "i": 62,
+        "start": 130.58,
+        "end": 131.56,
+        "asr": "你也画的鱼啊",
+        "ocr": "你 也 画 的 鱼 啊",
+        "selected": "你也画的鱼啊",
+        "source_ocr": "你 也 画 的 鱼 啊",
+        "evidence": "original_ocr",
+        "evidence_detail": "Preserved from the original OCR observation; not independently confirmed against audio or frame.",
+        "evaluation_split": "test"
+      },
+      {
+        "i": 63,
+        "start": 131.56,
+        "end": 132.74,
+        "asr": "我也画的鱼",
+        "ocr": "我也画的鱼",
+        "selected": "我也画的鱼",
+        "source_ocr": "我也画的鱼",
+        "evidence": "original_ocr",
+        "evidence_detail": "Preserved from the original OCR observation; not independently confirmed against audio or frame.",
+        "evaluation_split": "test"
+      },
+      {
+        "i": 64,
+        "start": 132.74,
+        "end": 134.0,
+        "asr": "会冻还会吐泡吧",
+        "ocr": "还会吐泡泡",
+        "selected": "会冻还会吐泡吧",
+        "source_ocr": "还会吐泡泡泡",
+        "evidence": "video_frame",
+        "evidence_detail": "Subtitle read directly from frame_1335s.png (video time about 133.5s); original OCR duplicated 泡.",
+        "verification_status": "frame_checked_edit",
+        "frame_audit": {
+          "sample_positions": [
+            "middle"
+          ],
+          "sample_times_s": [
+            133.5
+          ],
+          "assessment": "Subtitle read directly from frame_1335s.png (video time about 133.5s); original OCR duplicated 泡."
+        },
+        "evaluation_split": "test"
+      },
+      {
+        "i": 65,
+        "start": 142.56,
+        "end": 143.92,
+        "asr": "你画画还用墨水啊",
+        "ocr": "你画画还用墨水啊",
+        "selected": "你画画还用墨水啊",
+        "source_ocr": "你画画还用墨水啊",
+        "evidence": "original_ocr_and_video_frame_repeat_scan",
+        "evidence_detail": "Frame at 143.24s visibly reads 画画; lexical repetition is intentional, no edit.",
+        "verification_status": "frame_checked_no_edit",
+        "frame_audit": {
+          "sample_positions": [
+            "middle"
+          ],
+          "sample_times_s": [
+            143.24
+          ],
+          "assessment": "Frame at 143.24s visibly reads 画画; lexical repetition is intentional, no edit."
+        },
+        "evaluation_split": "test"
+      },
+      {
+        "i": 66,
+        "start": 144.32,
+        "end": 145.28,
+        "asr": "我都用黄金",
+        "ocr": "我都用黄金",
+        "selected": "我都用黄金",
+        "source_ocr": "我都用黄金",
+        "evidence": "original_ocr",
+        "evidence_detail": "Preserved from the original OCR observation; not independently confirmed against audio or frame.",
+        "evaluation_split": "test"
+      },
+      {
+        "i": 67,
+        "start": 161.87,
+        "end": 164.01,
+        "asr": "我去 你钓的是我的鱼",
+        "ocr": "你钓的是我的鱼",
+        "selected": "我去 你钓的是我的鱼",
+        "source_ocr": "你钓的是我的鱼",
+        "evidence": "original_ocr",
+        "evidence_detail": "Preserved from the original OCR observation; not independently confirmed against audio or frame.",
+        "evaluation_split": "test"
+      },
+      {
+        "i": 68,
+        "start": 164.01,
+        "end": 166.89,
+        "asr": "对呀 我还遛你鸽子烤你鸭呢",
+        "ocr": "我还遛你鸽子",
+        "selected": "对呀 我还遛你鸽子烤你鸭呢",
+        "source_ocr": "我还遛你鸽子",
+        "evidence": "original_ocr_and_video_frame_scan",
+        "evidence_detail": "Original OCR was unchanged; the low-density caption was checked in frames at its start, midpoint, and end. Midpoint frame visibly matches the original OCR phrase. Start/end samples show neighboring caption states at cue boundaries; no added or missing text was evident in the reviewed caption.",
+        "verification_status": "frame_checked_no_edit",
+        "frame_audit": {
+          "sample_positions": [
+            "start",
+            "middle",
+            "end"
+          ],
+          "sample_times_s": [
+            164.06,
+            165.45,
+            166.84
+          ],
+          "assessment": "Midpoint frame visibly matches the original OCR phrase. Start/end samples show neighboring caption states at cue boundaries; no added or missing text was evident in the reviewed caption."
+        },
+        "evaluation_split": "test"
+      },
+      {
+        "i": 69,
+        "start": 181.43,
+        "end": 183.01,
+        "asr": "没想到 还是卷起来了",
+        "ocr": "还是卷起来了",
+        "selected": "没想到 还是卷起来了",
+        "source_ocr": "还是卷起来了",
+        "evidence": "original_ocr",
+        "evidence_detail": "Preserved from the original OCR observation; not independently confirmed against audio or frame.",
+        "model_support": [
+          "SenseVoice",
+          "ElevenLabs Scribe"
+        ],
+        "model_support_outputs": {
+          "SenseVoice": "没想到还是卷起来了",
+          "ElevenLabs Scribe": "没想到还是卷起来了"
+        },
+        "model_support_note": "User reports an opening sound effect overlapping the speech. These ASR transcripts are corroboration, not proof from listening; retain verification status as unverified.",
+        "verification_status": "unverified",
+        "evaluation_split": "test"
+      },
+      {
+        "i": 70,
+        "start": 185.13,
+        "end": 186.87,
+        "asr": "经过一番友好协商",
+        "ocr": "经过一番友好协商",
+        "selected": "经过一番友好协商",
+        "source_ocr": "经过一番友好协商",
+        "evidence": "original_ocr",
+        "evidence_detail": "Preserved from the original OCR observation; not independently confirmed against audio or frame.",
+        "evaluation_split": "test"
+      },
+      {
+        "i": 71,
+        "start": 186.87,
+        "end": 188.83,
+        "asr": "我们的艺术展终于要开幕了",
+        "ocr": "我们的艺术展",
+        "selected": "我们的艺术展终于要开幕了",
+        "source_ocr": "我们的艺术展",
+        "evidence": "original_ocr",
+        "evidence_detail": "Preserved from the original OCR observation; not independently confirmed against audio or frame.",
+        "evaluation_split": "test"
+      },
+      {
+        "i": 73,
+        "start": 192.61,
+        "end": 194.95,
+        "asr": "你会在山上看到这样一个雷霆大海报",
+        "ocr": "你会在山上看到",
+        "selected": "你会在山上看到这样一个雷霆大海报",
+        "source_ocr": "你会在山上看到",
+        "evidence": "original_ocr",
+        "evidence_detail": "Preserved from the original OCR observation; not independently confirmed against audio or frame.",
+        "evaluation_split": "test"
+      },
+      {
+        "i": 74,
+        "start": 194.95,
+        "end": 196.67,
+        "asr": "你见过人类做海报吗",
+        "ocr": "你见过人类做海报吗",
+        "selected": "你见过人类做海报吗",
+        "source_ocr": "你见过人类做海报吗",
+        "evidence": "original_ocr",
+        "evidence_detail": "Preserved from the original OCR observation; not independently confirmed against audio or frame.",
+        "evaluation_split": "test"
+      },
+      {
+        "i": 75,
+        "start": 197.09,
+        "end": 198.61,
+        "asr": "你们要的大嘛",
+        "ocr": "你们要的大嘛",
+        "selected": "你们要的大嘛",
+        "source_ocr": "你们要的大嘛",
+        "evidence": "original_ocr",
+        "evidence_detail": "Preserved from the original OCR observation; not independently confirmed against audio or frame.",
+        "evaluation_split": "test"
+      },
+      {
+        "i": 77,
+        "start": 204.81,
+        "end": 207.99,
+        "asr": "也可以看到草垒的鱼灯和我的鱼遥香呼应",
+        "ocr": "也可以看到曹磊的鱼灯",
+        "selected": "也可以看到草垒的鱼灯和我的鱼遥香呼应",
+        "source_ocr": "也可以看到曹磊的鱼灯",
+        "evidence": "original_ocr",
+        "evidence_detail": "Preserved from the original OCR observation; not independently confirmed against audio or frame.",
+        "evaluation_split": "test"
+      },
+      {
+        "i": 78,
+        "start": 209.19,
+        "end": 211.57,
+        "asr": "路上你会发现机遇其之作的小人",
+        "ocr": "路上你会发现",
+        "selected": "路上你会发现机遇其之作的小人",
+        "source_ocr": "路上你会发现",
+        "evidence": "original_ocr_and_video_frame_scan",
+        "evidence_detail": "Original OCR was unchanged; the low-density caption was checked in frames at its start, midpoint, and end. Midpoint frame visibly matches the original OCR phrase. Start/end samples show neighboring caption states at cue boundaries; no added or missing text was evident in the reviewed caption.",
+        "verification_status": "frame_checked_no_edit",
+        "frame_audit": {
+          "sample_positions": [
+            "start",
+            "middle",
+            "end"
+          ],
+          "sample_times_s": [
+            209.24,
+            210.38,
+            211.52
+          ],
+          "assessment": "Midpoint frame visibly matches the original OCR phrase. Start/end samples show neighboring caption states at cue boundaries; no added or missing text was evident in the reviewed caption."
+        },
+        "evaluation_split": "test"
+      },
+      {
+        "i": 79,
+        "start": 211.57,
+        "end": 213.49,
+        "asr": "藏在街头巷尾的角角落落",
+        "ocr": "藏在街头巷尾的角角落落",
+        "selected": "藏在街头巷尾的角角落落",
+        "source_ocr": "藏在街头巷尾的角角落落",
+        "evidence": "original_ocr_and_video_frame_repeat_scan",
+        "evidence_detail": "Frame at 212.53s visibly reads 角角落落; lexical repetition is intentional, no edit.",
+        "verification_status": "frame_checked_no_edit",
+        "frame_audit": {
+          "sample_positions": [
+            "middle"
+          ],
+          "sample_times_s": [
+            212.53
+          ],
+          "assessment": "Frame at 212.53s visibly reads 角角落落; lexical repetition is intentional, no edit."
+        },
+        "evaluation_split": "test"
+      },
+      {
+        "i": 80,
+        "start": 215.75,
+        "end": 216.91,
+        "asr": "当你走到山顶",
+        "ocr": "当你走到山顶",
+        "selected": "当你走到山顶",
+        "source_ocr": "当你走到山顶",
+        "evidence": "original_ocr",
+        "evidence_detail": "Preserved from the original OCR observation; not independently confirmed against audio or frame.",
+        "evaluation_split": "test"
+      },
+      {
+        "i": 81,
+        "start": 216.91,
+        "end": 219.23,
+        "asr": "你会看见高到8米的榕树女神",
+        "ocr": "你会看见高达8米的榕树女神",
+        "selected": "你会看见高达8米的榕树女神",
+        "source_ocr": "你会看见高达8米的榕树女神",
+        "evidence": "original_ocr",
+        "evidence_detail": "Preserved from the original OCR observation; not independently confirmed against audio or frame.",
+        "evaluation_split": "test"
+      },
+      {
+        "i": 82,
+        "start": 219.23,
+        "end": 221.31,
+        "asr": "所以为什么是榕树女神啊",
+        "ocr": "所以为什么是榕树女神啊",
+        "selected": "所以为什么是榕树女孩啊",
+        "source_ocr": "所以为什么是榕树女孩啊",
+        "evidence": "video_frame",
+        "evidence_detail": "Subtitle read directly from frame_row82.png (video time 220.27s); the visible character is 神, not the original OCR's 孩.",
+        "verification_status": "frame_checked_edit",
+        "frame_audit": {
+          "sample_positions": [
+            "middle"
+          ],
+          "sample_times_s": [
+            220.27
+          ],
+          "assessment": "Subtitle read directly from frame_row82.png (video time 220.27s); the visible character is 神, not the original OCR's 孩."
+        },
+        "evaluation_split": "test"
+      },
+      {
+        "i": 83,
+        "start": 221.31,
+        "end": 223.29,
+        "asr": "因为福州是荣城啊啊",
+        "ocr": "所以为什么是榕树女神啊 因为福州是“榕城”",
+        "selected": "因为福州是荣城啊啊",
+        "source_ocr": "所以为什么是榕树女神啊 因为福州是“榕城”",
+        "evidence": "original_ocr",
+        "evidence_detail": "Preserved from the original OCR observation; not independently confirmed against audio or frame.",
+        "evaluation_split": "test"
+      },
+      {
+        "i": 84,
+        "start": 223.95,
+        "end": 225.35,
+        "asr": "既然来到了榕成福州",
+        "ocr": "既然来到了榕城福州",
+        "selected": "既然来到了榕城福州",
+        "source_ocr": "既然来到了榕城福州",
+        "evidence": "original_ocr",
+        "evidence_detail": "Preserved from the original OCR observation; not independently confirmed against audio or frame.",
+        "evaluation_split": "test"
+      },
+      {
+        "i": 85,
+        "start": 225.35,
+        "end": 226.73,
+        "asr": "当然要和福字合格影",
+        "ocr": "当然要和‘福’字合个影",
+        "selected": "当然要和福字合格影",
+        "source_ocr": "当然要和‘福’字合个影",
+        "evidence": "original_ocr",
+        "evidence_detail": "Preserved from the original OCR observation; not independently confirmed against audio or frame.",
+        "evaluation_split": "test"
+      },
+      {
+        "i": 86,
+        "start": 226.73,
+        "end": 229.03,
+        "asr": "熊老师用不同的材质和字体",
+        "ocr": "熊老师用不同的材质和字体",
+        "selected": "熊老师用不同的材质和字体",
+        "source_ocr": "熊老师用不同的材质和字体",
+        "evidence": "original_ocr",
+        "evidence_detail": "Preserved from the original OCR observation; not independently confirmed against audio or frame.",
+        "evaluation_split": "test"
+      },
+      {
+        "i": 87,
+        "start": 229.03,
+        "end": 230.73,
+        "asr": "在整个街区藏了很多个福",
+        "ocr": "在整個街區藏了很多個‘福’",
+        "selected": "在整個街區藏了很多個‘福’",
+        "source_ocr": "在整個街區藏了很多個‘福’",
+        "evidence": "original_ocr",
+        "evidence_detail": "Preserved from the original OCR observation; not independently confirmed against audio or frame.",
+        "evaluation_split": "test"
+      },
+      {
+        "i": 88,
+        "start": 230.73,
+        "end": 232.03,
+        "asr": "喂 干什么呢",
+        "ocr": "哎干什么呢",
+        "selected": "喂 干什么呢",
+        "source_ocr": "哎干什么呢",
+        "evidence": "original_ocr",
+        "evidence_detail": "Preserved from the original OCR observation; not independently confirmed against audio or frame.",
+        "evaluation_split": "test"
+      },
+      {
+        "i": 89,
+        "start": 233.11,
+        "end": 234.15,
+        "asr": "想要接福吗",
+        "ocr": "想要接福吗",
+        "selected": "想要接福吗",
+        "source_ocr": "想要接福吗",
+        "evidence": "original_ocr",
+        "evidence_detail": "Preserved from the original OCR observation; not independently confirmed against audio or frame.",
+        "evaluation_split": "test"
+      },
+      {
+        "i": 90,
+        "start": 234.15,
+        "end": 235.23,
+        "asr": "来阴台山吧",
+        "ocr": "来烟台山吧",
+        "selected": "来烟台山吧",
+        "source_ocr": "来烟台山吧",
+        "evidence": "original_ocr",
+        "evidence_detail": "Preserved from the original OCR observation; not independently confirmed against audio or frame.",
+        "evaluation_split": "test"
+      }
+    ]
+  },
+  "excluded_observations": [
+    {
+      "i": 1,
+      "start": 1.08,
+      "end": 2.52,
+      "asr": "最苦恼的事就是",
+      "ocr": "...",
+      "selected": "最苦恼的事就是",
+      "source_ocr": "...",
+      "exclusion": "OCR text shorter than four normalized characters; not scoreable under the fixed retrieval protocol",
+      "evidence": "original_ocr",
+      "evidence_detail": "Excluded by the scorer's predeclared minimum-reference-length rule."
+    },
+    {
+      "i": 2,
+      "start": 2.52,
+      "end": 3.44,
+      "asr": "诶我说",
+      "ocr": "哎我说",
+      "selected": "诶我说",
+      "source_ocr": "哎我说",
+      "exclusion": "OCR text shorter than four normalized characters; not scoreable under the fixed retrieval protocol",
+      "evidence": "original_ocr",
+      "evidence_detail": "Excluded by the scorer's predeclared minimum-reference-length rule."
+    },
+    {
+      "i": 7,
+      "start": 12.32,
+      "end": 14.16,
+      "asr": "2288 哦",
+      "ocr": "",
+      "selected": "2288 哦",
+      "source_ocr": "",
+      "exclusion": "OCR text shorter than four normalized characters; not scoreable under the fixed retrieval protocol",
+      "evidence": "original_ocr",
+      "evidence_detail": "Excluded by the scorer's predeclared minimum-reference-length rule."
+    },
+    {
+      "i": 31,
+      "start": 52.85,
+      "end": 53.87,
+      "asr": "你看哈",
+      "ocr": "你看哈",
+      "selected": "你看哈",
+      "source_ocr": "你看哈",
+      "exclusion": "OCR text shorter than four normalized characters; not scoreable under the fixed retrieval protocol",
+      "evidence": "original_ocr",
+      "evidence_detail": "Excluded by the scorer's predeclared minimum-reference-length rule."
+    },
+    {
+      "i": 61,
+      "start": 128.76,
+      "end": 130.06,
+      "asr": "哎哎哎",
+      "ocr": "",
+      "selected": "哎哎哎",
+      "source_ocr": "",
+      "exclusion": "OCR text shorter than four normalized characters; not scoreable under the fixed retrieval protocol",
+      "evidence": "original_ocr",
+      "evidence_detail": "Excluded by the scorer's predeclared minimum-reference-length rule."
+    },
+    {
+      "i": 72,
+      "start": 189.59,
+      "end": 192.61,
+      "asr": "如果你在十一黄金周来到福州烟台山",
+      "ocr": "",
+      "selected": "如果你在十一黄金周来到福州烟台山",
+      "source_ocr": "",
+      "exclusion": "OCR text shorter than four normalized characters; not scoreable under the fixed retrieval protocol",
+      "evidence": "original_ocr",
+      "evidence_detail": "Excluded by the scorer's predeclared minimum-reference-length rule."
+    },
+    {
+      "i": 76,
+      "start": 198.61,
+      "end": 202.45,
+      "asr": "在这里你可以看到翔的油画和我的博画在斗法",
+      "ocr": "",
+      "selected": "在这里你可以看到翔的油画和我的博画在斗法",
+      "source_ocr": "",
+      "exclusion": "OCR text shorter than four normalized characters; not scoreable under the fixed retrieval protocol",
+      "evidence": "original_ocr",
+      "evidence_detail": "Excluded by the scorer's predeclared minimum-reference-length rule."
+    },
+    {
+      "i": 91,
+      "start": 235.23,
+      "end": 236.91,
+      "asr": "我藏了100个福在这里",
+      "ocr": "",
+      "selected": "我藏了100个福在这里",
+      "source_ocr": "",
+      "exclusion": "OCR text shorter than four normalized characters; not scoreable under the fixed retrieval protocol",
+      "evidence": "original_ocr",
+      "evidence_detail": "Excluded by the scorer's predeclared minimum-reference-length rule."
+    },
+    {
+      "i": 92,
+      "start": 238.01,
+      "end": 240.85,
+      "asr": "哦 上嘴 嘴 嘴 嘴",
+      "ocr": "",
+      "selected": "哦 上嘴 嘴 嘴 嘴",
+      "source_ocr": "",
+      "exclusion": "OCR text shorter than four normalized characters; not scoreable under the fixed retrieval protocol",
+      "evidence": "original_ocr",
+      "evidence_detail": "Excluded by the scorer's predeclared minimum-reference-length rule."
+    },
+    {
+      "i": 93,
+      "start": 243.31,
+      "end": 245.03,
+      "asr": "Chance-Elysée",
+      "ocr": "想想工作室 bilibili",
+      "selected": "Chance-Elysée",
+      "source_ocr": "想想工作室 bilibili",
+      "exclusion": "persistent channel watermark, not spoken subtitle",
+      "evidence": "video_frame",
+      "evidence_detail": "Visible as a fixed top-right overlay in frame_250s.png; excluded from speech scoring."
+    },
+    {
+      "i": 94,
+      "start": 245.03,
+      "end": 247.43,
+      "asr": "Bala Bala Bala Bala",
+      "ocr": "",
+      "selected": "Bala Bala Bala Bala",
+      "source_ocr": "",
+      "exclusion": "OCR text shorter than four normalized characters; not scoreable under the fixed retrieval protocol",
+      "evidence": "original_ocr",
+      "evidence_detail": "Excluded by the scorer's predeclared minimum-reference-length rule."
+    },
+    {
+      "i": 95,
+      "start": 247.43,
+      "end": 249.11,
+      "asr": "A soleil, sous la pluie",
+      "ocr": "",
+      "selected": "A soleil, sous la pluie",
+      "source_ocr": "",
+      "exclusion": "OCR text shorter than four normalized characters; not scoreable under the fixed retrieval protocol",
+      "evidence": "original_ocr",
+      "evidence_detail": "Excluded by the scorer's predeclared minimum-reference-length rule."
+    },
+    {
+      "i": 96,
+      "start": 249.11,
+      "end": 251.13,
+      "asr": "A midi ou à minuit",
+      "ocr": "想想工作室 bilibili",
+      "selected": "A midi ou à minuit",
+      "source_ocr": "想想工作室 bilibili",
+      "exclusion": "persistent channel watermark, not spoken subtitle",
+      "evidence": "video_frame",
+      "evidence_detail": "Visible as a fixed top-right overlay in frame_250s.png; excluded from speech scoring."
+    },
+    {
+      "i": 97,
+      "start": 251.13,
+      "end": 253.43,
+      "asr": "Il y a tout ce que vous voulez",
+      "ocr": "想想工作室 bilibili",
+      "selected": "Il y a tout ce que vous voulez",
+      "source_ocr": "想想工作室 bilibili",
+      "exclusion": "persistent channel watermark, not spoken subtitle",
+      "evidence": "video_frame",
+      "evidence_detail": "Visible as a fixed top-right overlay in frame_250s.png; excluded from speech scoring."
+    },
+    {
+      "i": 98,
+      "start": 253.43,
+      "end": 255.11,
+      "asr": "Au Champs-Elysées",
+      "ocr": "想想工作室",
+      "selected": "Au Champs-Elysées",
+      "source_ocr": "想想工作室",
+      "exclusion": "persistent channel watermark, not spoken subtitle",
+      "evidence": "video_frame",
+      "evidence_detail": "Visible as a fixed top-right overlay in frame_250s.png; excluded from speech scoring."
+    },
+    {
+      "i": 99,
+      "start": 255.11,
+      "end": 260.59,
+      "asr": "Bala Bala Bala Bala",
+      "ocr": "想法工作室",
+      "selected": "Bala Bala Bala Bala",
+      "source_ocr": "想法工作室",
+      "exclusion": "persistent channel watermark, not spoken subtitle",
+      "evidence": "video_frame",
+      "evidence_detail": "Visible as a fixed top-right overlay in frame_250s.png; excluded from speech scoring."
+    },
+    {
+      "i": 100,
+      "start": 260.59,
+      "end": 262.91,
+      "asr": "Au Champs-Elysées",
+      "ocr": "想想工作室 bilibili",
+      "selected": "Au Champs-Elysées",
+      "source_ocr": "想想工作室 bilibili",
+      "exclusion": "persistent channel watermark, not spoken subtitle",
+      "evidence": "video_frame",
+      "evidence_detail": "Visible as a fixed top-right overlay in frame_250s.png; excluded from speech scoring."
+    },
+    {
+      "i": 101,
+      "start": 262.91,
+      "end": 264.79,
+      "asr": "Bala Bala Bala",
+      "ocr": "想想工作室",
+      "selected": "Bala Bala Bala",
+      "source_ocr": "想想工作室",
+      "exclusion": "persistent channel watermark, not spoken subtitle",
+      "evidence": "video_frame",
+      "evidence_detail": "Visible as a fixed top-right overlay in frame_250s.png; excluded from speech scoring."
+    },
+    {
+      "i": 102,
+      "start": 264.79,
+      "end": 266.97,
+      "asr": "A soleil, sous la pluie",
+      "ocr": "",
+      "selected": "A soleil, sous la pluie",
+      "source_ocr": "",
+      "exclusion": "OCR text shorter than four normalized characters; not scoreable under the fixed retrieval protocol",
+      "evidence": "original_ocr",
+      "evidence_detail": "Excluded by the scorer's predeclared minimum-reference-length rule."
+    },
+    {
+      "i": 103,
+      "start": 266.97,
+      "end": 269.09,
+      "asr": "A midi ou à minuit",
+      "ocr": "想想工作室 bilibili",
+      "selected": "A midi ou à minuit",
+      "source_ocr": "想想工作室 bilibili",
+      "exclusion": "persistent channel watermark, not spoken subtitle",
+      "evidence": "video_frame",
+      "evidence_detail": "Visible as a fixed top-right overlay in frame_250s.png; excluded from speech scoring."
+    },
+    {
+      "i": 104,
+      "start": 269.09,
+      "end": 272.01,
+      "asr": "Il y a tout ce que vous voulez Au Champs-Elysées",
+      "ocr": "想想工作室 bilibili",
+      "selected": "Il y a tout ce que vous voulez Au Champs-Elysées",
+      "source_ocr": "想想工作室 bilibili",
+      "exclusion": "persistent channel watermark, not spoken subtitle",
+      "evidence": "video_frame",
+      "evidence_detail": "Visible as a fixed top-right overlay in frame_250s.png; excluded from speech scoring."
+    }
+  ]
+}

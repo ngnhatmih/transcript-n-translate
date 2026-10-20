@@ -163,6 +163,45 @@ class SqliteRepos:
             conn.execute("UPDATE sources SET audio_path=?, duration=? WHERE id=?",
                          (audio_path, duration, source_id))
 
+    def delete_source(self, source_id: int) -> None:
+        """Xoá nguồn + MỌI transcript + MỌI bản dịch của nó, trong MỘT giao dịch.
+
+        Ba vì sao của hình dạng này:
+
+        * **Cascade viết tay.** `schema.py` khai `REFERENCES sources(id)` mà không
+          có `ON DELETE CASCADE`. `_connect()` bật `PRAGMA foreign_keys=ON`, nên
+          xoá nguồn khi còn transcript ném `FOREIGN KEY constraint failed`; còn
+          nếu ai đó tắt ràng buộc thì lại để lại transcript mồ côi trỏ vào kênh
+          đã mất — hiện lên `GET /api/transcripts` như một bản ghi thật.
+        * **Thứ tự.** `translations.transcript_id` trỏ tới `transcripts`, nên bản
+          dịch đi TRƯỚC transcript của nó, transcript đi trước nguồn.
+        * **Một `_tx`.** Chết sau câu thứ hai mà câu thứ ba chưa chạy là dữ liệu
+          lệch: một nguồn đã mất bản dịch nhưng vẫn còn transcript.
+
+        `SELECT 1 FROM sources` TRƯỚC khi xoá là chỗ duy nhất phát hiện id lạ:
+        `DELETE` không khớp hàng nào vẫn "thành công", nên chỉ nhìn `rowcount` của
+        các câu sau là không đủ (chúng bằng 0 một cách hợp lệ khi nguồn không có
+        transcript nào). Đọc trong CÙNG giao dịch để hai lời gọi song song không
+        cùng thấy hàng rồi cùng xoá.
+
+        KHÔNG chạm bảng `jobs` (job là lịch sử chạy, không phải con của nguồn) và
+        KHÔNG chạm tệp trên đĩa — route xoá tệp SAU giao dịch này, xem
+        `routes_sources.delete_source`.
+        """
+        with self._connect() as conn:
+            with self._tx(conn):
+                row = conn.execute("SELECT 1 FROM sources WHERE id=?",
+                                   (source_id,)).fetchone()
+                if row is None:
+                    raise NotFound(f"source {source_id} không tồn tại")
+                conn.execute(
+                    "DELETE FROM translations WHERE transcript_id IN"
+                    " (SELECT id FROM transcripts WHERE source_id=?)",
+                    (source_id,),
+                )
+                conn.execute("DELETE FROM transcripts WHERE source_id=?", (source_id,))
+                conn.execute("DELETE FROM sources WHERE id=?", (source_id,))
+
     # ---------- transcripts ----------
     def add_transcript(self, *, source_id: int, engine: str, lang: str,
                        segments: list[Segment]) -> int:
@@ -295,6 +334,22 @@ class SqliteRepos:
         if row is None:
             raise NotFound(f"translation {translation_id} không tồn tại")
         return self._row_to_translation(row)
+
+    def delete_translation(self, translation_id: int) -> None:
+        """Xoá MỘT hàng `translations`; transcript và nguồn của nó GIỮ NGUYÊN.
+
+        MỘT câu lệnh, nên không cần `_tx`: `DELETE` tự là một đơn vị nguyên tử, và
+        `rowcount == 0` chính là phép kiểm id lạ — thay vì `SELECT` rồi `DELETE`
+        (hai lần chạm hàng, và một cửa sổ để người khác xoá chen vào).
+
+        Vì sao ném `NotFound` thay vì lặng lẽ trả về: route đã hứa **404** cho id
+        không tồn tại, nên một lần xoá "thành công" trên hàng không có là câu trả
+        lời nói dối (cùng quy ước với `update_translation_segments`).
+        """
+        with self._connect() as conn:
+            cur = conn.execute("DELETE FROM translations WHERE id=?", (translation_id,))
+            if cur.rowcount == 0:
+                raise NotFound(f"translation {translation_id} không tồn tại")
 
     def update_translation_segments(self, translation_id: int,
                                     segments: list[Segment]) -> None:

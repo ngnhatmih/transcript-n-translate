@@ -27,6 +27,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
 import type { Job, Source } from "../api/types.ts";
+import { ApiError } from "../api/client.ts";
 import { setupDom, teardownDom } from "../../test/dom.ts";
 
 /** Hai kênh THẬT đúng tám khoá của `routes_sources._source_json`. */
@@ -453,7 +454,9 @@ describe("ChannelZone: chon duoc KENH (Task W1)", () => {
    */
   const NO_CHUA_CO_LUAT: ReadonlySet<string> = new Set([
     "ch",
-    "ch__dong",
+    // `ch__dong` ĐÃ RỜI danh sách này: từ tính năng XOÁ KÊNH nó phải là flex container
+    // (`position: relative` + `display: flex` cho hai nút anh em trong một dòng), nên nó có
+    // LUẬT thật trong `app.css` — món nợ cũ của Task 4/W1 đóng luôn ở đây.
     "ch__rong",
     "ch__loi",
     "ch__cho",
@@ -482,7 +485,10 @@ describe("ChannelZone: chon duoc KENH (Task W1)", () => {
     };
 
     // (1) CO KENH: `ch`, `ch__danh-sach`, `ch__dong`, `ch__item`, `ch__dau`, `ch__ten`, `ch__meta`,
-    //     `ch__tieng`, `ch__buoc` + loi nap gon `ch__nap*`.
+    //     `ch__tieng`, `ch__buoc` + loi nap gon `ch__nap*` + NUT XOA (`ch__xoa`, `ch__xoa-loi`).
+    //     ⚠️ `onXoa` PHAI co mat o luot nay: nút xoá chỉ render khi có đường xoá (một nút bấm
+    //     được mà không gửi gì đi là thứ repo này cấm), nên thiếu nó thì hai luật `ch__xoa*`
+    //     thành LUẬT MỒ CÔI oan — đúng phép đo SAI mà khối chú thích đầu bài này cảnh báo.
     const co = render(
       taoPhanTu(ChannelZone, {
         sources: SOURCES,
@@ -492,6 +498,7 @@ describe("ChannelZone: chon duoc KENH (Task W1)", () => {
         selectedId: 1,
         onSelect: () => {},
         onNapTep: khongNap,
+        onXoa: async () => {},
       }),
     );
     gom(co.container);
@@ -571,5 +578,168 @@ describe("ChannelZone: chon duoc KENH (Task W1)", () => {
       + `kieu cho no, va no KHONG nam trong danh sach NO da khai. Luat co trong app.css: `
       + `${JSON.stringify([...trongCss].sort())}`,
     );
+  });
+
+  // -------------------------------------------------------------------------
+  // XOÁ MỘT KÊNH — HAI BƯỚC
+  //
+  // ⚠️ Vì sao KHÔNG `window.confirm`: jsdom (bộ chạy của `npm test`) và harness trình duyệt
+  // của repo không cho bấm nút "OK" của dialog native ⇒ đường ĐỒNG Ý sẽ không bao giờ được
+  // chạy trong test. Bước xác nhận vì thế nằm trong DOM, bằng chữ, và mỗi trạng thái phải
+  // NÓI RA (`xóa` → `xóa?` + `hủy` → `đang xóa…` → câu lỗi NGUYÊN VĂN), không chỉ bằng màu.
+  // -------------------------------------------------------------------------
+
+  /** Nút xoá của MỘT kênh, tra theo `data-testid` (không theo thứ tự mảng). */
+  function nutXoa(container: HTMLElement, id: number): HTMLButtonElement {
+    const nut = container.querySelector(`[data-testid="xoa-kenh-${id}"]`);
+    assert.ok(nut !== null, `khong thay nut xoa cua kenh ${id}`);
+    return nut as HTMLButtonElement;
+  }
+
+  /** Chữ trên nút, đã trim — trạng thái NGƯỜI đọc được của control này là CHỮ. */
+  function chuNut(nut: Element): string {
+    return (nut.textContent ?? "").trim();
+  }
+
+  it("XOÁ KÊNH: nút xoá là NÚT ANH EM của nút chọn (không lồng trong nút), cùng `<li class=\"ch__dong\">`", () => {
+    const { container, unmount } = render(
+      taoPhanTu(ChannelZone, {
+        sources: SOURCES,
+        jobs: JOBS,
+        loading: false,
+        error: null,
+        selectedId: null,
+        onSelect: () => {},
+        onNapTep: khongNap,
+        onXoa: async () => {},
+      }),
+    );
+
+    const muc = mucCua(container, "kenh-mot.wav");
+    const xoa = nutXoa(container, 1);
+    assert.equal(xoa.tagName, "BUTTON", "nút xoá phải là NÚT thật (Tab/Enter/Space)");
+    assert.equal(xoa.getAttribute("type"), "button", "`type=button`: không được submit form nào");
+    // ⚠️ BẤT BIẾN DOM: `<button>` không được CHỨA `<button>`. Nếu nút xoá bị lồng vào nút
+    // chọn thì trình duyệt tự đóng thẻ ngoài, DOM thật khác JSX, và cú bấm rơi vào phần tử
+    // khác — không có gì trong test này xanh giả được: hai phép khẳng định dưới đo THẲNG
+    // quan hệ cha/con.
+    assert.equal(muc.contains(xoa), false, "nút xoá KHÔNG được nằm trong nút chọn");
+    assert.equal(xoa.parentElement, muc.parentElement, "hai nút phải là ANH EM trong cùng một `<li>`");
+    assert.equal(
+      xoa.parentElement?.querySelectorAll("button").length,
+      2,
+      "mỗi dòng kênh có ĐÚNG HAI nút: chọn + xoá (một dòng, không phải hai khối)",
+    );
+    unmount();
+  });
+
+  it("XOÁ KÊNH: cú bấm ĐẦU chỉ mở bước xác nhận — 0 lời gọi API; cú bấm THỨ HAI gọi ĐÚNG MỘT lần", async () => {
+    const goi: number[] = [];
+    const { container, unmount } = render(
+      taoPhanTu(ChannelZone, {
+        sources: SOURCES,
+        jobs: JOBS,
+        loading: false,
+        error: null,
+        selectedId: null,
+        onSelect: () => {},
+        onNapTep: khongNap,
+        onXoa: async (id: number) => {
+          goi.push(id);
+        },
+      }),
+    );
+
+    const nut = nutXoa(container, 1);
+    assert.equal(chuNut(nut), "xóa", "trạng thái đầu nói ra bằng CHỮ `xóa`");
+
+    fireEvent.click(nut);
+
+    assert.equal(chuNut(nut), "xóa?", "cú bấm đầu phải hỏi lại bằng CHỮ `xóa?`");
+    assert.ok(
+      container.querySelector('[data-testid="xoa-kenh-1-huy"]') !== null,
+      "bước xác nhận phải có ĐƯỜNG HUỶ (một điều khiển thật, không phải 'bấm ra ngoài')",
+    );
+    assert.deepEqual(goi, [], "cú bấm ĐẦU KHÔNG được gọi API");
+
+    fireEvent.click(nut);
+    // Chờ ĐÚNG tín hiệu "lời gọi đã xong" (nút rời `đang xóa…`), không phải chỉ "bộ đếm đã
+    // tăng": `goi` tăng ngay trong handler, còn nút chỉ đổi nhãn sau khi promise settle.
+    await waitFor(() => {
+      assert.deepEqual(goi, [1], "cú bấm thứ hai phải gọi ĐÚNG MỘT lần với đúng id 1");
+      assert.equal(chuNut(nut), "xóa", "xong thì nút trở về trạng thái thường");
+    });
+
+    // ĐƯỜNG HUỶ: mở bước xác nhận rồi bấm `hủy` ⇒ KHÔNG có lời gọi nào.
+    goi.length = 0;
+    fireEvent.click(nut);
+    fireEvent.click(container.querySelector('[data-testid="xoa-kenh-1-huy"]') as Element);
+    assert.equal(chuNut(nut), "xóa", "huỷ phải đóng bước xác nhận");
+    assert.equal(
+      container.querySelector('[data-testid="xoa-kenh-1-huy"]'),
+      null,
+      "nút huỷ phải biến mất",
+    );
+    assert.deepEqual(goi, [], "đường HUỶ không được gọi API");
+
+    assert.deepEqual(tiengOn, [], "luồng xoá không được sinh tiếng ồn console");
+    unmount();
+  });
+
+  it("XOÁ KÊNH: `đang xóa…` khi lời gọi đang bay (nút khoá), và lỗi là NGUYÊN VĂN `ApiError.message`", async () => {
+    // (a) ĐANG BAY — lời gọi không bao giờ xong, nên cửa sổ đo là xác định.
+    const treo = render(
+      taoPhanTu(ChannelZone, {
+        sources: SOURCES,
+        jobs: JOBS,
+        loading: false,
+        error: null,
+        selectedId: null,
+        onSelect: () => {},
+        onNapTep: khongNap,
+        onXoa: () => new Promise<void>(() => {}),
+      }),
+    );
+    const nut = nutXoa(treo.container, 1);
+    fireEvent.click(nut);
+    fireEvent.click(nut);
+    await waitFor(() => {
+      assert.equal(chuNut(nut), "đang xóa…",
+        "trạng thái ĐANG BAY phải nói ra bằng chữ, không chỉ bằng việc nút mờ đi");
+    });
+    assert.equal(nut.disabled, true, "nút bị khoá trong lúc bay (cú bấm thứ ba không thành lời gọi thứ hai)");
+    treo.unmount();
+
+    // (b) LỖI — câu 409 của backend (`delete_guard.mot_loi_409`) được hiện NGUYÊN VĂN.
+    const cau = "409: không xoá được nguồn 1: job #12 đang xếp hàng hoặc đang chạy trên nó — huỷ job đó trước rồi xoá";
+    const loi = render(
+      taoPhanTu(ChannelZone, {
+        sources: SOURCES,
+        jobs: JOBS,
+        loading: false,
+        error: null,
+        selectedId: null,
+        onSelect: () => {},
+        onNapTep: khongNap,
+        onXoa: async () => {
+          throw new ApiError(409, cau.slice("409: ".length));
+        },
+      }),
+    );
+    const nut2 = nutXoa(loi.container, 1);
+    fireEvent.click(nut2);
+    fireEvent.click(nut2);
+    await waitFor(() => {
+      assert.equal(
+        (loi.container.querySelector('[data-testid="xoa-kenh-1-loi"]')?.textContent ?? "").trim(),
+        cau,
+        "lỗi phải hiện NGUYÊN VĂN `ApiError.message` (mã HTTP + câu tiếng Việt của backend)",
+      );
+    });
+    assert.equal(chuNut(nut2), "xóa", "sau lỗi nút về trạng thái thường để bấm lại");
+    // Kênh KHÔNG được biến mất: phép xoá đã hỏng, và giao diện không được tự cắt hàng.
+    assert.ok(loi.container.querySelector('[data-testid="xoa-kenh-1"]') !== null, "kênh phải còn sau lỗi");
+    assert.deepEqual(tiengOn, [], "luồng xoá lỗi không được sinh tiếng ồn console");
+    loi.unmount();
   });
 });

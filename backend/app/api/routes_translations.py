@@ -33,10 +33,11 @@ from __future__ import annotations
 import dataclasses
 import pathlib
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, Field
 
+from app.api.delete_guard import active_job_ids, mot_loi_409
 from app.api.deps import get_chimera_plan, get_dirs, get_repos, get_specs
 from app.api.routes_jobs import _job_json
 from app.domain.chimera import Baseline, cost_json
@@ -45,7 +46,8 @@ from app.domain.models import Job
 from app.domain.mt_qa import QaLimits, cps_row
 from app.domain.paths import PathOutsideRoot, resolve_within
 from app.domain.staleness import is_stale, translation_summary_json
-from app.pipeline.export import FORMATS, MEDIA_TYPES, artifact_name
+from app.pipeline.export import (FORMATS, MEDIA_TYPES, artifact_name,
+                                 export_meta, render)
 from app.registry import by_id
 
 router = APIRouter(prefix="/api/translations", tags=["translations"])
@@ -360,8 +362,40 @@ def patch_translation(translation_id: int, body: PatchIn,
     return _summary(fresh, stale=is_stale(current, fresh.transcript_version))
 
 
+@router.delete("/{translation_id}", status_code=204)
+def delete_translation(translation_id: int, repos=Depends(get_repos)):
+    """Xoá MỘT bản dịch. Transcript và nguồn của nó KHÔNG bị chạm.
+
+    Ba quyết định:
+
+    * **404 khi id lạ**, lấy từ chính `repos.delete_translation` (nó ném
+      `LookupError` khi `rowcount == 0`) — không đọc hàng trước rồi mới xoá, vì
+      một `DELETE` đã là phép kiểm tồn tại nguyên tử. Câu của adapter đã nêu id
+      (`"translation 12 không tồn tại"`), đúng thứ client cần.
+    * **409 khi còn job `translate` sống** trỏ vào bản dịch này: `TranslateHandler`
+      ghi checkpoint vào hàng `translations` sau MỖI lô, nên xoá dưới chân nó thì
+      lô kế tiếp ném `NotFound` và job chết vì một lý do không liên quan tới dữ
+      liệu. Xem `app/api/delete_guard.py`. Phép kiểm chạy TRƯỚC khi xoá.
+    * **KHÔNG đụng bảng `jobs` và KHÔNG đụng đĩa.** Bản dịch không có tệp riêng;
+      thứ duy nhất trên đĩa gắn với nó là tệp xuất (`<out>/transcript-N.vi.srt`
+      của `pipeline/export.py`), và đường xuất KHÔNG bị sửa bởi tính năng này —
+      nó là đầu ra của một lần xuất đã xong, không phải trạng thái của hàng.
+    """
+    ids = active_job_ids(repos, key="translation_id", value=translation_id)
+    if ids:
+        raise HTTPException(
+            409,
+            mot_loi_409(doi_tuong=f"bản dịch {translation_id}", ids=ids,
+                        cach_sua="huỷ job đó trước rồi xoá"),
+        )
+    try:
+        repos.delete_translation(translation_id)
+    except LookupError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    return Response(status_code=204)
+
+
 #: Router RIÊNG cho chế độ CHIMERA (§8.7.5, spec UI §4.5).
-#:
 #: Không nằm trên `router` ở trên (router đó mang `prefix="/api/translations"`), và
 #: cũng không nằm trong `routes_translations.export_router`: nó là một TÀI NGUYÊN
 #: khác — "chế độ Chimera tốn bao nhiêu" không thuộc về một bản dịch nào cả, nên
@@ -438,8 +472,15 @@ def export_translation(translation_id: int, format: str = "srt", bilingual: int 
                  f"transcript {transcript.id} có {len(transcript.segments)} đoạn: "
                  f"dịch lại trước khi xuất")
 
-    body = FORMATS[fmt](transcript.segments, translations=translations,
-                        bilingual=bool(bilingual))
+    body = render(fmt, transcript.segments, translations=translations,
+                  bilingual=bool(bilingual),
+                  meta=export_meta(
+                      transcript=transcript, translation=translation,
+                      # `stale` TÍNH Ở ĐÂY, cùng nguồn với `list_translations`:
+                      # bản dịch dịch từ một version cũ của transcript là dữ liệu
+                      # người dùng PHẢI thấy trong tệp xuất, không chỉ trên màn hình.
+                      stale=is_stale(transcript.version,
+                                     translation.transcript_version)))
 
     # CÙNG `artifact_name()` với handler của đường cũ. `translated=True` vì route
     # này LUÔN xuất theo một hàng `translations` — quy tắc `.vi` nằm ở

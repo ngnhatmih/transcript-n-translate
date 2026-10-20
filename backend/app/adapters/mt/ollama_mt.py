@@ -171,7 +171,14 @@ class OllamaMtEngine:
                                  timeout=_TIMEOUT_S)
         # Lỗi HTTP và lỗi vận chuyển đều PHẢI nổi lên: Task 11 phân biệt chúng để
         # quyết định thử lại hay lùi về từng segment. Nuốt ở đây là mất khả năng đó.
-        resp.raise_for_status()
+        try:
+            resp.raise_for_status()
+        except httpx.HTTPStatusError as exc:
+            body = (resp.text or "")[:500]
+            if "repeat limit" in body:
+                raise ValueError(f"model lặp token, Ollama ngắt giữa chừng: {body}") from exc
+            raise httpx.HTTPStatusError(f"{exc} | ollama: {body}",
+                                        request=exc.request, response=exc.response) from exc
         data = resp.json()
         # Model đã thực sự nạp NGAY khi Ollama trả lời — kể cả khi ta parse hỏng.
         self._loaded = True
@@ -203,11 +210,19 @@ class OllamaMtEngine:
         # glossary", prompt thì có. `registry.json` đã khai `hy-mt-1.5-7b` với
         # `runtime: "ollama"` + `glossary_prompt: false`, nên đây là tổ hợp Task 12
         # dựng thật, không phải nhánh chết.
+        # `engine_id` chỉ để MỞ HATCH biến thể prompt của lượt đo echo
+        # (`prompts.experiment_prompt_style`): id nào không phải engine được đo
+        # thì `experiment_prompt_style` trả mặc định TRƯỚC khi đọc biến môi
+        # trường, nên `qwen2.5-3b`/`qwen2.5-7b` nhận đúng chuỗi `p2` từng byte dù
+        # biến môi trường có đặt gì. Không truyền id này là để prompt của một
+        # engine không nói được nó là engine nào — và hatch thì phải engine-scoped.
         content = self.chat(
             system_prompt(glossary if self._supports_glossary else [],
-                          target_lang=opts.target_lang),
+                          target_lang=opts.target_lang,
+                          engine_id=self._engine_id),
             user_prompt(batch, source_lang=opts.source_lang,
-                        target_lang=opts.target_lang),
+                        target_lang=opts.target_lang,
+                        engine_id=self._engine_id),
             temperature=opts.temperature)
         return parse_batch_response(content, batch)
 

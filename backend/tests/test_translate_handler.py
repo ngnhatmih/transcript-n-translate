@@ -23,6 +23,7 @@ import pytest
 
 from app.adapters.clock_system import SystemClock
 from app.adapters.persist.sqlite_repos import NotFound, SqliteRepos
+from app.domain.alignment import AlignmentProblem
 from app.domain.models import CallStats, Job, Segment
 from app.domain.mt import MtOpts
 from app.domain.mt_qa import QaLimits
@@ -1142,3 +1143,201 @@ def test_a_cancelled_run_leaves_running_behind_it(repos, transcript):
 
     assert spy.writes == ["running", "cancelled"], spy.writes
     assert repos.get_translation(tr_id).status == "cancelled"
+
+
+# ---------------------------------------------------------------------------
+# LÔ QUÁ TO + `AlignmentProblem` DO ADAPTER NÉM RA
+#
+# Hai lỗi THẬT, đo được trên bản ghi thật (`data/app.db`, transcript #1, 464 đoạn,
+# engine `qwen2.5-7b`):
+#
+# * lô đầu là 135 mục / 1199 ký tự (`batch_segments`, ngân sách 1200 ký tự — đoạn
+#   phụ đề thật rất ngắn, trung bình 8,6 ký tự), và một lời gọi 135 mục bị model
+#   BỎ MỤC: đo N vào/N ra = 1→1, 4→4, 8→8, 16→16, 32→32, 64→64, **135→100/101**
+#   với `done_reason="stop"` (KHÔNG phải cắt vì hết context);
+# * adapter ném `AlignmentProblem` TỪ `parse_batch_response`, và bản cũ bắt nó
+#   bằng `except Exception` (nó là lớp con) rồi coi là lỗi VẬN CHUYỂN ⇒ chính sách
+#   ba bước không chạy. Bằng chứng từ job thật: log chỉ có một dòng `LỖI: engine
+#   trả 101 mục, cần 135`, KHÔNG có dòng `lệch alignment (lần 1)` và KHÔNG có
+#   dòng `hạ cấp`, và `llm_calls` có ĐÚNG MỘT hàng cho mỗi lần chạy ⇒ 0/464 đoạn.
+# ---------------------------------------------------------------------------
+
+#: Cỡ lô lớn nhất còn đo được là ĐỦ với `qwen2.5-7b` (xem `mt.DEFAULT_MAX_ITEMS`).
+_MEASURED_GOOD_ITEMS = 64
+
+#: Cỡ lô đã ĐO được là GÃY: model trả 100/101 mục rồi `done`.
+_MEASURED_BROKEN_ITEMS = 135
+
+
+class _RaisesAlignmentAbove(FakeMtEngine):
+    """Adapter THẬT: tự ném `AlignmentProblem` khi lô vượt `limit` mục.
+
+    `OllamaMtEngine.translate` → `parse_batch_response` ném đúng lớp lỗi này (đo
+    được: `engine trả 100 mục, cần 135`), nên fake phải ném TỪ `translate` — một
+    fake trả về danh sách ngắn chỉ chạm `check_alignment`, tức chạm một đường KHÁC
+    với đường mà sản phẩm đi (xem ghi chú cùng loại ở `test_chimera.py`).
+    """
+
+    def __init__(self, limit: int, **kw):
+        super().__init__(**kw)
+        self.limit = limit
+        self.raised = 0
+
+    def translate(self, batch, glossary, opts):
+        if len(batch) > self.limit:
+            # Đường NÉM phải tự ghi `attempts`: `super().translate` là chỗ ghi bình
+            # thường, và nó không chạy khi ta ném (ghi ở cả hai chỗ thì mỗi lần gọi
+            # thành hai dòng, và phép đếm "hai lần thử mỗi lô" sẽ sai gấp đôi).
+            self.attempts.append([s.i for s in batch])
+            self.raised += 1
+            ids = [s.i for s in batch]
+            raise AlignmentProblem(
+                ids, ids[: self.limit],
+                f"engine trả {self.limit} mục, cần {len(batch)}")
+        return super().translate(batch, glossary, opts)
+
+
+def _big_transcript(repos, n=135):
+    """Transcript `n` đoạn NGẮN — đúng hình dạng bản ghi thật.
+
+    Tổng ký tự nhỏ hơn ngân sách 1200 nên KHÔNG có trần số mục thì cả bản ghi nằm
+    trong MỘT lô — đó chính là cách lô 135 mục sinh ra trong sản phẩm.
+    """
+    sid = repos.add_source(kind="file", origin="big.mp4", media_path="/m/big.mp4")
+    segs = [seg(i, f"câu {i}") for i in range(1, n + 1)]
+    tid = repos.add_transcript(source_id=sid, engine="fw", lang="zh", segments=segs)
+    return tid, segs
+
+
+def test_a_big_transcript_is_split_by_the_item_budget(repos):
+    """135 đoạn ngắn ⇒ NĂM lô ≤ `DEFAULT_MAX_ITEMS`, không phải một lô 135 mục."""
+    from app.domain.mt import DEFAULT_MAX_ITEMS
+
+    tid, _ = _big_transcript(repos)
+    tr_id = _translation(repos, tid)
+    engine = _RecordingInputs()
+    _call(_handler(repos, engine), repos, tr_id, tid)
+
+    sizes = [len(b) for b in engine.batches_seen]
+    assert max(sizes) == DEFAULT_MAX_ITEMS, (
+        f"không lô nào được vượt trần {DEFAULT_MAX_ITEMS} mục: {sizes}"
+    )
+    assert sizes == [DEFAULT_MAX_ITEMS] * 4 + [135 - 4 * DEFAULT_MAX_ITEMS], sizes
+    got = repos.get_translation(tr_id)
+    assert [s.i for s in got.segments] == list(range(1, 136)), "đủ 135 mục, đúng thứ tự"
+    assert got.status == "done"
+
+
+def test_the_measured_broken_batch_size_now_produces_every_item(repos):
+    """Ca THẬT: engine chỉ trả đủ khi lô ≤ 64 mục ⇒ vẫn ra ĐỦ 135 mục.
+
+    Trước bản vá, cả bản ghi là MỘT lô 135 mục > 64 nên adapter ném
+    `AlignmentProblem` và (vì lỗi thứ hai) cả job `failed` ở 0 mục.
+    """
+    tid, _ = _big_transcript(repos)
+    tr_id = _translation(repos, tid)
+    engine = _RaisesAlignmentAbove(_MEASURED_GOOD_ITEMS)
+    _call(_handler(repos, engine), repos, tr_id, tid)
+
+    got = repos.get_translation(tr_id)
+    assert [s.i for s in got.segments] == list(range(1, 136))
+    assert got.status == "done"
+    assert engine.raised == 0, (
+        "trần số mục phải chặn lô 135 mục TRƯỚC khi engine kịp bỏ mục: "
+        f"{engine.attempts}"
+    )
+    assert len(engine.attempts) == 5, engine.attempts
+
+
+def test_an_alignment_problem_from_the_adapter_is_retried_then_falls_back(repos):
+    """`AlignmentProblem` NÉM TỪ `translate` phải đi đúng chính sách ba bước.
+
+    Engine ở đây lệch ở MỌI lô nhiều hơn một mục (đúng hình dạng "adapter tự
+    parse rồi thấy thiếu"), nên đường đi phải là: thử cả lô (hỏng) → thử lại cả lô
+    (hỏng) → hạ cấp từng segment → ĐỦ 135 mục, `done`.
+
+    Mutant: bỏ nhánh `except AlignmentProblem` (để nó rơi vào `except Exception`)
+    ⇒ `AlignmentProblem` nổi lên khỏi `translate`, hàng dịch thành `failed` với
+    0 mục — ĐỎ đúng tên bài này.
+    """
+    tid, _ = _big_transcript(repos)
+    tr_id = _translation(repos, tid)
+    engine = _RaisesAlignmentAbove(1)
+    _call(_handler(repos, engine), repos, tr_id, tid)
+
+    got = repos.get_translation(tr_id)
+    assert [s.i for s in got.segments] == list(range(1, 136))
+    assert got.status == "done"
+    assert engine.raised == 2 * 5, (
+        "mỗi lô lớn phải được thử ĐÚNG hai lần trước khi hạ cấp: "
+        f"raised={engine.raised}, attempts={len(engine.attempts)}"
+    )
+    singles = [b for b in engine.attempts if len(b) == 1]
+    assert len(singles) == 135, f"hạ cấp phải chạm từng segment một: {len(singles)}"
+
+
+class _RaisesMalformedAbove(FakeMtEngine):
+    """Adapter trả phản hồi DỊ DẠNG khi lô vượt `limit` mục.
+
+    `parse_batch_response` ném `ValueError` cho sáu hình dạng (khoá lạ, thiếu khoá,
+    giá trị không phải chuỗi...), và ĐO ĐƯỢC trên lần chạy thật với `qwen2.5-7b`:
+    model trả `{"i:": 277, "text": "…"}` — khoá `i:` thay vì `i` — làm job chết ở
+    270/464 mục. Đó là hỏng CỦA MỘT LÔ, nên nó phải đi cùng đường với lệch mục.
+    """
+
+    def __init__(self, limit: int, **kw):
+        super().__init__(**kw)
+        self.limit = limit
+        self.raised = 0
+
+    def translate(self, batch, glossary, opts):
+        if len(batch) > self.limit:
+            self.attempts.append([s.i for s in batch])
+            self.raised += 1
+            raise ValueError(
+                "mục thiếu 'i' hoặc 'text' không phải chuỗi: "
+                f"{{'i:': {batch[0].i}, 'text': '...'}}")
+        return super().translate(batch, glossary, opts)
+
+
+def test_a_malformed_batch_response_is_retried_then_falls_back(repos):
+    """`ValueError` CỦA MỘT LÔ (phản hồi dị dạng) không được giết cả bản dịch.
+
+    Đo được: lần chạy thật `qwen2.5-7b` trên transcript #1 (464 đoạn) chết ở
+    270/464 vì MỘT mục có khoá `i:` — `ValueError` nổi lên khỏi `translate` và
+    không lô nào khác được thử. Sau bản vá: thử lại cả lô, rồi hạ cấp từng đoạn ⇒
+    ĐỦ 135 mục.
+
+    Mutant: bỏ `ValueError` khỏi nhánh `except` ⇒ `ValueError` nổi lên, hàng dịch
+    `failed` ở 0 mục — ĐỎ đúng tên bài này.
+    """
+    tid, _ = _big_transcript(repos)
+    tr_id = _translation(repos, tid)
+    engine = _RaisesMalformedAbove(1)
+    _call(_handler(repos, engine), repos, tr_id, tid)
+
+    got = repos.get_translation(tr_id)
+    assert [s.i for s in got.segments] == list(range(1, 136))
+    assert got.status == "done"
+    assert engine.raised == 2 * 5, (
+        f"mỗi lô phải được thử ĐÚNG hai lần trước khi hạ cấp: raised={engine.raised}"
+    )
+
+
+def test_an_engine_that_answers_every_item_is_still_called_once_per_batch(repos):
+    """ĐỐI CHỨNG ÂM: engine trả ĐỦ ⇒ không retry, không hạ cấp, không đổi gì khác.
+
+    Chỉ có số lô là khác trước bản vá (5 lô thay vì 1), và đó là điều đã đo được
+    là CẦN. Một bản vá "cứ hạ cấp cho chắc" sẽ đỏ ở đây: 135 lô một mục.
+    """
+    tid, _ = _big_transcript(repos)
+    tr_id = _translation(repos, tid)
+    engine = FakeMtEngine()
+    _call(_handler(repos, engine), repos, tr_id, tid)
+
+    assert engine.attempts == engine.calls, "không lần gọi nào được thử lại"
+    assert len(engine.attempts) == 5, engine.attempts
+    assert all(len(b) > 1 for b in engine.attempts), (
+        f"không được hạ cấp khi engine trả đủ: {engine.attempts}"
+    )
+    assert [s.i for s in repos.get_translation(tr_id).segments] == list(range(1, 136))

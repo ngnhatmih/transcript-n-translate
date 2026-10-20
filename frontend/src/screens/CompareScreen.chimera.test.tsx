@@ -316,6 +316,12 @@ describe("§4.5 CHE DO CHIMERA", () => {
     assert.ok(dai.includes("5 lượt gọi model cho mỗi lô"), dai);
     assert.ok(dai.includes("~5×"), `he so phai la 5, nhan duoc: ${dai}`);
     assert.ok(/4\s*\/\s*6 ứng viên/.test(dai), `phai noi 4/6, nhan duoc: ${dai}`);
+    // 🔴 MOC THOI GIAN: con so nay la KE HOACH NGAY BAY GIO, con o ung vien `c5`/`c6`
+    // ben duoi in `skipped` cua LUOT CHAY DO. Do tren DB that: dai ghi "6/6 ung vien
+    // chay duoc" trong khi o c6 cua ban dang xem ghi "engine chua duoc pull" — hai cau
+    // dung o hai thoi diem khac nhau ma khong co gi noi ra. Tu nay dai phai noi ro moc.
+    assert.ok(dai.includes("NGAY BÂY GIỜ"),
+      `dai phai noi ro day la trang thai NGAY BAY GIO, nhan duoc: ${dai}`);
     const thieu = chu(container, '[data-testid="chimera-thieu"]');
     assert.ok(thieu.includes("qwen2.5-7b") && thieu.includes("hy-mt-1.5-7b"),
       `phai neu TEN engine thieu, nhan duoc: ${thieu}`);

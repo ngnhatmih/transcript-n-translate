@@ -55,6 +55,41 @@ describe("reducer trang thai client", () => {
     assert.equal(s.currentSegment, 9);
   });
 
+  it("XOA KENH DANG CHON: `clearChannel` dua channelId ve null va don CUNG bo vi tri nhu `selectChannel`", () => {
+    // ⚠️ Vì sao là một ACTION riêng chứ không phải `selectChannel(kenhKhac)`: xoá kênh đang
+    // mở thì không có "kênh khác" nào để trỏ vào (có thể là kênh cuối cùng). Để `channelId`
+    // ở lại một id ĐÃ CHẾT là trạng thái mà `App` phải tránh: `chonTranscript` trả `null` nên
+    // màn rơi về trạng thái rỗng, nhưng id trần đó vẫn sống trong state và có thể được cấp
+    // lại cho một kênh khác ở lần đọc sau — khi đó app tự mở nhầm kênh mà không ai bấm gì.
+    const truoc: UiState = {
+      ...initialState,
+      channelId: 1,
+      currentSegment: 9,
+      playing: true,
+      editingSegment: 9,
+      pinnedB: 4,
+      // `error` là băng-rôn DÙNG CHUNG, không thuộc kênh nào ⇒ KHÔNG được xoá (cùng luật với
+      // `selectChannel`, xem comment ở đó).
+      error: "khong doc duoc kenh",
+    };
+    const s = reduce(truoc, { type: "clearChannel" });
+    assert.equal(s.channelId, null, "bỏ chọn ⇒ `null`, đúng trạng thái `initialState`");
+    assert.equal(s.currentSegment, null);
+    assert.equal(s.playing, false);
+    assert.equal(s.editingSegment, null);
+    assert.equal(s.pinnedB, null);
+    assert.equal(s.error, "khong doc duoc kenh", "`error` không thuộc kênh nào");
+    assert.notEqual(s, truoc, "phải trả về object MỚI (React so sánh tham chiếu)");
+  });
+
+  it("`clearChannel` trên state CHUA chon kenh la no-op VE Y NGHIA (van la null, khong nem)", () => {
+    // Idempotent: một lần bấm xoá thứ hai (hoặc một kênh không được chọn) không được làm
+    // reducer ném — nó chỉ giữ nguyên câu trả lời "chưa chọn kênh nào".
+    const s = reduce({ ...initialState }, { type: "clearChannel" });
+    assert.equal(s.channelId, null);
+    assert.equal(s.currentSegment, null);
+  });
+
   it("khong cho ghim ban B trung ban A", () => {
     const s = reduce(
       { ...initialState, pinnedB: null },

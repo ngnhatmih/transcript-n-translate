@@ -42,6 +42,20 @@ export const initialState: UiState = {
 
 export type Action =
   | { type: "selectChannel"; id: number }
+  /**
+   * BỎ CHỌN kênh — dùng khi kênh đang chọn vừa bị XOÁ.
+   *
+   * ⚠️ Vì sao cần một action riêng thay vì `selectChannel` một kênh khác: xoá kênh
+   * đang mở thì KHÔNG có "kênh khác" nào để trỏ vào (có thể là kênh cuối cùng), và
+   * để `channelId` trỏ vào một id đã chết là đúng trạng thái mà `App` phải tránh:
+   * `chonTranscript(transcripts, channelId)` trả `null` nên mọi màn rơi về trạng
+   * thái rỗng — nhưng danh sách `sources` vẫn còn được đọc lại, và nếu id đó được
+   * cấp lại cho một kênh MỚI thì app sẽ mở nhầm kênh mà không ai bấm gì.
+   *
+   * `null` chính là trạng thái khởi tạo (`initialState.channelId`), tức "chưa chọn
+   * kênh nào" — bỏ chọn không sinh ra một trạng thái thứ hai để mọi màn phải biết.
+   */
+  | { type: "clearChannel" }
   | { type: "setMode"; mode: Mode }
   | { type: "setPlaying"; playing: boolean }
   | { type: "setCurrentSegment"; i: number | null }
@@ -64,6 +78,21 @@ export function reduce(state: UiState, action: Action): UiState {
       return {
         ...state,
         channelId: action.id,
+        currentSegment: null,
+        playing: false,
+        editingSegment: null,
+        pinnedB: null,
+      };
+
+    case "clearChannel":
+      // BỎ CHỌN sau khi kênh đang mở bị XOÁ. Cùng bộ vị trí mà `selectChannel` dọn
+      // (chúng đều thuộc kênh vừa biến mất), chỉ khác `channelId` là `null`.
+      // Không dọn thì `currentSegment`/`editingSegment`/`pinnedB` là những chỉ số của
+      // một danh sách đoạn không còn tồn tại — đúng lớp lỗi "hiện dữ liệu của kênh A
+      // trong khung kênh B" mà tệp này tách khỏi React để chặn.
+      return {
+        ...state,
+        channelId: null,
         currentSegment: null,
         playing: false,
         editingSegment: null,

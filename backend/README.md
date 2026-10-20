@@ -63,34 +63,220 @@ GPU. Nó tự ép UTF-8 cho stdout (console Windows mặc định cp1252, còn s
 tiếng Trung/Việt) và tự đặt cache model trước khi nạp `faster_whisper`.
 
 Con số nền của lần chạy mặc định, đo sau khi xoá `__pycache__` (lệnh ở mục
-"Kiểm thử" trên, chạy từ trong `backend\`). Thứ có nghĩa là **1034 / 15**, không
+"Kiểm thử" trên, chạy từ trong `backend\`). Thứ có nghĩa là **1192 / 15**, không
 phải số giây — thời gian trôi giữa các lần chạy (đã thấy 24,00–30,94 s) còn con
 số bài thì không:
 
 ```
-1034 passed, 15 deselected, 1 warning
+1192 passed, 15 deselected, 1 warning
 ```
 
 Hai con số đó là SỐ BÀI ĐƯỢC CHỌN, và chúng khớp với số mà `--collect-only` báo
-(`tests/test_backend_readme.py::test_readme_baseline_matches_the_tests_actually_
+(`1192/1207`, 15 bài `live` bị bỏ;
+`tests/test_backend_readme.py::test_readme_baseline_matches_the_tests_actually_
 collected` đối chiếu mỗi lần chạy).
 
-Máy này **CÓ** `ffmpeg 8.1.1` + `ffprobe` trên PATH (đã đo), nên `1034/15` ở trên
+Máy này **CÓ** `ffmpeg 8.1.1` + `ffprobe` trên PATH (đã đo), nên `1192/15` ở trên
 là số THẬT của nó. Máy **không có** `ffmpeg`/`ffprobe` cho một kết quả KHÁC: cả
 `tests/test_ingest.py` bị `skipif` ở cấp module — **9** bài cùng skip một lượt —
-nên dòng tổng kết của máy đó là **`978 passed, 9 skipped, 15 deselected`**. Đó là
+nên dòng tổng kết của máy đó là **`1183 passed, 9 skipped, 15 deselected`** (=
+`1192 − 9`; con số này TỪNG ghi `978`, tức một baseline rất cũ, và nó lệch phép
+trừ của chính khối nền ngay trên nó). Đó là
 con số của máy thiếu ffmpeg, **không phải** con số máy này từng in ra; đừng chép
 nó vào khối nền ở trên, và đừng "sửa" số nền xuống chỉ vì thiếu ffmpeg.
 
 ⚠️ Con số `856` ở đây TỪNG không khớp phép trừ của chính nó: `865 − 9 = 856`, tức
-nó là số của lượt TRƯỚC `V1` (+3 bài) còn sót lại. Nay nó bằng đúng `920 − 9`.
+nó là số của lượt TRƯỚC `V1` (+3 bài) còn sót lại. Phép trừ của khối nền hiện tại
+là `1192 − 9` = `1183`.
 
 (Con số này từng bị ghi là `798`: bài `test_a_failed_translation_leaves_the_
 transcript_reviewed` được thêm ở `a428334` — **cùng commit đã sửa tệp này** — mà
 số nền không được bump. Nó tồn tại để phát hiện TRÔI, nên một số sai làm mọi lần
 chạy báo dương tính giả.
 
-Lần bump gần nhất, `819/13` → `821/13`, là do đợt dọn nợ thêm
+Lần bump gần nhất, `1194/15` → `1192/15` (**−2 bài**), do **xoá seam "sưởi trước
+lô đầu"** khỏi `app/pipeline/translate.py`: **−4** bài ghim seam đó bị gỡ cùng nó,
+**ba** bài ghim `scripts/smoke_echo_guard.py::echo_by_batch` (kế toán theo lô: echo
+của lô nào nằm ở lô đó, một lời gọi một mục đứng TRƯỚC lô đầu không bị tính vào lô
+1, và nhãn `phase` tách được lô 4 mục của cấu hình D khỏi một lô 4 mục bình
+thường) được GIỮ LẠI — chúng kiểm phép KẾ TOÁN, không kiểm seam, và bảng theo lô
+là bằng chứng của cả lượt đo — cộng **+2** bài mới ghim `mt_qa.is_echo` (một con
+số giữ nguyên như `2288` -> `2288` KHÔNG phải echo; nguồn Hán chép nguyên văn vẫn
+là echo). Seam bị xoá vì nó là ĐƯỜNG CHẾT: cờ capability của nó **chưa từng** được
+khai trong `registry.json`, nên không cấu hình nào vào được đường đó — cùng một
+lỗi với một khai báo không ai đọc, và repo này đã xoá `capabilities.batch_infer`
+đúng theo luật đó. Đường ship không đổi từng byte.
+
+Số đo đứng sau việc **để nó ngoài sản phẩm** vẫn là bảng A–E ngay dưới, và ba giả
+thuyết nó bác là: sưởi **không** sửa được v0 (**0/2** lượt — B trùng A đến từng
+lô), **lô đầu nhỏ không thay được sưởi** (D: lô 4 mục sạch rồi lô 30 mục ngay sau
+đó vẫn chép `29/30`), và **dời chỉ dẫn xuống cuối prompt đổi 0/89 lần dịch lại**
+(V1, xem đoạn quét prompt bên dưới). Artifact của lượt đo:
+`data/experiments/accuracy-pipelines/20261019-echo-warmup/`.
+
+Lượt đo đó (cùng clip 115 đoạn, cùng 5 thuật ngữ, lô 30, `echo_guard` BẬT, mỗi cấu
+hình MỘT TIẾN TRÌNH, `/api/ps` rỗng trước mỗi lượt vì driver `release()` sau lượt
+trước; artifact ở `data/experiments/accuracy-pipelines/20261019-echo-warmup/`):
+
+    cấu hình                                              | dịch lại | EchoProblem | echo còn lại | chữ Hán | giây
+    A · v0, không sưởi (đối chứng)                        | 89       | 0           | 0            | 0       | 77,86
+    B · v0 + một lời gọi sưởi                             | 89       | 0           | 0            | 0       | 79,19
+    C · v2 + sưởi                                         | 0 / 29   | 0 / 0       | 0 / 0        | 0 / 0   | 56,90 / 71,48
+    D · v0, lô đầu ép còn 4 mục (không sưởi)              | 29       | 0           | 0            | 0       | 114,16
+    E · v2, lô đầu ép còn 4 mục (không sưởi)              | 0        | 0           | 0            | 0       | 103,91
+
+Bảng echo THEO LÔ (`echo_by_batch` trong chính artifact) là thứ lượt trước thiếu, và
+nó lật đúng chỗ kết luận cũ dễ bị đọc sai. **A** (đối chứng) không dồn echo vào lô
+1: cả BA lô đủ 30 mục đều bị chép — `29/30`, `30/30`, `30/30` — và lô 25 mục CUỐI
+sạch (`0/25`); **B** ra y hệt A từng lô, tức một lời gọi sưởi KHÔNG đổi gì với v0.
+Id bị chép luôn là "mọi segment của lô trừ đoạn 9" (`2288`, số thuần nên
+`echoes_source` không tính) ⇒ echo là COPY CẢ LÔ, và con số `29` của lượt trước
+không phải một tỉ lệ đặc biệt mà là "30 trừ đoạn không có chữ Hán". **D** tách được
+hai giả thuyết: lô 4 mục SẠCH, rồi lô 30 mục NGAY SAU ĐÓ chép `29/30` — rủi ro bám
+vào **lô ĐẦU TIÊN ĐỦ 30 MỤC**, không phải "lời gọi đầu"; và hai lô 30 mục sau trả
+thiếu mục (22/30, 24/30, 25/30) nên hạ cấp từng segment (60 lời gọi singleton), wall
+time **114,16 s** — "lô đầu nhỏ" là một cách chữa ĐẮT và không sửa được gì.
+
+Với **v2**, mọi lô TRỪ lô đầu đều sạch (7/7 lượt của cả hai vòng đo), và lô đầu
+chép `29/30` phụ thuộc trạng thái model: model NGUỘI (chưa nạp) ⇒ 3/3 lượt đều
+chép; còn khi model đã nạp trước lô đầu — bằng lời gọi sưởi (C) hoặc bằng một lần
+nạp SẴN từ ngoài tiến trình (`/api/generate`, không phải một lượt dịch) — thì kết
+quả là **0 rồi 29** ở cả hai nhánh. Tức "sưởi" không chữa được: nó đổi một đồng xu
+lấy một lời gọi, và wall time KHÔNG về dưới 40 s được: **48,03 s** là lượt sạch
+NHANH NHẤT đo được (4 lô, 115 đoạn, engine tự báo 48,0 s — gần như toàn bộ wall
+time là sinh token thật), nên con số `~33 s` mà tiêu chí "< 10 lần dịch lại, không
+`EchoProblem`, ≤ ~40 s" nhắm tới chính là wall time của một lượt KHÔNG dịch (lượt
+chép nguồn ở lô 30 cũ: 32,89 s). Kết luận: không cấu hình nào đạt cả ba tiêu chí;
+C và E đạt hai tiêu chí đầu (0 dịch lại, 0 `EchoProblem`) nhưng wall time 56,90 s
+và 103,91 s, và C KHÔNG tái lập được (lượt lặp: 29 lần dịch lại) — nên đòn bẩy còn
+lại vẫn là kiến trúc hybrid, không phải prompt và không phải sưởi.
+
+Smoke của lượt đo đó (cùng clip 115 đoạn, cùng 5 thuật ngữ, cùng engine, lô 30,
+`echo_guard` BẬT, mỗi style MỘT lượt qua `TranslateHandler`, artifact ở
+`data/experiments/accuracy-pipelines/20261019-prompt-echo-sweep/`): **V0** -> 89
+lần dịch lại / 0 lô hỏng / 83,03 s (tái lập đúng số đã ghim, nên bốn cột so được
+với nhau); **V1** -> **89** / 0 / 76,01 s (dời chỉ dẫn xuống cuối KHÔNG đổi gì:
+giả thuyết "model bỏ chỉ dẫn ở đầu prompt dài" SAI với engine này); **V2** ->
+**29** / 0 / 68,16 s (một cặp ví dụ cắt 60 lần dịch lại, và 29 lần còn lại nằm
+HẾT ở lô ĐẦU — lần chạy lặp lại, artifact ở `repeat-v2/` trong cùng thư mục, vẫn
+đúng **29** nên không phải may); **V3** -> 0 lần
+dịch lại nhưng **1 `EchoProblem`** (model trả 22/30 rồi 25/30 mục, hạ cấp xuống
+dịch từng segment, một segment vẫn echo) / 32,92 s / **0** segment được nhận.
+Không lượt nào bị QA báo `lang:`; cờ `is_echo` duy nhất còn lại (đoạn 9, `2288`
+-> `2288`) có ở CẢ artifact `20261019-echo-guard/` cũ, tức phép đo của QA bắt oan
+một con số giữ nguyên, không phải lỗi mới — và đó chính là ca đã sửa sau lượt này:
+`mt_qa.is_echo` nay trả `False` khi NGUỒN không có chữ Hán nào, vì một con số/mã
+giữ nguyên là bản dịch ĐÚNG chứ không phải bản chép của một bản dịch (không cấu
+hình nào của lượt đo cũ chạy lại, nên bốn artifact trên vẫn giữ cờ cũ đó). Tức
+KHÔNG biến thể nào đạt mức "< 10
+lần dịch lại, không `EchoProblem`, ≤ ~40 s": V2 là biến thể duy nhất cải thiện
+được con số, nhưng 29 ≥ 10 và 29 lời gọi singleton vẫn giữ wall time ở 60–68 s —
+nên KHÔNG nhận biến thể nào ở lượt này, và đòn bẩy tiếp theo là kiến trúc hybrid
+(opus-mt trước, hy-mt chỉ trên các đoạn bị gắn cờ), không phải prompt.
+
+Lần bump trước, `1165/15` → `1187/15` (**+22 bài**), do **hatch biến thể prompt**
+của lượt đo echo (`tests/test_mt_prompt_styles.py`, **+22**): bốn biến thể V0–V3
+(mặc định; chỉ dẫn dời xuống cuối; một cặp ví dụ Hán -> Việt; dòng dữ liệu đánh số
+`[i]`) chọn bằng `prompts.EXPERIMENT_PROMPT_STYLE_ENV` và CHỈ cho `hy-mt-1.5-7b`,
+để đo xem có biến thể nào làm lô 30 thôi chép nguồn không — cái giá của `echo_guard`
+là **89** lời gọi singleton và **78,85 s** ở lô 30, và mục tiêu là kéo số đó xuống
+dưới ~10 lần dịch lại để wall time về ~33 s. Hai mươi hai bài đó ghim ba thứ: (a)
+prompt mặc định **từng byte** — cả `system_prompt` lẫn `user_prompt`, cộng sha256
+của cặp, vì hai hàm này DÙNG CHUNG với `qwen2.5-3b`/`qwen2.5-7b` và số của chúng
+đã ghim; (b) một engine không chọn biến thể (`qwen*`, `opus-mt`, hoặc người gọi
+không truyền `engine_id`) nhận ĐÚNG chuỗi mặc định **dù biến môi trường có đặt gì**
+— hatch đọc biến đó SAU khi đã loại engine, nên đây là tính chất của code chứ không
+phải lời hứa; (c) mỗi biến thể có đúng tính chất định nghĩa nó (V1 DỜI câu cấm chứ
+không nhân bản nó, V2 đúng MỘT cặp input/output giữ số `12000` và KHÔNG lấy chữ từ
+clip, V3 đánh số mọi dòng dữ liệu nhưng giữ NGUYÊN VĂN dòng `Định dạng:`). KHÔNG
+biến thể nào được ship và `PROMPT_VERSION` KHÔNG đổi, nên nhãn của lượt đo nằm ở
+trường `prompt_style` trong artifact chứ không ở `translations.prompt_version`.
+
+Lần bump trước, `1141/15` → `1165/15` (**+21 bài**), do **echo guard**: với
+`hy-mt-1.5-7b`, trên clip 115 đoạn `20261019-name-patch-smoke`, số đoạn bị TRẢ
+NGUYÊN chữ Trung là **0–8/115** ở lô 8, **29/115** ở lô 15, **59–89/115** ở lô 30
+(chữ Hán trong đầu ra: 0–54 / 181 / 389–629; `opus-mt` cùng clip: 0/115 và 0 chữ
+Hán). Số mục vẫn khớp nên `check_alignment` cho qua và hàng `translations` vẫn
+`done` — nên đường dịch có thêm `mt_qa.echoes_source` (vị từ THUẦN, ngưỡng
+`ECHO_GUARD_SHARE = 0,5` chữ Hán / ký tự không phải khoảng trắng, cộng luật khớp
+nguyên văn cho ca thuật ngữ đã token hoá), `TranslateHandler._guard_echoes` (dịch
+lại MỘT MÌNH từng đoạn bị chép), và lỗi CÓ TÊN `pipeline.translate.EchoProblem`
+(cả lô `failed`, không ghi `done`). Cơ chế bật bằng `capabilities.echo_guard` và
+chỉ `hy-mt-1.5-7b` khai, nên `opus-mt` đi đúng đường cũ từng byte. Toàn bộ
+**+21 bài** nằm ở hai tệp mới: `tests/test_echo_guard.py` (**+12**: bản dịch Việt
+sạch, chép nguyên văn, model viết lại trong tiếng Trung, rỗng, câu lai có thuật
+ngữ Hán ở 0,33/0,47 KHÔNG bị chặn, một chữ Hán trích dẫn, ngưỡng 0,5, ca đã token
+hoá 2/6 phải bắt bằng luật nguyên văn, cổng ngôn ngữ `zh -> zh`/`en -> vi`) và
+`tests/test_translate_echo_guard.py` (**+9**: engine không khai cờ nhận nguyên
+đầu ra Hán với ĐÚNG một lời gọi, thiếu `engine_capabilities` y hệt cờ tắt, đoạn
+echo được gọi lại một mình rồi lô thành công kèm số đo trong log, lô sạch không
+gọi cổng, lô vẫn echo ném `EchoProblem` kèm id/số đoạn và hàng `failed` không có
+segment nào, lỗi liệt kê ĐỦ id, cờ của `registry.json` THẬT chỉ bật cho
+`hy-mt-1.5-7b` và cờ đó chạy, dịch lại hỏng alignment cũng chặn, chỉ `text` đổi).
+
+Smoke THẬT sau khi bật cổng (cùng clip, engine thật, `scripts/smoke_echo_guard.py`,
+artifact ở `data/experiments/accuracy-pipelines/20261019-echo-guard/`): lô 30 -> 4
+lời gọi cả lô + **89** lời gọi dịch lại, **0** lô hỏng, **0** đoạn echo, **0** chữ
+Hán, **78,85 s**; lô 15 -> 8 + **29**, 0 lô hỏng, 0 echo, 0 chữ Hán, **57,72 s**;
+lô 8 -> 17 + (7 cổng + 8 hạ cấp), 0 lô hỏng, 0 echo, **2** chữ Hán (một câu sót
+`不到路费2000` -> `不到2000`, tỉ lệ 0,33 dưới ngưỡng nên cổng cố ý không chặn), **61,00 s**.
+Tức cổng biến "59–89/115 đoạn chép nguồn" thành "0 đoạn", và làm điều đó ở CẢ BA
+kích thước lô — cái giá là 89 lời gọi singleton ở lô 30, và đó là lý do cờ bật bằng
+dữ liệu của từng engine.
+
+⚠️ Số nền trước lượt này đọc là `1141`, nhưng lần chạy thật TRƯỚC thay đổi đã CHỌN
+`1144` bài: ba bài thêm trong cây làm việc chưa được bump (đúng kiểu TRÔI mà con
+số này tồn tại để bắt). `1144 + 21 = 1165` là con số đã đo.
+
+Lần bump trước, `1128/15` → `1141/15` (**+13 bài**), do **echo là lỗi IM LẶNG**: trên
+clip 115 đoạn `20261019-name-patch-smoke`, `hy-mt-1.5-7b` trả nguyên
+chữ Trung cho **59–89/115 đoạn** ở lô 30 — số mục vẫn khớp nên `check_alignment`
+cho qua, QA chỉ gắn `lang:<i>` từng dòng, và hàng `translations` vẫn `done`, tức
+một lượt "4 lời gọi / 32,8 s" là lượt KHÔNG dịch (`opus-mt`: 0/115 trên cùng
+clip). Vì vậy đường dịch có thêm `mt_qa.is_echo` + `mt_qa.echo_run_issue` và
+`TranslateHandler._retry_echoed`: đoạn bị chép nguồn được dịch lại MỘT MÌNH (lô
+1), đoạn vẫn echo giữ chữ của model kèm cờ `echo` trên `Segment.qa`, và cả lượt
+thêm issue `echo:<n>/<tổng>` khi vượt 5%. Cơ chế bật bằng
+`capabilities.echo_retry` (`registry.json`), nên engine chưa đo đi đường cũ. Toàn
+bộ **+13 bài** nằm ở `tests/test_translate_echo.py` mới (chép nguyên văn, viết
+lại trong tiếng Trung vẫn là echo, câu lai có tên Hán KHÔNG phải echo, ngưỡng
+0,5 và 5%, chỉ đoạn echo bị gọi lại và gọi một mình, dịch lại hỏng không làm mất
+lô, mỗi lần dịch lại đúng một hàng `llm_calls`, cảnh báo cấp lượt không phụ thuộc
+cờ).
+
+Trước đó, `1115/15` → `1128/15` (**+13 bài**), do tính năng **XOÁ** —
+hai route `DELETE /api/sources/{id}` và `DELETE /api/translations/{id}`
+(`routes_sources.delete_source` + `routes_translations.delete_translation`), phần
+cascade viết tay trong `adapters/persist/sqlite_repos.py` (`schema.py` KHÔNG có
+`ON DELETE CASCADE`), và luật 409 dùng chung ở `app/api/delete_guard.py`. Chia
+ra: `tests/test_api_delete_sources.py` mới **+9 bài** (cascade ba bảng, tệp media
+bị xoá, tệp thiếu không phải lỗi, tệp NGOÀI `media_dir` không bị chạm, 404 nêu
+id, 409 cho job `queued`/`running` kèm id job, job `done` không chặn và hàng
+`jobs` sống sót, job của nguồn KHÁC không chặn);
+`tests/test_api_delete_translations.py` mới **+4 bài** (chỉ một hàng bị xoá,
+transcript/nguồn nguyên vẹn, 404, 409 khi có job `translate`, job `done` không
+chặn).
+
+Trước đó, `1075/15` → `1115/15` (**+40 bài**), do **bảo vệ thuật ngữ
+bằng token** (`app/domain/term_placeholder.py` + seam trong
+`pipeline/translate.py`), **cổng capability của bản vá tên riêng**, và **hai cờ QA
+từng nói SAI** khi cơ chế token bật. Policy tên riêng là Hán-Việt
+(`曹磊 → Tào Lôi`), còn `hy-mt1.5-7b:q4_K_M` tự ra pinyin (`Cao Lei`) — nên bản
+dịch của thuật ngữ phải đến từ hàng glossary. Chia ra:
+`tests/test_term_placeholder.py` mới **+22 bài** (thuật ngữ dài thắng, một lượt
+`re.sub` không thay hai lần, `ZXQ1`/`ZXQ10`, model hoa/thường/tách số, token ở đầu
+câu, token bỏ/lặp/lạ, va chạm tiền tố, term dính số, `plan_terms`);
+`tests/test_translate_placeholder_wiring.py` mới **+11 bài** (engine không khai cờ
+nhận ĐÚNG chuỗi gốc, chỉ `text` đổi, câu không chứa thuật ngữ byte-identical, câu
+nguồn đã có token, QA không còn báo sai, cổng `name_patch` của
+`opus-mt`/`hy-mt-1.5-7b` trên `registry.json` thật); `test_mt_qa.py` **+3** (cờ
+`glossary_enforced`, rendering dài không bị tính là model lan man, chỉ quy đổi
+rendering của thuật ngữ CÓ trong câu nguồn); `test_metrics.py` **+3** và
+`test_ocr_scoring.py` **+1** (paired bootstrap CI tất định theo seed; bảng theo cặp
+phải khớp bảng điểm — dùng để chấm **test split** 42 caption, xem
+`data/experiments/accuracy-pipelines/20261019-decode-dev-sweep/paired-ci-test-summary-v4.json`).
+
+Trước đó, `819/13` → `821/13`, là do đợt dọn nợ thêm
 `tests/test_schema_llm_calls_index.py` (2 bài chọn được, cả 2 chạy thật). Vì
 `ffmpeg` có mặt, không bài nào skip ở đây — nên nếu con số này "nhảy" mà không có
 bài nào được thêm hay gỡ, đó đúng là TRÔI cần điều tra.
