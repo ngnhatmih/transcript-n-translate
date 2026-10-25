@@ -278,10 +278,10 @@ mục **4/14** lô (2/8 lô của lượt 15 thẳng + 2/6 nửa của lượt c
 4 mục 0/2 — nên chế độ này bám vào LỜI GỌI, không phải một ngưỡng mà phép chia cắt
 ngang được; phép chia chỉ rẻ khi nửa đầu tình cờ sạch. Vì vậy **không nối phép chia vào sản
 phẩm**: con số quyết định là 95,72 s / 88,67 s so với 78,91 s của đường đang ship
-(và 59,09 s của lô 15 thẳng — phép chia chỉ rẻ hơn về SỐ LỜI GỌI). Ghi chú cho
-lượt sau: mọi lời gọi **25 mục** đo được tới nay đều sạch (**0/13** hàng
-`echo_by_batch`), nhưng lô 25 là ĐUÔI của clip trong mọi lượt nên độ dài
-và nội dung còn lẫn nhau — muốn coi đó là ngưỡng thì phải đo một phép chia 25/5.
+(và 59,09 s của lô 15 thẳng — phép chia chỉ rẻ hơn về SỐ LỜI GỌI). Đã đo (`20261025-batch-25`, `scripts/measure_batch_25.py`): câu "25 mục thì sạch"
+**SAI** — hai lô 25 mục GIỮA clip bị chép **24/25** (id 0–24) và **25/25** (id 25–49),
+hai lô sau sạch (50–74, 75–99), đuôi 15 mục sạch. Các lời gọi 25 mục sạch trước đây sạch
+vì là **đuôi clip**, không phải vì cỡ ⇒ ứng viên chia lô 25/5 bị LOẠI.
 
 Smoke của lượt đo đó (cùng clip 115 đoạn, cùng 5 thuật ngữ, cùng engine, lô 30,
 `echo_guard` BẬT, mỗi style MỘT lượt qua `TranslateHandler`, artifact ở

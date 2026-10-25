@@ -169,11 +169,22 @@ khoán, tiểu bang Virginia"), không phải ở phép sửa tên, nên con s�
 `hit_after` rỗng ở **cả hai** engine nên nó không phải bằng chứng (rỗng có thể là chưa tính).
 Lý do chưa bật là **chưa thử trên đường sẽ chạy**, không phải "đã đo và kém".
 
-**Một ứng viên rẻ chưa bị loại:** chia lô 25/5. Cả **13** lô 25 mục đo được đều sạch, nhưng
-tất cả đều là đuôi clip (id 90–114), nên con số đó **không** nói 25 mục là an toàn. §4 lại cho
-thấy cỡ lô có tác dụng riêng (lô `30–59` sạch ở 15 mục nhưng bị chép ở 30 mục), nên ứng viên
-này **chưa mất lý do**: cách tách sạch nhất là một lô 25 mục nằm giữa clip, hoặc một clip thứ
-hai. Chưa đo.
+**Ứng viên "chia lô 25/5" — ĐÃ ĐO và ĐÃ BỊ LOẠI.** Cả 13 lời gọi 25 mục đo trước đây đều
+sạch, nhưng tất cả đều là **đuôi clip** (id 90–114), nên con số đó không nói 25 mục là an
+toàn. Lượt đo `20261025-batch-25` (`scripts/measure_batch_25.py`, cùng clip 115 đoạn,
+`hy-mt`, `batch_items=25`, **không** `echo_guard`) chia lô 25 mục để đưa lô 25 vào GIỮA clip:
+
+| lô | id | cỡ | vị trí | bị chép |
+|---|---|---|---|---|
+| 1 | 0–24 | 25 | giữa | **24/25** |
+| 2 | 25–49 | 25 | giữa | **25/25** |
+| 3 | 50–74 | 25 | giữa | 0/25 |
+| 4 | 75–99 | 25 | giữa | 0/25 |
+| 5 | 100–114 | 15 | đuôi | 0/15 |
+
+⇒ "25 mục thì sạch" **SAI**. Những lời gọi 25 mục sạch trước đây sạch vì **vị trí/nội
+dung** (đuôi clip), không phải vì cỡ — nên chia lô 25/5 **không phải** một đòn bẩy, và
+danh sách ứng viên rẻ đóng lại.
 
 Chưa thấy đòn bẩy rẻ nào cho kết quả tốt hơn **trong các lượt đã đo**; hybrid là thay đổi kiến
 trúc nên để sau.
@@ -189,7 +200,7 @@ trúc nên để sau.
 | ba giả thuyết (V0–V3, A–E, cây chia) | `20261019-prompt-echo-sweep/` (lượt `v3` 32,92 s: `translation_status = failed`, `accepted_segments = 0`, `error.type = EchoProblem`), `20261019-echo-warmup/`, `20261019-echo-halving/` |
 | 250 mục-lượt so với 204 | `20261019-echo-halving/halving-batch-30.json`, tổng `attempt_tree[].calls[].items` = 225 (22 lời gọi) + lô cuối 25 = 250; đối chứng 115 + 89 lần dịch lại = 204 |
 | bảng cỡ lô gốc (93 hàng → 86 lô, 18 lượt) | prompt đang ship — 65 hàng → 61 lô, 12 lượt: `echo-warmup/{config-A,config-B,config-D}`, `echo-halving/{control-batch-30,half-straight-batch-15}`, `vram-sample/batch-30`, `echo-batch30-repeat/{run1,run2}/config-A`, `echo-batch15-repeat/{run1,run2}/config-A`, `echo-batch15-real/{run1,run2}/config-A`. Prompt thử `v2` — 28 hàng → 25 lô, 6 lượt: `echo-warmup/{config-C,config-E,repeat-C/config-C}` + `echo-warmup/control-v2-{warm-model,warm-model-2,no-warmup}/v2-batch-30`. Một hàng = một lời gọi `size > 1` (đúng định nghĩa `echo_by_batch`); các hàng **cùng `ids`** là lần gửi lại của cùng một lô (4 hàng ở prompt ship: `config-D` 2, `vram-sample` 1, `batch30-repeat/run2` 1; 3 hàng ở `v2`: `config-E` 2, `repeat-C` 1) nên được gộp — nếu đếm hàng thay vì lô thì mẫu số thành 31/21 và chính là lỗi "trộn lô gốc với lần gửi lại" mà §5 nêu. **Không** dùng hai lượt chia đôi (dụng cụ tắt cổng, `echoed` luôn 0 dù `tree_stats.copied_batches = 3`) và **không** dùng ba lượt `echo-guard/*` (không có bảng theo lô) |
-| 25 mục sạch 0/13; 15 mục 6/21 | cùng bảng trên; 13 lô 25 mục đều là lô cuối của clip (id 90–114), nên chưa nói được gì về một lô 25 mục nằm giữa clip |
+| 25 mục: 0/13 (đuôi) và **2/4 lô giữa clip bị chép** | cùng bảng trên cho 13 lô đuôi; lượt `20261025-batch-25/batch-25.json` (5 lô 25/15 mục, `hy-mt`, không guard): 24/25 và 25/25 bị chép ở lô 1–2, 0/25 ở lô 3–4 |
 | vị trí vs cỡ lô | ba lượt lô 15 (`echo-halving/half-straight-batch-15.json`, `echo-batch15-real/{run1,run2}/config-A.json`) cùng chép `ids 0–14` và `ids 60–74`, mọi cửa sổ khác 0 — đọc `echo_by_batch[].ids`/`echoed` của từng lượt. Lô giữa `30–59` (= hai cửa sổ `30–44` + `45–59`, sạch ở cỡ 15) bị chép ở **6/9** lượt lô 30 (`config-A`, `config-B`, `control-batch-30`, `echo-batch30-repeat/run1`, `echo-batch15-repeat/{run1,run2}`); sạch ở `vram-sample`, `echo-batch30-repeat/run2`, và ở `config-D` (lô giữa của lượt này lệch 4 mục vì lô đầu 4 mục) |
 | `fw-large-v3` so với turbo | trọng số trên đĩa: `D:\models\hf\models--Systran--faster-whisper-large-v3` 3,13 GB, `models--mobiuslabsgmbh--faster-whisper-large-v3-turbo` 1,51 GB. Thời gian cùng phép đo (một tiến trình, gồm nạp model): 38,35 s so với 12,32 s — `backend/experiments/accuracy_pipelines/README.md`; tuỳ cấu hình decode: 29,88–44,32 s — `20261019-decode-dev-sweep/large-v3-*.json` (`inference_seconds`, không gồm nạp model nên không so trực tiếp với 12,32 s). CER 0,0490 so với 0,0696 trên cùng tham chiếu 84 caption — `references/ocr-caption-reference-v2.md` |
 | hybrid 7/115 đoạn (6,1%), 17,09 s, 0/7 → 7/7 thuật ngữ | `20261019-hybrid-spike/hybrid-spike.json`: `definitions.wide` (7 id), `phases.opus_whole_clip` 11,86 s, `phases.hymt_flagged_only` 5,23 s / 7 lời gọi (`cost.hymt_seconds_per_flagged_segment` 0,747), `segments_detail[].vi_hy` cho cả 7 câu. **n = 7 đoạn của một clip** |
