@@ -249,13 +249,22 @@ Mục này **không tô hồng**. Câu nào chưa đo thì ghi **CHƯA ĐO**.
 - **Bảng phím tắt §11.4** và đường bàn phím §5.1/§12.5 (Task 11) — **`?` mở bảng phím tắt**.
 - **Tầng Chrome thật** (`frontend/e2e/`) + **bảng tiêu chí §12 được TRACK**
   (`frontend/e2e/TIEU-CHI-12.md`).
+- **Chimera §4.5** — làm ở nhánh `chimera`, có trên cây này sau lượt gộp: chip amber + dải cảnh
+  báo chi phí + N ô ứng viên + dòng hợp nhất (`screens/CompareScreen.tsx`,
+  `screens/CompareScreen.chimera.test.tsx`), kế hoạch Chrome 61 bước
+  (`frontend/e2e/plans/chimera.json` + `seed-chimera.py`), ảnh + `ket-qua.json` ngoài repo
+  (`_shots/chimera-2026-10-20/`), báo cáo bàn giao
+  `.superpowers/sdd/2026-09-26-frontend-workspace-2/chimera-report.md`.
+  ⚠️ **TRẦN đo được, đừng đọc dòng trên thành "Chimera tốt hơn":** với bộ ứng viên trên máy này
+  (`qwen2.5-3b`/`qwen2.5-7b` **nhại bản nguồn** 6/6), bản hợp nhất **giống từng byte** bản của mỏ
+  neo `opus-mt` ⇒ chế độ Chimera tiêu 6 lượt gọi để ra đúng thứ **một** lượt `opus-mt` cho ra.
+  Chưa làm: **ETA trên hàng đợi** (§4.5) và **transcript dài** (dài nhất mới 6 đoạn).
 
 ### CHƯA LÀM (có chủ ý)
 
 | Chưa làm | Ghi chú |
 |---|---|
 | **Bảng eval §4.6/§4.7** | ⚠️ **NGOÀI PHẠM VI THEO QUYẾT ĐỊNH CỦA NGƯỜI DÙNG** — giai đoạn này chỉ làm **bốn màn** (`frontend/e2e/TIEU-CHI-12.md:30`). Tiêu chí §12 số 7 giữ nguyên dòng, **không** xoá. |
-| **Chimera §4.5** | chưa làm (cùng quyết định trên). |
 | **Layout điện thoại** | chưa làm. |
 | **Sáng/tối & đổi theme** | chưa làm. |
 | **Kéo-thả sắp xếp cột** | chưa làm. |
