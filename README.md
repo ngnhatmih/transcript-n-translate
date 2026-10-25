@@ -114,9 +114,33 @@ Hai chi tiết của lệnh test đều **bắt buộc**, thiếu là chết:
 `src/api/contract.test.ts` chạy trên **backend THẬT**, không mock:
 
 1. Nó **tự spawn** backend ở **8620** (`backend/.venv/Scripts/python.exe run_api.py`, cwd
-   `backend/`) và **dựa vào DB của repo đang RỖNG** (`data/app.db`).
+   `backend/`) và đo trên **DB mà tiến trình con THỪA HƯỞNG** — `spawn` **không** truyền `env`,
+   nên con đọc `PHUDE_DB`/`PHUDE_DATA` của **shell đang chạy**, và khi hai biến đó trống thì rơi
+   về `data/app.db`. Khối này chỉ đo được trên DB **RỖNG**.
 2. Nhánh **200** của route chi tiết nằm ở một backend **THỨ HAI, cổng 8621**, có DB gieo riêng
    (`PHUDE_DB`/`PHUDE_DATA`/`PHUDE_PORT`, `contract.test.ts:573-587,700`).
+
+🔴 **VÌ VẬY: trỏ `PHUDE_DB`/`PHUDE_DATA` vào một thư mục RỖNG NGOÀI REPO trước khi chạy** —
+`data/app.db` của workspace này **KHÔNG còn rỗng** (backend đã chạy thật ở các giai đoạn sau).
+Đo được ngày `2026-10-25`, cùng một cây `d69ac3b`, hai môi trường:
+
+| môi trường | kết quả | nghĩa |
+|---|---|---|
+| `PHUDE_DB`/`PHUDE_DATA` → thư mục rỗng ngoài repo | `tests 317 / pass 315 / fail 2 / cancelled 0`, EXIT=1 | **ĐÚNG** (hai bài đỏ DB-rỗng) |
+| mặc định (con đọc `data/app.db` đã có dữ liệu) | `tests 317 / pass 307 / fail 0 / cancelled 10`, EXIT=1 | **LƯỢT BẨN** — 10 bài bị `before` HUỶ, không đo gì |
+
+Dòng thứ hai là đúng cái bẫy mà mục này đang cảnh báo, chỉ đổi chiều: `fail 0` **trông đẹp hơn**
+nền thật trong khi thực ra **không bài nào trong khối đó chạy**. Luật "`fail 0` mà `EXIT ≠ 0` là
+lượt bẩn" (dưới) bắt được nó; đừng đọc `pass/fail` mà bỏ `cancelled`.
+
+Lượt đo của tài liệu này (8620/8621 trống; `PHUDE_DB`/`PHUDE_DATA` trỏ thư mục rỗng ngoài repo):
+
+```
+ℹ tests 317   ℹ suites 31   ℹ pass 315   ℹ fail 2   ℹ cancelled 0
+ℹ skipped 0   ℹ todo 0      ℹ duration_ms 34253.3797
+EXIT=1
+0 dòng "asynchronous activity" ; [guard thoat] 10/10 global da ve nguyen trang
+```
 
 🔴 **Trước mọi lượt `npm test`, 8620 và 8621 phải TRỐNG.** Nếu ai đang giữ 8620, khối hợp đồng
 nhận một server LẠ đã gieo dữ liệu là "backend dùng được": hai guard DB-rỗng thành **XANH** và
@@ -139,12 +163,12 @@ hai khi 8620 bị chiếm). Ai áp `fail − 2` sẽ ra số ÂM hoặc thiếu.
 **một lượt có `fail 0` mà `EXIT ≠ 0` là LƯỢT BẨN** — phải kiểm `EXIT` + `uncaughtException`,
 không chỉ `pass/fail`.
 
-Lượt đo của tài liệu này (8620/8621 trống trước khi chạy):
+Lượt đo của tài liệu này (8620/8621 trống; `PHUDE_DB`/`PHUDE_DATA` trỏ thư mục rỗng ngoài repo):
 
 ```
-ℹ tests 308   ℹ suites 30   ℹ pass 306   ℹ fail 2   ℹ cancelled 0
-ℹ skipped 0   ℹ todo 0      ℹ duration_ms 32295.5656
-EXIT=1   ·   wall 32,6 s
+ℹ tests 317   ℹ suites 31   ℹ pass 315   ℹ fail 2   ℹ cancelled 0
+ℹ skipped 0   ℹ todo 0      ℹ duration_ms 34253.3797
+EXIT=1
 0 dòng "asynchronous activity" ; [guard thoat] 10/10 global da ve nguyen trang
 ```
 

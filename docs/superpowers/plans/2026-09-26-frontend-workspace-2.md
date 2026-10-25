@@ -2580,6 +2580,52 @@ Lỗi **C1** (Critical, ERRATA #47/#48 vòng này: `.ed__khung` không phải kh
 Chrome headless **giữ cờ** `--remote-debugging-port=9222` với `--user-data-dir=…\deepseek\_shots\profile` là **instance của CHÍNH TÔI** (giết xong: chrome **22 → 14** tiến trình). ⚠️ **Nhưng `9222` vẫn `True` sau khi giết** ⇒ **9222 đúng là Chrome của người dùng** (lời khai gốc của tôi đúng), instance của tôi **không bind được** vì cổng đã bị chiếm — và nó sống **6 tiếng** vì chính `close.mjs` (tôi viết để **từ chối** đóng 9222 vì tưởng đó là Chrome của người dùng) đã bảo vệ nó.
 🔴 **LUẬT:** một chốt chặn viết dựa trên **suy đoán về quyền sở hữu tài nguyên** phải kèm **cách kiểm chủ sở hữu** (PID + đường dẫn profile), nếu không nó bảo vệ nhầm thứ và để rò tài nguyên của chính mình.
 
+## ⚠️ ERRATA #49 — sau khi ĐÓNG PLAN, rà lại sáu nhóm việc: **nền `npm test` trong tài liệu đã TRÔI**, và **`fail 0` trông TỐT HƠN nền thật**
+
+Bối cảnh: rà lại đủ sáu nhóm việc của giai đoạn trên cây `d69ac3b` (HEAD) và chạy lại cổng. Hai phát
+hiện dưới đây đều **bác một giả định** mà `README.md` đang ngầm khẳng định.
+
+### 1. ⚠️ Số nền trong README là của `0672f97`, không phải HEAD
+README ghi `tests 308 / pass 306 / fail 2 / cancelled 0` (`duration_ms 32295.5656`) — số của lượt
+Task 13. HEAD `d69ac3b` thêm **9 bài** (`317`). Đo lại **cùng điều kiện**:
+
+```
+ℹ tests 317   ℹ suites 31   ℹ pass 315   ℹ fail 2   ℹ cancelled 0
+ℹ skipped 0   ℹ todo 0      ℹ duration_ms 34253.3797
+EXIT=1
+```
+
+Hai bài đỏ **đúng hai tên cũ** (`contract.test.ts:299` và `:345`). ⇒ README đã được cập nhật. Luật cũ
+**không đổi**: phép đo hợp lệ là **DANH SÁCH TÊN BÀI ĐỎ**, không phải `fail − 2`.
+
+### 2. 🔴 ĐIỀU KIỆN "DB RỖNG" PHỤ THUỘC BIẾN MÔI TRƯỜNG — và nó fail theo chiều NGUY HIỂM
+`contract.test.ts` spawn backend **không truyền `env`** ⇒ tiến trình con **thừa hưởng**
+`PHUDE_DB`/`PHUDE_DATA`; khi hai biến trống thì nó rơi về `data/app.db`, mà DB đó **nay KHÔNG còn
+rỗng** (backend đã chạy thật ở các giai đoạn sau). Đo được trên **CÙNG một cây**:
+
+| môi trường | kết quả | nghĩa |
+|---|---|---|
+| `PHUDE_DB`/`PHUDE_DATA` → thư mục rỗng NGOÀI repo | `pass 315 / fail 2 / cancelled 0`, EXIT=1 | **ĐÚNG** (hai bài DB-rỗng) |
+| mặc định (con đọc `data/app.db` đã có dữ liệu) | `pass 307 / fail 0 / cancelled 10`, EXIT=1 | **BẨN** — 10 bài bị `before` HUỶ |
+
+Khối `before` **từ chối** chạy trên DB không rỗng, nên `fail` **giảm 2 → 0** trong khi **không bài
+nào trong khối đó đo gì**. Đây là **chiều ngược** của bẫy đã ghi ở ERRATA #46 mục 4 (`fail` **tăng**
+khi 8620 bị server lạ chiếm): lần này `fail` **giảm**.
+
+🔴 **LUẬT: `cancelled` phải đọc CÙNG `fail`.** Một lượt `fail 0 / cancelled 10` **trông đẹp hơn** nền
+thật và **không đo được gì**. Và một con số nền chép vào tài liệu phải kèm **điều kiện môi trường**
+của nó (biến nào, trỏ đâu), nếu không nó là con số không tái lập được.
+
+### 3. Đối chiếu sáu nhóm việc (đều có bằng chứng, không phải lời khai)
+| nhóm | bằng chứng trên cây `d69ac3b` |
+|---|---|
+| **W2** nạp tệp §4.2 | `shell/IntakeFrame.tsx` (khung kéo-thả, `onDragOver` `preventDefault`, `type="file"` **không** `accept`, `LANG_NHAN` = `zh`/`en`) + **một** `App.napTep` truyền xuống; ảnh `_shots/w2` (4 PNG), ERRATA #43 |
+| **NỢ đường ghi** (D1/D2) | `patchTranscript`/`approveTranscript`/`cancelJob`/`retryJob` trong `api/`; `startEdit`/`endEdit` có người dùng; `App.tsx:887` `case "nudge"` (nudge = `Shift+←/→` 0,1 s, `Alt+←/→` 1 s, **`[`/`]` là mốc** — ERRATA #44 mục 3); ảnh `_shots/d1` (3), `d2` (4) |
+| **Task 11** | `BangPhim.tsx` render §11.4 từ chính bảng dữ liệu + `BangPhim.test.tsx`; ảnh `_shots/t12b/04-bang-phim-tat-11-4.png`, `20-bang-phim-11-4.png`; ERRATA #47 |
+| **Task 12** | `e2e/cdp.mjs` + `e2e/session.mjs` + `e2e/plans/*.json` trên backend THẬT ở 8631 với DB gieo; ảnh `_shots/t12` (15), `t12b` (16), `t12fix1` (16); **HEAD** có `_shots/r1-dround` (**51 PNG**) |
+| **Task 13** | `README.md` §"Chạy frontend" + §"HAI ĐỊNH NGHĨA CPS" + khối nợ (`N-9` còn mở); `.superpowers/sdd/2026-09-26-frontend-workspace-2/ponytail-debt.md` (32 KB) |
+| **Nợ nhỏ (5/5)** | nhãn tab bản dịch lấy `id` (không theo vị trí mảng, `CompareScreen.tsx`); `_seed/seed.py:52-69` gieo độ dài KHÁC NHAU cho CPS hai chiều; `OllamaDown.tsx:122` `role="status"` trên `.od`; `contract.test.ts:799-805` đã đính chính comment; `README.md` mục hai định nghĩa CPS |
+
 ## Quy ước thẩm mỹ — spec UI thắng, skill chỉ là checklist
 
 Spec `2026-09-25-phu-de-lab-ui-design.md` là **nguồn có thẩm quyền về hình thức** (bạn đã duyệt). Skill
