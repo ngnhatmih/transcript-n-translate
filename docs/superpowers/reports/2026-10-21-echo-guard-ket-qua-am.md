@@ -59,8 +59,9 @@ lô nhỏ nhanh hơn.
 ## 4. Phát hiện chính
 
 **Chép là chuyện của cả lời gọi, và nó chép cả lô.** Mỗi lời gọi mang nhiều hơn một mục là
-một hàng trong `echo_by_batch` của driver. Dưới đây là **toàn bộ 93 hàng** của 18 lượt đi
-qua cổng (không chọn mẫu), tách theo prompt vì hai prompt trả lời hai câu hỏi khác nhau:
+một hàng trong `echo_by_batch` của driver. Dưới đây là **toàn bộ** 93 hàng của 18 lượt đi
+qua cổng — không chọn mẫu; hai lượt tắt cổng và ba lượt không có bảng được nói ở dưới —
+tách theo prompt vì hai prompt trả lời hai câu hỏi khác nhau:
 
 | cỡ lời gọi | bị chép (prompt đang ship) | n | bị chép (prompt thử `v2`) | n |
 |---|---|---|---|---|
@@ -97,9 +98,9 @@ nó **không** nằm trong bảng trên, vì bảng đó chỉ đếm hàng có 
 chép (`tree_stats.copied_batches = 3`). Đếm chúng vào bảng sẽ báo "sạch" cho những lời gọi
 không sạch — đây là chỗ một bảng trộn hai dụng cụ đo sẽ sai mà không ai thấy.
 
-Kết luận thực dụng: cỡ 30 không dùng được nếu thiếu guard; nếu dùng `hy-mt` thì lô 15 và lô
-30 cho thời gian tương đương, khác nhau ở chỗ lô 15 có ít đoạn bị chép hơn mỗi lần (29 so
-với 59–89).
+Kết luận thực dụng: cỡ 30 không dùng được nếu thiếu guard; nếu dùng `hy-mt` thì hai cỡ
+chồng lấn về thời gian (57,72–95,42 so với 77,86–118,57 s), khác nhau ở chỗ lô 15 có ít đoạn
+bị chép hơn mỗi lần (29 so với 59–89).
 
 ## 5. Bài học phương pháp
 
