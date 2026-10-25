@@ -49,6 +49,20 @@ DEFAULT_TIMEOUT_S = 600.0
 CONTRACTS = ("json", "lines")
 
 
+def prompt_version_for(contract: str) -> str:
+    """Nhãn `prompt_version` của một hợp đồng đầu ra.
+
+    Có hàm này để composition root ghi được nhãn MÀ KHÔNG dựng engine (nó tính
+    `prompt_versions` trước, và một engine `http` cần khoá API để dựng). Nhãn phải
+    nói đúng thứ đã viết ra bản dịch: `openai-lines-p1` khác `openai-json-p1`, và
+    cả hai khác bộ `V0..V3` của đường Ollama — trộn chúng là trộn hai biến số
+    trong cùng một cột artifact.
+    """
+    if contract not in CONTRACTS:
+        raise ValueError(f"hợp đồng lạ: {contract!r} (chỉ nhận {list(CONTRACTS)})")
+    return f"openai-{contract}-p1"
+
+
 class OpenAiChatMt:
     """`MtEngine` trên `/v1/chat/completions`; mọi thứ khác do handler lo.
 
@@ -97,7 +111,7 @@ class OpenAiChatMt:
         """Không tra `PROMPT_VERSION` được: prompt của hợp đồng `lines` KHÔNG đi
         qua `experiment_prompt_style` và không thuộc bộ `V0..V3` đã đo. Trả tên
         hợp đồng thay vì bịa một phiên bản chưa từng đo."""
-        return f"openai-{self._contract}-p1"
+        return prompt_version_for(self._contract)
 
     def supports_glossary(self) -> bool:
         return self._supports_glossary

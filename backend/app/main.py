@@ -16,6 +16,7 @@ from app.adapters.clock_system import SystemClock
 from app.adapters.governor.single_gpu import SingleGpuGovernor
 from app.adapters.mt.chimera_merge import OllamaMergeEngine
 from app.adapters.mt.ollama_mt import OllamaMtEngine
+from app.adapters.mt.openai_chat_mt import OpenAiChatMt, prompt_version_for
 from app.adapters.mt.opus_mt import OpusMtEngine
 from app.adapters.mt.prompts import MERGE_PROMPT_VERSION, PROMPT_VERSION
 from app.adapters.persist.sqlite_repos import SqliteRepos
@@ -32,7 +33,7 @@ from app.pipeline.transcribe import AUTO_FORWARD_SETTING, TranscribeHandler
 from app.pipeline.translate import TranslateHandler
 from app.registry import (ASR_DEFAULT_SETTING, DEFAULT_MT_KEY, MT_DEFAULT_SETTING,
                           by_id, default_asr_engine, default_mt_engine,
-                          ollama_available)
+                          ollama_available, openai_models_available)
 from app.worker import PhaseQueueWorker
 
 #: `auto_forward` nay mặc định BẬT: từ Task 12 đã có handler `translate` thật,
@@ -64,6 +65,11 @@ def _mark_availability(specs) -> None:
     (adapter THẬT, registry THẬT).
     """
     pulled: set[str] | None = None
+    #: Cache theo base_url cho engine `runtime == "http"`: hai hàng trỏ cùng một
+    #: endpoint là MỘT phép dò, không phải hai (hai phép dò cho cùng câu hỏi có
+    #: thể lệch nhau, và câu trả lời lệch ở đây là giao diện hứa một engine rồi
+    #: job chết ở tận worker).
+    probed: dict[str, set[str]] = {}
     for spec in specs:
         if spec.kind != "mt":
             continue
@@ -71,8 +77,46 @@ def _mark_availability(specs) -> None:
             if pulled is None:
                 pulled = ollama_available()
             spec.capabilities["available"] = spec.model_ref in pulled
+        elif spec.runtime == "http":
+            spec.capabilities["available"] = _http_engine_ready(spec, probed)
         else:
             spec.capabilities["available"] = True
+
+
+def _http_engine_opts(spec) -> dict:
+    """`opts` của một engine `runtime == "http"`, đã kiểm những khoá bắt buộc.
+
+    Không có mặc định cho `base_url`: một endpoint mặc định là một lời hứa về một
+    dịch vụ bên ngoài mà ta không kiểm soát, và hứa sai ở đây nghĩa là job dịch
+    gửi văn bản của người dùng tới một chỗ không ai chọn.
+    """
+    opts = spec.opts if isinstance(spec.opts, dict) else {}
+    if not isinstance(opts.get("base_url"), str) or not opts["base_url"].strip():
+        raise RuntimeError(
+            f"engine dịch {spec.id!r} khai runtime 'http' nhưng thiếu "
+            f"`opts.base_url`; ví dụ: \"base_url\": \"https://api.deepseek.com/v1\"")
+    return opts
+
+
+def _http_engine_ready(spec, probed: dict[str, set[str]]) -> bool:
+    """Endpoint trả lời VÀ khai đúng `model_ref`, khoá API (nếu cần) có trong
+    biến môi trường. Thiếu bất cứ thứ nào ⇒ `False`, không ném: một dòng cấu
+    hình chưa điền đủ thì engine "chưa sẵn sàng", đúng như Ollama chưa pull.
+    """
+    try:
+        opts = _http_engine_opts(spec)
+    except RuntimeError:
+        return False
+    key_env = opts.get("api_key_env")
+    api_key = None
+    if key_env:
+        api_key = os.environ.get(str(key_env))
+        if not api_key:
+            return False
+    base = opts["base_url"]
+    if base not in probed:
+        probed[base] = openai_models_available(base, api_key=api_key)
+    return spec.model_ref in probed[base]
 
 
 def chimera_plan_for(specs) -> ChimeraPlan:
@@ -161,9 +205,68 @@ def _build_mt_engines(specs) -> dict[str, object]:
                 engine_id=spec.id,
                 supports_glossary=bool(spec.capabilities.get("glossary_prompt", False)),
             )
-        else:
+        elif spec.runtime == "http":
+            engines[spec.id] = _http_engine_from_spec(spec)
+        elif spec.runtime == "inprocess":
             engines[spec.id] = OpusMtEngine(spec.model_ref)
+        else:
+            # Runtime lạ phải ỒN: đoán nó thành opus-mt là âm thầm chạy một model
+            # khác với cái registry khai.
+            raise RuntimeError(
+                f"engine dịch {spec.id!r} khai runtime {spec.runtime!r} không hỗ trợ; "
+                f"chỉ nhận 'inprocess', 'ollama', 'http'")
     return engines
+
+
+def _http_engine_from_spec(spec):
+    """Dựng `OpenAiChatMt` từ ĐÚNG một hàng registry — không hard-code endpoint.
+
+    Khoá API đọc từ BIẾN MÔI TRƯỜNG có tên trong `opts.api_key_env`, không bao
+    giờ từ `registry.json`: một tệp cấu hình được commit thì không được chứa
+    khoá, và một khoá nằm trong tệp là khoá đã bị chia sẻ với mọi người đọc repo.
+
+    Hợp đồng đầu ra là DỮ LIỆU (`opts.contract`), không phải một hằng số của
+    adapter: endpoint có `response_format` thật thì dùng `json`; endpoint không
+    có grammar (cổng web) thì dùng `lines`. Số đo của hai hợp đồng ở
+    `docs/superpowers/reports/2026-10-25-spike-openai-mt.md`.
+    """
+    opts = _http_engine_opts(spec)
+    key_env = opts.get("api_key_env")
+    api_key = os.environ.get(str(key_env)) if key_env else None
+    if key_env and not api_key:
+        raise RuntimeError(
+            f"engine dịch {spec.id!r} cần khoá API ở biến môi trường {key_env!r} "
+            f"nhưng biến đó rỗng hoặc không có")
+    return OpenAiChatMt(
+        spec.model_ref,
+        base_url=opts["base_url"],
+        engine_id=spec.id,
+        api_key=api_key,
+        contract=opts.get("contract", "json"),
+        json_mode=opts.get("json_mode", "none"),
+        temperature=opts.get("temperature"),
+        max_tokens=opts.get("max_tokens"),
+        reasoning_effort=opts.get("reasoning_effort"),
+        supports_glossary=bool(spec.capabilities.get("glossary_prompt", False)),
+    )
+
+
+def _prompt_version_of(spec) -> str:
+    """`prompt_version` của MỘT hàng registry — một chỗ duy nhất, ba luật.
+
+    Vì sao không chỉ `PROMPT_VERSION.get(spec.id, "unknown")`: bảng đó là của các
+    engine đã đo, và một engine `http` KHÔNG có tên trong bảng. Rơi về "unknown"
+    ở đó không phải "chưa biết" — nó là một NHÃN SAI, vì prompt của engine `http`
+    là prompt của hợp đồng đầu ra (`openai-lines-p1` hay `openai-json-p1`), và
+    hàng `translations` sẽ mang "unknown" trong khi bản dịch do một prompt có
+    tên viết ra. Ba luật, theo đúng thứ tự:
+    `http` ⇒ tên hợp đồng; `inprocess`/`ollama` ⇒ bảng `PROMPT_VERSION`; không có
+    ⇒ "unknown" (trung thực: engine chưa từng đo).
+    """
+    if spec.runtime == "http":
+        opts = spec.opts if isinstance(spec.opts, dict) else {}
+        return prompt_version_for(opts.get("contract", "json"))
+    return PROMPT_VERSION.get(spec.id, "unknown")
 
 
 def build_components():
@@ -241,7 +344,7 @@ def build_components():
     # nhất nối `adapters/mt/prompts.py` với tầng HTTP. `TranscribeHandler` nhận
     # CÙNG dict này — hai nơi cùng ghi `translations.prompt_version` thì phải đọc
     # cùng một nguồn, không phải hai bản sao của cùng một biểu thức.
-    prompt_versions = {spec.id: PROMPT_VERSION.get(spec.id, "unknown")
+    prompt_versions = {spec.id: _prompt_version_of(spec)
                        for spec in specs if spec.kind == "mt"}
     for spec in specs:
         if spec.kind == "mt":

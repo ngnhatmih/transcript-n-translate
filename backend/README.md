@@ -63,39 +63,39 @@ GPU. Nó tự ép UTF-8 cho stdout (console Windows mặc định cp1252, còn s
 tiếng Trung/Việt) và tự đặt cache model trước khi nạp `faster_whisper`.
 
 Con số nền của lần chạy mặc định, đo sau khi xoá `__pycache__` (lệnh ở mục
-"Kiểm thử" trên, chạy từ trong `backend\`). Thứ có nghĩa là **1247 / 15**, không
+"Kiểm thử" trên, chạy từ trong `backend\`). Thứ có nghĩa là **1269 / 15**, không
 phải số giây — thời gian trôi giữa các lần chạy (đã thấy 24,00–30,94 s) còn con
 số bài thì không:
 
 ```
-1247 passed, 15 deselected, 1 warning
+1269 passed, 15 deselected, 1 warning
 ```
 
 Hai con số đó là SỐ BÀI ĐƯỢC CHỌN, và chúng khớp với số mà `--collect-only` báo
-(`1247/1262`, 15 bài `live` bị bỏ;
+(`1269/1284`, 15 bài `live` bị bỏ;
 `tests/test_backend_readme.py::test_readme_baseline_matches_the_tests_actually_
 collected` đối chiếu mỗi lần chạy).
 
-Máy này **CÓ** `ffmpeg 8.1.1` + `ffprobe` trên PATH (đã đo), nên `1247/15` ở trên
+Máy này **CÓ** `ffmpeg 8.1.1` + `ffprobe` trên PATH (đã đo), nên `1269/15` ở trên
 là số THẬT của nó. Máy **không có** `ffmpeg`/`ffprobe` cho một kết quả KHÁC: cả
 `tests/test_ingest.py` bị `skipif` ở cấp module — **9** bài cùng skip một lượt —
-nên dòng tổng kết của máy đó là **`1238 passed, 9 skipped, 15 deselected`** (=
-`1247 − 9`; con số này TỪNG ghi `978`, tức một baseline rất cũ, và nó lệch phép
+nên dòng tổng kết của máy đó là **`1260 passed, 9 skipped, 15 deselected`** (=
+`1269 − 9`; con số này TỪNG ghi `978`, tức một baseline rất cũ, và nó lệch phép
 trừ của chính khối nền ngay trên nó). Đó là
 con số của máy thiếu ffmpeg, **không phải** con số máy này từng in ra; đừng chép
 nó vào khối nền ở trên, và đừng "sửa" số nền xuống chỉ vì thiếu ffmpeg.
 
 ⚠️ Con số `856` ở đây TỪNG không khớp phép trừ của chính nó: `865 − 9 = 856`, tức
 nó là số của lượt TRƯỚC `V1` (+3 bài) còn sót lại. Phép trừ của khối nền hiện tại
-là `1247 − 9` = `1238`.
+là `1269 − 9` = `1260`.
 
 (Con số này từng bị ghi là `798`: bài `test_a_failed_translation_leaves_the_
 transcript_reviewed` được thêm ở `a428334` — **cùng commit đã sửa tệp này** — mà
 số nền không được bump. Nó tồn tại để phát hiện TRÔI, nên một số sai làm mọi lần
 chạy báo dương tính giả.
 
-Lần bump này, `1206/15` → `1247/15` (**+41 bài**), do **hợp đồng đầu ra `lines`** và
-adapter OpenAI-compatible. `tests/test_mt_lines_contract.py` (**+24**) ghim parser dòng:
+Lần bump này, `1206/15` → `1269/15` (**+63 bài**), do **hợp đồng đầu ra `lines`**,
+adapter OpenAI-compatible, và **nối dây runtime `http`**. `tests/test_mt_lines_contract.py` (**+24**) ghim parser dòng:
 đủ số dòng, đúng tập `id`, id trùng, mục có id mà không có bản dịch, và — quan trọng
 nhất — một dòng KHÔNG mang id nằm GIỮA khối bản dịch là LỖI chứ không phải lời dẫn bị bỏ
 qua (model xuống dòng giữa câu thì bỏ dòng sau là mất nửa câu mà số dòng vẫn "đủ").
@@ -103,7 +103,12 @@ qua (model xuống dòng giữa câu thì bỏ dòng sau là mất nửa câu m�
 `max_tokens`, `response_format` **không** được gửi trừ khi có yêu cầu rõ ràng (một cổng
 web không có tương đương cho chúng), khoá API chỉ đi trong header, và lỗi HTTP phải ném
 `HTTPStatusError` chứ không phải `JSONDecodeError`. Số đo của hai hợp đồng nằm trong
-`docs/superpowers/reports/2026-10-25-spike-openai-mt.md`.
+`docs/superpowers/reports/2026-10-25-spike-openai-mt.md`. `tests/test_mt_openai_wiring.py`
+ (**+22**) ghim phần NỐI DÂY: `available` của engine `http` là câu trả lời thật (endpoint
+trả lời, khai đúng `model_ref`, khoá API có trong biến môi trường), hai hàng cùng endpoint
+chỉ dò MỘT lần, hàng thiếu `base_url` là "chưa sẵn sàng" chứ không làm sập tiến trình,
+còn lúc DỰNG engine thì thiếu `base_url`/khoá là lỗi ồn và `runtime` lạ không được đoán
+thành `opus-mt`.
 
 Lần bump gần nhất, `1202/15` → `1206/15` (**+4 bài**), do sửa lỗi **`--batches`
 bị `--configs` nuốt**: `main()` của `scripts/smoke_echo_guard.py` tự gán cứng lô
@@ -526,6 +531,58 @@ hy-mt1.5-7b:q4_K_M    5f79e49d4ed2    5.3 GB    100% GPU    4096    llamacpp
 * Cờ **mặc định TẮT**: không có lời gọi `nvidia-smi` nào và artifact **không** có
   khoá `vram` — `tests/test_vram_sample.py` ghim cả hai vế (khối vắng mặt + hàm
   THUẦN `summarize_vram`).
+
+### Thêm một engine dịch qua API (`runtime: "http"`)
+
+Một engine dịch không nhất thiết phải nằm trên máy này. `runtime: "http"` nói giao thức
+**OpenAI-compatible** (`POST {base_url}/chat/completions`); mọi thứ còn lại — batching,
+alignment, QA, retry — vẫn là `TranslateHandler` của sản phẩm. Đây là DỮ LIỆU: thêm một
+hàng vào `mt` là xong, không sửa mã. `available` của hàng đó là câu trả lời THẬT (endpoint
+trả lời, khai đúng `model_ref` ở `/models`, và khoá API có trong biến môi trường), dò một
+lần lúc dựng, giống hệt cách engine Ollama bị dò.
+
+```json
+{
+  "id": "api-dich",
+  "label": "API dịch (cần mạng)",
+  "runtime": "http",
+  "model_ref": "deepseek-chat",
+  "vram_mb": 0,
+  "langs": ["zh", "en"],
+  "capabilities": { "glossary_prompt": true, "glossary_patch": false, "chimera": false },
+  "opts": {
+    "base_url": "https://api.deepseek.com/v1",
+    "contract": "json",
+    "json_mode": "object",
+    "max_tokens": 4096,
+    "api_key_env": "DEEPSEEK_API_KEY"
+  }
+}
+```
+
+`opts`: `base_url` BẮT BUỘC (gồm `/v1`); `contract` (`json` | `lines`, mặc định `json`);
+`api_key_env` là TÊN biến môi trường, **không** phải khoá — một khoá nằm trong
+`registry.json` là khoá đã chia sẻ với mọi người đọc repo.
+
+**Chọn `contract` theo endpoint, không theo sở thích.** `json` chỉ đúng khi endpoint BẢO
+ĐẢM JSON (API chính thức có `response_format`; Ollama native có `format: "json"` — grammar
+của nó là thứ giữ hợp đồng, không phải model). Endpoint không có grammar — ví dụ một cổng
+biến phiên web thành API — phải dùng `lines`: đo được trên cùng clip, cùng `hy-mt`, `json`
+chết ở 0–30/115 đoạn vì lỗi cú pháp, còn `lines` đi hết **115/115 trong 59,09 s / 25 lời
+gọi**, 0 chữ Hán, thuật ngữ 7/7 (`docs/superpowers/reports/2026-10-25-spike-openai-mt.md`).
+Lô 15 là điểm làm việc của hợp đồng `lines`: lô 30 làm 3/4 lô hỏng alignment rồi phải hạ
+cấp, đắt hơn — nên đặt `capabilities.max_items_per_call: 15`.
+
+**Ví dụ trên KHÔNG có trong `registry.json` đã ship**, và đó là chủ ý: engine chưa đo trên
+endpoint thật thì chưa khai. Ba điều phải nói trước khi bật nó:
+
+1. **`default_mt` phải tiếp tục là `opus-mt`.** Đổi engine mặc định là đổi tiền đề offline
+   của cả pipeline, và mọi số trong tài liệu này đo trên đường local.
+2. **Văn bản phụ đề rời khỏi máy.** Đây là thay đổi về quyền riêng tư, không phải một tối
+   ưu — với engine `runtime: "http"` thì nội dung clip của người dùng đi tới bên thứ ba.
+3. **Số đo của nó không tái lập được.** Không đặt được sampling, hành vi của dịch vụ đổi
+   ngoài tầm kiểm soát. Một con số của engine `http` phải được dán nhãn như vậy, không được
+   trộn vào bảng so sánh local.
 
 ### Giới hạn — đọc trước khi tin bất cứ con số nào ở trên
 

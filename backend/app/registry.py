@@ -42,7 +42,11 @@ class EngineSpec:
     id: str
     label: str
     kind: str            # 'asr' | 'mt'  — loại ENGINE, không phải loại job
-    runtime: str         # 'inprocess' | 'ollama'
+    #: 'inprocess' (opus-mt, Marian chạy trong tiến trình) | 'ollama' (LLM qua
+    #: `/api/chat`) | 'http' (một endpoint OpenAI-compatible, cấu hình ở `opts`).
+    #: Giá trị lạ KHÔNG bị đoán: `app/main.py::_build_mt_engines` ném lỗi kèm
+    #: danh sách runtime đang hỗ trợ.
+    runtime: str
     model_ref: str
     vram_mb: int
     langs: tuple[str, ...]
@@ -184,6 +188,53 @@ def ollama_available(base_url: str = DEFAULT_OLLAMA_BASE_URL,
         if not isinstance(entry, dict):
             continue
         for key in ("name", "model"):
+            value = entry.get(key)
+            if isinstance(value, str) and value:
+                names.add(value)
+    return names
+
+
+def openai_models_available(base_url: str, *, api_key: str | None = None,
+                            timeout: float = 1.5,
+                            client=None) -> set[str]:
+    """TÊN model một endpoint OpenAI-compatible khai ở `GET /models`.
+
+    Cùng hợp đồng với `ollama_available`, vì người gọi là cùng một chỗ
+    (`app/main.py::_mark_availability`) và cùng một câu hỏi: "engine này phục vụ
+    được job NGAY BÂY GIỜ không". Tập RỖNG khi không dùng được — endpoint chết,
+    cổng đóng, timeout, 401 vì thiếu khoá, phản hồi dị dạng. Tập rỗng là câu trả
+    lời an toàn: một endpoint không trả lời được thì không phục vụ được.
+
+    `client` để test tiêm được mà không chạm mạng (đúng khuôn `OllamaMtEngine`);
+    `api_key` chỉ đi trong header, KHÔNG bao giờ vào URL hay thông báo lỗi.
+    """
+    import httpx
+
+    headers = {}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+    try:
+        if client is not None:
+            resp = client.get(f"{base_url.rstrip('/')}/models", headers=headers)
+        else:
+            with httpx.Client(timeout=timeout) as owned:
+                resp = owned.get(f"{base_url.rstrip('/')}/models", headers=headers)
+        if resp.status_code != 200:
+            return set()
+        data = resp.json()
+    except Exception:
+        return set()
+
+    models = data.get("data") if isinstance(data, dict) else None
+    if not isinstance(models, list):
+        return set()
+    # `id` là khoá của OpenAI; nhận thêm `name`/`model` vì các bản tương thích
+    # (vLLM, LM Studio, llama.cpp) không thống nhất một khoá.
+    names: set[str] = set()
+    for entry in models:
+        if not isinstance(entry, dict):
+            continue
+        for key in ("id", "name", "model"):
             value = entry.get(key)
             if isinstance(value, str) and value:
                 names.add(value)

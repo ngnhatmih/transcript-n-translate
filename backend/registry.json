@@ -4,7 +4,7 @@
   "default_asr": "fw-large-v3-turbo",
   "_ghi_chu_default_mt": "R58: engine DỊCH mặc định khi auto_forward bật. Id phải có trong danh sách `mt` bên dưới. Không khai báo khoá này thì pipeline rơi về phần tử ĐẦU của mảng `mt` (thứ tự dòng), nên hãy khai báo tường minh.",
   "default_mt": "opus-mt",
-  "_ghi_chu_batch": "Chế độ NHANH (BatchedInferencePipeline) là DỮ LIỆU ở `opts.batch_size`: >1 thì chạy đường batched, 0/1 thì chạy `WhisperModel.transcribe`. Đã XOÁ khoá `capabilities.batch_infer` khỏi mọi engine ASR vì ĐO ĐƯỢC là KHÔNG mã nào trong sản phẩm đọc nó (grep toàn repo chỉ ra một fixture test): hai entry khác nhau ở khoá đó nhưng cùng `batch_size: 8` cho ra transcript GIỐNG NHAU đến sáu chữ số, nên nó là một khai báo nói dối về khả năng. Một nguồn sự thật duy nhất, không hai.",
+  "_ghi_chu_batch": "Chế độ NHANH (BatchedInferencePipeline) là DỮ LIỆU ở `opts.batch_size`: >1 thì chạy đường batched, 0/1 thì chạy `WhisperModel.transcribe`. Đã XOÁ TƯƠNG TỰ khoá `capabilities.batch_json` khỏi mọi engine MT: grep toàn repo chỉ ra `registry.json`, artifact và tài liệu, KHÔNG mã nào đọc nó. Hợp đồng đầu ra của một engine `http` nay là DỮ LIỆU ở `opts.contract` (`json` | `lines`), nơi `app/adapters/mt/openai_chat_mt.py` thật sự đọc; engine `http` khai thêm `opts.base_url` (BẮT BUỘC, gồm `/v1`) và `opts.api_key_env` (TÊN biến môi trường, KHÔNG phải khoá) — xem mục `runtime: http` trong `backend/README.md`. Đã XOÁ khoá `capabilities.batch_infer` khỏi mọi engine ASR vì ĐO ĐƯỢC là KHÔNG mã nào trong sản phẩm đọc nó (grep toàn repo chỉ ra một fixture test): hai entry khác nhau ở khoá đó nhưng cùng `batch_size: 8` cho ra transcript GIỐNG NHAU đến sáu chữ số, nên nó là một khai báo nói dối về khả năng. Một nguồn sự thật duy nhất, không hai.",
   "_ghi_chu_term_placeholder": "`term_placeholder` = engine giữ token `ZXQ{n}` nguyên vẹn để bản dịch thuật ngữ lấy từ hàng glossary thay vì do model chọn (`app/domain/term_placeholder.py`, người đọc là `TranslateHandler._placeholder_terms`). `name_patch` = được phép vá tên riêng nghe nhầm trong chữ NGUỒN bằng caption OCR (`experiments/accuracy_pipelines/name_patch.py::name_patch_allowed`, người đọc là `patch_transcript` và CLI `scripts/patch_names_from_ocr.py`). CẢ HAI chỉ khai cho `hy-mt-1.5-7b`, và đó là DỮ LIỆU ĐO ĐƯỢC chứ không phải sở thích: đo qua adapter thật, `ZXQ{n}` sống sót 6/6 trong lô 7 câu; còn bản vá tên đo trên `opus-mt` làm 3 trong 7 câu TỆ ĐI. Engine không khai ⇒ không bật (mặc định), nên không có nhánh nào được kích hoạt bằng cách thiếu cấu hình.",
   "asr": [
     {
@@ -66,7 +66,7 @@
       "model_ref": "Helsinki-NLP/opus-mt-zh-vi",
       "vram_mb": 0,
       "langs": ["zh", "en"],
-      "capabilities": { "glossary_prompt": false, "glossary_patch": false, "chimera": false, "batch_json": false },
+      "capabilities": { "glossary_prompt": false, "glossary_patch": false, "chimera": false },
       "opts": {}
     },
     {
@@ -76,7 +76,7 @@
       "model_ref": "qwen2.5:3b-instruct-q4_K_M",
       "vram_mb": 2500,
       "langs": ["zh", "en"],
-      "capabilities": { "glossary_prompt": true, "glossary_patch": false, "chimera": false, "batch_json": true },
+      "capabilities": { "glossary_prompt": true, "glossary_patch": false, "chimera": false },
       "opts": {}
     },
     {
@@ -86,7 +86,7 @@
       "model_ref": "qwen2.5:7b-instruct-q4_K_M",
       "vram_mb": 5200,
       "langs": ["zh", "en"],
-      "capabilities": { "glossary_prompt": true, "glossary_patch": false, "chimera": false, "batch_json": true },
+      "capabilities": { "glossary_prompt": true, "glossary_patch": false, "chimera": false },
       "opts": {}
     },
     {
@@ -96,7 +96,7 @@
       "model_ref": "hy-mt1.5-7b:q4_K_M",
       "vram_mb": 5200,
       "langs": ["zh", "en"],
-      "capabilities": { "glossary_prompt": false, "glossary_patch": true, "chimera": true, "batch_json": true, "term_placeholder": true, "name_patch": true, "echo_retry": true, "echo_guard": true, "max_items_per_call": 1 },
+      "capabilities": { "glossary_prompt": false, "glossary_patch": true, "chimera": true, "term_placeholder": true, "name_patch": true, "echo_retry": true, "echo_guard": true, "max_items_per_call": 1 },
       "opts": {}
     }
   ],
