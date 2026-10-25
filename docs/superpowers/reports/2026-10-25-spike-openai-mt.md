@@ -1,72 +1,84 @@
 # Spike: dịch qua một endpoint OpenAI-compatible (không phải đường ship)
 
-**Câu hỏi.** Cổng kiểu `whalegate` (biến phiên `chat.deepseek.com` thành
-`/v1/chat/completions`) hoặc một API chính thức có dùng được làm **engine dịch** của
-`phu-de-lab` không — cụ thể: nó có giữ được **hợp đồng JSON** (đúng số mục, đúng `id`,
-không rỗng) mà đường dịch đang dựa vào, và giá phải trả là gì?
+**Câu hỏi.** Một endpoint `/v1/chat/completions` — cổng kiểu `whalegate` (biến phiên
+`chat.deepseek.com` thành API) hoặc API chính thức — có giữ được **hợp đồng đầu ra** của
+đường dịch (đúng số mục, đúng `id`, không rỗng) không, và giá phải trả là gì?
 
-**Cách đo.** `backend/scripts/spike_openai_mt.py` dựng một engine tối thiểu nói giao thức
-OpenAI và cắm vào **`TranslateHandler` của sản phẩm** (cùng batching, cùng
-`parse_batch_response`, cùng retry alignment, cùng QA), với `engine_capabilities={}` — tức
-engine **không** khai `echo_guard`/`term_placeholder`/`name_patch`. Không sửa
-`registry.json`, không đổi `default_mt`, không thêm capability nào.
+**Cách đo.** Adapter `app/adapters/mt/openai_chat_mt.py` (mã sản phẩm, chưa khai trong
+`registry.json`) cắm vào **`TranslateHandler` của sản phẩm** — cùng batching, cùng retry
+alignment, cùng QA — với `engine_capabilities={}`, tức engine **không** khai `echo_guard`/
+`term_placeholder`/`name_patch`. Driver: `scripts/spike_openai_mt.py`. Không sửa
+`registry.json`, không đổi `default_mt`.
 
-**Đã chạy trên cái gì.** Chưa có gateway: `whalegate` **không được cài** (`~/.whalegate`
-không tồn tại, cổng 8790 không mở) và **không có API key** nào trong môi trường. Nên phép
-đo chạy trên endpoint OpenAI-compatible **có sẵn** — Ollama `http://127.0.0.1:11434/v1`,
-model `hy-mt1.5-7b:q4_K_M`, cùng clip 115 đoạn, cùng 5 thuật ngữ, cùng lô 30. Đây là
-**cùng giao thức** mà gateway nói, nên kết quả nói về giao thức, không nói về DeepSeek.
+**Chạy trên cái gì.** Chưa có gateway: `whalegate` **không được cài** (`~/.whalegate` không
+tồn tại, cổng 8790 không mở) và **không có API key** nào trong môi trường. Nên phép đo
+chạy trên endpoint OpenAI-compatible **có sẵn** — Ollama `http://127.0.0.1:11434/v1`, model
+`hy-mt1.5-7b:q4_K_M`, cùng clip 115 đoạn, cùng 5 thuật ngữ. Đây là **cùng giao thức** mà
+gateway nói, nên kết quả nói về giao thức, **không** nói về DeepSeek.
 
-| lượt | `json_mode` | lời gọi | lỗi hợp đồng | nhận được | thời gian | trạng thái |
-|---|---|---|---|---|---|---|
-| `ollama-v1-hy-mt-b30` | không gửi `response_format` | 33 | **5** | 30/115 | 55,04 s | `failed` |
-| `ollama-v1-hy-mt-b30-jsonmode` | `response_format: json_object` | 2 | 0 | 30/115 | 10,67 s | `failed` (HTTP 500) |
+| hợp đồng | lô | lời gọi | lỗi | nhận được | giây | chữ Hán còn | echo | thuật ngữ |
+|---|---|---|---|---|---|---|---|---|
+| `json` | 30 | 32 | 14 (`other`) | **0/115** `failed` | 49,11 | – | – | – |
+| `json` | 30 (bản đầu, engine trong script) | 33 | 5 (`other`) | 30/115 `failed` | 55,04 | 175 | 29 | 0/2 |
+| `lines` | 30 | 67 | 5 (`alignment`) | **115/115** `done` | 99,34 | 0 | 0 | 6/7 |
+| `lines` | 15 | 25 | 3 (`alignment`) | **115/115** `done` | **59,09** | 0 | 0 | **7/7** |
 
-Artifact: `data/experiments/accuracy-pipelines/20261025-spike-openai-mt/{ollama-v1-hy-mt-b30,
-ollama-v1-hy-mt-b30-jsonmode}.json` (mỗi lời gọi một hàng trong `calls[]`, kèm
-`response_head` của lần hỏng).
+Artifact: `data/experiments/accuracy-pipelines/20261025-spike-openai-mt/` (mỗi lời gọi một
+hàng trong `calls[]`, có `kind` = `alignment` / `http` / `other`).
 
-## Phát hiện: hợp đồng JSON là của **Ollama**, không phải của model
+## 1. Hợp đồng JSON là của **Ollama**, không phải của model
 
 Đường native (`/api/chat` + `format: "json"`) chưa từng hỏng JSON trong suốt các lượt đo
-echo, và tài liệu vẫn ngầm hiểu đó là "model làm đúng". Qua `/v1/chat/completions` thì
-model trả JSON **hỏng cú pháp** ngay:
+echo. Qua `/v1` (không có `format: "json"`) thì model 7B viết **sai cú pháp** ngay: mất dấu
+phẩy giữa hai mục, `{" translations"` thừa dấu cách, `"text", "..."` thay vì `"text": "..."`,
+và có lần `Unterminated string`. Hỏng ở lô 30 **và** ở lô 1 (3/30 lời gọi). Hai lượt `json`
+đều kết thúc `failed` với 0–30/115 đoạn.
 
-- lô 30, lần 1: `Expecting ',' delimiter: line 1 column 1001` — mất dấu phẩy giữa hai mục;
-- lô 30, lần 2: `{" translations": ...` (thừa dấu cách) và một mục dùng `"text", "Bản dịch"`
-  thay vì `"text": "Bản dịch"`;
-- **cỡ 1**: vẫn hỏng — 3 trong 30 lời gọi một mục trả JSON sai cấu trúc
-  (`{"translations": [{"i": 30, "text": "..."}}]`, thừa một dấu ngoặc).
+Ràng buộc decode theo grammar của Ollama là thứ giữ hợp đồng. Cổng web không có nó, và
+README của `whalegate` ghi rõ `temperature`/`top_p`/`max_tokens`/`stop`/`response_format`
+**không có tương đương** — nên cổng nằm đúng chỗ của lượt `json` ở trên.
 
-Tức ràng buộc decode theo grammar của Ollama mới là thứ giữ hợp đồng; bỏ nó đi thì model
-7B viết sai cú pháp ở **cả lô 30 lẫn lô 1**. Một gateway web không có grammar, không nhận
-`response_format` (README của `whalegate` ghi rõ: các tham số sampling **không có tương
-đương** trên web), nên nó ở đúng vị trí của lượt `json_mode: none` — hỏng hợp đồng.
+## 2. Đổi hợp đồng sang `lines`: hỏng theo kiểu KHÁC, và kiểu đó thì cứu được
 
-Lượt có `response_format` sống được lời gọi đầu (30/115 đoạn, 0 lỗi hợp đồng) rồi chết ở
-lời gọi thứ hai: HTTP 500 `prediction aborted, token repeat limit reached`. Đây là chế độ
-hỏng **đã biết** của `hy-mt` ở lô 30 (native cũng có nhánh "model lặp token, Ollama ngắt"),
-không phải bằng chứng `response_format` bị từ chối — nhưng nó cho thấy kể cả khi hợp đồng
-JSON được giữ, endpoint này vẫn chết giữa clip.
+Hợp đồng `lines` (mỗi dòng `<i>` TAB `<bản dịch>`) không có ngoặc, không có dấu phẩy, nên
+những lỗi trên không tồn tại. Cái còn lại là **lệch số dòng**: model trả 29/30 hoặc 2/30.
+`parse_lines_response` ném `AlignmentProblem`, handler thử lại rồi hạ cấp từng mục — và
+clip đi hết: **115/115 `done`**, 0 chữ Hán, **0 echo**, thuật ngữ 6/7 (lô 30) và 7/7 (lô 15).
 
-## Phát hiện phụ: harness đo đúng hiện tượng cũ
+Đây là điểm quan trọng nhất của spike, và nó là một **phẩm chất**, không phải một sự tiện:
 
-Không bật `echo_guard`, lượt lô 30 chép nguyên văn **29/115 đoạn** (175 chữ Hán) — khớp
-hiện tượng đã đo trên đường native (29/30 ở lô đầu). Nên script này không phải một dụng cụ
-mới cần tin: nó tái tạo đúng lỗi mà cả báo cáo echo đang nói tới.
+* hợp đồng JSON ở lô 30 hỏng **im lặng** — model **chép nguyên văn** cả lô (29/115 đoạn,
+  175 chữ Hán) trong khi trạng thái vẫn có thể là `done`; phải có `echo_guard` mới bắt được;
+* hợp đồng `lines` hỏng **ồn** — thiếu dòng là `AlignmentProblem`, handler thấy ngay.
+
+Vì vậy "không đo được" ồn hơn "đo sai": cùng một model, cùng lô, hai hợp đồng cho hai kiểu
+thất bại, và chỉ một kiểu tự báo.
+
+## 3. Giá
+
+`lines` lô 15: **59,09 s / 25 lời gọi**, so với đường native lô 15 có guard (57,72–95,42 s,
+37 lời gọi) và lô 30 có guard (77,86–118,57 s, 93–96 lời gọi) — tức ngang lượt native tốt
+nhất, ít lời gọi hơn, và **không cần guard** vì không có bản chép nào.
+
+Lô 30 rẻ hơn về số lời gọi lý thuyết nhưng đắt hơn trên thực tế (99,34 s / 67) vì 3 lô hỏng
+alignment rồi hạ cấp: **cỡ lô 15 là điểm làm việc** của hợp đồng này trên clip này.
+
+## 4. Harness đo đúng hiện tượng cũ
+
+Lượt `json` không guard chép **29/115 đoạn** — khớp hiện tượng đã đo trên đường native
+(29/30 ở lô đầu). Nên dụng cụ này không phải một dụng cụ mới cần tin: nó tái tạo đúng lỗi
+mà cả báo cáo echo đang nói tới.
 
 ## Kết luận
 
-**Không dùng được như một engine thay thế trực tiếp.** Ba yêu cầu tối thiểu nếu muốn đi
-tiếp, và cả ba đều là việc mới chứ không phải đổi `base_url`:
-
-1. **Bỏ hợp đồng JSON** ở đầu ra: dùng giao thức dễ tha hơn (mỗi đoạn một dòng, tiền tố
-   `id`, hoặc parser khoan dung như DSML của `whalegate`) — nếu không, lô 30 sẽ hỏng.
-2. **Vẫn phải giữ `echo_guard`**: cỡ 1 cũng có thể chép (đo được ở lượt `v3`), và một
-   gateway không có grammar cũng không có guard.
-3. Chấp nhận **không tái lập được** (không sampling, hành vi web đổi) và **rủi ro ToS**.
-
-Đường đúng vẫn là: cloud thì **API chính thức** (có `response_format` thật, có SLA) — cùng
-script này đo được bằng một dòng `--base-url ... --api-key-env ...`; còn offline thì
-**hybrid** đã có spec. Spike này **không** đo gì về DeepSeek web, và không được trích dẫn
-như thể đã đo.
+* **Adapter OpenAI-compatible là khả thi** và đã có trong mã (`openai_chat_mt.py`,
+  `parse_lines_response`, 41 bài ghim). Nó **chưa** được khai trong `registry.json`: chưa có
+  số đo trên endpoint thật (gateway hay API chính thức), và một engine chưa đo thì chưa khai.
+* **Hợp đồng `lines` là đường đi cho endpoint không có grammar.** Không cần bỏ JSON cho
+  đường Ollama (đường đó đang tốt) — mỗi engine khai hợp đồng của nó.
+* **`echo_guard` vẫn phải giữ** cho engine dùng hợp đồng `json`; với `lines` thì trên clip
+  này không cần, nhưng đó là kết luận của **một clip**, không phải một bảo đảm.
+* Gateway `whalegate` vẫn **không** phải đường cho sản phẩm: ToS, không tái lập được, và
+  `response_format` không tồn tại. Nếu cần chất lượng cloud thì API chính thức, cùng script
+  này, một dòng `--base-url/--api-key-env`.
+* Spike này **không** đo gì về DeepSeek web, và không được trích dẫn như thể đã đo.

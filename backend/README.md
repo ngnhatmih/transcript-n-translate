@@ -63,36 +63,47 @@ GPU. Nó tự ép UTF-8 cho stdout (console Windows mặc định cp1252, còn s
 tiếng Trung/Việt) và tự đặt cache model trước khi nạp `faster_whisper`.
 
 Con số nền của lần chạy mặc định, đo sau khi xoá `__pycache__` (lệnh ở mục
-"Kiểm thử" trên, chạy từ trong `backend\`). Thứ có nghĩa là **1206 / 15**, không
+"Kiểm thử" trên, chạy từ trong `backend\`). Thứ có nghĩa là **1247 / 15**, không
 phải số giây — thời gian trôi giữa các lần chạy (đã thấy 24,00–30,94 s) còn con
 số bài thì không:
 
 ```
-1206 passed, 15 deselected, 1 warning
+1247 passed, 15 deselected, 1 warning
 ```
 
 Hai con số đó là SỐ BÀI ĐƯỢC CHỌN, và chúng khớp với số mà `--collect-only` báo
-(`1206/1221`, 15 bài `live` bị bỏ;
+(`1247/1262`, 15 bài `live` bị bỏ;
 `tests/test_backend_readme.py::test_readme_baseline_matches_the_tests_actually_
 collected` đối chiếu mỗi lần chạy).
 
-Máy này **CÓ** `ffmpeg 8.1.1` + `ffprobe` trên PATH (đã đo), nên `1206/15` ở trên
+Máy này **CÓ** `ffmpeg 8.1.1` + `ffprobe` trên PATH (đã đo), nên `1247/15` ở trên
 là số THẬT của nó. Máy **không có** `ffmpeg`/`ffprobe` cho một kết quả KHÁC: cả
 `tests/test_ingest.py` bị `skipif` ở cấp module — **9** bài cùng skip một lượt —
-nên dòng tổng kết của máy đó là **`1197 passed, 9 skipped, 15 deselected`** (=
-`1206 − 9`; con số này TỪNG ghi `978`, tức một baseline rất cũ, và nó lệch phép
+nên dòng tổng kết của máy đó là **`1238 passed, 9 skipped, 15 deselected`** (=
+`1247 − 9`; con số này TỪNG ghi `978`, tức một baseline rất cũ, và nó lệch phép
 trừ của chính khối nền ngay trên nó). Đó là
 con số của máy thiếu ffmpeg, **không phải** con số máy này từng in ra; đừng chép
 nó vào khối nền ở trên, và đừng "sửa" số nền xuống chỉ vì thiếu ffmpeg.
 
 ⚠️ Con số `856` ở đây TỪNG không khớp phép trừ của chính nó: `865 − 9 = 856`, tức
 nó là số của lượt TRƯỚC `V1` (+3 bài) còn sót lại. Phép trừ của khối nền hiện tại
-là `1206 − 9` = `1197`.
+là `1247 − 9` = `1238`.
 
 (Con số này từng bị ghi là `798`: bài `test_a_failed_translation_leaves_the_
 transcript_reviewed` được thêm ở `a428334` — **cùng commit đã sửa tệp này** — mà
 số nền không được bump. Nó tồn tại để phát hiện TRÔI, nên một số sai làm mọi lần
 chạy báo dương tính giả.
+
+Lần bump này, `1206/15` → `1247/15` (**+41 bài**), do **hợp đồng đầu ra `lines`** và
+adapter OpenAI-compatible. `tests/test_mt_lines_contract.py` (**+24**) ghim parser dòng:
+đủ số dòng, đúng tập `id`, id trùng, mục có id mà không có bản dịch, và — quan trọng
+nhất — một dòng KHÔNG mang id nằm GIỮA khối bản dịch là LỖI chứ không phải lời dẫn bị bỏ
+qua (model xuống dòng giữa câu thì bỏ dòng sau là mất nửa câu mà số dòng vẫn "đủ").
+`tests/test_mt_openai_chat.py` (**+17**) ghim thân yêu cầu của adapter: `temperature`,
+`max_tokens`, `response_format` **không** được gửi trừ khi có yêu cầu rõ ràng (một cổng
+web không có tương đương cho chúng), khoá API chỉ đi trong header, và lỗi HTTP phải ném
+`HTTPStatusError` chứ không phải `JSONDecodeError`. Số đo của hai hợp đồng nằm trong
+`docs/superpowers/reports/2026-10-25-spike-openai-mt.md`.
 
 Lần bump gần nhất, `1202/15` → `1206/15` (**+4 bài**), do sửa lỗi **`--batches`
 bị `--configs` nuốt**: `main()` của `scripts/smoke_echo_guard.py` tự gán cứng lô

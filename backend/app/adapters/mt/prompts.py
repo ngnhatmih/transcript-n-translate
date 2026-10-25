@@ -171,6 +171,24 @@ def experiment_prompt_style(engine_id: str | None) -> str:
 #: nghĩa của V3 — nếu biến thể tự viết lại dòng này thì nó đã đổi hai thứ).
 _FORMAT_LINE = 'Định dạng: {"translations": [{"i": <số>, "text": "<bản dịch>"}]}'
 
+#: Dòng hợp đồng ĐẦU RA của kiểu `lines` (xem `parse_lines_response`).
+#:
+#: Vì sao cần một hợp đồng thứ hai: hợp đồng JSON của dòng trên là thứ **Ollama**
+#: bảo đảm bằng grammar-constrained decoding (`format: "json"`), KHÔNG phải thứ
+#: model 7B tự làm được. Đo được: cùng `hy-mt`, cùng clip, cùng lô 30, qua một
+#: endpoint OpenAI-compatible (không có grammar) thì model trả JSON hỏng cú pháp —
+#: mất dấu phẩy giữa hai mục, `{" translations"` thừa dấu cách, một mục viết
+#: `"text", "..."` thay vì `"text": "..."` — và hỏng cả ở lô 1 (3/30 lời gọi).
+#: Artifact: `data/experiments/accuracy-pipelines/20261025-spike-openai-mt/`.
+#:
+#: Kiểu dòng không có ngoặc, không có dấu phẩy, nên những lỗi đó không tồn tại;
+#: lỗi còn lại là lệch SỐ DÒNG, và nó bị `parse_lines_response` ném thành
+#: `AlignmentProblem` — tức vẫn ồn, không âm thầm cắt cụt.
+_FORMAT_LINE_LINES = (
+    "Định dạng: mỗi mục MỘT dòng, bắt đầu bằng số `i` của mục, sau đó là một dấu "
+    "TAB, rồi bản dịch. Không thêm chữ nào khác."
+)
+
 #: Câu CẤM CHÉP NGUYÊN VĂN (vá lỗi echo `p1` -> `p2`, xem `PROMPT_VERSION`).
 #: Hàm chứ không phải hằng vì nó mang `target_lang`; `system_prompt` và V1 dùng
 #: CÙNG một chuỗi, nên câu này không thể trôi thành hai dị bản.
@@ -181,12 +199,28 @@ def _no_copy_lines(target_lang: str) -> list[str]:
     ]
 
 
-def _role_lines(target_lang: str) -> list[str]:
-    """Ba dòng VAI + quy tắc, phần chung của mọi style."""
+def _role_lines(target_lang: str, *, contract: str = "json") -> list[str]:
+    """Ba dòng VAI + quy tắc, phần chung của mọi style.
+
+    `contract` chọn câu hợp đồng ĐẦU RA: `json` (mặc định — byte-identical với
+    trước lượt đo, có test ghim) hay `lines`. Hai câu này KHÔNG được cùng xuất
+    hiện: một prompt vừa đòi JSON vừa đòi dòng thì model chọn cái nào cũng là
+    prompt chưa đo.
+
+    Giá trị lạ NÉM, không rơi về mặc định: một engine khai hợp đồng không tồn tại
+    mà vẫn chạy sẽ sinh ra artifact mang nhãn sai, đúng loại lỗi `p1`/`p2` từng
+    làm cả một bảng kết luận phải viết lại.
+    """
+    if contract == "json":
+        format_line = "Trả về DUY NHẤT một đối tượng JSON, không thêm chữ nào khác."
+    elif contract == "lines":
+        format_line = "Trả về DUY NHẤT các dòng bản dịch, không thêm chữ nào khác."
+    else:
+        raise ValueError(f"hợp đồng đầu ra lạ: {contract!r} (chỉ nhận 'json', 'lines')")
     return [
         f"Bạn là dịch giả chuyên nghiệp sang {target_lang}.",
         "Dịch sát nghĩa, giữ nguyên văn phong và mức trang trọng của bản gốc.",
-        "Trả về DUY NHẤT một đối tượng JSON, không thêm chữ nào khác.",
+        format_line,
     ]
 
 
@@ -256,6 +290,21 @@ def system_prompt(glossary: list[Term], *, target_lang: str,
     return "\n".join(lines)
 
 
+def system_prompt_lines(glossary: list[Term], *, target_lang: str) -> str:
+    """`system_prompt` nhưng cho hợp đồng `lines`: vai + glossary + cấm chép.
+
+    Không nhận `engine_id` và không đi qua `experiment_prompt_style`: các style
+    `V0..V3` đều được đo TRÊN hợp đồng JSON, nên cho chúng chạm vào prompt dòng
+    là trộn hai biến số vào một phép đo. Engine dùng hợp đồng này có đúng MỘT
+    prompt, và đó là điều kiện để con số của nó so được với nhau.
+    """
+    lines = _role_lines(target_lang, contract="lines")
+    if glossary:
+        lines.extend(_glossary_lines(glossary))
+    lines.extend(_no_copy_lines(target_lang))
+    return "\n".join(lines)
+
+
 
 def user_prompt(batch: list[Segment], *, source_lang: str, target_lang: str,
                 engine_id: str | None = None) -> str:
@@ -294,6 +343,23 @@ def user_prompt(batch: list[Segment], *, source_lang: str, target_lang: str,
     lines.append(_FORMAT_LINE)
     lines.append(f"Dữ liệu: {json.dumps(items, ensure_ascii=False)}")
     return "\n".join(lines)
+
+
+def user_prompt_lines(batch: list[Segment], *, source_lang: str,
+                      target_lang: str) -> str:
+    """Lượt người dùng cho hợp đồng `lines`: khối dữ liệu cũng bằng dòng.
+
+    Khối dữ liệu dùng CÙNG dấu TAB mà đầu ra phải dùng — một ví dụ sống ngay
+    trong prompt, rẻ hơn mọi lời giải thích về định dạng, và không đòi model suy
+    ra hình dạng đầu ra từ một mảng JSON (đó chính là chỗ nó chép lại nguồn).
+    """
+    head = [
+        f"Dịch từng mục từ {source_lang} sang {target_lang}.",
+        "Giữ nguyên số thứ tự của từng mục và trả đúng bấy nhiêu dòng.",
+        _FORMAT_LINE_LINES,
+    ]
+    payload = "\n".join(f"{s.i}\t{s.text}" for s in batch)
+    return "\n".join(head) + f"\nDữ liệu:\n{payload}"
 
 
 #: Model thật hay bọc JSON trong ```json ... ``` — đây là failure mode phổ biến
@@ -405,6 +471,70 @@ def parse_batch_response(raw: str, batch: list[Segment]) -> list[Segment]:
     # field và nuốt `emotion`, `events`, `avg_logprob`, `no_speech_prob`,
     # `suspect`, `t`, `qa` (đúng lỗi đã bị bắt ở review Task 7). Dịch chỉ được
     # đổi `text`; mọi thứ khác — kể cả `words` — là dữ liệu của bản gốc.
+    return [replace(s, text=got[s.i]) for s in batch]
+
+
+#: Đầu một dòng của hợp đồng `lines`: số `i`, có thể bọc trong `[]`, rồi dấu ngăn
+#: cách. Nới ĐÚNG chỗ model hay vi phạm (`[12]`, `12.`, `12:`, `12 -`, thụt đầu
+#: dòng), nhưng không nới chỗ quyết định alignment.
+_LINE_HEAD = re.compile(r"^\s*\[?\s*(\d{1,6})\s*\]?\s*")
+
+#: Dấu ngăn cách được nhận sau `i`. TAB đứng đầu vì đó là thứ prompt yêu cầu;
+#: phần còn lại là những gì model thật đã trả thay cho TAB.
+_LINE_SEPARATORS = " \t|:=.->\u2013\u2014"
+
+
+def parse_lines_response(raw: str, batch: list[Segment]) -> list[Segment]:
+    """Ghép bản dịch từ hợp đồng `lines` — một dòng `<i>` TAB `<bản dịch>` mỗi mục.
+
+    Vì sao có hàm này: xem `_FORMAT_LINE_LINES`. Tóm tắt: hợp đồng JSON được
+    **Ollama** bảo đảm bằng grammar, nên qua một endpoint không có grammar thì
+    model viết hỏng cú pháp. Kiểu dòng không có ngoặc và dấu phẩy, nên những lỗi
+    đó không tồn tại.
+
+    Ba bất biến, giống hệt `parse_batch_response` — và đây là lý do hàm này KHÔNG
+    được nới hơn:
+    * **Đủ số dòng** — thiếu một dòng là `AlignmentProblem`, không bao giờ trả list
+      ngắn hơn đầu vào (mất một dòng phụ đề mà không có triệu chứng là đúng kiểu
+      thất bại `AlignmentProblem` sinh ra để chặn);
+    * **Đúng tập id** — id lạ hay id thiếu đều ném;
+    * **Không nuốt chữ** — một dòng KHÔNG mang id nằm giữa khối bản dịch là lỗi,
+      không phải lời dẫn: model xuống dòng giữa một câu mà ta lặng lẽ bỏ dòng sau
+      thì bản dịch mất nửa câu mà số dòng vẫn "đủ".
+
+    Lời dẫn TRƯỚC dòng đầu tiên (ví dụ "Dưới đây là bản dịch:") được bỏ qua — đó
+    là thứ model hay thêm và nó không mang thông tin gì.
+    """
+    text = _FENCE.sub("", raw.strip()).strip()
+    got: dict[int, str] = {}
+    order: list[int] = []
+    started = False
+    for line in text.splitlines():
+        if not line.strip():
+            continue
+        match = _LINE_HEAD.match(line)
+        if match is None:
+            if started:
+                raise ValueError(
+                    f"dòng không mang id nằm giữa khối bản dịch: {line!r}")
+            continue                      # lời dẫn trước khối: bỏ qua
+        started = True
+        index = int(match.group(1))
+        body = line[match.end():].lstrip(_LINE_SEPARATORS).strip()
+        if not body:
+            raise ValueError(f"mục {index} có id nhưng không có bản dịch: {line!r}")
+        if index in got:
+            raise ValueError(f"id {index} xuất hiện hai lần trong đầu ra")
+        got[index] = body
+        order.append(index)
+
+    expected_ids = [s.i for s in batch]
+    if len(order) != len(batch):
+        raise AlignmentProblem(expected_ids, sorted(got),
+                               f"engine trả {len(order)} dòng, cần {len(batch)}")
+    if sorted(got) != sorted(expected_ids):
+        raise AlignmentProblem(expected_ids, sorted(got),
+                               f"engine trả id {sorted(got)}, cần {sorted(expected_ids)}")
     return [replace(s, text=got[s.i]) for s in batch]
 
 
