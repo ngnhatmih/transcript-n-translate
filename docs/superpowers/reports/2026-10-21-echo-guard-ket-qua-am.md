@@ -23,20 +23,24 @@ không khai thì đi đúng đường cũ, từng byte.
 
 Kết quả: **0 echo ở lô 30 và lô 15**. Cái giá là thời gian:
 
-| cấu hình | thời gian | so với `opus-mt` (9,75 s) |
-|---|---|---|
-| lô 30 + guard | 78,91 – 118,57 s (sáu lượt) | 8,1 – 12,2× |
-| lô 15 + guard | 57,72 – 95,42 s (ba lượt) | 5,9 – 9,8× |
+| cấu hình | lượt | thời gian | lời gọi | so với `opus-mt` (9,75 s) |
+|---|---|---|---|---|
+| lô 30, prompt đang ship | 10 | 77,86 – 118,57 s | 93 – 96 | 8,0 – 12,2× |
+| lô 30, prompt thử `v2` | 6 | 48,03 – 103,91 s | 4 – 67 | 4,9 – 10,7× |
+| lô 15, prompt đang ship | 4 | 57,72 – 95,42 s | 37 | 5,9 – 9,8× |
+| lô 8, prompt đang ship | 1 | 61,00 s | 32 | 6,3× |
+| lô 30 chia đôi, prompt đang ship | 2 | 88,67 · 95,72 s | 24 · 25 | 9,1 – 9,8× |
 
-Thời gian phụ thuộc **số lời gọi một mục**, cộng nhiễu giữa các lượt: cả sáu lượt lô 30
-đều có đúng 89 lời gọi một mục (89 + 0, 89 + 0, 59 + 30, 59 + 30 và hai lượt 89 + 0), vậy
-mà thời gian chạy từ 79 đến 119 s. Hai lượt chậm nhất chạy khi máy còn làm việc khác, nên
-biên trên phản ánh cả tải hệ thống — đại lượng ổn định giữa các lượt là **số lời gọi**, 
-không phải số giây. Lô 15 có ba lượt (57,72 · 92,17 · 95,42 s) nên **không nhanh hơn lô
-30**: hai khoảng chồng lấn gần hết, và lượt 57,72 s là ngoại lệ. Khác biệt thật giữa hai cỡ
-nằm ở số lời gọi: lô 15 có ít lời gọi dịch lại hơn (29 so với 59–89) nhưng nhiều lời gọi
-cấp lô hơn (8 so với 4). Vì vậy `default_mt` vẫn là `opus-mt`; nếu dùng `hy-mt` thì chọn cỡ
-lô theo số lời gọi muốn chấp nhận, không phải theo niềm tin rằng lô nhỏ nhanh hơn.
+Dưới prompt đang ship, **cả mười lượt lô 30 đều bị chép ít nhất một lô**, nên không lượt nào
+dưới 77,86 s. Lượt lô 30 sạch duy nhất đo được (48,03 s, 4 lời gọi) dùng prompt thử `v2` và
+thừa hưởng model **đã nạp sẵn từ ngoài tiến trình**, nên nó là cận dưới lạc quan. Lô 15 rẻ
+nhất là 57,72 s, thấp hơn 77,86 s, nhưng bốn lượt lô 15 chia thành hai cặp (57,72 · 59,09 s
+đầu phiên, 92,17 · 95,42 s cuối phiên), nên chênh lệch không quy được cho cỡ lô; một lượt lô
+15 vẫn gọi 37 lời gọi, so với 4 của lượt lô 30 sạch. Số lời gọi là đại lượng so sánh được:
+lượt sạch 4 lời gọi, lượt ba lô bị chép 93–96 — nhưng mười lượt cùng 93–96 lời gọi vẫn chênh
+**77,86 – 118,57 s**, nên số giây thừa hưởng cả tải máy. Vì vậy `default_mt` vẫn là `opus-mt`;
+nếu dùng `hy-mt` thì chọn cỡ lô theo số lời gọi muốn chấp nhận, không phải theo niềm tin rằng
+lô nhỏ nhanh hơn.
 
 ## 3. Ba giả thuyết bị bác bỏ
 
@@ -50,56 +54,61 @@ lô theo số lời gọi muốn chấp nhận, không phải theo niềm tin r�
    25 lời gọi và 95,72 s (88,67 s ở lượt lặp), so với 93 lời gọi và 78,91 s ở đối chứng
    của **chính lượt chia đôi**, vì tổng số mục-lượt phải dịch là khoảng 250 thay vì 204
    (115 đoạn + 89 lần dịch lại), và mỗi lô bị chép vẫn tốn một lời gọi đầy đủ trước khi
-   bị bỏ. Con số 78,85 s ở mục 2 là của lượt đo guard riêng, không phải lượt này.
+   bị bỏ. Lượt 78,85 s ở bảng trên là lượt guard riêng, không phải lượt chia đôi.
 
 ## 4. Phát hiện chính
 
-Chép nguyên văn là thuộc tính của từng lời gọi: 19/23 lời gọi cỡ 30 bị chép, so với 8/29
-ở 15 mục, 0/1 ở 10 mục (đuôi clip của lượt lô 15), 1/2 ở 8 mục, 0/2 ở 4 mục và 0/7 ở lời
-gọi một mục. Các hàng cỡ nhỏ có n rất nhỏ, và nhiều lời gọi trong số đó chỉ phát sinh sau
-khi lô cha bị chép, nên bảng cho thấy xu hướng, không cho phép xếp thứ tự giữa các cỡ.
-Echo ở cỡ 15 không phải hiện tượng của lô đầu: lô thứ năm giữa lượt cũng chép 15/15, và cả
-hai lượt lặp lại giống hệt nhau từng dòng.
-Khi một lời gọi bị chép thì bị chép gần như toàn bộ: mọi lô bị chép ở cỡ 30 đều có số đoạn
-bị chép là **29/30 hoặc 30/30**; riêng lượt đối chứng là 89 trong 115 đoạn của clip. Con
-số "29/30" ban đầu thực chất là 30 trừ đoạn chỉ có số.
+**Chép là chuyện của cả lời gọi, và nó chép cả lô.** Mỗi lời gọi mang nhiều hơn một mục là
+một hàng trong `echo_by_batch` của driver. Dưới đây là **toàn bộ 93 hàng** của 18 lượt đi
+qua cổng (không chọn mẫu), tách theo prompt vì hai prompt trả lời hai câu hỏi khác nhau:
 
-`19/23` gộp **bảy lượt** (sáu lượt chạy thẳng lô 30 và lượt chia đôi), nên số lô bị chép
-và số lời gọi bị chép là hai phép đếm khác nhau, không phải mâu thuẫn. Cách phát biểu
-không phụ thuộc cách đếm, và nên dùng khi bảo vệ: **cả sáu lượt chạy thẳng lô 30 đều bị
-chép ở ít nhất hai lô đầy** (số lô bị chép mỗi lượt: 3, 2, 3, 2, 3, 3).
+| cỡ lời gọi | bị chép (prompt đang ship) | n | bị chép (prompt thử `v2`) | n |
+|---|---|---|---|---|
+| 30 | 23 | 31 | 3 | 21 |
+| 25 — luôn là đuôi clip | 0 | 8 | 0 | 5 |
+| 21 — đuôi clip | 0 | 1 | 0 | 1 |
+| 15 | 6 | 21 | — | — |
+| 10 — đuôi clip | 0 | 3 | — | — |
+| 4 — lô đầu của lượt D | 0 | 1 | 0 | 1 |
 
-| cỡ lời gọi | bị chép | n |
-|---|---|---|
-| 30 | 19 | 23 |
-| 25 | 0 | 6 — lời gọi đuôi của lượt chia đôi không có `attempts` |
-| 15 | 8 | 29 |
-| 10 | 0 | 1 |
-| 8 | 1 | 2 |
-| 4 | 0 | 2 |
-| 1 | 0 | 7 |
+Ở prompt đang ship: **23/31 lời gọi 30 mục bị chép** (74%), 6/21 ở 15 mục (29%), và **0/13**
+ở mọi cỡ còn lại — tám lời gọi 30 mục sạch duy nhất nằm gọn trong ba lượt (85,49 · 95,25 ·
+114,16 s). Cỡ 25 sạch **không** phải vì 25 nhỏ mà vì nó luôn là đuôi clip (30+30+30+25);
+một lô 25 mục nằm giữa clip chưa từng được đo (§6). Prompt `v2` (biến thể của lượt sưởi,
+không ship) chỉ chép 3/21 lời gọi 30 mục, nên gộp hai prompt vào một ô sẽ làm nhẹ đi hiện
+tượng ở prompt đang ship.
 
-Bỏ lượt `vram-sample` khỏi bảng thì cỡ 30 là **17/19** và kết luận không đổi — kết quả
-không phụ thuộc lượt đo có bản ghi mơ hồ. Cỡ 30 có 23 chứ không phải 24 là đúng số học
-của các lượt đó: một lượt có 94 lời gọi = 5 lời gọi cấp lô (bốn cỡ 30 gồm ba lô gốc và
-một lần gửi lại cả lô sau lệch alignment, cộng một lô cuối 25 mục) + 29 và 30 lời gọi dịch
-lại do echo + 30 lời gọi dịch lại do lệch alignment. Các bản ghi `echoed = 0` kèm 30 lời
-gọi một mục là **pha alignment**, không phải trường bị ghi sai: đó là lời gọi cỡ 30 thật
-và sạch. Cỡ 25 có 6 chứ không phải 7 vì lượt chia đôi có lời gọi đuôi 25 mục nhưng không
-lưu danh sách lần gọi.
+**Chép cả lô, không phải một tỉ lệ.** Không có hàng nào ở mức "chép một nửa": mọi lời gọi bị
+chép trả về **29/30 hoặc 30/30** (và 14/15 hoặc 15/15 ở lô 15). Đoạn không bị chép luôn là
+cùng một đoạn — đoạn 9, nguồn `2288`, chỉ có số nên không có chữ Hán. Vì vậy "29" không phải
+con số đặc biệt: nó là 30 trừ đúng đoạn không có chữ Hán.
 
-Bảng chỉ dùng mười artifact có bản ghi từng lời gọi và **chỉ đếm lời gọi cấp lô** (lô gốc,
-lần gửi lại, và lần chia); các lời gọi một mục do echo chỉ được tính khi bản ghi có danh
-sách (lượt chia đôi: 7). Vì vậy tổng `n = 70` **không phải** tổng số lời gọi của mười
-artifact, vốn là 696. Kết luận thực dụng: cỡ 30 không dùng được nếu thiếu guard; nếu dùng
-`hy-mt` thì lô 15 và lô 30 cho thời gian tương đương, khác nhau ở chỗ lô 15 có ít đoạn bị
-chép hơn mỗi lần (29 so với 59–89).
+**Vì vậy không có cỡ lô nào an toàn.** Cỡ 30 hỏng 74% lời gọi, cỡ 15 hỏng 29%, và cỡ 1 cũng
+không miễn nhiễm: một lượt (`v3`, 32,92 s) chết vì `EchoProblem` khi đoạn 7 **vẫn** là bản
+chép sau khi đã dịch riêng. Cổng không phụ thuộc cỡ lô vì thế.
+
+**Ba lượt không có bảng theo lô.** `20261019-echo-guard/` chạy trước khi driver ghi
+`echo_by_batch`, nên chúng chỉ đóng góp vào bảng chi phí. Riêng `batch-15.json` đo **57,72 s**
+có `batch_items = 15` — đúng là lô 15, 8 lời gọi cấp lô + 29 lần dịch lại = 37 lời gọi — nhưng
+nó **không** nằm trong bảng trên, vì bảng đó chỉ đếm hàng có thật trong artifact.
+
+**Hai lượt chia đôi cũng không nằm trong bảng.** Driver của chúng tắt cổng cho lô bị chép
+(chia thay vì dịch lại), nên cả 35 hàng đều ghi `echoed = 0` dù **cả ba** lô gốc thật sự bị
+chép (`tree_stats.copied_batches = 3`). Đếm chúng vào bảng sẽ báo "sạch" cho những lời gọi
+không sạch — đây là chỗ một bảng trộn hai dụng cụ đo sẽ sai mà không ai thấy.
+
+Kết luận thực dụng: cỡ 30 không dùng được nếu thiếu guard; nếu dùng `hy-mt` thì lô 15 và lô
+30 cho thời gian tương đương, khác nhau ở chỗ lô 15 có ít đoạn bị chép hơn mỗi lần (29 so
+với 59–89).
 
 ## 5. Bài học phương pháp
 
 **Kiểm tra đường cơ sở trước khi đặt mục tiêu.** Mục tiêu ban đầu là "kéo thời gian về
-khoảng 33 s", lấy từ một lượt chạy 32,89 s — nhưng đó chính là lượt **chép nguồn, không
-dịch gì**. Lượt sạch nhanh nhất đo được là 48,03 s. Mục tiêu bất khả ngay từ đầu.
+khoảng 33 s", lấy từ một lượt chạy 32,92 s — nhưng lượt đó **thất bại** (`EchoProblem` ở
+đoạn 7 sau khi hạ cấp alignment, **0 đoạn** được nhận), nên 32,92 s là thời gian của một lượt
+không cho ra sản phẩm nào. Lượt sạch nhanh nhất đo được là 48,03 s (prompt thử, model nạp
+sẵn), còn dưới prompt đang ship thì lượt lô 30 rẻ nhất là 77,86 s. Mục tiêu bất khả ngay từ
+đầu.
 
 **Số dẫn xuất phải tính lại từ nguồn, và nguồn phải đúng đơn vị đếm.** Ba con số xuất
 hiện trong quá trình viết đều sai cùng một kiểu: một con số mục-lượt (287) không tái lập
@@ -113,14 +122,27 @@ trước, rồi mới cộng.
 
 ## 6. Hướng phát triển
 
-**Hybrid.** `opus-mt` dịch cả lô (9,75 s); chỉ những đoạn bị QA gắn cờ (`lang:`, lệch
-glossary) mới chuyển sang `hy-mt` dịch riêng từng câu. Chi phí khi đó tỉ lệ với số đoạn
-bị gắn cờ thay vì cả clip, và `hy-mt` chỉ nhận lời gọi ngắn nên tránh hẳn chế độ chép
-theo lô. Chưa đo.
+**Hybrid.** `opus-mt` dịch cả clip (11,86 s); đoạn nào **chứa thuật ngữ đã duyệt** thì chuyển
+sang `hy-mt` dịch riêng từng câu. Trên clip: 7/115 đoạn (6,1%), 7 lời gọi một mục của `hy-mt`
+mất 5,23 s — tổng **17,09 s**, tức 1,4× `opus-mt` một mình và rẻ hơn **2,8×** so với lượt
+`hy-mt` cả lô nhanh nhất (48,03 s), **3,4–6,9×** so với các lượt còn lại (57,72–118,57 s).
+Cả 7 câu ra đúng thuật ngữ (0/7 → **7/7**). Điều kiện kích hoạt phải là **sự có mặt của thuật
+ngữ**, không phải một cờ QA: `missing_term` chỉ nổi lên khi phép dò thuật ngữ được bật, còn
+`cps:`/`length:` là lỗi hình dạng nên không được dùng làm điều kiện.
 
-**Một ứng viên rẻ chưa bị loại:** chia lô 25/5. Mọi lời gọi 25 mục đo được đều sạch,
-nhưng cả hai đều là đuôi clip nên chưa kết luận được; cần một lượt đo với lô 25 mục nằm
-giữa clip.
+**`fw-large-v3` không phải mặc định, dù CER trên dev thấp hơn.** Cùng clip, nó cần **3,2 GB
+VRAM** so với 1,6 GB của turbo và **~18 s** so với ~12 s. Máy 8 GB chỉ chừa 934 MiB cho MT,
+nên `default_asr` vẫn là `fw-large-v3-turbo`; đổi mặc định là một lượt đo mới, để sau.
+
+**`name_patch` chỉ chạy được qua đường hybrid.** Sửa tên riêng từ OCR trước khi dịch chỉ có
+tác dụng khi engine nhận capability đó — hiện chỉ `hy-mt` khai, còn `default_mt` là `opus-mt`.
+Ép chạy trên `opus-mt` với 7 câu thử: **0 câu** ra thuật ngữ trong glossary và phần lớn câu
+**xấu đi** (`福州燕台山` được sửa đúng thành `烟台山` nhưng bản dịch ra "thị trường chứng
+khoán, tiểu bang Virginia"). Vì vậy nó chưa bật.
+
+**Một ứng viên rẻ chưa bị loại:** chia lô 25/5. Cả **13** lời gọi 25 mục đo được đều sạch,
+nhưng tất cả đều là đuôi clip nên chưa kết luận được; cần một lượt đo với lô 25 mục nằm giữa
+clip.
 
 Mọi đòn bẩy rẻ khác đã bị loại bằng số; hybrid là thay đổi kiến trúc nên để sau.
 
@@ -130,7 +152,9 @@ Mọi đòn bẩy rẻ khác đã bị loại bằng số; hybrid là thay đổ
 |---|---|
 | VRAM (đỉnh 7258, ổn định 7013, chừa 934 MiB, 87 mẫu) | `20261019-vram-sample/batch-30.json`, khối `vram`; đỉnh rơi vào pha hạ cấp alignment nên là đỉnh đường xấu nhất; nền rảnh 1781 MiB không phải GPU trống |
 | echo 59–89/115, 389–629 chữ Hán; lô 8/15/30 | `20261019-echo-guard/`, `20261019-term-placeholder-clip/sweep/` |
-| chi phí lô 30 (78,91 – 118,57 s, sáu lượt) và lô 15 (57,72 – 95,42 s, ba lượt) | `echo-halving/control-batch-30.json`, `vram-sample/batch-30.json`, `echo-batch30-repeat/{run1,run2}`, `echo-batch15-real/{run1,run2}`, `echo-guard/batch-15.json`. Hai thư mục `echo-batch15-repeat/*` có `batch_items = 30` vì driver khi đó **bỏ qua** tham số cỡ lô; lỗi đã được vá kèm bốn test ghim (`test_echo_guard_batches.py`), nên chúng được tính vào lô 30 và `echo-batch15-real/*` mới là lô 15 thật |
-| ba giả thuyết (V0–V3, A–E, cây chia) | `20261019-prompt-echo-sweep/`, `20261019-echo-warmup/`, `20261019-echo-halving/` |
-| 250 mục-lượt so với 204 | `20261019-echo-halving/halving-batch-30.json`, `attempt_tree[].calls[].items` (225) + lô cuối 25 |
-| bảng cỡ lời gọi | tám artifact có `echo_by_batch`: `vram-sample/batch-30`, `echo-halving/{control-batch-30, half-straight-batch-15, halving-batch-30}`, và bốn lượt lặp `echo-batch30-repeat/{run1,run2}` + `echo-batch15-repeat/{run1,run2}`. Ba chỗ dữ liệu không sạch, đã ghi rõ khi đọc bảng: ba lượt (`vram-sample`, `echo-batch30-repeat/run2`, `echo-batch15-repeat/*`) có một bản ghi của **lần gửi lại cả lô** (trường `echoed` ghi 0 và cả 30 mục bị gọi lại một mình = 30 lời gọi cỡ 1 của pha alignment); `halving-batch-30` có lời gọi đuôi 25 mục nhưng **không lưu danh sách lần gọi**; `half-straight-batch-15` có đuôi 10 mục, là hàng `10` trong bảng |
+| chi phí 23 lượt (bảng ở mục 2) | `echo-guard/{batch-8,batch-15,batch-30}`; `echo-warmup/{config-A,config-B,config-C,config-D,config-E,repeat-C/config-C}` + `echo-warmup/control-v2-{warm-model,warm-model-2,no-warmup}/v2-batch-30`; `echo-halving/{control-batch-30,half-straight-batch-15,halving-batch-30}` + `echo-halving/repeat-halving/halving-batch-30`; `vram-sample/batch-30`; `echo-batch30-repeat/{run1,run2}/config-A`; `echo-batch15-repeat/{run1,run2}/config-A`; `echo-batch15-real/{run1,run2}/config-A`. Đúng 23 tệp, mỗi tệp một tiến trình. Sáu lượt chạy prompt thử `v2` (`echo-warmup/{config-C,config-E,repeat-C/config-C}` và ba lượt `control-v2-*`), còn lại là prompt đang ship. Hai thư mục `echo-batch15-repeat/*` có `batch_items = 30` vì driver khi đó **bỏ qua** tham số cỡ lô; lỗi đã được vá kèm bốn test ghim (`test_echo_guard_batches.py`), nên chúng tính vào lô 30 và `echo-batch15-real/*` mới là lô 15 thật |
+| ba giả thuyết (V0–V3, A–E, cây chia) | `20261019-prompt-echo-sweep/` (lượt `v3` 32,92 s: `translation_status = failed`, `accepted_segments = 0`, `error.type = EchoProblem`), `20261019-echo-warmup/`, `20261019-echo-halving/` |
+| 250 mục-lượt so với 204 | `20261019-echo-halving/halving-batch-30.json`, tổng `attempt_tree[].calls[].items` = 225 (22 lời gọi) + lô cuối 25 = 250; đối chứng 115 + 89 lần dịch lại = 204 |
+| bảng cỡ lời gọi (93 hàng, 18 lượt) | prompt đang ship — 65 hàng, 12 lượt: `echo-warmup/{config-A,config-B,config-D}`, `echo-halving/{control-batch-30,half-straight-batch-15}`, `vram-sample/batch-30`, `echo-batch30-repeat/{run1,run2}/config-A`, `echo-batch15-repeat/{run1,run2}/config-A`, `echo-batch15-real/{run1,run2}/config-A`. Prompt thử `v2` — 28 hàng, 6 lượt: `echo-warmup/{config-C,config-E,repeat-C/config-C}` + `echo-warmup/control-v2-{warm-model,warm-model-2,no-warmup}/v2-batch-30`. Mỗi hàng là một lời gọi `size > 1`, đúng như `echo_by_batch` định nghĩa. **Không** dùng hai lượt chia đôi (dụng cụ tắt cổng, `echoed` luôn 0 dù `tree_stats.copied_batches = 3`) và **không** dùng ba lượt `echo-guard/*` (không có bảng theo lô) |
+| 25 mục sạch 0/13, 15 mục 6/21 | cùng bảng trên; 13 lời gọi 25 mục đều là lô cuối của clip (id 90–114), nên chưa nói được gì về một lô 25 mục nằm giữa clip |
+| hybrid 7/115 đoạn (6,1%), 17,09 s, 0/7 → 7/7 thuật ngữ | `20261019-hybrid-spike/hybrid-spike.json`: `definitions.wide` (7 id), `phases.opus_whole_clip` 11,86 s, `phases.hymt_flagged_only` 5,23 s / 7 lời gọi, `segments_detail[].vi_hy` cho cả 7 câu |
