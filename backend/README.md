@@ -63,38 +63,50 @@ GPU. Nó tự ép UTF-8 cho stdout (console Windows mặc định cp1252, còn s
 tiếng Trung/Việt) và tự đặt cache model trước khi nạp `faster_whisper`.
 
 Con số nền của lần chạy mặc định, đo sau khi xoá `__pycache__` (lệnh ở mục
-"Kiểm thử" trên, chạy từ trong `backend\`). Thứ có nghĩa là **1202 / 15**, không
+"Kiểm thử" trên, chạy từ trong `backend\`). Thứ có nghĩa là **1206 / 15**, không
 phải số giây — thời gian trôi giữa các lần chạy (đã thấy 24,00–30,94 s) còn con
 số bài thì không:
 
 ```
-1202 passed, 15 deselected, 1 warning
+1206 passed, 15 deselected, 1 warning
 ```
 
 Hai con số đó là SỐ BÀI ĐƯỢC CHỌN, và chúng khớp với số mà `--collect-only` báo
-(`1202/1217`, 15 bài `live` bị bỏ;
+(`1206/1221`, 15 bài `live` bị bỏ;
 `tests/test_backend_readme.py::test_readme_baseline_matches_the_tests_actually_
 collected` đối chiếu mỗi lần chạy).
 
-Máy này **CÓ** `ffmpeg 8.1.1` + `ffprobe` trên PATH (đã đo), nên `1202/15` ở trên
+Máy này **CÓ** `ffmpeg 8.1.1` + `ffprobe` trên PATH (đã đo), nên `1206/15` ở trên
 là số THẬT của nó. Máy **không có** `ffmpeg`/`ffprobe` cho một kết quả KHÁC: cả
 `tests/test_ingest.py` bị `skipif` ở cấp module — **9** bài cùng skip một lượt —
-nên dòng tổng kết của máy đó là **`1193 passed, 9 skipped, 15 deselected`** (=
-`1202 − 9`; con số này TỪNG ghi `978`, tức một baseline rất cũ, và nó lệch phép
+nên dòng tổng kết của máy đó là **`1197 passed, 9 skipped, 15 deselected`** (=
+`1206 − 9`; con số này TỪNG ghi `978`, tức một baseline rất cũ, và nó lệch phép
 trừ của chính khối nền ngay trên nó). Đó là
 con số của máy thiếu ffmpeg, **không phải** con số máy này từng in ra; đừng chép
 nó vào khối nền ở trên, và đừng "sửa" số nền xuống chỉ vì thiếu ffmpeg.
 
 ⚠️ Con số `856` ở đây TỪNG không khớp phép trừ của chính nó: `865 − 9 = 856`, tức
 nó là số của lượt TRƯỚC `V1` (+3 bài) còn sót lại. Phép trừ của khối nền hiện tại
-là `1202 − 9` = `1193`.
+là `1206 − 9` = `1197`.
 
 (Con số này từng bị ghi là `798`: bài `test_a_failed_translation_leaves_the_
 transcript_reviewed` được thêm ở `a428334` — **cùng commit đã sửa tệp này** — mà
 số nền không được bump. Nó tồn tại để phát hiện TRÔI, nên một số sai làm mọi lần
 chạy báo dương tính giả.
 
-Lần bump gần nhất, `1200/15` → `1202/15` (**+2 bài**), do lượt đo **VRAM**:
+Lần bump gần nhất, `1202/15` → `1206/15` (**+4 bài**), do sửa lỗi **`--batches`
+bị `--configs` nuốt**: `main()` của `scripts/smoke_echo_guard.py` tự gán cứng lô
+30 cho mọi lượt có `--configs`, nên `--batches 15 --configs A` vẫn gọi engine bằng
+lô 30 và ghi `batch_items: 30` — cờ trông như đã chạy mà không chạy, không bài nào
+đỏ. `tests/test_echo_guard_batches.py` (**+4**) ghim: `--batches 15` ⇒
+`batch_items == 15`; `--batches 15 30` ⇒ hai artifact, mỗi lô một tệp; lượt
+`--configs` độc hại cũ nay cũng ra 15; và hai lô trên cùng một cấu hình không ghi
+đè nhau (`config-A-batch-15.json` / `config-A-batch-30.json`). Test dùng engine +
+handler GIẢ và `_loaded_models` giả, nên không cần model, không cần mạng, không
+chạm `nvidia-smi`. Lượt sửa này **không đổi đường ship**: mặc định lô vẫn là 30,
+prompt/`PROMPT_VERSION`/registry không chạm.
+
+Trước đó, `1200/15` → `1202/15` (**+2 bài**), do lượt đo **VRAM**:
 `tests/test_vram_sample.py` (**+2**) ghim (a) hàm THUẦN `summarize_vram` của
 `scripts/smoke_echo_guard.py` — nền phẳng rồi bàn ổn định, một gai đơn lẻ (peak
 bắt nó, steady thì không; gai trong NỀN không được đọc thành "đã nạp"), và mảng

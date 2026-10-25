@@ -21,6 +21,14 @@ Vì sao `--batches` chứ không sửa `DEFAULT_MAX_ITEMS`/`max_items_per_call`
     kích thước lô, mới là thứ quyết định, nên cùng một clip phải chạy được ở cả
     30/15/8.
 
+`--batches` THẮNG `--configs` (ghim ở `tests/test_echo_guard_batches.py`)
+    Bảng `CONFIGS` chỉ khai `style` và `first_batch_items` — nó KHÔNG có lô, vì lô
+    là biến của phép đo chứ không phải của cấu hình. Trước bản này `main()` tự gán
+    cứng 30 cho mọi lượt có `--configs`, nên `--batches 15 --configs A` vẫn gọi
+    engine bằng lô 30 và artifact ghi `batch_items: 30`: cờ trông đã chạy mà không
+    chạy, tức lỗi ÂM THẦM. Nay lô chỉ có một nguồn là CLI; nhiều lô trên cùng một
+    cấu hình ghi ra nhiều tệp `config-<X>-batch-<n>.json` thay vì ghi đè nhau.
+
 Vì sao đếm cả `echo_guard:<n>/<m>` trong log
     Đó là con số DUY NHẤT do chính cổng in ra (tiền tố ổn định, grep được trong
     `jobs` log khi chạy thật), nên smoke đối chiếu nó với hình dạng lời gọi thay vì
@@ -1093,7 +1101,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--glossary", type=pathlib.Path, required=True)
     parser.add_argument("--out-dir", type=pathlib.Path, required=True)
     parser.add_argument("--batches", type=int, nargs="+", default=[30],
-                        help="các trần số mục cần đo (mặc định 30 = mặc định cũ)")
+                        help="các trần số mục cần đo (mặc định 30 = mặc định cũ). "
+                             "Cờ này THẮNG cả --configs: bảng CONFIGS không khai "
+                             "lô, nên lô của một lượt chỉ có MỘT nguồn là đây")
     parser.add_argument("--styles", nargs="+", default=[STYLE_DEFAULT],
                         choices=list(PROMPT_STYLES),
                         help="các biến thể prompt cần đo (mặc định v0 = prompt "
@@ -1101,7 +1111,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--configs", nargs="+", choices=list(CONFIGS),
                         help="các cấu hình của lượt đo SƯỞI còn tái lập được "
                              "(A/D, và E thêm sau; B/C đã bị xoá cùng seam sưởi); "
-                             "có mặt thì THẮNG --styles/--batches. Mỗi cấu hình "
+                             "có mặt thì THẮNG --styles, còn --batches vẫn quyết "
+                             "định lô (xem --batches). Mỗi cấu hình "
                              "nên là một lần gọi tiến trình riêng (xem docstring)")
     parser.add_argument("--no-unload", action="store_true",
                         help="KHÔNG đổ model sau mỗi lượt (mặc định là đổ, để lượt "
@@ -1124,16 +1135,36 @@ def main(argv: list[str] | None = None) -> int:
     tables: dict[str, list[dict]] = {}
     plans: list[dict] = []
     if args.configs:
+        # Lô ở đây đến từ CLI, KHÔNG từ bảng `CONFIGS`: bảng đó chỉ khai `style`
+        # và `first_batch_items`, và trước bản này dòng dưới tự gán cứng 30 nên
+        # `--batches 15 --configs A` vẫn gọi engine bằng lô 30 (ba lô 30 cộng một
+        # lô 25) trong khi cờ trông như đã có tác dụng — đúng loại hỏng ÂM THẦM mà
+        # repo này coi là lỗi. `batch_items` giờ chỉ có MỘT nguồn là `args.batches`,
+        # nên `--batches` THẮNG, và artifact ghi đúng con số đã dùng để gọi.
         for config in args.configs:
-            plan = dict(CONFIGS[config])
-            plan.update({"config": config, "batch_items": 30})
-            plans.append(plan)
+            for batch_items in args.batches:
+                plan = dict(CONFIGS[config])
+                plan.update({"config": config, "batch_items": batch_items})
+                # Tên tệp: giữ `config-A.json` cho lượt MỘT lô (tên cũ, không đổi
+                # artifact của lượt trước); nhiều lô trên cùng một cấu hình thì
+                # phải mang lô, nếu không lượt sau ghi đè lượt trước trong cùng
+                # một tệp và phép đo mất một nửa số.
+                plan["artifact_name"] = (
+                    _artifact_name(config, plan["style"], batch_items)
+                    if len(args.batches) == 1
+                    else f"config-{config}-batch-{batch_items}.json")
+                #: Khoá bảng theo lô trong `summary.json` — cùng lý do với tên tệp.
+                plan["key"] = (config if len(args.batches) == 1
+                               else f"{config}-{batch_items}")
+                plans.append(plan)
     else:
         for style in args.styles:
             for batch_items in args.batches:
                 plans.append({"config": None, "style": style,
                               "batch_items": batch_items,
-                              "first_batch_items": None, "note": ""})
+                              "first_batch_items": None, "note": "",
+                              "artifact_name": None,
+                              "key": f"{style}-{batch_items}"})
 
     for plan in plans:
         label = plan["config"] or f"{plan['style']}·lô {plan['batch_items']}"
@@ -1146,10 +1177,10 @@ def main(argv: list[str] | None = None) -> int:
                          config=plan["config"],
                          first_batch_items=plan["first_batch_items"],
                          unload=not args.no_unload,
-                         sample_vram=args.sample_vram)
+                         sample_vram=args.sample_vram,
+                         artifact_name=plan["artifact_name"])
         rows.append(_row(result))
-        tables[plan["config"] or f"{plan['style']}-{plan['batch_items']}"] = (
-            result["echo_by_batch"])
+        tables[plan["key"]] = result["echo_by_batch"]
         _print_batches(plan["config"], result["echo_by_batch"])
 
     summary = {"experiment": "echo-guard-smoke", "rows": rows,
