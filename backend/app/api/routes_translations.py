@@ -33,18 +33,21 @@ from __future__ import annotations
 import dataclasses
 import pathlib
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, Field
 
-from app.api.deps import get_dirs, get_repos, get_specs
+from app.api.delete_guard import active_job_ids, mot_loi_409
+from app.api.deps import get_chimera_plan, get_dirs, get_repos, get_specs
 from app.api.routes_jobs import _job_json
+from app.domain.chimera import Baseline, cost_json
 from app.domain.job_state import phase_of
 from app.domain.models import Job
 from app.domain.mt_qa import QaLimits, cps_row
 from app.domain.paths import PathOutsideRoot, resolve_within
 from app.domain.staleness import is_stale, translation_summary_json
-from app.pipeline.export import FORMATS, MEDIA_TYPES, artifact_name
+from app.pipeline.export import (FORMATS, MEDIA_TYPES, artifact_name,
+                                 export_meta, render)
 from app.registry import by_id
 
 router = APIRouter(prefix="/api/translations", tags=["translations"])
@@ -54,6 +57,12 @@ class CreateIn(BaseModel):
     transcript_id: int
     engine: str
     target_lang: str = "vi"
+    #: Bật chế độ CHIMERA (§8.7.5, spec UI §4.5). Khi bật, `engine` chỉ còn là
+    #: một phép kiểm hợp lệ: bản dịch do KẾ HOẠCH Chimera của registry quyết định,
+    #: và `translations.engine` ghi engine PHA — engine thật sự viết ra chữ được
+    #: giữ. Ghi id người dùng chọn ở đây là để hàng bản dịch tự nhận công của một
+    #: engine không viết chữ nào.
+    chimera: bool = False
 
 
 class SegmentIn(BaseModel):
@@ -102,9 +111,37 @@ def _require_transcript(repos, transcript_id: int):
         raise HTTPException(404, str(exc)) from exc
 
 
+def _baseline_for(repos, transcript_id: int) -> Baseline | None:
+    """Chi phí THẬT của MỘT lượt dịch một-engine trên CHÍNH kênh này.
+
+    Đây là CƠ SỞ ĐO của cảnh báo chi phí (§4.5, §9.2): thời gian và token của một
+    hàng `translations` đã `done` của cùng transcript, chia cho số đoạn của nó rồi
+    nhân lên. Không có hàng nào như vậy thì trả `None` và cảnh báo NÓI RA là chưa
+    đo được — bịa một con số từ số đoạn là đúng thứ mà "phải ĐO ĐƯỢC" cấm.
+
+    ⚠️ Hàng CHIMERA bị LOẠI khỏi cơ sở đo. Một lượt Chimera tốn `N+1` lời gọi, nên
+    lấy nó làm mốc rồi nhân thêm `N+1` lần nữa là nhân đôi hệ số và thổi phồng cảnh
+    báo lên gấp `N+1`. Nay trước sau gì cũng chỉ có một lượt dịch thường để so.
+    """
+    for row in repos.list_translations_for_transcript(transcript_id):
+        if row.status != "done":
+            continue
+        try:
+            full = repos.get_translation(row.id)
+        except LookupError:
+            continue
+        if full.chimera is not None or full.duration_ms is None or not full.segments:
+            continue
+        return Baseline(translation_id=full.id, engine=full.engine,
+                        segments=len(full.segments), duration_ms=full.duration_ms,
+                        tokens_in=full.tokens_in, tokens_out=full.tokens_out)
+    return None
+
+
 @router.post("", status_code=201)
 def create_translation(body: CreateIn, repos=Depends(get_repos),
-                       specs=Depends(get_specs)):
+                       specs=Depends(get_specs),
+                       chimera_plan=Depends(get_chimera_plan)):
     """Tạo hàng `translations` TRƯỚC, rồi xếp ĐÚNG MỘT job `translate`.
 
     Thứ tự này bắt buộc: `TranslateHandler` tra hàng đó bằng `translation_id`
@@ -132,6 +169,51 @@ def create_translation(body: CreateIn, repos=Depends(get_repos),
 
     transcript = _require_transcript(repos, body.transcript_id)
 
+    chimera_data = None
+    if body.chimera:
+        # Ba lời từ chối ở đây đều là 409 TRƯỚC khi ghi, cùng lớp với I-3: một job
+        # Chimera được xếp rồi mới chết ở worker là một hàng `translations` nằm lại
+        # ở `queued` mà không ai giải thích.
+        if chimera_plan is None or chimera_plan.declared == 0:
+            raise HTTPException(
+                409, "chế độ Chimera chưa dùng được: registry không khai báo ứng "
+                     "viên nào (khoá `chimera.candidates`)")
+        if chimera_plan.run_count == 0:
+            need = ", ".join(sorted({c.engine for c in chimera_plan.candidates}))
+            raise HTTPException(
+                409, f"chế độ Chimera chưa dùng được: KHÔNG ứng viên nào chạy được "
+                     f"(cần model của: {need}; xem `GET /api/chimera/cost`)")
+        # `engine` của hàng = engine PHA: nó là engine THẬT SỰ viết ra chữ được giữ
+        # lại, nên nó là câu trả lời đúng cho cột `engine`. Ai viết thì xem
+        # `chimera.candidates[].engine` — đó là chỗ kể cả câu chuyện.
+        try:
+            spec = by_id(specs, chimera_plan.merge_engine)
+        except KeyError as exc:
+            raise HTTPException(
+                409, f"engine pha {chimera_plan.merge_engine!r} không có trong registry"
+            ) from exc
+        if not spec.capabilities.get("available"):
+            raise HTTPException(
+                409, f"engine pha {chimera_plan.merge_engine!r} chưa sẵn sàng: model "
+                     f"chưa được pull, hoặc runtime không phục vụ được")
+
+        # CẢNH BÁO CHI PHÍ được TÍNH Ở ĐÂY, ghi vào hàng, và vì thế nó là CÙNG con
+        # số mà giao diện đã hiện TRƯỚC khi người dùng bấm. Tính lại ở cuối lượt
+        # chạy là so hai con số khác nhau rồi gọi đó là "đối chiếu".
+        cost = cost_json(chimera_plan, segments=len(transcript.segments),
+                         baseline=_baseline_for(repos, transcript.id))
+        chimera_data = {
+            "enabled": True,
+            "declared": cost["declared"],
+            "run_count": cost["runnable"],
+            "calls_per_batch": cost["calls_per_batch"],
+            "merge_engine": chimera_plan.merge_engine,
+            "estimate": cost["estimate"],
+            "estimate_basis": cost["estimate_basis"],
+            "baseline": cost["baseline"],
+            "segments": cost["segments"],
+        }
+
     translation_id = repos.add_translation(
         transcript_id=transcript.id,
         # Version mà bản dịch này dịch TỪ, không phải version hiện tại lúc job
@@ -141,8 +223,14 @@ def create_translation(body: CreateIn, repos=Depends(get_repos),
         engine=spec.id,
         target_lang=body.target_lang,
         segments=[],
-        prompt_version=spec.capabilities.get("prompt_version", "unknown"),
+        # Một lượt Chimera được viết bởi prompt PHA, không phải prompt dịch: hai
+        # chuỗi khác nhau, và `translations.prompt_version` tồn tại để phân biệt
+        # chúng. Cả hai giá trị đều là DỮ LIỆU do composition root đặt vào
+        # `spec.capabilities` — tầng API không import `app.adapters`.
+        prompt_version=spec.capabilities.get(
+            "chimera_prompt_version" if body.chimera else "prompt_version", "unknown"),
         glossary_version=repos.glossary_version(),
+        chimera=chimera_data,
         status="queued",
     )
     job = Job(id=None, workspace=2, type="translate", engine=spec.id,
@@ -219,6 +307,10 @@ def get_translation(translation_id: int, repos=Depends(get_repos)):
             for t in row.segments]
     return {
         **_summary(row, stale=is_stale(transcript.version, row.transcript_version)),
+        # Dấu vết CHIMERA (§4.5): kế hoạch N ứng viên, ƯỚC LƯỢNG chi phí đã hiện
+        # TRƯỚC khi bấm, và số đo THẬT của từng ứng viên + lượt pha. `None` = hàng
+        # này không chạy ở chế độ Chimera — KHÁC `{}` ("chạy mà chưa có dữ liệu").
+        "chimera": getattr(row, "chimera", None),
         "segments": [s.to_json() for s in row.segments],
         "cps": {
             "max_cps": limits.max_cps,
@@ -270,6 +362,69 @@ def patch_translation(translation_id: int, body: PatchIn,
     return _summary(fresh, stale=is_stale(current, fresh.transcript_version))
 
 
+@router.delete("/{translation_id}", status_code=204)
+def delete_translation(translation_id: int, repos=Depends(get_repos)):
+    """Xoá MỘT bản dịch. Transcript và nguồn của nó KHÔNG bị chạm.
+
+    Ba quyết định:
+
+    * **404 khi id lạ**, lấy từ chính `repos.delete_translation` (nó ném
+      `LookupError` khi `rowcount == 0`) — không đọc hàng trước rồi mới xoá, vì
+      một `DELETE` đã là phép kiểm tồn tại nguyên tử. Câu của adapter đã nêu id
+      (`"translation 12 không tồn tại"`), đúng thứ client cần.
+    * **409 khi còn job `translate` sống** trỏ vào bản dịch này: `TranslateHandler`
+      ghi checkpoint vào hàng `translations` sau MỖI lô, nên xoá dưới chân nó thì
+      lô kế tiếp ném `NotFound` và job chết vì một lý do không liên quan tới dữ
+      liệu. Xem `app/api/delete_guard.py`. Phép kiểm chạy TRƯỚC khi xoá.
+    * **KHÔNG đụng bảng `jobs` và KHÔNG đụng đĩa.** Bản dịch không có tệp riêng;
+      thứ duy nhất trên đĩa gắn với nó là tệp xuất (`<out>/transcript-N.vi.srt`
+      của `pipeline/export.py`), và đường xuất KHÔNG bị sửa bởi tính năng này —
+      nó là đầu ra của một lần xuất đã xong, không phải trạng thái của hàng.
+    """
+    ids = active_job_ids(repos, key="translation_id", value=translation_id)
+    if ids:
+        raise HTTPException(
+            409,
+            mot_loi_409(doi_tuong=f"bản dịch {translation_id}", ids=ids,
+                        cach_sua="huỷ job đó trước rồi xoá"),
+        )
+    try:
+        repos.delete_translation(translation_id)
+    except LookupError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    return Response(status_code=204)
+
+
+#: Router RIÊNG cho chế độ CHIMERA (§8.7.5, spec UI §4.5).
+#: Không nằm trên `router` ở trên (router đó mang `prefix="/api/translations"`), và
+#: cũng không nằm trong `routes_translations.export_router`: nó là một TÀI NGUYÊN
+#: khác — "chế độ Chimera tốn bao nhiêu" không thuộc về một bản dịch nào cả, nên
+#: nó phải trả lời được TRƯỚC khi có bản dịch nào tồn tại (§4.5: cảnh báo chi phí
+#: hiện trước khi người dùng bấm).
+chimera_router = APIRouter(prefix="/api/chimera", tags=["chimera"])
+
+
+@chimera_router.get("/cost")
+def chimera_cost(transcript_id: int, repos=Depends(get_repos),
+                 chimera_plan=Depends(get_chimera_plan)):
+    """CẢNH BÁO CHI PHÍ của một lượt Chimera trên kênh này — ĐO ĐƯỢC, không câu chữ.
+
+    Trả về: sáu ứng viên ĐÃ KHAI kèm cờ chạy được và lý do không chạy được, số ứng
+    viên THẬT SỰ chạy, số lượt chạm engine cho một lô (`N ứng viên + 1 lượt pha`),
+    và ƯỚC LƯỢNG thời gian/token suy từ một bản dịch thường ĐÃ CHẠY XONG trên chính
+    kênh này (`estimate_basis` nói rõ nó đo từ đâu).
+
+    `estimate: null` là một câu trả lời HỢP LỆ và đi kèm lý do — "chưa đo được"
+    khác hẳn "bằng không", và cảnh báo chi phí mà bịa số thì không cảnh báo được gì.
+    """
+    if chimera_plan is None or chimera_plan.declared == 0:
+        raise HTTPException(
+            503, "registry chưa khai báo chế độ Chimera (khoá `chimera.candidates`)")
+    transcript = _require_transcript(repos, transcript_id)
+    return cost_json(chimera_plan, segments=len(transcript.segments),
+                     baseline=_baseline_for(repos, transcript.id))
+
+
 #: Router RIÊNG cho hình dạng spec §11 của route export.
 #:
 #: Không nằm trên `router` ở trên (router đó mang `prefix="/api/translations"`), và
@@ -317,8 +472,15 @@ def export_translation(translation_id: int, format: str = "srt", bilingual: int 
                  f"transcript {transcript.id} có {len(transcript.segments)} đoạn: "
                  f"dịch lại trước khi xuất")
 
-    body = FORMATS[fmt](transcript.segments, translations=translations,
-                        bilingual=bool(bilingual))
+    body = render(fmt, transcript.segments, translations=translations,
+                  bilingual=bool(bilingual),
+                  meta=export_meta(
+                      transcript=transcript, translation=translation,
+                      # `stale` TÍNH Ở ĐÂY, cùng nguồn với `list_translations`:
+                      # bản dịch dịch từ một version cũ của transcript là dữ liệu
+                      # người dùng PHẢI thấy trong tệp xuất, không chỉ trên màn hình.
+                      stale=is_stale(transcript.version,
+                                     translation.transcript_version)))
 
     # CÙNG `artifact_name()` với handler của đường cũ. `translated=True` vì route
     # này LUÔN xuất theo một hàng `translations` — quy tắc `.vi` nằm ở

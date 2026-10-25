@@ -12,9 +12,11 @@
 import { api, BASE } from "./client.ts";
 import type {
   AffectedPreview,
+  ChimeraCost,
   EngineSpec,
   GlossaryVersion,
   Job,
+  JobType,
   Registry,
   Source,
   SourceCreated,
@@ -34,8 +36,16 @@ import type {
   TranslationSegmentPatch,
 } from "./types.ts";
 
-/** Định dạng xuất phụ đề — đúng khoá của `pipeline/export.py::FORMATS`. */
-export type ExportFormat = "srt" | "vtt" | "ass";
+/**
+ * Định dạng xuất — đúng khoá của `pipeline/export.py::FORMATS`.
+ *
+ * `json` là định dạng hai thứ tiếng kèm mốc thời gian của BẢN GỐC
+ * (`domain/subtitle_format.py::to_json`): mỗi đoạn có `start`/`end` (giây, của bản
+ * gốc), `text` (nguồn), `translation`, và một khối `meta` (bản dịch nào, engine
+ * nào, prompt nào, `stale`). Ba định dạng kia chỉ có chữ, nên muốn ghép lại bản
+ * gốc với bản dịch thì phải parse phụ đề.
+ */
+export type ExportFormat = "srt" | "vtt" | "ass" | "json";
 
 function query(params: Record<string, string | number | undefined>): string {
   const search = new URLSearchParams();
@@ -74,8 +84,27 @@ export function addSourceUrl(url: string, lang: SourceLang = "zh"): Promise<Sour
   return api.post<SourceCreated>("/sources/url", { url, lang });
 }
 
+/**
+ * `DELETE /api/sources/{id}` — xoá MỘT kênh cùng mọi bản ghi/bản dịch của nó (**204**).
+ *
+ * Vì sao `Promise<void>` chứ không `Promise<Source>`: route trả **204 KHÔNG thân**
+ * (`routes_sources.delete_source`), và `client.call` đã trả `undefined` cho đúng
+ * mã đó. Bịa một hàng trả về ở đây là hứa một thứ backend không gửi.
+ *
+ * ⚠️ Hàm KHÔNG tự đọc lại danh sách: người gọi (`App`) gọi `sources.reload()` sau
+ * khi hàm này xong — nguồn sự thật là máy chủ, không phải một bản sao cục bộ đã
+ * bị cắt tay (cùng luật với mọi đường GHI khác của app).
+ *
+ * Hai nhánh lỗi mà NGƯỜI DÙNG phải đọc nguyên văn (backend đã viết tiếng Việt):
+ * **404** (`source N không tồn tại`) và **409** (`job #k đang xếp hàng hoặc đang
+ * chạy trên nó`) — `ApiError.message` đã là `"<status>: <detail>"`.
+ */
+export function deleteSource(sourceId: number): Promise<void> {
+  return api.del<void>(`/sources/${sourceId}`);
+}
+
 // ---------------------------------------------------------------------------
-// jobs — hàng đợi: liệt kê, xem, huỷ, chạy lại
+// jobs — hàng đợi: tạo, liệt kê, xem, huỷ, chạy lại
 // ---------------------------------------------------------------------------
 
 export function listJobs(): Promise<Job[]> {
@@ -94,6 +123,43 @@ export function cancelJob(jobId: number): Promise<Job> {
 /** Chỉ chạy lại được job ở trạng thái `failed`/`interrupted` (backend trả 409 nếu không). */
 export function retryJob(jobId: number): Promise<Job> {
   return api.post<Job>(`/jobs/${jobId}/retry`);
+}
+
+/**
+ * Body của `POST /api/jobs` — ĐÚNG `routes_jobs.JobIn`.
+ *
+ * Vì sao `engine` là TUỲ CHỌN chứ không bắt buộc: route chỉ đòi engine với
+ * `type ∈ ENGINE_REQUIRED` (`{"asr"}`, cùng tệp), còn `ingest`/`export` không có engine nào để
+ * chọn. Khai bắt buộc ở client sẽ là một lời hứa SAI về hợp đồng máy chủ.
+ *
+ * `type` là `JobType` (union của `types.ts`) chứ `string`: route trả **422** cho một loại không
+ * nằm trong `PAYLOAD_SCHEMA`, và một union chặn lỗi đó ngay ở chỗ viết code thay vì ở chỗ chạy.
+ *
+ * `payload` KHÔNG được khai kiểu theo từng loại job ở đây: hợp đồng payload (`IngestPayload`/
+ * `AsrPayload`/`ExportPayload`) do `PAYLOAD_SCHEMA` của route định nghĩa và nó được kiểm Ở MÁY
+ * CHỦ trước khi ghi hàng (sai trường ⇒ 422 ngay, không phải một job `failed` ở worker). Client
+ * chép lại hợp đồng đó là nguồn sự thật thứ hai — và nó sẽ trôi âm thầm.
+ */
+export interface JobCreate {
+  workspace: number;
+  type: JobType;
+  engine?: string | null;
+  payload?: Record<string, unknown>;
+}
+
+/**
+ * `POST /api/jobs` — XẾP một job vào hàng đợi; máy chủ trả hàng `jobs` vừa tạo (**201**).
+ *
+ * ⚠️ Đây là đường DUY NHẤT để chạy lại việc bóc băng bằng một engine ASR khác: route `retry`
+ * chỉ chạy lại CHÍNH job cũ (cùng engine, cùng payload), còn đổi engine thì phải là một job
+ * `asr` MỚI. Không có hàm này, ô chọn engine ở màn Biên tập là một điều khiển bấm được mà không
+ * gửi gì đi — đúng thứ repo này cấm.
+ *
+ * ⚠️ Hàm KHÔNG tự đọc lại gì sau khi tạo: job mới đi vào HÀNG ĐỢI qua SSE (`useJobStream`), và
+ * bản ghi mới của nó hiện ra qua ngòi nổ đọc lại `/api/transcripts` khi job `asr` chuyển `done`.
+ */
+export function createJob(body: JobCreate): Promise<Job> {
+  return api.post<Job>("/jobs", body);
 }
 
 // ---------------------------------------------------------------------------
@@ -156,6 +222,35 @@ export function patchTranslation(
   segments: TranslationSegmentPatch[],
 ): Promise<Translation> {
   return api.patch<Translation>(`/translations/${translationId}`, { segments });
+}
+
+/**
+ * `DELETE /api/translations/{id}` — xoá MỘT bản dịch, transcript của nó giữ nguyên (**204**).
+ *
+ * Cùng hình dạng với `deleteSource` (và cùng ba nhánh lỗi: 404 id lạ, 409 khi còn
+ * job `translate` sống). Người gọi đọc lại danh sách bằng `translations.reload()`.
+ */
+export function deleteTranslation(translationId: number): Promise<void> {
+  return api.del<void>(`/translations/${translationId}`);
+}
+
+// ---------------------------------------------------------------------------
+// chimera — cảnh báo chi phí, ĐỌC TRƯỚC khi bấm
+// ---------------------------------------------------------------------------
+
+/**
+ * Cảnh báo chi phí của MỘT lượt Chimera trên kênh này (§4.5, §9.2).
+ *
+ * Vì sao nó là một endpoint riêng chứ không phải một khoá của `/api/translations`:
+ * câu hỏi "chế độ này tốn bao nhiêu" phải trả lời được TRƯỚC khi có bản dịch nào
+ * tồn tại — nếu không thì "hiện trước khi người dùng bấm" là một lời hứa không có
+ * đường thực hiện.
+ *
+ * ⚠️ `estimate: null` là câu trả lời HỢP LỆ ("chưa đo được"), kèm `estimate_basis`
+ * và `estimate_hint`. Client KHÔNG được tự tính một con số thay thế.
+ */
+export function chimeraCost(transcriptId: number): Promise<ChimeraCost> {
+  return api.get<ChimeraCost>(`/chimera/cost${query({ transcript_id: transcriptId })}`);
 }
 
 // ---------------------------------------------------------------------------
@@ -274,10 +369,12 @@ export const endpoints = {
   getSource,
   uploadSource,
   addSourceUrl,
+  deleteSource,
   listJobs,
   getJob,
   cancelJob,
   retryJob,
+  createJob,
   listTranscripts,
   getTranscript,
   patchTranscript,
@@ -286,9 +383,11 @@ export const endpoints = {
   listTranslations,
   getTranslation,
   patchTranslation,
+  deleteTranslation,
   listTerms,
   createTerm,
   patchTerm,
+  chimeraCost,
   glossaryVersion,
   affectedPreview,
   registry,

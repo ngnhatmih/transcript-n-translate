@@ -58,11 +58,41 @@
  *
  * ⚠️ **KHÔNG tự áp `status === "done"` ở đây** (xem `macDinhId`), và **KHÔNG tự chọn bản
  * `done` mới nhất**: quyết định đó là của `App` (một chỗ, truyền xuống).
+ *
+ * ── DẢI CHỌN BẢN DỊCH RỜI KHỎI THANH CÔNG CỤ (nút xoá bản dịch) ─────────────────────
+ *
+ * Mỗi bản dịch có thêm một nút XOÁ hai bước (`NutXoa`). Chỗ đặt nó là một quyết định hình
+ * thức, và lý do là một phép ĐO chứ không phải thẩm mỹ:
+ *
+ * * Nhét nút xoá vào đúng chip bản dịch trong `.cmp__thanh` ⇒ mỗi bản dịch thêm HAI phần tử
+ *   vào thanh công cụ, cùng chỗ với ô chọn engine, nút "dịch", chip `◆ CHIMERA` và nút ghim.
+ *   Với vài bản dịch, thanh đó tràn ngang và **chip CHIMERA bị đẩy ra ngoài `clientWidth`** —
+ *   người dùng mất luôn đường vào chế độ Chimera mà không có dấu hiệu nào cho biết nó còn
+ *   tồn tại.
+ * * Vì vậy dải chọn bản dịch thành MỘT HÀNG RIÊNG của lưới `.cmp` (`.cmp__bans`, hàng 2),
+ *   mỗi bản một dòng `bản dịch #N · engine · status` + `[xóa]`. Thanh công cụ vì thế KHÔNG
+ *   mọc thêm phần tử nào — nó còn BỚT đi N chip.
+ * * `getBoundingClientRect()`/`scrollWidth` là phép đo của TRÌNH DUYỆT THẬT; jsdom không có
+ *   layout, nên bài ghim trong `CompareScreen.test.tsx` chỉ khẳng định được SỰ HIỆN DIỆN +
+ *   THỨ TỰ + LỚP của chip CHIMERA và dải chi phí (xem bài `HINH THUC (XOÁ)`), không khẳng
+ *   định được "không tràn". Một khẳng định về tràn ngang chỉ đứng vững khi đo trên Chrome
+ *   thật — đừng thay nó bằng một `assert` trong jsdom.
+ *
+ * Nút xoá KHÔNG gọi API: `onXoa` là của `App` (gọi `DELETE /api/translations/{id}` rồi
+ * `translations.reload()`), cùng khuôn "màn không tự `fetch`" của cả file này.
  */
 import { useEffect, useState } from "react";
 
-import type { EngineSpec, JobState, TranslationDetail, Transcript } from "../api/types.ts";
+import type {
+  ChimeraCost,
+  ChimeraRun,
+  EngineSpec,
+  JobState,
+  TranslationDetail,
+  Transcript,
+} from "../api/types.ts";
 import { EngineSelect } from "../shell/EngineSelect.tsx";
+import { NutXoa } from "../ui/NutXoa.tsx";
 import { KhungRong } from "../ui/TrangRong.tsx";
 
 interface Props {
@@ -128,6 +158,38 @@ interface Props {
    * thứ hai: tiến trình THẬT nằm ở job/SSE và `useJobStream` đã hiện nó ở vùng HÀNG ĐỢI.
    */
   trangThaiJob?: JobState | null;
+  /**
+   * CHẾ ĐỘ CHIMERA ĐANG BẬT (§4.5). Là state của `App`, không phải của màn này —
+   * cùng khuôn với `macDinhId`: màn chỉ BAO, `App` quyết định, vì `App` là nơi gọi
+   * `POST /api/translations` và cờ này đi vào body đó.
+   */
+  chimera?: boolean;
+  /** Người dùng bấm chip ⇒ BÁO LÊN `App`. Màn không tự lật cờ. */
+  onChimeraChange?: (bat: boolean) => void;
+  /**
+   * CẢNH BÁO CHI PHÍ đã đọc (`GET /api/chimera/cost`), `null` = chưa có.
+   *
+   * ⚠️ Màn này KHÔNG tự gọi endpoint đó — cùng luật với mọi màn khác của dự án
+   * ("một chỗ gọi API cho mỗi màn"): `App` đọc, màn hiện.
+   */
+  chiPhi?: ChimeraCost | null;
+  /** Lời gọi đang bay ⇒ dải hiện trạng thái ĐANG ĐO (khung khớp bố cục, không spinner). */
+  dangDocChiPhi?: boolean;
+  /** Lỗi của lần đọc — NGUYÊN VĂN `ApiError.message`; UI không được đoán thay backend. */
+  loiChiPhi?: string | null;
+  /**
+   * XOÁ MỘT BẢN DỊCH — **của `App`**: nó gọi `DELETE /api/translations/{id}` rồi
+   * `translations.reload()`, nên danh sách mới là của MÁY CHỦ, không phải một bản
+   * cục bộ đã cắt tay.
+   *
+   * ⚠️ Trả `Promise` vì nút xoá hai bước phải nói ra `đang xóa…` và lỗi NGUYÊN
+   * VĂN của backend (`NutXoa`) — 409 `job #k đang xếp hàng` là câu người dùng cần
+   * đọc để biết phải huỷ job nào.
+   *
+   * `undefined` ⇒ không có nút xoá nào: đó là trạng thái của nơi dựng màn này chỉ
+   * để ĐỌC (bài test cũ, hoặc vỏ chưa nối đường xoá).
+   */
+  onXoa?: (id: number) => Promise<void>;
 }
 
 /**
@@ -171,6 +233,38 @@ function chuTrangThaiJob(trangThai: JobState): string {
   }
 }
 
+/** Một khoảng thời gian, đơn vị giây; `null` = KHÔNG ĐO ĐƯỢC (`—`, không phải `0,0s`). */
+function giay(ms: number | null | undefined): string {
+  if (ms === null || ms === undefined) return "—";
+  return `${(ms / 1000).toFixed(1)}s`;
+}
+
+/** Một số token; `null` = engine không báo (OPUS-MT chạy trong tiến trình). */
+function token(n: number | null | undefined): string {
+  return n === null || n === undefined ? "—" : String(n);
+}
+
+/**
+ * Tên các ENGINE không chạy được, KHÔNG trùng — vế "nói rõ cái thiếu" của §4.5.
+ *
+ * Trả về ENGINE chứ không phải ứng viên: ba ứng viên cùng thiếu `qwen2.5-7b` phải
+ * hiện một lần. Đây là điều người dùng cần biết để sửa (`ollama pull` cái gì).
+ */
+function engineThieu(chiPhi: ChimeraCost): string[] {
+  return [...new Set(chiPhi.candidates.filter((c) => !c.available).map((c) => c.engine))];
+}
+
+/** Cảnh báo CHẤT LƯỢNG đã khai của các ứng viên — đi KÈM cảnh báo chi phí. */
+function canhBaoChatLuong(chiPhi: ChimeraCost): { engine: string; note: string }[] {
+  const ra: { engine: string; note: string }[] = [];
+  for (const c of chiPhi.candidates) {
+    if (c.quality_note === null) continue;
+    if (ra.some((x) => x.engine === c.engine)) continue;
+    ra.push({ engine: c.engine, note: c.quality_note });
+  }
+  return ra;
+}
+
 /** Cột phải của một đoạn CHƯA có chữ dịch: trạng thái của bản dịch + trạng thái JOB (nếu có). */
 function chuODichTrong(ban: TranslationDetail, trangThaiJob: JobState | null): string {
   const job = trangThaiJob === null ? "" : ` · job: ${chuTrangThaiJob(trangThaiJob)}`;
@@ -188,6 +282,12 @@ export function CompareScreen({
   dangTao = false,
   loiTao = null,
   trangThaiJob = null,
+  chimera = false,
+  onChimeraChange,
+  chiPhi = null,
+  dangDocChiPhi = false,
+  loiChiPhi = null,
+  onXoa,
 }: Props) {
   const [chonId, datChonId] = useState<number | null>(null);
   const [ghim, datGhim] = useState(false);
@@ -248,6 +348,15 @@ export function CompareScreen({
   // (`reducer.pinB` từ chối đúng ca đó) — ở đây đơn giản là không có gì để ghim.
   const ghimBan = ghim ? translations.find((tr) => tr.id !== chon?.id) ?? null : null;
 
+  // DẤU VẾT CHIMERA của bản đang xem (§4.5). `null` = bản dịch thường ⇒ KHÔNG có
+  // ngăn ứng viên nào, và đó là một trạng thái KHÁC hẳn "có chạy mà chưa có dữ liệu".
+  const chimeraRun: ChimeraRun | null = chon?.chimera ?? null;
+  // Chữ của TỪNG ứng viên theo `Segment.i`, dựng MỘT lần cho cả danh sách: tra trong
+  // mảng `segments` của mỗi ứng viên ở từng dòng là O(số_dòng × số_ứng_viên × số_đoạn).
+  const uvTheoI = (chimeraRun?.candidates ?? []).map(
+    (c) => new Map(c.segments.map((s) => [s.i, s.text])),
+  );
+
   const dichTheoI = new Map((chon?.segments ?? []).map((s) => [s.i, s]));
   const cpsTheoI = new Map((chon?.cps.rows ?? []).map((r) => [r.i, r]));
   const ghimTheoI = new Map((ghimBan?.segments ?? []).map((s) => [s.i, s]));
@@ -275,34 +384,28 @@ export function CompareScreen({
 
   return (
     <section className="cmp">
-      {/* Segmented control (U7: KHÔNG phải N tab) + nút ghim + CỬA VÀO "bắt đầu dịch". */}
-      <div className="cmp__thanh" role="radiogroup" aria-label="Bản dịch">
-        {translations.map((tr) => (
-          <button
-            key={tr.id}
-            type="button"
-            role="radio"
-            aria-checked={tr.id === chon?.id}
-            className="cmp__chon"
-            data-testid={`pick-${tr.id}`}
-            data-stale={String(tr.stale)}
-            onClick={() => {
-              datChonId(tr.id);
-              // BÁO LÊN `App`: lựa chọn này phải trở thành `banDangXemId` (xem prop
-              // `onChonBanDich`), nếu không thì `Transport` và nhãn job vẫn bám bản VỪA TẠO.
-              if (onChonBanDich !== undefined) onChonBanDich(tr.id);
-            }}
-          >
-            {/* NHÃN BỀN (D2) — KHÔNG đánh số theo VỊ TRÍ MẢNG.
-                ĐO ĐƯỢC TRƯỚC (ảnh chụp thật, ERRATA #41 mục 3a): nhãn cũ là `bản dịch {k + 1} ·
-                {engine}`, tức DANH TÍNH của một bản dịch là CHỖ ĐỨNG của nó trong mảng — thêm/bớt
-                một bản dịch là mọi nhãn sau đổi số, và cùng một bản dịch mang hai tên khác nhau ở
-                hai lần đọc. Nay danh tính lấy từ CHÍNH DỮ LIỆU CỦA HÀNG: `id` (duy nhất), `engine`
-                và `status` (đều của máy chủ). */}
-            {`bản dịch #${tr.id} · ${tr.engine} · ${tr.status}${tr.stale ? " · lỗi thời" : ""}`}
-          </button>
-        ))}
+      {/* THANH CÔNG CỤ — hàng 1 của lưới `.cmp`. BỐN điều khiển CỐ ĐỊNH: ô chọn engine,
+          nút "dịch", chip CHIMERA, nút ghim. ⚠️ Dải chọn bản dịch KHÔNG còn ở đây (nó ở
+          `.cmp__bans`, hàng 2): mỗi bản dịch thêm một nút xoá, nên nhét chúng vào thanh này
+          sẽ đẩy chip CHIMERA ra ngoài vùng nhìn thấy — một điều khiển không thấy được là
+          một điều khiển mất tích (xem `app.css` `.cmp__bans`). */}
+      <div className="cmp__thanh">
         {coBanDich ? nutDich : null}
+        {/* §4.5 NGUYÊN VĂN: *"Bật bằng chip amber trên thanh công cụ."* Chip này là
+            CÙNG một phần tử ở cả hai trạng thái (bật/tắt) — `aria-pressed` là thứ nói
+            trạng thái, không phải việc nó biến mất khi tắt. `--signal` chỉ có MỘT
+            nghĩa (đang hoạt động), nên chip bật mới được viền amber. */}
+        <button
+          type="button"
+          className="cmp__chimera-chip"
+          data-testid="chimera-chip"
+          aria-pressed={chimera}
+          onClick={() => {
+            if (onChimeraChange !== undefined) onChimeraChange(!chimera);
+          }}
+        >
+          ◆ CHIMERA
+        </button>
         <button
           type="button"
           className="cmp__ghim"
@@ -317,20 +420,136 @@ export function CompareScreen({
         </button>
       </div>
 
+      {/* DẢI CHỌN BẢN DỊCH — hàng 2: mỗi bản dịch MỘT DÒNG `bản dịch #N · engine · status`
+          (nút chọn) + nút XOÁ hai bước cạnh nó. Hai nút là ANH EM, không lồng nhau:
+          `<button>` KHÔNG được chứa `<button>` (trình duyệt tự đóng thẻ ngoài ⇒ DOM thật
+          khác JSX, và cú bấm rơi vào phần tử khác).
+          MỌI trạng thái của bước xoá NÓI RA bằng chữ (`xóa` → `xóa?` + `hủy` → `đang xóa…`,
+          và lỗi là NGUYÊN VĂN `ApiError.message`) — không chỉ bằng màu. */}
+      <div className="cmp__bans" role="radiogroup" aria-label="Bản dịch">
+        {translations.map((tr) => (
+          <div key={tr.id} className="cmp__ban">
+            <button
+              type="button"
+              role="radio"
+              aria-checked={tr.id === chon?.id}
+              className="cmp__chon"
+              data-testid={`pick-${tr.id}`}
+              data-stale={String(tr.stale)}
+              onClick={() => {
+                datChonId(tr.id);
+                // BÁO LÊN `App`: lựa chọn này phải trở thành `banDangXemId` (xem prop
+                // `onChonBanDich`), nếu không thì `Transport` và nhãn job vẫn bám bản VỪA TẠO.
+                if (onChonBanDich !== undefined) onChonBanDich(tr.id);
+              }}
+            >
+              {/* NHÃN BỀN (D2) — KHÔNG đánh số theo VỊ TRÍ MẢNG.
+                  ĐO ĐƯỢC TRƯỚC (ảnh chụp thật, ERRATA #41 mục 3a): nhãn cũ là `bản dịch {k + 1} ·
+                  {engine}`, tức DANH TÍNH của một bản dịch là CHỖ ĐỨNG của nó trong mảng — thêm/bớt
+                  một bản dịch là mọi nhãn sau đổi số, và cùng một bản dịch mang hai tên khác nhau ở
+                  hai lần đọc. Nay danh tính lấy từ CHÍNH DỮ LIỆU CỦA HÀNG: `id` (duy nhất), `engine`
+                  và `status` (đều của máy chủ). */}
+              {`bản dịch #${tr.id} · ${tr.engine} · ${tr.status}${tr.stale ? " · lỗi thời" : ""}`}
+            </button>
+            {onXoa === undefined ? null : (
+              <NutXoa
+                doiTuong={`bản dịch #${tr.id}`}
+                className="cmp__xoa"
+                classNameLoi="cmp__xoa-loi"
+                testid={`xoa-ban-${tr.id}`}
+                onXoa={() => onXoa(tr.id)}
+              />
+            )}
+          </div>
+        ))}
+      </div>
+
+      {/* §4.5 NGUYÊN VĂN: *"Dải cảnh báo chéo chạy ngang"*, và `app.css` khai **BẢY**
+          track cho `.cmp` (`auto auto auto auto auto auto 1fr`) với `grid-row` tường minh
+          cho MỌI con: `.cmp__thanh` 1 · `.cmp__bans` 2 · `.cmp__chi-phi` 3 ·
+          `.cmp__tin` 4 · `.cmp__nguong`/`.cmp__rong` 5 · `.cmp__dau` 6 ·
+          `.cmp__danh-sach` 7 (hàng `1fr` DUY NHẤT — chỗ cuộn). Đây là ERRATA #31 mục 1:
+          thêm một con vào lưới có `grid-template-rows` cố định mà không khai track +
+          `grid-row` là một lỗi IM LẶNG (đã sai ba lần trong dự án này). `.cmp__bans` là con
+          MỚI của lưới này (dải chọn bản dịch, tách khỏi thanh công cụ) và nó lấy hàng 2, nên
+          MỌI hàng phía dưới dời xuống MỘT bậc — con số ở trên là con số ĐANG CHẠY, không phải
+          con số cũ.
+          Chi phí hiện TRƯỚC khi bấm là điều kiện để chế độ này dùng được: `estimate` là
+          số ĐO ĐƯỢC từ một bản dịch thật đã chạy xong, và `null` là câu trả lời hợp lệ
+          ("chưa đo được") — KHÔNG bịa một con số. */}
+      {chimera ? (
+        <div className="cmp__chi-phi" data-testid="chimera-chi-phi">
+          {loiChiPhi !== null ? (
+            <p data-testid="chimera-loi">{loiChiPhi}</p>
+          ) : chiPhi === null ? (
+            dangDocChiPhi ? (
+              <p data-testid="chimera-dang-do">
+                <span className="cmp__cp-ky">◆</span> CHẾ ĐỘ CHIMERA · đang đo chi phí…
+                (đọc <code>GET /api/chimera/cost</code>)
+              </p>
+            ) : null
+          ) : (
+            <>
+              <p data-testid="chimera-mot-lan">
+                <span className="cmp__cp-ky">◆</span> CHẾ ĐỘ CHIMERA ·{" "}
+                {chiPhi.calls_per_batch} lượt gọi model cho mỗi lô · chậm ~
+                {chiPhi.multiplier}× · VRAM không tăng (chạy tuần tự)
+              </p>
+              <p data-testid="chimera-so-ung-vien">
+                {chiPhi.runnable}/{chiPhi.declared} ứng viên chạy được NGAY BÂY GIỜ · engine
+                pha <code>{chiPhi.merge_engine}</code>
+              </p>
+              {engineThieu(chiPhi).length === 0 ? null : (
+                <p data-testid="chimera-thieu">
+                  thiếu: {engineThieu(chiPhi).join(", ")} — model chưa được pull, hoặc
+                  runtime không phục vụ được
+                </p>
+              )}
+              <p data-testid="chimera-uoc-luong">
+                {chiPhi.estimate === null ? (
+                  <>
+                    {chiPhi.estimate_basis}
+                    {chiPhi.estimate_hint ? ` ${chiPhi.estimate_hint}` : ""}
+                  </>
+                ) : (
+                  <>
+                    ước lượng:{" "}
+                    <span className="cmp__cp-so">{giay(chiPhi.estimate.duration_ms)}</span>{" "}
+                    · <span className="cmp__cp-so">{token(chiPhi.estimate.tokens_in)}</span>
+                    {"→"}
+                    <span className="cmp__cp-so">{token(chiPhi.estimate.tokens_out)}</span>{" "}
+                    token · {chiPhi.estimate_basis}
+                  </>
+                )}
+              </p>
+              {/* Cảnh báo CHẤT LƯỢNG đi KÈM cảnh báo chi phí: một ứng viên đã đo được là
+                  chép nguyên nguồn thì gọi nó thêm năm lần không làm bản dịch tốt hơn. */}
+              {canhBaoChatLuong(chiPhi).map((cb) => (
+                <p key={cb.engine} data-testid={`chimera-chat-luong-${cb.engine}`}>
+                  ⚠ chất lượng · {cb.engine}: {cb.note}
+                </p>
+              ))}
+            </>
+          )}
+        </div>
+      ) : null}
+
       {/* ⚠️ KHÔNG CÓ ENGINE MT NÀO DÙNG ĐƯỢC ⇒ nút VÔ HIỆU **và** một câu nói RÕ vì sao +
           cách sửa. Bài học §4.8 / ERRATA #30: đổi màu là KHÔNG ĐỦ — người dùng không được
           đoán. `available === true` là thuận tiện của client; **backend mới là thẩm quyền**
           (nó trả 409 nếu engine chưa sẵn sàng), nên lỗi của backend ở dưới vẫn phải hiện.
-          ⚠️ Hai nhánh dưới đây nằm TRONG một `div` `.cmp__tin` — con THỨ NĂM của lưới `.cmp`,
-          chứ không phải hai con rời. `app.css` khai **SÁU** track cho `.cmp`
-          (`grid-template-rows: auto auto auto auto auto 1fr`) và MỖI con có `grid-row` tường
-          minh: `.cmp__thanh` 1 · `.cmp__tin` 2 (co lại khi `:empty`) · `.cmp__nguong`/`.cmp__rong`
-          3 · `.cmp__dau` 4 · `.cmp__danh-sach` 6 (hàng `1fr` **DUY NHẤT** — chỗ cuộn).
-          ĐÓNG LÝ DO CỦA KHỐI NÀY: nếu hai nhánh dưới là hai con RỜI thì chúng là con thứ năm và
-          thứ sáu, và hàng `1fr` (chỗ cuộn của danh sách) rơi vào một trong hai nhánh đó — đúng
-          lỗi `Critical` C1 của ERRATA #36 mục 3. Khối chú thích này từng nói "BỐN con" khi
-          `app.css` đã khai SÁU (đo được ở re-review W3 #1, `Minor` F3): chú thích mâu thuẫn với
-          chính mã nó giải thích là một lời khai sai, nên nó được sửa cho khớp sự thật. */}
+          ⚠️ Hai nhánh dưới đây nằm TRONG một `div` `.cmp__tin` — MỘT con của lưới `.cmp`
+          (hàng 4), chứ không phải hai con rời. `app.css` khai **BẢY** track cho `.cmp`
+          (`grid-template-rows: auto auto auto auto auto auto 1fr`) và MỖI con có `grid-row`
+          tường minh: `.cmp__thanh` 1 · `.cmp__bans` 2 · `.cmp__chi-phi` 3 · `.cmp__tin` 4
+          (co lại khi `:empty`) · `.cmp__nguong`/`.cmp__rong` 5 · `.cmp__dau` 6 ·
+          `.cmp__danh-sach` 7 (hàng `1fr` **DUY NHẤT** — chỗ cuộn).
+          ĐÓNG LÝ DO CỦA KHỐI NÀY: nếu hai nhánh dưới là hai con RỜI thì chúng chiếm thêm hai
+          hàng, và hàng `1fr` (chỗ cuộn của danh sách) rơi vào một trong hai nhánh đó — đúng
+          lỗi `Critical` C1 của ERRATA #36 mục 3. ⚠️ Con số ở khối này TỪNG lệch với chính
+          `app.css` (nói "BỐN con" khi CSS khai SÁU; rồi nói SÁU khi CSS khai BẢY): nó được
+          sửa lại theo đúng số track ĐANG CHẠY khi `.cmp__bans` được thêm vào lưới — chú thích
+          mâu thuẫn với mã nó giải thích là một lời khai sai. */}
       <div className="cmp__tin">
         {dungDuoc.length === 0 ? (
           <p className="cmp__ly-do-khong-dich" data-testid="ly-do-khong-dich">
@@ -395,6 +614,68 @@ export function CompareScreen({
                   Đoạn ĐÃ dịch vẫn hiện CHỮ THẬT của nó — trạng thái không được nuốt chữ. */}
               <span className="cmp__dich" data-testid="col-right">
                 {chuDich ?? (chon === null ? "" : chuODichTrong(chon, trangThaiJob))}
+                {/* §4.5 NGUYÊN VĂN: *"Mỗi dòng đã xử lý được mở rộng: bản hợp nhất ở
+                    trên (đánh ◆, kèm HỢP NHẤT TỪ 6 ỨNG VIÊN · hyp 3 · 1.4s), và 6 ứng
+                    viên xếp chồng bên dưới, ứng viên được chọn sáng hơn."*
+                    Bốn vế đều là DỮ LIỆU của máy chủ:
+                      · `ran_count` — số ứng viên THẬT SỰ chạy, không phải số đã khai;
+                      · `anchor_by_segment[i]` — `hyp` của dòng này, chỉ số 1-based
+                        trong danh sách ĐÃ KHAI (backend tính, không suy ở client);
+                      · `merge.duration_ms` — thời gian THẬT của lượt pha;
+                      · `identical_segments` / `fallback_segments` — hai sự thật khó
+                        nói nhất, và cả hai đều được NÓI RA thay vì im lặng.
+                    `distinct_by_segment` là con số khiến "chế độ đắt gấp N" kiểm được:
+                    `1` nghĩa là mọi ứng viên giống hệt nhau, tức lượt pha không có gì
+                    để pha (ĐO ĐƯỢC: đúng vậy với bốn ứng viên qwen trên máy này). */}
+                {chimeraRun === null ? null : (
+                  <span className="cmp__uv-boc" data-testid={`ung-vien-${seg.i}`}>
+                    <span className="cmp__hop-nhat" data-testid={`hop-nhat-${seg.i}`}>
+                      ◆ HỢP NHẤT TỪ {chimeraRun.ran_count} ỨNG VIÊN · hyp{" "}
+                      {chimeraRun.merge.anchor_by_segment[String(seg.i)] ?? "—"} ·{" "}
+                      {giay(chimeraRun.merge.duration_ms)}
+                      {chimeraRun.merge.fallback_segments.includes(seg.i) ? (
+                        <span data-testid={`lui-${seg.i}`}> · lùi về mỏ neo</span>
+                      ) : null}
+                      {chimeraRun.merge.identical_segments?.includes(seg.i) ? (
+                        <span data-testid={`khong-doi-${seg.i}`}>
+                          {" "}· lượt pha không đổi gì so với mỏ neo
+                        </span>
+                      ) : null}
+                      {chimeraRun.distinct_by_segment?.[String(seg.i)] === undefined ? null : (
+                        <span data-testid={`khac-nhau-${seg.i}`}>
+                          {" "}· {chimeraRun.distinct_by_segment[String(seg.i)]} bản khác nhau
+                        </span>
+                      )}
+                    </span>
+                    {chimeraRun.candidates.map((ungVien, k) => {
+                      const duocChon =
+                        (chimeraRun.merge.anchor_by_segment[String(seg.i)] ?? 0) === k + 1;
+                      const chuUv = uvTheoI[k]?.get(seg.i);
+                      return (
+                        <span
+                          key={ungVien.id}
+                          className={"cmp__uv" + (duocChon ? " is-chon" : "")}
+                          data-testid={`uv-${seg.i}-${ungVien.id}`}
+                        >
+                          <span className="cmp__uv-nhan">{ungVien.id}</span>
+                          <span className="cmp__uv-chu">
+                            {/* ⚠️ `skipped` là trạng thái LÚC LƯỢT CHẠY ĐÓ, còn dải
+                                `chimera-so-ung-vien` ở trên là kế hoạch NGAY BÂY GIỜ.
+                                Hai câu đúng ở hai thời điểm khác nhau, nên câu này phải
+                                NÓI RA mốc của nó: đo được trên DB thật, dải ghi
+                                "6/6 ứng viên chạy được" trong khi ô c6 của bản đang xem
+                                ghi "engine chưa được pull" — người đọc thấy mâu thuẫn mà
+                                không có gì giải thích. */}
+                            {chuUv ??
+                              (typeof ungVien.skipped === "string"
+                                ? `trong lượt này: ${ungVien.skipped}`
+                                : "không chạy")}
+                          </span>
+                        </span>
+                      );
+                    })}
+                  </span>
+                )}
               </span>
               <span className="cmp__cps" data-testid="col-cps">
                 {cps === undefined || cps.cps === null ? "—" : cps.cps.toFixed(1)}

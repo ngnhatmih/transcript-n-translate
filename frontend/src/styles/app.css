@@ -160,11 +160,20 @@ body {
   list-style: none;
 }
 
-/* Một hàng: rail mono 72px (§2.3, cố định) + chữ + nhãn lý do.
-   Lề trái 6px là chỗ dành cho VÂN (§2.5) hoặc cho đèn amber của đoạn đang phát (§4.1). */
+/* Một hàng: rail mono cho HAI đầu mốc (`0:02.00 → 0:04.00`) + chữ + nhãn lý do.
+   Lề trái 6px là chỗ dành cho VÂN (§2.5) hoặc cho đèn amber của đoạn đang phát (§4.1).
+
+   ⚠️ VÌ SAO CỘT ĐẦU KHÔNG CÒN LÀ `--rail` (72px): rail giờ in CẢ HAI đầu mốc, không phải một.
+   Chuỗi `0:02.00 → 0:04.00` là **17 ký tự** mono ở `--fs-num` 10,5px (bề rộng mỗi ký tự ≈ 0,6 em
+   ⇒ ≈ 6,3 px) ≈ **107 px**, còn 72 px chỉ đủ cho một mốc (`0:02.00` = 7 ký tự ≈ 44 px). Với track
+   cũ, chữ TRÀN ra ngoài cột; và `text-align: right` của `.ed__rail` làm nó tràn về phía TRÁI, tức
+   ra ngoài khung cuộn (`.ed__khung` cắt theo chiều dọc, chiều ngang thì trôi) — nên đây không
+   phải chuyện thẩm mỹ mà là chữ BỊ MẤT. `calc(var(--rail) * 2)` = 144 px: đủ cho 17 ký tự +
+   `padding-left`, và vẫn là bội của token nhịp cũ thay vì một con số ma. Bóng ma của trạng thái
+   rỗng (`.rong__ma`) giữ ĐÚNG bề rộng này — nó là bóng của chính hàng này, xem chỗ đó. */
 .ed__item {
   display: grid;
-  grid-template-columns: var(--rail) 1fr auto;
+  grid-template-columns: calc(var(--rail) * 2) 1fr auto;
   gap: var(--sp-3);
   align-items: start;
   min-height: var(--row-2);
@@ -173,12 +182,17 @@ body {
   border-left: var(--suspect-hatch-w) solid transparent;
 }
 
+/* `nowrap` là BẮT BUỘC, không phải phòng thủ: chuỗi hai mốc có MỘT dấu cách (quanh `→`), nên nếu
+   thiếu nó thì ở bề rộng hẹp (cửa sổ nhỏ, phóng to chữ) trình duyệt sẽ ngắt dòng NGAY GIỮA hai
+   mốc — `0:02.00 →` ở dòng trên và `0:04.00` ở dòng dưới — và hàng `min-height: 44px` cao lên,
+   phá nhịp dọc của cả danh sách (mọi phép tính cửa sổ của ảo hoá đều dựa vào `ROW_H`). */
 .ed__rail {
   padding-left: var(--sp-2);
   font-family: var(--font-mono);
   font-size: var(--fs-num);
   color: var(--ink-2);
   text-align: right;
+  white-space: nowrap;
 }
 
 .ed__chu {
@@ -360,6 +374,17 @@ body {
   font-family: var(--font-mono);
   font-size: var(--fs-num);
   color: var(--ink-1);
+}
+
+/* Ô chọn ENGINE ASR của thanh trên (mượn hình dạng `.eng` của header/Đối chiếu — cùng một loại
+   điều khiển thì cùng một hình dạng).
+   ⚠️ VÌ SAO CẦN `max-width`: một `<select>` tự lấy bề rộng của lựa chọn DÀI NHẤT, và nhãn engine
+   là CHUỖI CỦA REGISTRY — `"Faster-Whisper large-v3 (chính xác hơn turbo)"` là 47 ký tự ≈ **290 px**
+   ở `--fs-num`. Không chặn trên thì ô chọn đẩy `duyệt` (đang `margin-left: auto`) ra ngoài khung
+   ở cửa sổ hẹp, tức một lệnh CÓ SẴN biến mất chỉ vì registry có thêm một engine mới. Cắt ở
+   `260px`: chữ trên thanh ngắn lại, còn danh sách xổ xuống vẫn đủ nhãn. */
+.ed__thanh .eng__chon {
+  max-width: 260px;
 }
 
 /* ── CÁC LỆNH GHI (Task D2): `duyệt` (Biên tập) · `huỷ`/`chạy lại` (Hàng đợi) ───────────────────
@@ -581,20 +606,20 @@ body {
 
 /* Khay TIN cua cua vao "bat dau dich": MOT con cua luoi `.cmp`, du trong no co 0, 1 hay 3
    nhanh (ly do khong dich duoc · loi backend · cua vao khi chua co ban dich). No la con
-   THU HAI cua `.cmp` va LUON co mat trong JSX (`CompareScreen` render `<div className=
-   "cmp__tin">` o moi trang thai cua ban ghi), nen so con CO MAT cua luoi nay la NAM hoac
-   SAU — khong bao gio con bon. Luat `:empty` duoi day chi an no khi no khong co gi de noi,
+   ke tu §4.5 no la con THU BA (dai canh bao chi phi chiem hang 2), va no LUON co mat
+   trong JSX (`CompareScreen` render `<div className="cmp__tin">` o moi trang thai cua
+   ban ghi), nen so con CO MAT cua luoi nay la NAM hoac SAU — khong bao gio con bon. Luat `:empty` duoi day chi an no khi no khong co gi de noi,
    va no an duoc vi hang `auto` cua no co lai bang khong. */
 .cmp__tin:empty {
   display: none;
 }
 
-/* VỊ TRÍ của khay tin: hàng 2. Khai ở luật RIÊNG (không phải luật `:empty` ở trên) vì
+/* VỊ TRÍ của khay tin: hàng 4. Khai ở luật RIÊNG (không phải luật `:empty` ở trên) vì
    `grid-row` phải đúng ở CẢ HAI trạng thái — khay có nội dung và khay rỗng. Nếu chỉ khai
    trong `:empty` thì lúc khay CÓ chữ, `.cmp__tin` lại do auto-placement đặt, và đó đúng là
    cơ chế đã sinh ra C1. */
 .cmp__tin {
-  grid-row: 2;
+  grid-row: 4;
 }
 
 /* ── §4.3 CUA VAO "BAT DAU DICH" (Task W3) — o chon engine + nut "dich" ──────────────
@@ -724,43 +749,272 @@ body {
 
    SÁU con theo thứ tự DOM (`CompareScreen.tsx`), và track tương ứng:
      1 `.cmp__thanh`    (thanh chọn bản dịch)          → track 1 `auto`
-     2 `.cmp__tin`      (khay tin — LUÔN có mặt)        → track 2 `auto` (co lại khi `:empty`)
-     3 `.cmp__nguong`   (dòng ngưỡng)                   ┐ hai nhánh LOẠI TRỪ NHAU,
-     3 `.cmp__rong`     (trạng thái rỗng)               ┘ cùng track 3 `auto`
-     4 `.cmp__dau`      (đầu cột)                       → track 4 `auto`
-     5 `.cmp__danh-sach`(danh sách cuộn được)           → track 6 `1fr`  ← HÀNG CUỐI
-   ⚠️ `.cmp__danh-sach` trỏ vào track CUỐI (`grid-row: 6`), KHÔNG phải track 5: đây là hàng
-   `1fr` — chỗ cuộn của danh sách — và nó phải là hàng DUY NHẤT được giãn. Khai `grid-row: 5`
+     2 `.cmp__chi-phi`  (§4.5 dải cảnh báo chi phí)     → track 2 `auto` (vắng khi chip TẮT)
+     3 `.cmp__tin`      (khay tin — LUÔN có mặt)        → track 3 `auto` (co lại khi `:empty`)
+     4 `.cmp__nguong`   (dòng ngưỡng)                   ┐ hai nhánh LOẠI TRỪ NHAU,
+     4 `.cmp__rong`     (trạng thái rỗng)               ┘ cùng track 4 `auto`
+     5 `.cmp__dau`      (đầu cột)                       → track 5 `auto`
+     6 `.cmp__danh-sach`(danh sách cuộn được)           → track 7 `1fr`  ← HÀNG CUỐI
+   ⚠️ `.cmp__danh-sach` trỏ vào track CUỐI (`grid-row: 7`), KHÔNG phải track 6: đây là hàng
+   `1fr` — chỗ cuộn của danh sách — và nó phải là hàng DUY NHẤT được giãn. Khai `grid-row: 6`
    là một lỗi IM LẶNG: phép đo của bài ghim dưới đây (`track[grid-row - 1] === "1fr"`) bắt được
    nó, và bản nháp đầu của khối này đã mắc đúng lỗi đó.
-   Khai TRACK cho cả sáu con CÓ MẶT, không phải cho số con của một nhánh: `.cmp__tin` có
+   Khai TRACK cho cả BẢY con CÓ MẶT, không phải cho số con của một nhánh: `.cmp__tin` có
    mặt ở mọi trạng thái của một bản ghi đã chọn, nên "bốn con" là con số của một trạng thái
-   KHÔNG tồn tại. */
+   KHÔNG tồn tại.
+   ⚠️ ERRATA #31 mục 1, LẦN THỨ TƯ: `.cmp__chi-phi` (nhánh CHIMERA) là một CON MỚI, nên nó
+   phải có track RIÊNG và `grid-row` TƯỜNG MINH — nếu không, hàng `1fr` (chỗ cuộn của danh
+   sách) trôi sang nó và danh sách không cuộn được. `.cmp` đi từ sáu lên bảy track trong
+   CÙNG lượt với việc thêm con đó. */
 .cmp {
   display: grid;
-  grid-template-rows: auto auto auto auto auto 1fr;
+  grid-template-rows: auto auto auto auto auto auto 1fr;
   height: 100%;
   min-height: 0;
   background: var(--panel-0);
+}
+
+/* ── §4.5 CHẾ ĐỘ CHIMERA — chip, dải cảnh báo chi phí, bốn cửa sổ ứng viên ───────── */
+
+/* Chip trên thanh công cụ. CÙNG một phần tử ở cả hai trạng thái: `aria-pressed` nói
+   trạng thái, không phải việc nó biến mất khi tắt. `--signal` chỉ có MỘT nghĩa (đang
+   hoạt động), nên chỉ chip ĐANG BẬT mới được viền + chữ amber. */
+.cmp__chimera-chip {
+  padding: var(--sp-1) var(--sp-2);
+  border: var(--rule-w) solid var(--rule);
+  border-radius: var(--radius);
+  background: var(--panel-2);
+  color: var(--ink-1);
+  font-family: var(--font-label);
+  font-size: var(--fs-label);
+  letter-spacing: var(--track-label);
+  cursor: pointer;
+  transition: border-color var(--dur-1) var(--ease-1), color var(--dur-1) var(--ease-1);
+}
+
+.cmp__chimera-chip[aria-pressed="true"] {
+  border-color: var(--signal);
+  color: var(--signal);
+}
+
+/* Hàng 3 — DẢI CẢNH BÁO CHÉO (§4.5 nguyên văn: *"Dải cảnh báo chéo chạy ngang"*).
+   ⚠️ Vân chéo ở đây TRÙNG kỹ thuật với vân "nghi ngờ" của §2.5 (`--suspect-hatch-*`)
+   nhưng KHÁC nghĩa: §2.5 dành vân đó cho "đoạn nghi ngờ", còn §4.5 chỉ định hình thức
+   này cho dải cảnh báo chi phí. Sắc là `--signal` ở alpha rất thấp, không phải `--fault`
+   — nhầm hai thứ này sẽ biến một cảnh báo chi phí thành một báo lỗi.
+   Chữ dùng `--ink-1` (≥ 4,5:1), KHÔNG dùng `--ink-2`: đây là câu người dùng PHẢI đọc
+   trước khi bấm. */
+.cmp__chi-phi {
+  grid-row: 3;
+  display: grid;
+  gap: var(--sp-1);
+  padding: var(--sp-2) var(--sp-3);
+  border-bottom: var(--rule-w) solid var(--rule);
+  background-image: repeating-linear-gradient(
+    var(--suspect-hatch-angle),
+    transparent 0,
+    transparent var(--suspect-hatch-step),
+    color-mix(in srgb, var(--signal) 8%, transparent) var(--suspect-hatch-step),
+    color-mix(in srgb, var(--signal) 8%, transparent)
+      calc(var(--suspect-hatch-step) * 2)
+  );
+  color: var(--ink-1);
+  font-family: var(--font-mono);
+  font-size: var(--fs-note);
+  line-height: var(--lh-body);
+}
+
+.cmp__chi-phi p {
+  margin: 0;
+}
+
+.cmp__chi-phi [data-testid="chimera-loi"] {
+  color: var(--fault);
+}
+
+/* Ký hiệu ◆ của §4.5 — chữ DUY NHẤT của dải mang amber, vì nó đánh dấu chế độ đang bật. */
+.cmp__cp-ky {
+  color: var(--signal);
+}
+
+/* Mọi CON SỐ ở đây là mono + chữ số đều nhau (§2.1): chúng phải xếp thẳng cột dọc. */
+.cmp__cp-so {
+  color: var(--ink-0);
+  font-variant-numeric: tabular-nums;
+}
+
+.cmp__chi-phi code {
+  font-family: var(--font-mono);
+  color: var(--ink-0);
+}
+
+/* Dòng HỢP NHẤT của mỗi đoạn (§4.5: *"bản hợp nhất ở trên, đánh ◆, kèm HỢP NHẤT TỪ 6
+   ỨNG VIÊN · hyp 3 · 1.4s"*). Sáng hơn các ứng viên: đây là thứ được GIỮ. */
+.cmp__hop-nhat {
+  display: block;
+  margin-top: var(--sp-1);
+  color: var(--ink-0);
+  font-family: var(--font-mono);
+  font-size: var(--fs-label);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Bốn cửa sổ ứng viên xếp chồng dưới bản hợp nhất. Có đường kẻ 1px ngăn cách (§2.3:
+   phân tầng bằng đường kẻ, không bằng shadow). */
+.cmp__uv-boc {
+  display: block;
+  margin-top: var(--sp-1);
+  padding-top: var(--sp-1);
+  border-top: var(--rule-w) solid var(--rule);
+}
+
+.cmp__uv {
+  display: grid;
+  grid-template-columns: 3.5rem 1fr;
+  gap: var(--sp-2);
+}
+
+.cmp__uv-nhan,
+.cmp__uv-chu {
+  color: var(--ink-1);
+  font-family: var(--font-mono);
+  font-size: var(--fs-label);
+}
+
+/* §4.5 nguyên văn: *"ứng viên được chọn sáng hơn"* — SÁNG HƠN, không phải amber:
+   `--signal` đã có nghĩa "đang hoạt động", và mỏ neo là một sự thật về dữ liệu. */
+.cmp__uv.is-chon .cmp__uv-nhan,
+.cmp__uv.is-chon .cmp__uv-chu {
+  color: var(--ink-0);
+}
+
+/* Ba sự thật khó nói nhất của một lượt pha, nói bằng CHỮ ở cạnh dòng hợp nhất: lượt pha
+   đã lùi về mỏ neo, lượt pha không đổi gì, và số bản KHÁC NHAU giữa các ứng viên. */
+.cmp__hop-nhat [data-testid^="lui-"],
+.cmp__hop-nhat [data-testid^="khong-doi-"],
+.cmp__hop-nhat [data-testid^="khac-nhau-"] {
+  color: var(--ink-1);
 }
 
 /* Trạng thái rỗng nói SỰ THẬT của lượt này, không hứa một thứ chưa có đường làm.
    Hình dạng nay là "tấm rỗng" dùng chung (`.rong`): chỗ này chỉ giữ VỊ TRÍ của nó trong lưới
    SÁU track của `.cmp` (luật ERRATA #31 mục 1) — bỏ `grid-row` ở đây là một lỗi IM LẶNG. */
 .cmp__rong {
-  /* Hàng 3 — CÙNG track với `.cmp__nguong` (hai nhánh loại trừ nhau). */
-  grid-row: 3;
+  /* Hàng 5 — CÙNG track với `.cmp__nguong` (hai nhánh loại trừ nhau). */
+  grid-row: 5;
   margin: 0;
 }
 
-/* Segmented control (U7: N bản dịch là MỘT dải nút, không phải N tab). */
+/* Segmented control (U7: N bản dịch là MỘT dải nút, không phải N tab).
+   ⚠️ Dải CHỌN BẢN DỊCH đã RỜI khỏi thanh này (xem `.cmp__bans` ngay dưới): thanh công cụ
+   còn ô chọn engine + nút "dịch" + chip CHIMERA + nút ghim, và nó không được phép tràn —
+   chip CHIMERA bị đẩy ra ngoài vùng nhìn thấy nghĩa là người dùng tưởng chế độ đó biến mất. */
 .cmp__thanh {
   grid-row: 1;
   display: flex;
+  /* `wrap` là lưới an toàn: nhãn engine dài, cỡ chữ lớn của OS, hay một cửa sổ hẹp đều có
+     thể làm bốn điều khiển này không vừa một dòng. Xuống dòng thì thanh CAO thêm, còn hơn
+     để một điều khiển trôi ra ngoài `clientWidth` mà không có cuộn ngang. */
+  flex-wrap: wrap;
   align-items: center;
   gap: var(--sp-2);
   padding: var(--sp-2) var(--sp-3);
   border-bottom: var(--rule-w) solid var(--rule);
+}
+
+/* DẢI CHỌN BẢN DỊCH — hàng 2, mỗi bản dịch MỘT DÒNG: `bản dịch #N · engine · status [xóa]`.
+   ⚠️ VÌ SAO RỜI KHỎI THANH CÔNG CỤ: trước đây mỗi bản dịch là một chip nằm TRONG
+   `.cmp__thanh`, cùng chỗ với ô chọn engine, nút "dịch", chip CHIMERA và nút ghim. Thêm
+   nút xoá vào đó làm thanh mọc thêm hai phần tử MỖI bản dịch và đẩy chip CHIMERA ra khỏi
+   vùng nhìn thấy — một điều khiển không thấy được là một điều khiển mất tích. Mỗi dòng ở
+   đây rộng rãi nên nhãn dài (engine + status + "lỗi thời") vẫn đọc được, và `max-height`
+   bên dưới giữ cho dải này không ăn hết chỗ của danh sách đoạn khi có nhiều bản dịch. */
+.cmp__bans {
+  grid-row: 2;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  max-height: calc(var(--row-2) * 3);
+  overflow-y: auto;
+  padding: var(--sp-2) var(--sp-3);
+  border-bottom: var(--rule-w) solid var(--rule);
+}
+
+/* Rỗng (bản ghi chưa có bản dịch nào) ⇒ không chiếm hàng. Track `auto` của nó co lại bằng
+   không, cùng cơ chế với `.cmp__tin:empty`. */
+.cmp__bans:empty {
+  display: none;
+}
+
+/* MỘT BẢN DỊCH = MỘT CẶP NÚT ANH EM (chọn + xoá) trên cùng một dòng.
+   ⚠️ Vì sao phải có ô bọc: nút CHỌN mang `role="radio"`, còn nút XOÁ là một điều khiển
+   KHÁC — nhét nút xoá vào trong nút chọn là HTML không hợp lệ (`<button>` không chứa
+   `<button>`), và trình duyệt sẽ tự đóng thẻ ngoài (DOM thật khác JSX). */
+.cmp__ban {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+}
+
+/* Nút CHỌN chiếm cả bề ngang còn lại của dòng: nó vẫn là một chip, nhưng giờ là chip của
+   MỘT DÒNG nên nhãn dài không bị ép; chữ canh trái như một mục danh sách. */
+.cmp__ban > .cmp__chon {
+  flex: 1 1 auto;
+  text-align: left;
+}
+
+/* Nút XOÁ của một bản dịch — cùng mặt chữ nhãn khắc với `.cmp__chon`, nhỏ hơn một bậc và
+   không mang `--signal` (amber chỉ có một nghĩa: đang hoạt động — §2.2 quy tắc 1). */
+.cmp__xoa {
+  flex: 0 0 auto;
+  padding: var(--sp-1) var(--sp-2);
+  border: var(--rule-w) solid var(--rule);
+  border-radius: var(--radius);
+  background: var(--panel-2);
+  color: var(--ink-2);
+  font-family: var(--font-label);
+  font-size: var(--fs-label);
+  letter-spacing: var(--track-label);
+  cursor: pointer;
+  transition: color var(--dur-1) var(--ease-1),
+              border-color var(--dur-1) var(--ease-1);
+}
+
+.cmp__xoa:hover {
+  color: var(--ink-0);
+  border-color: var(--ink-2);
+}
+
+/* BƯỚC XÁC NHẬN: chữ `xóa?` là tín hiệu CHÍNH, viền `--fault` là tín hiệu thứ hai
+   (spec UI §7). */
+.cmp__xoa[data-dang-xac-nhan="true"] {
+  border-color: var(--fault);
+  color: var(--fault);
+}
+
+/* Lối THOÁT của bước xác nhận — không mang màu lỗi, vì huỷ không phải lỗi. */
+.cmp__xoa[data-vai-tro="huy"] {
+  border-color: var(--rule);
+  color: var(--ink-1);
+}
+
+.cmp__xoa:disabled {
+  cursor: default;
+  color: var(--ink-2);
+}
+
+/* Ô lỗi của bước xoá — LUÔN có trong DOM (vùng `aria-live`), rỗng thì không chiếm chỗ.
+   Xuống dòng riêng trong dòng bản dịch (`flex-basis: 100%`) để câu 409 dài không bóp nhãn
+   của bản dịch. */
+.cmp__xoa-loi:empty {
+  display: none;
+}
+
+.cmp__xoa-loi {
+  flex-basis: 100%;
+  color: var(--fault);
+  font-family: var(--font-mono);
+  font-size: var(--fs-label);
 }
 
 .cmp__chon,
@@ -806,8 +1060,8 @@ body {
 }
 
 .cmp__nguong {
-  /* Hàng 3 — CÙNG track với `.cmp__rong` (hai nhánh loại trừ nhau). */
-  grid-row: 3;
+  /* Hàng 5 — CÙNG track với `.cmp__rong` (hai nhánh loại trừ nhau). */
+  grid-row: 5;
   margin: 0;
   padding: var(--sp-1) var(--sp-3);
   border-bottom: var(--rule-w) solid var(--rule);
@@ -821,14 +1075,14 @@ body {
    Bề mặt đầu cột nhích lên đúng MỘT bậc bằng `--surface-step` (§2.3: phân tầng bằng
    đường kẻ 1px + chênh lệch độ sáng nền, không bằng shadow mềm).
 
-   `grid-row: 4` ở đây áp cho `.cmp__dau` (con của lưới `.cmp`). Khai trong CÙNG khối với
+   `grid-row: 6` ở đây áp cho `.cmp__dau` (con của lưới `.cmp`). Khai trong CÙNG khối với
    `.cmp__dong` là để hai thứ dùng chung lưới cột không bị tách ra hai chỗ; `grid-row` là
    thuộc tính của GRID ITEM, nên nó KHÔNG có tác dụng lên `.cmp__dong` (một `<li>` nằm
    trong `.cmp__danh-sach`, không phải con của `.cmp`). */
 .cmp__dau,
 .cmp__dong {
   display: grid;
-  grid-row: 4;
+  grid-row: 6;
   grid-template-columns: 1fr 1fr 4.5rem;
   gap: var(--sp-3);
   padding-right: var(--sp-3);
@@ -859,10 +1113,10 @@ body {
 }
 
 .cmp__danh-sach {
-  /* Hàng 6 — hàng `1fr` DUY NHẤT của lưới: đây là chỗ cuộn của danh sách. Nếu nó rơi vào
+  /* Hàng 7 — hàng `1fr` DUY NHẤT của lưới: đây là chỗ cuộn của danh sách. Nếu nó rơi vào
      một hàng implicit `auto` (đúng lỗi C1 của ERRATA #36 mục 3) thì danh sách không cuộn
      được còn đầu cột lại giãn ra. */
-  grid-row: 6;
+  grid-row: 7;
   margin: 0;
   padding: 0;
   list-style: none;
@@ -1500,6 +1754,96 @@ body {
   font-size: var(--fs-note);
 }
 
+/* ── NÚT XOÁ KÊNH (hai bước) — `.ch__dong` giờ là MỘT HÀNG FLEX ────────────────────────
+   ⚠️ Trước tính năng xoá, mỗi dòng kênh là MỘT `<button class="ch__item">`
+   (`width: 100%`), tức cả dòng là một khối. Nay mỗi dòng có HAI nút ANH EM (chọn + xoá):
+   `<button>` không được chứa `<button>`, nên không thể lồng nút xoá vào trong.
+   `.ch__dong` thành flex để hai nút nằm NGANG HÀNG — nhịp dọc của danh sách (mỗi kênh
+   một khối, chiều cao theo nội dung) nhờ vậy KHÔNG đổi; `flex-wrap` chỉ để ô lỗi của
+   bước xoá xuống dòng riêng khi nó CÓ chữ (`flex-basis: 100%` bên dưới).
+   `position: relative` là mốc định vị của ô lỗi tuyệt đối đó. */
+.ch__dong {
+  position: relative;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+}
+
+/* Nút CHỌN co lại để nhường chỗ cho nút xoá.
+   ⚠️ `flex: 1 1 0` — KHÔNG phải `flex: 1 1 auto` (đo được trong Chrome thật): với
+   `flex-basis: auto`, kích thước cơ sở của nút là BỀ RỘNG NỘI DUNG (tên tệp dài), nên nó
+   chiếm trọn dòng và nút xoá bị `flex-wrap` đẩy xuống DÒNG THỨ HAI, canh trái (đo được:
+   `.ch__item` rộng 213/214 px, `.ch__xoa` ở `right=27` px tức mép TRÁI, dòng cao 117 px
+   thay vì một dòng). `flex-basis: 0` khiến hai nút chia sẻ ĐÚNG một dòng ở mọi bề rộng, và
+   phần chữ dài tự xuống dòng bên trong nút chọn. `min-width: 0` là điều kiện để nó được
+   phép co nhỏ hơn nội dung (mặc định `min-width: auto` của flex item sẽ chặn việc đó). */
+.ch__dong > .ch__item {
+  flex: 1 1 0;
+  width: auto;
+  min-width: 0;
+}
+
+/* Nút XOÁ: nhỏ hơn nút chọn một bậc (nhãn khắc `--fs-label`), viền `--rule` như mọi nút
+   phụ. Nó KHÔNG dùng `--signal` ở trạng thái thường: amber chỉ có MỘT nghĩa (đang hoạt
+   động — §2.2 quy tắc 1), và một nút chờ bấm không phải trạng thái hoạt động. */
+.ch__xoa {
+  flex: 0 0 auto;
+  margin: var(--sp-1) var(--sp-1) 0 0;
+  padding: 0 var(--sp-1);
+  border: var(--rule-w) solid var(--rule);
+  border-radius: var(--radius);
+  background: var(--panel-2);
+  color: var(--ink-2);
+  font-family: var(--font-label);
+  font-size: var(--fs-label);
+  letter-spacing: var(--track-label);
+  cursor: pointer;
+  transition: color var(--dur-1) var(--ease-1),
+              border-color var(--dur-1) var(--ease-1);
+}
+
+.ch__xoa:hover {
+  color: var(--ink-0);
+  border-color: var(--ink-2);
+}
+
+/* BƯỚC XÁC NHẬN. Chữ trên nút đã là `xóa?` (tín hiệu NGƯỜI đọc được, và là tín hiệu
+   CHÍNH); màu `--fault` ở đây là tín hiệu THỨ HAI, không phải tín hiệu duy nhất
+   (spec UI §7: thông tin không được chỉ nằm ở màu). */
+.ch__xoa[data-dang-xac-nhan="true"] {
+  border-color: var(--fault);
+  color: var(--fault);
+}
+
+/* Nút HUỶ của bước xác nhận: cùng hình dạng, KHÔNG mang màu lỗi — nó không phải lỗi,
+   nó là lối thoát. */
+.ch__xoa[data-vai-tro="huy"] {
+  border-color: var(--rule);
+  color: var(--ink-1);
+}
+
+/* Đang gọi API: nút bị khoá (cú bấm thứ ba không thành lời gọi thứ hai) và chữ trên nút
+   là `đang xóa…` — trạng thái vẫn NÓI RA bằng chữ, không chỉ bằng việc nút mờ đi. */
+.ch__xoa:disabled {
+  cursor: default;
+  color: var(--ink-2);
+}
+
+/* Ô LỖI của bước xoá. LUÔN có mặt trong DOM (vùng `aria-live` phải tồn tại trước khi có
+   nội dung), rỗng thì KHÔNG chiếm chỗ. Câu lỗi là NGUYÊN VĂN `ApiError.message` của
+   backend (404 id lạ / 409 job đang chạy) — xem `ui/NutXoa.tsx`. */
+.ch__xoa-loi:empty {
+  display: none;
+}
+
+.ch__xoa-loi {
+  flex-basis: 100%;
+  padding: 0 var(--sp-1) var(--sp-1);
+  color: var(--fault);
+  font-family: var(--font-mono);
+  font-size: var(--fs-label);
+}
+
 /* ── §4.2 CỬA VÀO CỦA WORKSPACE 1: NẠP TỆP (Task W2) ─────────────────────────────
    HAI lối vào, MỘT luật: khung kẻ nét đứt (`.nap__khung`) ở VÙNG GIỮA khi chưa có bản ghi, và
    một lối GỌN (`.ch__nap`) ở VÙNG KÊNH cho tệp thứ 2..N (§12.2 *"nạp 3 tệp cùng lúc"*).
@@ -1852,11 +2196,15 @@ body {
 /* BÓNG MA TRỤC THỜI GIAN — nét đứt DỌC 1 px, cao BA hàng (`--row-2` × 3 = số hàng của danh sách
    đoạn sắp tới), kèm ba rail mono.
    ⚠️ Trục DỌC, không phải ngang: thời gian là một TRỤC DỌC ở app này (`.ed__item` xếp hàng theo
-   mốc, rail 72 px — xem `--rail`), nên bóng ma phải nói trước ĐÚNG hình dạng đó.
+   mốc, rail hai mốc — xem `.ed__item`), nên bóng ma phải nói trước ĐÚNG hình dạng đó.
    ⚠️ Hai đường kẻ trên/dưới là hình dạng của MỘT HÀNG trong danh sách (`.ed__item` có
    `border-bottom`): bóng ma phải là bóng của một danh sách, không phải một khối trang trí.
    ⚠️ `position: absolute` cho riêng đường trục ⇒ nó không tiêu thụ một track nào, và thêm/bớt
-   rail không làm trục đổi chỗ. */
+   rail không làm trục đổi chỗ.
+   ⚠️ `padding-left` phải khớp BỀ RỘNG RAIL HIỆN TẠI (`calc(var(--rail) * 2)`, xem `.ed__item`):
+   trước lượt này hai bên cùng là `--rail` nên khớp sẵn; rail in thêm đầu mốc thứ hai mà chỗ này
+   giữ nguyên thì bóng ma lệch ĐÚNG 72 px so với hàng thật — một bóng của danh sách KHÔNG TỒN
+   TẠI. Đây là lý do phép sửa này nằm trong CÙNG lượt với `.ed__item`, không phải một việc để sau. */
 .rong__ma {
   position: relative;
   display: flex;
@@ -1864,7 +2212,7 @@ body {
   justify-content: space-between;
   gap: var(--sp-2);
   min-height: calc(var(--row-2) * 3);
-  padding-left: calc(var(--rail) + var(--sp-3));
+  padding-left: calc(var(--rail) * 2 + var(--sp-3));
   border-top: var(--rule-w) solid var(--rule);
   border-bottom: var(--rule-w) solid var(--rule);
 }

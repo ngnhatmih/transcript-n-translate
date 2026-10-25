@@ -1411,12 +1411,29 @@ def test_run_api_entrypoint_exists_and_defers_to_main():
 # từ chối (unit) và route thật trả 4xx kịp thời (tích hợp).
 # --------------------------------------------------------------------------
 
-#: Ký tự nằm NGOÀI bộ cho phép `[A-Za-z0-9._-]`: nhóm Windows-illegal, ký tự
-#: điều khiển, và các ký tự "hợp lệ trên POSIX nhưng bị bộ hẹp từ chối".
+#: Ký tự nằm NGOÀI bộ cho phép: nhóm Windows-illegal, ký tự điều khiển, và các
+#: ký tự "hợp lệ trên POSIX nhưng không mở được thành tệp ở đây".
+#:
+#: A1 (đo được): bộ cho phép cũ là `[A-Za-z0-9._-]`, nên `ảnh.mp4` và
+#: `Zh-请您欣赏.ogg` bị `POST /api/sources/upload` trả **422** — chặn đúng người
+#: dùng tiếng Trung/tiếng Việt ở cửa vào. Chữ có dấu và chữ Hán nay NẰM TRONG bộ
+#: cho phép (xem `_UNICODE_FILENAMES`); bảng từ chối dưới đây chỉ còn những thứ
+#: thật sự không mở được: ký tự điều khiển, `< > : " | ? *`, khoảng trắng và
+#: ngoặc. `ảnh.mp4` đã được CHUYỂN sang bảng hợp lệ, không phải bị xoá.
 _UNSAFE_FILENAMES = [
     "a*b.mp4", "a?b.mp4", "a|b.mp4", "a<b.mp4", "a>b.mp4", 'a"b.mp4',
     "ab:c.mp4", "a.b:c.mp4", "a\x01b.mp4", "a b.mp4", "a(b).mp4", "a[b].mp4",
-    "ảnh.mp4",
+]
+
+#: Tên KHÔNG phải ASCII phải đi qua nguyên vẹn (A1). Đây là tên tệp thật của
+#: người dùng Việt/Trung, không phải đầu vào tấn công.
+_UNICODE_FILENAMES = [
+    "ảnh.mp4",                      # tiếng Việt có dấu (NFC)
+    "bài-giảng-01.mp4",
+    "đường-dẫn.wav",
+    "Zh-请您欣赏.ogg",               # tên THẬT của clip Wikimedia ở `_realpipe/`
+    "日本語の音声.m4a",
+    "中文-音频.wav",
 ]
 
 #: Thiết bị dành riêng của Windows: trần, có đuôi, và HOA/thường trộn — Windows
@@ -1489,6 +1506,90 @@ def test_safe_basename_treats_a_leading_colon_prefix_as_a_drive():
 
     assert safe_basename("a:b.mp4") == "b.mp4"
     assert safe_basename("x:y.mp4") == "y.mp4"
+
+
+# --------------------------------------------------------------------------
+# A1: tên tệp KHÔNG phải ASCII (tiếng Trung, tiếng Việt có dấu) phải qua được.
+#
+# ĐO ĐƯỢC trước bản vá: `POST /api/sources/upload` với `Zh-请您欣赏.ogg` trả
+# **422** `tên tệp chứa ký tự không an toàn` — với một sản phẩm Trung -> Việt thì
+# đó là chặn đúng người dùng ở cửa vào. Bản vá KHÔNG nới đường thoát: vẫn cắt
+# thành phần đường dẫn và vẫn từ chối mọi ký tự không mở được thành tệp.
+# --------------------------------------------------------------------------
+
+@pytest.mark.parametrize("name", _UNICODE_FILENAMES)
+def test_safe_basename_keeps_a_non_ascii_name_whole(name):
+    """A1: chữ có dấu/Hán là tên HỢP LỆ, không phải "ký tự không an toàn"."""
+    from app.domain.paths import safe_basename
+
+    assert safe_basename(name) == name
+
+
+def test_safe_basename_still_strips_the_path_off_a_non_ascii_name():
+    """A1 KHÔNG được mở lại đường thoát: tên Unicode vẫn bị cắt về tên trần."""
+    from app.domain.paths import InvalidBasename, safe_basename
+
+    assert safe_basename("请您欣赏/../../../thoat.ogg") == "thoat.ogg"
+    assert safe_basename("../../中文/请您欣赏.ogg") == "请您欣赏.ogg"
+    assert safe_basename(r"..\..\请您欣赏.ogg") == "请您欣赏.ogg"
+    with pytest.raises(InvalidBasename):
+        safe_basename("中文/..")
+
+
+def test_upload_accepts_a_non_ascii_filename_and_keeps_it_inside_media(client):
+    """A1 RED TRƯỚC: ca này trả **422**. Sau bản vá: **201** + tệp nằm trong
+    `media/`, tên theo nội dung (16 hex + đuôi của tên gốc), byte nguyên vẹn."""
+    import hashlib
+
+    payload = b"du-lieu-tieng-trung-that"
+    resp = client.post("/api/sources/upload",
+                       files={"file": ("Zh-请您欣赏.ogg", io.BytesIO(payload), "audio/ogg")},
+                       data={"lang": "zh"})
+    assert resp.status_code == 201, resp.text
+    media = client.tmp / "media"
+    stored = pathlib.Path(resp.json()["source"]["media_path"])
+    assert stored.parent == media, f"tệp phải nằm trong media/: {stored}"
+    assert stored.name == f"{hashlib.sha256(payload).hexdigest()[:16]}.ogg"
+    assert stored.read_bytes() == payload
+    assert resp.json()["source"]["origin"] == "Zh-请您欣赏.ogg", (
+        "tên gốc của người dùng phải được giữ trong `sources.origin`"
+    )
+
+
+def test_upload_writes_no_path_outside_media_for_a_non_ascii_path_name(client, monkeypatch):
+    """A1 + containment: tên Unicode có `../` vẫn chỉ được GHI trong `media/`.
+
+    Bám vào ĐƯỜNG DẪN THẬT của lần mở ghi đầu tiên (như bài chặn event loop ở
+    trên), không bám vào tệp cuối: tệp cuối do `Path.replace` đổi tên theo nội
+    dung, nên một bản vá bỏ phép cắt đường dẫn vẫn để tệp cuối nằm trong `media/`
+    trong khi lần GHI ĐẦU đã rơi ra ngoài. Mutant "trả thẳng tên client gửi lên"
+    chết ở chính khẳng định `parent == media` này.
+    """
+    import builtins
+
+    media = (client.tmp / "media").resolve()
+    opened: list[pathlib.Path] = []
+    real_open = builtins.open
+
+    def spy_open(file, *args, **kwargs):
+        if isinstance(file, pathlib.Path) and "w" in (args[0] if args else kwargs.get("mode", "r")):
+            opened.append(file)
+        return real_open(file, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "open", spy_open)
+    resp = client.post(
+        "/api/sources/upload",
+        files={"file": ("请您欣赏/../../../thoat-ra-ngoai.ogg",
+                        io.BytesIO(b"x" * 32), "audio/ogg")},
+        data={"lang": "zh"})
+    assert resp.status_code == 201, resp.text
+    assert opened, "route upload phải mở một tệp trong media/ để ghi"
+    for path in opened:
+        assert path.resolve().parent == media, f"ghi ra ngoài media/: {path}"
+    assert not (client.tmp / "thoat-ra-ngoai.ogg").exists()
+    assert not (client.tmp.parent / "thoat-ra-ngoai.ogg").exists()
+    assert resp.json()["source"]["origin"] == "请您欣赏/../../../thoat-ra-ngoai.ogg"
+
 
 
 async def _post_upload(media_root: pathlib.Path, filename: str,

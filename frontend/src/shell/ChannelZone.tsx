@@ -29,6 +29,20 @@
  * ⚠️ Vùng này KHÔNG tự giữ "kênh đang chọn": `selectedId` là PROP. Một bản sao cục bộ sẽ
  * là nguồn sự thật thứ hai cho cùng một câu hỏi — và hai màn có thể nói hai chuyện khác nhau.
  *
+ * ## ĐƯỜNG XOÁ KÊNH (`onXoa`) — và vì sao nó KHÔNG phải một hàng thứ hai
+ *
+ * ĐO ĐƯỢC TRƯỚC TÍNH NĂNG: backend **không có route `DELETE` nào** (`routes_*.py`: chỉ
+ * POST/PATCH) ⇒ một kênh nạp nhầm chỉ có thể "bỏ qua", không xoá được. Nay mỗi dòng có thêm
+ * một nút xoá hai bước (`NutXoa`), đặt CẠNH nút chọn trong cùng `<li class="ch__dong">`.
+ *
+ * ⚠️ Nút xoá KHÔNG phải một hàng thứ hai của danh sách và KHÔNG lồng trong nút chọn: `<button>`
+ * không được chứa `<button>`, và một hàng cao thêm sẽ đổi nhịp thị giác của cả vùng. `app.css`
+ * định vị nó tuyệt đối trong `<li>` (`position: relative`), nên khối của mỗi kênh giữ nguyên
+ * chiều cao; câu trả lời cho "xoá cái gì / xoá chưa" vẫn là CHỮ trong chính nút đó.
+ *
+ * ⚠️ Vùng này KHÔNG gọi API và KHÔNG tự cắt hàng khỏi danh sách: `onXoa` là của `App`, và
+ * thành công nghĩa là `sources.reload()` — máy chủ là nguồn sự thật (xem prop `onXoa`).
+ *
  * ## `ponytail:` TRẦN — cái KHÔNG nối được, và vì sao
  *
  * 1. **Bước DỊCH không nối được ở Task 4.** Payload của job `translate` mang
@@ -56,6 +70,7 @@
 import type { Job, JobState, JobType, Source } from "../api/types.ts";
 import { NhapGon } from "./IntakeFrame.tsx";
 import type { NapTep } from "./IntakeFrame.tsx";
+import { NutXoa } from "../ui/NutXoa.tsx";
 import { KhungRong, TamLoi, maLoi } from "../ui/TrangRong.tsx";
 
 export interface ChannelZoneProps {
@@ -84,6 +99,22 @@ export interface ChannelZoneProps {
    * tệp thứ 2..N **không có cửa nào** vào app.
    */
   onNapTep: NapTep;
+  /**
+   * XOÁ MỘT KÊNH — **của `App`**, không phải của vùng này: nó gọi
+   * `DELETE /api/sources/{id}` rồi `sources.reload()`, và còn phải dọn
+   * `ui.channelId` nếu kênh đó đang được chọn (xem `App.xoaKenh`). Ở đây chỉ có
+   * cú bấm.
+   *
+   * ⚠️ Trả `Promise` chứ không `void`: nút xoá là hai bước và phải hiện
+   * `đang xóa…` / lỗi NGUYÊN VĂN của backend (`NutXoa`), nên nó cần biết lời gọi
+   * xong hay hỏng. `UI` vẫn KHÔNG tự sửa danh sách — thành công là `reload()` của
+   * `App`.
+   *
+   * `undefined` ⇒ KHÔNG có nút xoá nào được render. Đó là trạng thái của những
+   * nơi dựng vùng này chỉ để ĐỌC (bài test cũ, hoặc một vỏ khác chưa nối đường
+   * xoá): một nút bấm được mà không gửi gì đi là đúng thứ repo này cấm.
+   */
+  onXoa?: (id: number) => Promise<void>;
 }
 
 /** `duration` là GIÂY (số thực) do backend đo — client chỉ ĐỊNH DẠNG, không đo lại. */
@@ -140,6 +171,7 @@ export function ChannelZone({
   selectedId,
   onSelect,
   onNapTep,
+  onXoa,
 }: ChannelZoneProps) {
   // ⚠️ LỐI NẠP GỌN ĐỨNG NGOÀI MỌI NHÁNH NỘI DUNG — đó là điều kiện để nó **LUÔN tới được**:
   // đang đọc, lỗi, chưa có kênh, và ĐÃ có kênh (§12.2 cần đúng ca cuối: khung §4.2 ở vùng giữa
@@ -206,9 +238,16 @@ export function ChannelZone({
           const dangChon = source.id === selectedId;
           return (
             <li key={source.id} className="ch__dong">
-              {/* MỘT NÚT, không phải `<div onClick>`: `button` native mới focus được bằng
-                  Tab và kích hoạt được bằng Enter/Space (spec UI §7 + §12.5). `type="button"`
-                  để nó không bao giờ thành nút submit của một form nào.
+              {/* HAI NÚT ANH EM — KHÔNG lồng nút trong nút.
+                  ⚠️ Trước tính năng xoá, cả dòng là MỘT `<button class="ch__item">`. Đặt
+                  nút xoá BÊN TRONG nút đó là HTML không hợp lệ (`<button>` không được chứa
+                  `<button>`); trình duyệt sẽ tự đóng thẻ ngoài và DOM thật khác hẳn JSX, tức
+                  nút chọn mất phần thân và cú bấm rơi vào một phần tử khác. Nên cấu trúc là:
+                  `<li>` (mốc định vị) → nút CHỌN `.ch__item` + nút XOÁ, hai phần tử NGANG
+                  HÀNG. `app.css` cho `.ch__dong` `position: relative` và đặt nút xoá ở góc
+                  trên-phải, nên nhịp thị giác của danh sách (mỗi kênh một khối) KHÔNG đổi.
+                  MỖI nút vẫn là `button` native: Tab tới được, Enter/Space kích hoạt được
+                  (spec UI §7 + §12.5). `type="button"` để chúng không thành nút submit.
                   `aria-pressed` là trạng thái MÁY đọc được; dấu `▸` bên dưới là trạng thái
                   NGƯỜI đọc được — hai thứ khác nhau, và chỉ đổi MÀU là không đủ (spec UI §7:
                   thông tin không được chỉ nằm ở màu). */}
@@ -234,6 +273,20 @@ export function ChannelZone({
                   {BUOC_NGUON.map((buoc) => `${buoc.ten}: ${buocCuaKenh(source.id, buoc.type, dsJob)}`).join(" · ")}
                 </span>
               </button>
+              {/* NÚT XOÁ — ANH EM với nút chọn ở trên (xem khối chú thích trong `<li>`).
+                  Không có `onXoa` thì KHÔNG render gì: một nút xoá bấm được mà không gửi gì
+                  đi là đúng thứ repo này cấm, và vùng Kênh còn được dựng ở những nơi chỉ ĐỌC.
+                  Tên đối tượng trong `aria-label` là `origin` — nó là thứ người dùng nhìn thấy
+                  trên dòng, nên "xóa kênh nào" phải khớp với thứ họ đang đọc. */}
+              {onXoa === undefined ? null : (
+                <NutXoa
+                  doiTuong={`kênh ${source.origin}`}
+                  className="ch__xoa"
+                  classNameLoi="ch__xoa-loi"
+                  testid={`xoa-kenh-${source.id}`}
+                  onXoa={() => onXoa(source.id)}
+                />
+              )}
             </li>
           );
         })}

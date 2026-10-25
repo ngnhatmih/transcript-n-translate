@@ -212,6 +212,29 @@ export function App() {
   const [banDaChon, datBanDaChon] = useState<{ id: number; kenh: number; tid: number } | null>(null);
 
   /**
+   * CHẾ ĐỘ CHIMERA (§4.5, spec kiến trúc §8.7.5) — state của `App`, không phải của màn.
+   *
+   * Vì sao ở ĐÂY: cờ này đi vào BODY của `POST /api/translations` (`taoBanDich` bên
+   * dưới), và `App` là nơi DUY NHẤT gọi endpoint đó. Giữ nó trong `CompareScreen` là
+   * hai điểm quyết định cho cùng một lượt chạy — đúng lỗi mà `macDinhId` đã dẹp.
+   */
+  const [chimera, datChimera] = useState(false);
+  /**
+   * CẢNH BÁO CHI PHÍ (§4.5): đọc `GET /api/chimera/cost` khi chip BẬT và có kênh.
+   *
+   * ⚠️ Chỉ đọc khi `chimera === true`: endpoint này là một lượt đọc THẬT (không cache,
+   * `useApi` TRẦN), nên gọi nó lúc chip tắt là một request không ai dùng.
+   * ⚠️ Chỉ đọc lại khi `tid` đổi: cảnh báo chi phí phụ thuộc SỐ ĐOẠN của kênh và một
+   * bản dịch đã xong của chính kênh đó, không phụ thuộc bản dịch đang xem.
+   */
+  const chiPhiChimera = useApi(
+    () => (chimera && tid !== null
+      ? endpoints.chimeraCost(tid)
+      : Promise.resolve(null)),
+    [chimera, tid],
+  );
+
+  /**
    * Tạo một bản dịch cho bản ghi đang mở — **MỘT** hàm, gọi từ `CompareScreen`.
    *
    * ⚠️ Body là `{ transcript_id, engine }`: **KHÔNG gửi `target_lang`**. Backend đã mặc định
@@ -228,7 +251,20 @@ export function App() {
     datDangTao(true);
     datLoiTao(null);
     try {
-      const tao = await endpoints.createTranslation({ transcript_id: tid, engine });
+      // `chimera` đi CÙNG body — nhưng CHỈ khi BẬT. Khi bật, backend bỏ qua `engine`
+      // của người dùng và dùng kế hoạch ứng viên của registry, nên
+      // `translations.engine` ghi engine PHA (engine thật sự viết ra chữ được giữ).
+      //
+      // ⚠️ KHÔNG gửi `chimera: false`: đó đúng là mặc định của backend
+      // (`CreateIn.chimera = False`), nên nó chỉ làm body phình thêm một khoá mang
+      // giá trị backend đã có — và hợp đồng body của lượt W3 là HAI khoá, được ghim
+      // NGUYÊN VĂN JSON gửi lên ở `App.test.tsx::W3 BAT DAU DICH`.
+      const than: Parameters<typeof endpoints.createTranslation>[0] = {
+        transcript_id: tid,
+        engine,
+      };
+      if (chimera) than.chimera = true;
+      const tao = await endpoints.createTranslation(than);
       // ⚠️ Ghi KÈM kênh: ưu tiên này chỉ có nghĩa cho kênh đã tạo ra nó (xem `banDangXemId`).
       datBanMoiTao({ id: tao.translation.id, kenh: ui.channelId });
       // Trạng thái JOB của bản vừa tạo — cũng từ HTTP, không phải màn tự đoán. Kèm CẢ kênh
@@ -306,6 +342,64 @@ export function App() {
     const dauTien = ketQua.find((kq): kq is NapThanhCong => kq.ok);
     if (dauTien !== undefined) dispatch({ type: "selectChannel", id: dauTien.sourceId });
     return ketQua;
+  }
+
+  // ---------------------------------------------------------------------------
+  // ĐƯỜNG XOÁ — HAI hành động, MỘT luật: máy chủ là nguồn sự thật, nên xong thì
+  // ĐỌC LẠI danh sách; KHÔNG cắt tay hàng khỏi state.
+  //
+  // ĐO ĐƯỢC TRƯỚC TÍNH NĂNG: `endpoints` có **0** hàm xoá và backend có **0**
+  // route `DELETE` ⇒ một kênh nạp nhầm, hay một bản dịch hỏng, không có đường
+  // nào bỏ đi. Hai hàm dưới đây là NGƯỜI GỌI DUY NHẤT của hai route đó.
+  //
+  // ⚠️ VÌ SAO HÀM NẰM Ở ĐÂY (cùng lý do `napTep`/`taoBanDich`): `App` là nơi DUY
+  // NHẤT giữ `sources`/`translations`/`dispatch`, nên cũng là nơi duy nhất biết
+  // phải làm mới cái gì và phải dọn state nào. `ChannelZone`/`CompareScreen` chỉ
+  // có cú bấm và HIỆN trạng thái (`NutXoa`).
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Xoá MỘT kênh rồi đọc lại danh sách.
+   *
+   * ⚠️ **Kênh ĐANG CHỌN bị xoá ⇒ `channelId` về `null`** bằng `clearChannel`.
+   * Không dọn thì app trỏ vào một id đã chết: `chonTranscript()` trả `null` nên
+   * các màn rơi về trạng thái rỗng (không sai ngay), NHƯNG id trần đó vẫn nằm
+   * trong state, và lần đọc lại `/api/sources` có thể thấy nó được cấp cho một
+   * kênh khác — khi đó app tự mở một kênh mà người dùng không hề bấm, kèm
+   * `currentSegment`/`pinnedB` của kênh cũ (`clearChannel` dọn đúng bộ vị trí đó,
+   * y như `selectChannel` đang làm khi ĐỔI kênh). Đây là cùng một bất biến, không
+   * phải một luật mới.
+   *
+   * ⚠️ Thứ tự: dọn state rồi mới `reload()`. Ngược lại thì có một cửa sổ mà danh
+   * sách mới đã về trong khi `channelId` vẫn là id đã xoá.
+   *
+   * ⚠️ KHÔNG `transcripts.reload()` ở đây: bản ghi của kênh vừa xoá không còn
+   * được trỏ tới bởi `channelId` nào (`clearChannel` hoặc kênh khác vẫn đang mở),
+   * nên một lượt `GET /api/transcripts` nữa là request thừa — cùng lý do khối
+   * "ĐIỀU KHÔNG LÀM Ở ĐÂY" bên dưới từ chối một ngòi nổ đọc lại bảo hiểm.
+   *
+   * Lỗi (`404 id lạ`, `409 còn job`) KHÔNG bị nuốt: hàm NÉM để `NutXoa` hiện
+   * nguyên văn `ApiError.message`. Backend đã viết tiếng Việt, và với 409 thì đó
+   * là câu duy nhất nói job NÀO phải huỷ trước.
+   */
+  async function xoaKenh(id: number): Promise<void> {
+    await endpoints.deleteSource(id);
+    if (ui.channelId === id) dispatch({ type: "clearChannel" });
+    sources.reload();
+  }
+
+  /**
+   * Xoá MỘT bản dịch rồi đọc lại danh sách của kênh đang mở.
+   *
+   * ⚠️ KHÔNG cần dọn `banDaChon`/`banMoiTao` bằng tay: cả hai chỉ được dùng ở
+   * `banDangXemId` (bên dưới) khi chúng còn **thành viên của danh sách vừa đọc**,
+   * nên một id đã xoá tự rơi khỏi câu trả lời và `banDangXemId` lùi về bản `done`
+   * mới nhất. Viết thêm một nhánh dọn nữa là nguồn sự thật thứ hai cho cùng câu
+   * hỏi "bản nào đang xem" — và nó sẽ trôi khỏi `banDangXemId` ngay lần đổi quy ước.
+   */
+  async function xoaBanDich(id: number): Promise<void> {
+    await endpoints.deleteTranslation(id);
+    translations.reload();
   }
 
   // ---------------------------------------------------------------------------
@@ -589,6 +683,92 @@ export function App() {
   }, [jobs, daYeuCauHuy]);
   /** Câu lỗi **NGUYÊN VĂN** của lệnh gần nhất, theo TỪNG job (khoá = id job). */
   const [loiLenh, datLoiLenh] = useState<ReadonlyMap<number, string>>(() => new Map());
+
+  // ---------------------------------------------------------------------------
+  // BÓC LẠI BẰNG ENGINE ASR KHÁC — cò ở thanh trên của màn Biên tập
+  //
+  // ĐO ĐƯỢC TRƯỚC LƯỢT NÀY: `endpoints.createJob` **KHÔNG TỒN TẠI** ⇒ chỉ có hai loại job vào
+  // được hàng đợi: upload (`POST /api/sources/upload`, tạo `ingest`) và `POST /api/translations`
+  // (tạo `translate`). Một job `asr` chỉ đến từ handler `ingest` (`transcribe` tự nối tiếp), LUÔN
+  // bằng engine ASR MẶC ĐỊNH của registry. ⇒ muốn nghe lại CÙNG nguồn bằng engine khác thì người
+  // dùng phải sửa `registry.json` rồi nạp lại tệp — mất bản ghi, mất bản dịch, mất bản sửa tay.
+  //
+  // ⚠️ VÌ SAO KHÔNG DÙNG `retryJob`: `POST /api/jobs/{id}/retry` chạy lại CHÍNH job cũ — cùng
+  // `engine`, cùng `payload`. Nó không có tham số nào để đổi engine, và nó chỉ nhận job
+  // `failed`/`interrupted` (409 cho mọi trạng thái khác). Đổi engine là một job MỚI.
+  // ---------------------------------------------------------------------------
+  /**
+   * NGUỒN (id) + KÊNH đang có **MỘT lời gọi `bóc lại` BAY**, hoặc `null`.
+   *
+   * ⚠️ VÌ SAO `{id, kenh}` chứ không một `boolean` — cùng lý do đã ghi cho `dangDuyet` (`I3b` của
+   * review D2, đo được): một cờ GLOBAL không được dọn khi đổi kênh thì thanh trên của kênh MỚI
+   * nói *"đang bóc lại…"* trong khi chưa ai bóc bản ghi đó; và `finally` của lệnh CŨ sẽ xoá cờ
+   * của lệnh MỚI đang bay (mở toang guard chống trùng lặp). Trạng thái của một lệnh phải mang
+   * THEO đối tượng mà nó thuộc về: ở đây là `source_id` (job `asr` tác động NGUỒN, không phải
+   * transcript — `AsrPayload` chỉ có `source_id`).
+   */
+  const [dangBocLai, datDangBocLai] = useState<{ id: number; kenh: number | null } | null>(null);
+  /**
+   * LỖI `bóc lại` — **NGUYÊN VĂN `ApiError.message`** (`"<status>: <detail>"`), cùng lý do
+   * `loiGhiDoan`/`loiDuyet`: câu tiếng Việt của backend là thứ DUY NHẤT đúng (ví dụ 422
+   * *"loại job không hợp lệ…"* hay *"engine … không có trong registry"*). Thay bằng "có lỗi xảy ra"
+   * là bỏ mất đúng thông tin người dùng cần để sửa.
+   */
+  const [loiBocLai, datLoiBocLai] = useState<string | null>(null);
+
+  /**
+   * XẾP một job `asr` MỚI cho nguồn của bản ghi đang mở, bằng engine ASR người dùng đã chọn.
+   *
+   * ⚠️ `payload.source_id` lấy từ `transcript.data.source_id` — TRƯỜNG CÓ SẴN của `Transcript`
+   * (`types.ts`), không phải `ui.channelId`: hai số này trùng nhau trong thực tế, nhưng chỉ
+   * `source_id` là thứ HỢP ĐỒNG của route nói tới, và một ngày nào đó "kênh đang chọn" có thể
+   * khác "nguồn của bản ghi đang mở" (bản ghi cũ của kênh khác). Job phải bóc ĐÚNG nguồn mà nó
+   * được bấm từ đó.
+   *
+   * ⚠️ `payload.lang` là NGÔN NGỮ CỦA BẢN GHI (`Transcript.lang`), và nó là BẢN GHI LẠI lúc gửi,
+   * KHÔNG phải một điều khiển: ĐO ĐƯỢC — `pipeline/transcribe.py` đọc `source.lang or "zh"` chứ
+   * KHÔNG đọc `job.payload["lang"]` (grep `payload["lang"]` trong `backend/app` = 0). Gửi kèm để
+   * hàng `jobs` nói ra ngữ cảnh lúc xếp — cùng hình dạng payload mà handler `ingest` tự sinh
+   * (`ingest.py`: `{"source_id": …, "lang": …}`).
+   *
+   * ⚠️ KHÔNG đi qua `xepHangGhi` (hàng đợi ghi của D1): hàng đợi đó tồn tại để hai lần GHI
+   * `PATCH /api/transcripts/{id}` không tính body từ cùng một bản ghi CŨ (`ERRATA #44` mục 1).
+   * Việc này KHÔNG sửa transcript nào — nó xếp một job, và backend là bên duy nhất ghi bản ghi
+   * mới. Xếp nó sau một PATCH chậm chỉ làm chậm người dùng mà không tránh được gì.
+   *
+   * ⚠️ KHÔNG `reload()` gì ở đây khi thành công: bản ghi MỚI chỉ có sau khi job `asr` chạy xong,
+   * và đường đọc lại đã có sẵn — ngòi nổ (b) của `useEffect` theo dõi `jobs` gọi
+   * `transcripts.reload()` đúng lúc job `asr` của kênh này chuyển `done`. Thêm một `GET` ngay sau
+   * `POST` là một request chắc chắn không thấy gì mới (`ERRATA #35`).
+   */
+  async function bocLai(engine: string): Promise<void> {
+    const hienTai = transcript.data;
+    if (hienTai === null || engine === "") return;
+    const nguon = hienTai.source_id;
+    const kenhLucGui = ui.channelId;
+    // GUARD chống trùng lặp — theo ĐÚNG NGUỒN: hai lần bấm trên cùng một nguồn không chờ nhau ⇒
+    // vẫn MỘT job (hai job sẽ cùng bóc một nguồn và tạo hai bản ghi trùng), nhưng cờ "đang bay"
+    // của nguồn này không chặn một nguồn khác vừa được mở sau khi đổi kênh.
+    if (dangBocLai !== null && dangBocLai.id === nguon && dangBocLai.kenh === kenhLucGui) return;
+    datDangBocLai({ id: nguon, kenh: kenhLucGui });
+    datLoiBocLai(null);
+    try {
+      await endpoints.createJob({
+        workspace: 1,
+        type: "asr",
+        engine,
+        payload: { source_id: nguon, lang: hienTai.lang },
+      });
+    } catch (loi: unknown) {
+      datLoiBocLai(loi instanceof Error ? loi.message : String(loi));
+    } finally {
+      // Chỉ XOÁ cờ của CHÍNH mình (cùng lý do `duyetBanGhi`): một lệnh MỚI đang bay không được
+      // mở khoá bởi `finally` của lệnh CŨ.
+      datDangBocLai((cu) =>
+        cu !== null && cu.id === nguon && cu.kenh === kenhLucGui ? null : cu,
+      );
+    }
+  }
 
   /**
    * DUYỆT bản ghi đang mở — nút ở thanh trên của màn Biên tập (`EditScreen.onDuyet`).
@@ -1057,6 +1237,12 @@ export function App() {
     // Và CỜ "đang bay" của lệnh duyệt: nó thuộc về bản ghi + kênh CŨ (`I3b`), nên để nó sống qua
     // một lần đổi kênh là thanh trên của kênh MỚI tự nói *"đang duyệt…"*.
     datDangDuyet(null);
+    // LỖI + CỜ "đang bay" của lệnh `bóc lại` cũng thuộc NGUỒN + KÊNH cũ, cùng một lý do: câu 422
+    // của một nguồn khác không được nằm cạnh thanh trên của nguồn này, và cờ bay của nguồn CŨ
+    // không được khoá nút `bóc lại` của nguồn MỚI. (`finally` của lệnh cũ chỉ xoá cờ của CHÍNH nó
+    // — xem `bocLai` — nên dọn ở đây không mở khoá nhầm một lệnh đang bay của kênh mới.)
+    datDangBocLai(null);
+    datLoiBocLai(null);
   }, [ui.channelId]);
 
   /**
@@ -1183,6 +1369,9 @@ export function App() {
                Nó tồn tại vì khi ĐÃ có kênh thì vùng giữa hiện danh sách đoạn, nên khung §4.2
                không còn ở đó (§12.2 cần nạp được tệp thứ 2..N). */
             onNapTep={napTep}
+            /* ĐƯỜNG XOÁ KÊNH: nút hai bước ở từng dòng, gọi `DELETE /api/sources/{id}` rồi
+               đọc lại danh sách. Kênh đang chọn bị xoá ⇒ `channelId` về `null` (xem `xoaKenh`). */
+            onXoa={xoaKenh}
           />
         </aside>
         {/* BÀN LÀM VIỆC: màn hiện theo `ui.mode` (xem khối dưới). Dữ liệu của CẢ BA màn
@@ -1242,6 +1431,18 @@ export function App() {
               /* Lựa chọn của người dùng đi LÊN `App` (xem `banDaChon`): nếu giữ nó ở state cục
                  bộ của màn thì `banDangXemId` — và do đó cả `Transport` — vẫn là bản VỪA TẠO. */
               onChonBanDich={chonBanDich}
+              /* §4.5 CHẾ ĐỘ CHIMERA: cờ là state của `App` (nó đi vào body của
+                 `createTranslation`), còn cảnh báo chi phí đọc ở MỘT hook phía trên —
+                 màn chỉ hiện, không tự `fetch` (cùng luật với mọi màn khác). */
+              chimera={chimera}
+              onChimeraChange={datChimera}
+              chiPhi={chiPhiChimera.data}
+              dangDocChiPhi={chiPhiChimera.loading}
+              loiChiPhi={chiPhiChimera.error}
+              /* ĐƯỜNG XOÁ MỘT BẢN DỊCH: nút hai bước cạnh từng bản trong segmented
+                 control. Cùng khuôn với `onXoa` của vùng KÊNH — `App` giữ đường gọi API và
+                 việc đọc lại; màn chỉ có cú bấm. */
+              onXoa={xoaBanDich}
             />
           ) : ui.mode === "glossary" ? (
             /* §4.4 tab THUẬT NGỮ (Task 9). Màn này KHÔNG nhận prop: nó độc lập với
@@ -1285,6 +1486,24 @@ export function App() {
                 && dangDuyet.kenh === ui.channelId
               }
               loiDuyet={loiDuyet}
+              /* BÓC LẠI: MỌI spec của registry xuống, màn LỌC `kind === "asr"` (trước đây chỉ
+                 `CompareScreen` nhận `specs`). Ô chọn engine ASR KHÔNG dùng `<EngineSelect/>`:
+                 component đó lọc `capabilities.available`, mà spec ASR KHÔNG có khoá ấy ⇒ 0 lựa
+                 chọn. Màn chỉ BÁO engine đã chọn; `App` gọi `endpoints.createJob` rồi để ngòi nổ
+                 SSE + `/api/transcripts` làm phần còn lại. */
+              specs={specs}
+              onBocLai={(engine) => {
+                void bocLai(engine);
+              }}
+              /* "ĐANG BÓC LẠI…" CŨNG LÀ CÂU CỦA **NGUỒN ĐANG MỞ TRONG KÊNH ĐANG CHỌN**, không
+                 phải một cờ toàn cục — lời gọi của một nguồn CŨ không được nói thay nguồn này. */
+              dangBocLai={
+                dangBocLai !== null
+                && transcript.data !== null
+                && dangBocLai.id === transcript.data.source_id
+                && dangBocLai.kenh === ui.channelId
+              }
+              loiBocLai={loiBocLai}
             />
           )}
         </main>

@@ -139,6 +139,18 @@ function gieo() {
     path.join(SCRATCH, "data", "app.db"),
     String(Number(process.env.PHUDE_E2E_DOAN ?? 600)),
   ]);
+  // §4.5 CHE DO CHIMERA: mot kenh co du lieu CHIMERA THAT (ban ghi cua mot luot chay
+  // that, xem docblock `seed-chimera.py`). Can buoc gieo rieng vi `serve_no_worker.py`
+  // chay backend KHONG kem worker, nen mot job `translate` xep qua giao dien se khong
+  // bao gio chay — khong the tao bang cach bam.
+  chayPython(path.join(E2E_DIR, "seed-chimera.py"), [
+    BACKEND_DIR,
+    path.join(SCRATCH, "data", "app.db"),
+    // `media_path` phai TON TAI (Transport lay `src` tu `GET /api/media/{id}`), va no
+    // phai la mot tep MA `seed.py` da ghi: `seed.py` ghi `data/media/seed.wav`
+    // (`seed-kenh-mot.wav` chi la `origin`, KHONG phai ten tep).
+    path.join(SCRATCH, "data", "media", "seed.wav"),
+  ]);
 }
 
 async function main() {

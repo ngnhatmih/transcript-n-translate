@@ -1,8 +1,7 @@
 """Test cho adapter SenseVoice (R61/R62/R63).
 
-`funasr` KHÔNG được cài trong môi trường này và cố ý không được cài ở đây: mọi
-đường đi qua model đều dùng `model_factory` được bơm vào. Không bài nào tải
-mạng, không bài nào nạp model thật. Model thật là việc của smoke test Task 20.
+Mọi đường đi qua model trong unit test đều dùng `model_factory` được bơm vào.
+Không bài nào tải mạng hay nạp model thật; việc đó thuộc smoke test.
 
 Ba nhóm lý do tồn tại của file này:
   * R61 — brief chỉ test parser thuần, nên `sensevoice.py` không được bài test
@@ -151,7 +150,8 @@ def test_flatten_recurses_all_the_way_down_instead_of_dropping_silently():
 # R61: hợp đồng nạp model và gọi generate qua `model_factory`.
 # --------------------------------------------------------------------------
 
-def test_factory_receives_exact_load_arguments_and_loads_once(sv_spec):
+def test_factory_receives_exact_load_arguments_and_loads_once(sv_spec, monkeypatch, tmp_path):
+    monkeypatch.setenv("MODELSCOPE_CACHE", str(tmp_path))
     factory = _RecordingFactory()
     engine = SenseVoiceEngine(sv_spec, model_factory=factory)
     assert factory.calls == [], "chưa transcribe thì chưa được nạp model"
@@ -163,9 +163,34 @@ def test_factory_receives_exact_load_arguments_and_loads_once(sv_spec):
         "model": "iic/SenseVoiceSmall",
         "device": "cuda",
         "vad_model": "fsmn-vad",
-        "punc_model": "ct-punc",
         "disable_update": True,
-    }], "nạp đúng một lần, đúng model_ref/device/vad_model/punc_model/disable_update"
+    }], "nạp đúng một lần, dùng model local, VAD và device đã cấu hình"
+
+
+def test_local_modelscope_snapshot_is_used_instead_of_downloading_alias(
+    sv_spec, monkeypatch, tmp_path,
+):
+    snapshot = tmp_path / "models" / "iic--SenseVoiceSmall" / "snapshots" / "master"
+    snapshot.mkdir(parents=True)
+    (snapshot / "config.yaml").touch()
+    (snapshot / "model.pt").write_bytes(b"weights")
+    monkeypatch.setenv("MODELSCOPE_CACHE", str(tmp_path))
+    factory = _RecordingFactory()
+
+    SenseVoiceEngine(sv_spec, model_factory=factory).transcribe("a.wav", "zh")
+
+    assert factory.calls[0]["model"] == str(snapshot)
+
+
+def test_missing_local_snapshot_keeps_modelscope_alias_fallback(
+    sv_spec, monkeypatch, tmp_path,
+):
+    monkeypatch.setenv("MODELSCOPE_CACHE", str(tmp_path))
+    factory = _RecordingFactory()
+
+    SenseVoiceEngine(sv_spec, model_factory=factory).transcribe("a.wav", "zh")
+
+    assert factory.calls[0]["model"] == "iic/SenseVoiceSmall"
 
 
 def test_device_argument_is_forwarded(sv_spec):
@@ -181,7 +206,7 @@ def test_generate_receives_audio_path_language_and_itn_from_opts(sv_spec):
 
     assert factory.models[0].generate_calls == [{
         "input": "b.wav", "language": "yue", "use_itn": False,
-        "batch_size_s": 60, "merge_vad": True,
+        "batch_size_s": 60, "merge_vad": True, "output_timestamp": True,
     }], "audio_path/lang phải được chuyển tiếp, use_itn lấy từ spec.opts"
 
 
@@ -287,6 +312,43 @@ def test_list_of_pairs_timestamp_uses_first_start_and_last_end(sv_spec):
         "danh sách cặp (fsmn-vad) lấy ts[0][0] / ts[-1][-1]; "
         "bản brief nổ TypeError ở đây vì float([0, 1000])"
     )
+
+
+def test_character_timestamps_split_sensevoice_sentences_without_linear_drift(sv_spec):
+    raw = [{
+        "text": "<|zh|><|NEUTRAL|><|Speech|>第一句。第二句！",
+        "timestamp": [
+            [0, 300], [300, 600], [600, 900], [900, 1200],
+            [5000, 5300], [5300, 5600], [5600, 5900], [5900, 6200],
+        ],
+    }]
+
+    out = SenseVoiceEngine(sv_spec, model_factory=_RecordingFactory(raw)).transcribe(
+        "a.wav", "zh"
+    )
+
+    assert [(s.text, s.start, s.end) for s in out] == [
+        ("第一句。", 0.0, 1.2), ("第二句！", 5.0, 6.2),
+    ], "phải dùng timestamp từng ký tự, không chia đều trên cả transcript"
+    assert all(segment.words is None for segment in out), (
+        "timestamp ký tự chỉ là điểm chia nội bộ, không giả là word timestamp"
+    )
+
+
+def test_character_timestamp_mapping_ignores_unaligned_symbol_markers(sv_spec):
+    raw = [{
+        "text": "<|zh|><|Speech|>第一句。😀第二句！",
+        "timestamp": [
+            [0, 300], [300, 600], [600, 900], [900, 1200],
+            [5000, 5300], [5300, 5600], [5600, 5900], [5900, 6200],
+        ],
+    }]
+
+    out = SenseVoiceEngine(sv_spec, model_factory=_RecordingFactory(raw)).transcribe(
+        "a.wav", "zh"
+    )
+
+    assert [segment.text for segment in out] == ["第一句。", "第二句！"]
 
 
 def test_partial_explicit_timing_is_not_silently_completed(sv_spec):
@@ -430,9 +492,8 @@ def test_release_empties_cuda_cache_only_when_torch_reports_a_gpu(sv_spec, monke
 
 
 # --------------------------------------------------------------------------
-# R61: `funasr` KHÔNG được cài ở giai đoạn này. Import ở cấp module sẽ làm
-# hỏng cả tầng ASR ngay khi import; Task 20 sẽ cài funasr nên lúc đó chỉ còn
-# bài kiểm tra AST này bắt được lỗi.
+# R61: FunASR là phụ thuộc nặng, nên import ở cấp module sẽ kéo nó vào cả
+# những lần khởi động không dùng SenseVoice. Giữ import lười và ghim bằng AST.
 # --------------------------------------------------------------------------
 
 def _funasr_refs(nodes) -> list[str]:
@@ -452,7 +513,7 @@ def test_funasr_is_imported_lazily_not_at_module_level():
     module_level = _funasr_refs(
         n for n in tree.body if isinstance(n, (ast.Import, ast.ImportFrom)))
     assert module_level == [], (
-        f"`funasr` chưa được cài: import ở cấp module là chết người ({module_level})"
+        f"FunASR phải được import lười, không phải ở cấp module ({module_level})"
     )
 
     assert _funasr_refs(ast.walk(tree)), (

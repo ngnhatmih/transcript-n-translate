@@ -26,9 +26,114 @@ from app.adapters.clock_system import SystemClock
 from app.adapters.persist.sqlite_repos import NotFound, SqliteRepos
 from app.domain.models import Job, Segment, Transcript
 from app.domain.subtitle_format import (
-    format_timestamp, to_ass, to_srt, to_vtt,
+    format_timestamp, to_ass, to_json, to_srt, to_vtt,
 )
-from app.pipeline.export import ExportHandler
+from app.pipeline.export import FORMATS, MEDIA_TYPES, ExportHandler, export_meta, render
+
+
+# ---------------------------------------------------------------------------
+# `to_json` — định dạng DUY NHẤT mang mốc thời gian của BẢN GỐC ra ngoài cùng bản
+# dịch. Hình dạng đã chọn: mảng phẳng `segments[]` + khối `meta`. Các bài ở đây
+# ghim HÌNH DẠNG đó (khoá nào, đơn vị nào, giây có làm tròn không) và ghim rằng
+# thời gian đến từ BẢN GỐC, không phải từ bản dịch.
+# ---------------------------------------------------------------------------
+
+_JSON_SOURCE = [Segment(i=0, start=0.0, end=2.1, text="你好"),
+                Segment(i=1, start=2.1, end=4.25, text="再见", suspect=True)]
+_JSON_VI = ["Xin chào", "Tạm biệt"]
+
+
+def test_json_has_meta_and_a_flat_segments_array():
+    out = json.loads(to_json(_JSON_SOURCE, translations=_JSON_VI,
+                             meta={"transcript_id": 1, "translation_id": 2}))
+    assert set(out) == {"meta", "segments"}
+    assert out["meta"] == {"transcript_id": 1, "translation_id": 2}
+    assert [s["i"] for s in out["segments"]] == [0, 1]
+    assert set(out["segments"][0]) == {
+        "i", "start", "end", "start_timecode", "end_timecode",
+        "text", "translation", "suspect", "qa",
+    }
+
+
+def test_json_times_come_from_the_source_segment_not_the_translation():
+    """`start`/`end` là GIÂY của đoạn NGUỒN, KHÔNG làm tròn thêm.
+
+    Phép đo phải phân biệt được nguồn với bản dịch, nên bản dịch ở đây mang mốc
+    thời gian KHÁC hẳn (0/99) — lấy nhầm bên nào là đỏ ngay.
+    """
+    source = [Segment(i=7, start=1.5, end=2.75, text="甲")]
+    translated = [Segment(i=7, start=0.0, end=99.0, text="Bản dịch")]
+    out = json.loads(to_json(source, translations=[t.text for t in translated]))
+    item = out["segments"][0]
+    assert (item["start"], item["end"]) == (1.5, 2.75)
+    assert item["start_timecode"] == "00:00:01.500"
+    assert item["end_timecode"] == "00:00:02.750"
+    assert item["text"] == "甲" and item["translation"] == "Bản dịch"
+
+
+def test_json_keeps_vietnamese_and_han_as_utf8_not_escaped():
+    """`ensure_ascii=False`: byte trong tệp là UTF-8 THẬT.
+
+    `\\u1eeb` là cùng một JSON hợp lệ về ngữ nghĩa, nhưng nó biến một tệp người
+    đọc được thành một tệp chỉ máy đọc được — và đó là thứ người dùng mở ra để
+    kiểm bản dịch. Ghim trên CHUỖI thô, không chỉ trên `json.loads` (nếu không thì
+    hai cách mã hoá là tương đương về ngữ nghĩa và bài này vô nghĩa).
+    """
+    raw = to_json(_JSON_SOURCE, translations=_JSON_VI)
+    assert "Xin chào" in raw and "Tạm biệt" in raw
+    assert "你好" in raw
+    assert "\\u" not in raw, "không được escape sang \\uXXXX"
+
+
+def test_json_marks_a_missing_translation_as_null():
+    out = json.loads(to_json(_JSON_SOURCE))
+    assert [s["translation"] for s in out["segments"]] == [None, None]
+
+
+def test_json_carries_the_source_suspect_flag():
+    out = json.loads(to_json(_JSON_SOURCE, translations=_JSON_VI))
+    assert [s["suspect"] for s in out["segments"]] == [False, True]
+
+
+def test_json_splits_qa_issues_by_segment_and_keeps_idless_ones_in_meta():
+    """Issue CÓ `id` xuống đúng đoạn; issue KHÔNG có `id` ở lại `meta`.
+
+    `engine_no_glossary` nói về ENGINE, không về một dòng — nhét nó vào một đoạn
+    là bịa ra một vấn đề của dòng đó; nuốt nó đi là mất một cờ mà người dùng cần.
+    """
+    issues = ["engine_no_glossary", "cps:1=30.0>21.0", "lang:1=source:han5/latin0"]
+    out = json.loads(to_json(_JSON_SOURCE, translations=_JSON_VI,
+                             meta={"qa_issues": issues}))
+    assert out["meta"]["qa_issues"] == issues
+    assert out["segments"][0]["qa"] == []
+    assert out["segments"][1]["qa"] == ["cps:1=30.0>21.0", "lang:1=source:han5/latin0"]
+
+
+def test_json_rejects_a_translation_count_mismatch():
+    with pytest.raises(ValueError):
+        to_json(_JSON_SOURCE, translations=["chỉ một"])
+
+
+def test_json_is_wired_into_the_one_format_registry():
+    """`json` là định dạng THẬT của đường export: có media type, và `render` đi
+    qua `to_json` (không qua một đường thứ hai)."""
+    assert "json" in FORMATS and "json" in MEDIA_TYPES
+    assert MEDIA_TYPES["json"] == "application/json"
+    body = json.loads(render("json", _JSON_SOURCE, translations=_JSON_VI,
+                             meta={"transcript_id": 9}))
+    assert body["meta"]["transcript_id"] == 9
+    assert len(body["segments"]) == 2
+
+
+def test_meta_engine_is_null_when_there_is_no_translation_row():
+    """Đường job không có hàng `translations` ⇒ `engine` là `null`, KHÔNG phải
+    engine ASR của transcript: hai nghĩa khác nhau không được dùng chung một khoá."""
+    transcript = Transcript(id=3, source_id=1, engine="fw-large-v3-turbo", lang="zh",
+                            segments=[], version=2)
+    meta = export_meta(transcript=transcript)
+    assert meta["translation_id"] is None and meta["engine"] is None
+    assert meta["stale"] is None, "chưa đo được KHÁC false"
+    assert meta["transcript_version"] == 2
 
 
 def test_timestamp_formatting_hours_and_millis():

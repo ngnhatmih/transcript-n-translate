@@ -77,6 +77,16 @@ export const api = {
   get: <T>(path: string) => call<T>("GET", path),
   post: <T>(path: string, body?: unknown) => call<T>("POST", path, jsonInit(body)),
   patch: <T>(path: string, body?: unknown) => call<T>("PATCH", path, jsonInit(body)),
+  /**
+   * `DELETE` — hai route xoá của backend trả **204 KHÔNG thân**.
+   *
+   * Vì sao vẫn dùng chung `call`: nó đã phân nhánh `status === 204` ở trên
+   * (`response.json()` trên thân rỗng ném `JSON.parse("")`), nên đường xoá thừa
+   * hưởng đúng phép kiểm đó thay vì có một bản sao thứ hai của cùng logic. Kiểu
+   * trả về là `void` ở nơi gọi (`deleteSource`/`deleteTranslation`), không phải
+   * một giá trị bịa ra cho một response không có nội dung.
+   */
+  del: <T>(path: string) => call<T>("DELETE", path),
 
   /**
    * Tải tệp lên (`POST /api/sources/upload`) — multipart, KHÔNG đặt

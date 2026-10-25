@@ -20,6 +20,7 @@ _seed-e2e/
 # Dữ liệu chạy — không commit
 data/media/
 data/output/
+data/experiments/
 data/app.db
 data/logs/
 *.db-journal
@@ -45,3 +46,12 @@ models/
 .idea/
 Thumbs.db
 desktop.ini
+
+# Thư mục làm việc của agent và bản sao lưu reference: scratch, không phải mã đồ án.
+# Ba mục này từng nằm untracked qua nhiều lượt, làm `git status` không BAO GIỜ rỗng —
+# tức cái luật "status phải rỗng" mất tác dụng đúng vào lúc cần nó nhất.
+.agents/
+.reference-backups/
+# Lockfile của bộ skill đã cài trên máy: không thuộc app. Muốn ghim bộ skill vào lịch sử
+# thì bỏ dòng dưới và commit nó như một quyết định có chủ.
+skills-lock.json

@@ -147,6 +147,12 @@ class Translation:
     tokens_in: int | None = None
     tokens_out: int | None = None
     duration_ms: int | None = None
+    #: Dấu vết chế độ CHIMERA (§8.7.5) của hàng này: kế hoạch N ứng viên + lượt
+    #: pha, ước lượng chi phí ĐÃ GHI LÚC TẠO HÀNG, và số đo THẬT của từng ứng
+    #: viên. `None` = hàng này không chạy ở chế độ Chimera. Không nằm trên
+    #: `TranslationSummary`: `segments` cũng không nằm ở đó, và cùng lý do — nó là
+    #: một JSON lớn, chỉ route CHI TIẾT mới được kéo.
+    chimera: dict | None = None
     created_at: str = ""
 
 
@@ -175,6 +181,18 @@ class TranslationSummary:
     prompt_version: str
     status: str = "queued"
     created_at: str = ""
+    # Bốn trường của V1: cờ QA và số đo của lần dịch. Hàng TÓM TẮT mang chúng vì
+    # `GET /api/translations` phải nói được "bản dịch này có cờ" — nếu chỉ route
+    # chi tiết có, giao diện phải mở từng bản dịch mới biết bản nào đáng ngờ, và
+    # một cờ chỉ nhìn thấy khi đã nghi ngờ thì không phải một cờ.
+    #
+    # Ở lớp này `qa_issues` LUÔN là danh sách (cột NULL đọc lên thành `[]`) —
+    # "chưa đo" khác "đo rồi, không có vấn đề" ở cột số (token/thời gian, `None`),
+    # nhưng với cờ thì hai thứ đó nói cùng một điều: không có gì để báo.
+    qa_issues: list[str] = field(default_factory=list)
+    tokens_in: int | None = None
+    tokens_out: int | None = None
+    duration_ms: int | None = None
 
 
 @dataclass

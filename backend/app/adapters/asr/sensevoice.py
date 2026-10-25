@@ -1,7 +1,7 @@
 """Adapter SenseVoice qua FunASR.
 
 Khác faster-whisper ở ba điểm:
-  * không có word timestamp -> chỉ timestamp cấp đoạn
+  * không có word timestamp; FunASR alignment cấp ký tự được dùng nội bộ
   * không có avg_logprob -> dấu hiệu nghi ngờ lấy từ tag sự kiện (bgm, laughter)
   * cần torch + FunASR (faster-whisper thì không)
 
@@ -12,16 +12,48 @@ test kiểm tra hợp đồng mà không nạp model.
 from __future__ import annotations
 
 import math
+import os
+import pathlib
+import unicodedata
 from typing import Callable
 
 from app.adapters.asr.cuda_runtime import ensure_cuda_runtime
-from app.domain.models import Segment
+from app.domain.models import Segment, Word
 from app.domain.segmentation import normalize
 from app.registry import EngineSpec
 
 from .sensevoice_tags import parse_rich_tags
 
 SUSPICIOUS_EVENTS = frozenset({"bgm", "laughter", "cry", "applause"})
+
+
+def _resolve_model_ref(model_ref: str) -> str:
+    """Ưu tiên snapshot SenseVoice Small hoàn chỉnh trong cache local."""
+    local_ref = pathlib.Path(model_ref)
+    if local_ref.is_dir():
+        return str(local_ref)
+    if model_ref != "iic/SenseVoiceSmall":
+        return model_ref
+
+    cache = os.environ.get("MODELSCOPE_CACHE")
+    if not cache:
+        from app.config import HF_HOME
+        cache = str(pathlib.Path(HF_HOME) / "modelscope")
+    root = pathlib.Path(cache)
+    snapshots = list((root / "models/iic--SenseVoiceSmall/snapshots").glob("*"))
+    candidates = snapshots + [
+        root / "hub/iic/SenseVoiceSmall",
+        root / "iic/SenseVoiceSmall",
+    ]
+    complete = [
+        path for path in candidates
+        if (path / "config.yaml").is_file()
+        and (path / "model.pt").is_file()
+        and (path / "model.pt").stat().st_size > 0
+    ]
+    if complete:
+        return str(max(complete, key=lambda path: path.stat().st_mtime))
+    return model_ref
 
 
 class SenseVoiceEngine:
@@ -49,9 +81,8 @@ class SenseVoiceEngine:
                 from funasr import AutoModel
                 factory = AutoModel
             self._model = factory(
-                model=self.spec.model_ref,
+                model=_resolve_model_ref(self.spec.model_ref),
                 vad_model="fsmn-vad",
-                punc_model="ct-punc",
                 device=self.device,
                 disable_update=True,
             )
@@ -65,15 +96,22 @@ class SenseVoiceEngine:
             use_itn=bool(self.spec.opts.get("use_itn", True)),
             batch_size_s=60,
             merge_vad=True,
+            output_timestamp=True,
         )
         segments: list[Segment] = []
-        for idx, item in enumerate(_flatten(raw)):
+        for item in _flatten(raw):
+            timestamped = _character_timestamp_segments(
+                item, len(segments), self.engine_id,
+            )
+            if timestamped is not None:
+                segments.extend(timestamped)
+                continue
             parsed = parse_rich_tags(item.get("text", ""))
             if not parsed.text:
                 continue
             start, end = _timing_seconds(item, self.engine_id)
             seg = Segment(
-                i=idx, start=start, end=max(end, start + 0.01), text=parsed.text,
+                i=len(segments), start=start, end=max(end, start + 0.01), text=parsed.text,
                 emotion=parsed.emotion, events=list(parsed.events),
             )
             if SUSPICIOUS_EVENTS.intersection(parsed.events):
@@ -81,7 +119,11 @@ class SenseVoiceEngine:
             segments.append(seg)
         if not segments:
             raise RuntimeError("SenseVoice không trả về đoạn nào")
-        return normalize(segments)
+        normalized = normalize(segments)
+        # Character alignments above are internal split points, not word data.
+        for segment in normalized:
+            segment.words = None
+        return normalized
 
     def release(self) -> None:
         # Xoá tham chiếu model TRƯỚC khối try: dù phần dọn torch có nổ thế nào
@@ -161,6 +203,91 @@ def _timing_seconds(item: dict, engine_id: str) -> tuple[float, float]:
             f"[[bắt đầu, kết thúc], ...]. Không gán mốc 0 cho mọi đoạn."
         )
     return start_ms / 1000.0, end_ms / 1000.0
+
+
+def _character_timestamp_segments(item: dict, first_index: int,
+                                  engine_id: str) -> list[Segment] | None:
+    """Split FunASR's full-text character alignment on sentence punctuation.
+
+    Some SenseVoice/FunASR versions return one full transcript plus one
+    timestamp pair per non-symbol character. If the cardinalities do not
+    match, keep the existing chunk-level timing fallback rather than guessing.
+    """
+    raw_text = item.get("text", "")
+    parsed = parse_rich_tags(raw_text)
+    timestamps = item.get("timestamp")
+    if not parsed.text or not isinstance(timestamps, (list, tuple)):
+        return None
+
+    # A two-number timestamp is an utterance span, not two character spans.
+    if len(timestamps) == 2 and all(_finite_number(value) is not None
+                                    for value in timestamps):
+        return None
+
+    aligned_chars = [
+        char for char in parsed.text
+        if not char.isspace()
+        and not unicodedata.category(char).startswith(("S", "C"))
+    ]
+    if len(aligned_chars) != len(timestamps):
+        return None
+
+    words: list[Word] = []
+    text_chars: list[str] = []
+    sentence_segments: list[Segment] = []
+    punctuation = frozenset("。！？!?；;")
+    timestamp_index = 0
+    previous_start = -1.0
+
+    def append_sentence() -> None:
+        if not words or not "".join(text_chars).strip():
+            return
+        segment = Segment(
+            i=first_index + len(sentence_segments),
+            start=words[0].s,
+            end=max(words[-1].e, words[0].s + 0.01),
+            text="".join(text_chars).strip(),
+            words=list(words),
+            emotion=parsed.emotion,
+            events=list(parsed.events),
+        )
+        if SUSPICIOUS_EVENTS.intersection(parsed.events):
+            segment.suspect = True
+        sentence_segments.append(segment)
+
+    for char in parsed.text:
+        if char.isspace():
+            if text_chars:
+                text_chars.append(char)
+            continue
+        if unicodedata.category(char).startswith(("S", "C")):
+            continue
+
+        pair = timestamps[timestamp_index]
+        timestamp_index += 1
+        if not isinstance(pair, (list, tuple)) or len(pair) != 2:
+            raise RuntimeError(
+                f"{engine_id}: timestamp ký tự không hợp lệ tại vị trí {timestamp_index - 1}; "
+                "cần cặp timestamp ký tự hoặc start/end hợp lệ"
+            )
+        start_ms, end_ms = _finite_number(pair[0]), _finite_number(pair[1])
+        if (start_ms is None or end_ms is None or end_ms < start_ms
+                or start_ms < previous_start):
+            raise RuntimeError(
+                f"{engine_id}: timestamp ký tự không hữu hạn hoặc không tăng dần "
+                f"tại vị trí {timestamp_index - 1}"
+            )
+        start, end = start_ms / 1000.0, end_ms / 1000.0
+        previous_start = start_ms
+        words.append(Word(w=char, s=start, e=end))
+        text_chars.append(char)
+        if char in punctuation:
+            append_sentence()
+            words = []
+            text_chars = []
+
+    append_sentence()
+    return sentence_segments or None
 
 
 def _flatten(raw) -> list[dict]:

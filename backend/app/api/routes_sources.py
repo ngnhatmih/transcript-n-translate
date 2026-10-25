@@ -1,18 +1,24 @@
-"""Route nguồn vào: tải tệp lên, dán link, liệt kê, xem chi tiết.
+"""Route nguồn vào: tải tệp lên, dán link, liệt kê, xem chi tiết, xoá.
 
 Route KHÔNG tự chạy pipeline. Nó lưu media + một hàng `sources`, rồi xếp một job
 `ingest`; worker (một luồng riêng) mới thật sự chạm ffmpeg. Nhờ vậy một tệp 2 GB
 không giữ request HTTP mở suốt thời gian bóc âm thanh.
+
+`DELETE /api/sources/{id}` là chiều NGƯỢC LẠI và cũng đi qua cùng bất biến đó:
+nó không chạm worker, nó từ chối (409) khi một job còn sống đang trỏ vào nguồn —
+xem `delete_source` ở cuối tệp và `app/api/delete_guard.py`.
 """
 from __future__ import annotations
 
 import pathlib
 from typing import BinaryIO
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import (APIRouter, Depends, File, Form, HTTPException, Response,
+                     UploadFile)
 from pydantic import BaseModel, field_validator
 from starlette.concurrency import run_in_threadpool
 
+from app.api.delete_guard import active_job_ids, mot_loi_409
 from app.api.deps import get_dirs, get_repos
 from app.domain import job_state as js
 from app.domain.models import Job, Source
@@ -182,3 +188,94 @@ def get_source(source_id: int, repos=Depends(get_repos)):
         return _source_json(repos.get_source(source_id))
     except LookupError as exc:
         raise HTTPException(404, str(exc)) from exc
+
+
+def _xoa_tep_media(media_dir: pathlib.Path, duong_dan: str | None) -> None:
+    """Xoá MỘT tệp media của nguồn, CHỈ khi nó nằm trong `media_dir`.
+
+    Bốn quyết định, mỗi cái là một cách hỏng đã trả giá ở chỗ khác của dự án:
+
+    * **`resolve_within` chứ không so tiền tố chuỗi.** `media_path`/`audio_path` là
+      dữ liệu trong DB, và `..` cùng symlink/junction đi vòng qua phép so chuỗi;
+      đây đúng phép kiểm mà `routes_media` đã áp cho cột này lúc ĐỌC và
+      `routes_sources.add_url` áp lúc GHI. Một lần `unlink()` là không hoàn tác
+      được, nên nó phải đi qua cùng cửa đó.
+    * **Ngoài `media_dir` ⇒ KHÔNG xoá, và KHÔNG ném.** Hàng `sources` đã bị xoá
+      trong giao dịch TRƯỚC đó (xem `delete_source`), nên một `500` ở đây là nói
+      dối về một việc đã xong: client sẽ tưởng bản ghi còn và bấm lại. Bất biến
+      giữ được là "không bao giờ unlink ngoài thư mục media", không phải "luôn
+      unlink".
+    * **Tệp thiếu KHÔNG phải lỗi** (`missing_ok=True`): nguồn `url` chưa bóc âm
+      thanh có `audio_path` NULL, và một tệp bị xoá tay là chuyện thường — hàng
+      `sources` vẫn phải biến mất.
+    * **`OSError` khác cũng bị nuốt** (tệp đang bị khoá trên Windows, quyền):
+      cùng lý do với nhánh ngoài gốc — `204` đã hứa "hàng đã xoá", và một tệp
+      không xoá được không làm hàng đó sống lại.
+    """
+    if duong_dan is None or duong_dan == "":
+        return
+    try:
+        target = resolve_within(media_dir, duong_dan)
+    except PathOutsideRoot:
+        return
+    try:
+        target.unlink(missing_ok=True)
+    except OSError:
+        return
+
+
+@router.delete("/{source_id}", status_code=204)
+def delete_source(source_id: int, repos=Depends(get_repos), dirs=Depends(get_dirs)):
+    """Xoá MỘT nguồn: bản dịch + transcript của nó, rồi hàng `sources`, rồi tệp.
+
+    Thứ tự và giới hạn của nó, nói thẳng:
+
+    1. **404 trước mọi thứ khác.** `get_source` đọc hàng THẬT (và trả câu
+       "source N không tồn tại"), nên một id lạ không đi tiếp được vào nhánh nào.
+       Route đọc hàng này chứ không chỉ dựa vào `delete_source` vì nó cần
+       `media_path`/`audio_path` — thứ biến mất cùng hàng.
+    2. **409 khi còn job sống.** Xem `app/api/delete_guard.py` để biết vì sao
+       TỪ CHỐI là hành vi an toàn (handler đang chạy sẽ ghi checkpoint vào hàng
+       vừa bị xoá) và vì sao đường nối là `payload.source_id`. Phép kiểm chạy
+       TRƯỚC khi xoá bất cứ thứ gì, nên hàng còn nguyên khi route trả 409.
+    3. **DB trước, đĩa sau, và không cùng một giao dịch.** Giao dịch SQLite
+       (`repos.delete_source`) là một khối nguyên tử; tệp trên đĩa thì không
+       rollback được cùng nó. Làm ngược lại (xoá tệp trước) sẽ để lại hàng
+       `sources` trỏ vào một `media_path` không còn tồn tại nếu bước DB hỏng —
+       và `GET /api/media/{id}` khi đó trả 500 thay vì 404.
+    4. **Bảng `jobs` KHÔNG bị chạm.** Job là lịch sử chạy, không phải con của
+       nguồn; xoá nó là xoá dấu vết của một lần chạy thật (cùng lý do
+       `mark_running_as_interrupted` giữ hàng lại thay vì xoá).
+    """
+    try:
+        source = repos.get_source(source_id)
+    except LookupError as exc:
+        raise HTTPException(404, str(exc)) from exc
+
+    ids = active_job_ids(repos, key="source_id", value=source_id)
+    if ids:
+        raise HTTPException(
+            409,
+            mot_loi_409(doi_tuong=f"nguồn {source_id}", ids=ids,
+                        cach_sua="huỷ job đó trước rồi xoá"),
+        )
+
+    try:
+        repos.delete_source(source_id)
+    except LookupError as exc:
+        # Đua hiếm: một request khác vừa xoá xong giữa `get_source` và đây. Trả
+        # CÙNG câu 404 của nhánh trên thay vì 500 — với người gọi, "hàng không
+        # còn" là đúng sự thật ở cả hai thời điểm.
+        raise HTTPException(404, str(exc)) from exc
+
+    media_dir: pathlib.Path = dirs["media"]
+    # `audio_path` có thể TRÙNG `media_path` (nguồn `file` đã bóc tiếng tại chỗ):
+    # `unlink` lần hai với `missing_ok=True` là no-op, nên không cần khử trùng.
+    for duong_dan in (source.media_path, source.audio_path):
+        _xoa_tep_media(media_dir, duong_dan)
+
+    # 204 KHÔNG có thân. Trả `Response` tường minh thay vì `None`: FastAPI sinh
+    # thân JSON cho giá trị trả về, và một thân `null` trên 204 là phản hồi sai
+    # chuẩn (RFC 7231) mà vài client coi là lỗi.
+    return Response(status_code=204)
+

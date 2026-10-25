@@ -140,36 +140,45 @@ class OllamaMtEngine:
     def supports_glossary(self) -> bool:
         return self._supports_glossary
 
-    def translate(self, batch: list[Segment], glossary: list[Term],
-                  opts: MtOpts) -> list[Segment]:
-        if not batch:
-            return []
+    def chat(self, system: str, user: str, *,
+             temperature: float | None = None) -> str:
+        """MỘT lượt gọi `/api/chat`: gửi hai prompt, trả `message.content`.
+
+        Tách ra để LƯỢT PHA của Chimera dùng CHUNG đường HTTP và chung phép ĐO với
+        lượt dịch thường. Chép lại khối này ở một adapter thứ hai là hai chỗ để
+        trôi ba thứ ĐÃ ĐO được: `total_duration` là NANÔ giây, token nằm ở
+        `prompt_eval_count`/`eval_count`, và `keep_alive` là thứ giữ model trong
+        VRAM giữa các lượt. Lượt pha cũng PHẢI được đếm như mọi lần chạm engine
+        (spec §4.2) — đi chung đường này thì nó được đếm mà không phải nhớ.
+
+        `temperature=None` dùng `_TEMPERATURE`; chế độ Chimera truyền nhiệt độ của
+        TỪNG ứng viên vào đây, nên nhiệt độ là tham số của LƯỢT GỌI, không phải
+        của adapter.
+        """
         body = {
             "model": self._model,
             "stream": False,               # ta đọc MỘT đối tượng JSON, không stream
             "format": "json",              # đo được: Ollama ép đầu ra là JSON sạch
             "keep_alive": self._keep_alive,
-            "options": {"temperature": _TEMPERATURE},
+            "options": {"temperature": _TEMPERATURE if temperature is None
+                        else float(temperature)},
             "messages": [
-                {"role": "system",
-                 # Cờ và prompt phải nói CÙNG một điều. QA gắn `engine_no_glossary`
-                 # theo `spec.capabilities["glossary_prompt"]` (Task 12 truyền cờ
-                 # vào) — nếu prompt cứ áp glossary thì bản ghi tự mâu thuẫn: nhãn
-                 # nói "không glossary", prompt thì có. `registry.json` đã khai
-                 # `hy-mt-1.5-7b` với `runtime: "ollama"` + `glossary_prompt:
-                 # false`, nên đây là tổ hợp Task 12 dựng thật, không phải nhánh chết.
-                 "content": system_prompt(glossary if self._supports_glossary else [],
-                                          target_lang=opts.target_lang)},
-                {"role": "user",
-                 "content": user_prompt(batch, source_lang=opts.source_lang,
-                                        target_lang=opts.target_lang)},
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
             ],
         }
         resp = self._client.post(f"{self._base_url}/api/chat", json=body,
                                  timeout=_TIMEOUT_S)
         # Lỗi HTTP và lỗi vận chuyển đều PHẢI nổi lên: Task 11 phân biệt chúng để
         # quyết định thử lại hay lùi về từng segment. Nuốt ở đây là mất khả năng đó.
-        resp.raise_for_status()
+        try:
+            resp.raise_for_status()
+        except httpx.HTTPStatusError as exc:
+            body = (resp.text or "")[:500]
+            if "repeat limit" in body:
+                raise ValueError(f"model lặp token, Ollama ngắt giữa chừng: {body}") from exc
+            raise httpx.HTTPStatusError(f"{exc} | ollama: {body}",
+                                        request=exc.request, response=exc.response) from exc
         data = resp.json()
         # Model đã thực sự nạp NGAY khi Ollama trả lời — kể cả khi ta parse hỏng.
         self._loaded = True
@@ -178,7 +187,7 @@ class OllamaMtEngine:
             tokens_out=data.get("eval_count"),
             duration_ms=_nanos_to_ms(data.get("total_duration")),
         )
-        # Thân dị dạng phải thành chuỗi RỖNG ở ĐÂY, trước `parse_batch_response`.
+        # Thân dị dạng phải thành chuỗi RỖNG ở ĐÂY, trước khi bên gọi parse.
         # Hợp đồng lỗi của adapter chỉ có `ValueError` (parse), `AlignmentProblem`
         # (lệch) và lỗi HTTP/vận chuyển; một `AttributeError` nổi lên từ tầng này là
         # loại lỗi thứ tư mà tầng thử lại của Task 11 không lường được, nên nó không
@@ -189,7 +198,32 @@ class OllamaMtEngine:
         # nhận một thứ chưa hề qua kiểm.
         message = data.get("message")
         raw = message.get("content") if isinstance(message, dict) else None
-        content = raw if isinstance(raw, str) else ""
+        return raw if isinstance(raw, str) else ""
+
+    def translate(self, batch: list[Segment], glossary: list[Term],
+                  opts: MtOpts) -> list[Segment]:
+        if not batch:
+            return []
+        # Cờ và prompt phải nói CÙNG một điều. QA gắn `engine_no_glossary` theo
+        # `spec.capabilities["glossary_prompt"]` (Task 12 truyền cờ vào) — nếu
+        # prompt cứ áp glossary thì bản ghi tự mâu thuẫn: nhãn nói "không
+        # glossary", prompt thì có. `registry.json` đã khai `hy-mt-1.5-7b` với
+        # `runtime: "ollama"` + `glossary_prompt: false`, nên đây là tổ hợp Task 12
+        # dựng thật, không phải nhánh chết.
+        # `engine_id` chỉ để MỞ HATCH biến thể prompt của lượt đo echo
+        # (`prompts.experiment_prompt_style`): id nào không phải engine được đo
+        # thì `experiment_prompt_style` trả mặc định TRƯỚC khi đọc biến môi
+        # trường, nên `qwen2.5-3b`/`qwen2.5-7b` nhận đúng chuỗi `p2` từng byte dù
+        # biến môi trường có đặt gì. Không truyền id này là để prompt của một
+        # engine không nói được nó là engine nào — và hatch thì phải engine-scoped.
+        content = self.chat(
+            system_prompt(glossary if self._supports_glossary else [],
+                          target_lang=opts.target_lang,
+                          engine_id=self._engine_id),
+            user_prompt(batch, source_lang=opts.source_lang,
+                        target_lang=opts.target_lang,
+                        engine_id=self._engine_id),
+            temperature=opts.temperature)
         return parse_batch_response(content, batch)
 
     def release(self) -> None:

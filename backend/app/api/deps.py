@@ -24,3 +24,13 @@ def get_worker(request: Request):
 
 def get_dirs(request: Request) -> dict[str, Any]:
     return request.app.state.dirs
+
+
+def get_chimera_plan(request: Request):
+    """Kế hoạch Chimera của tiến trình, hoặc `None`.
+
+    `getattr` có mặc định: `create_app()` dựng được mà không có kế hoạch (mọi bài
+    test chỉ đọc), và một route Chimera gọi trên app đó phải trả 503 kèm lý do —
+    không phải ném `AttributeError` thành 500.
+    """
+    return getattr(request.app.state, "chimera_plan", None)

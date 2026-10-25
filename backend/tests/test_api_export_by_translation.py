@@ -34,6 +34,7 @@ Bốn chỗ khác brief, và lý do:
 from __future__ import annotations
 
 import dataclasses
+import json
 import pathlib
 
 import pytest
@@ -335,6 +336,108 @@ def test_export_with_segment_counts_out_of_step_is_409(wired):
         tid, [*_SOURCE, Segment(i=3, start=2.0, end=3.0, text="第三段")])
 
     assert c.get(f"/api/export/{tr_id}?format=srt").status_code == 409
+
+
+# ---------------------------------------------------------------------------
+# `format=json` — định dạng DUY NHẤT mang mốc thời gian của BẢN GỐC + bản dịch
+# ---------------------------------------------------------------------------
+
+def test_export_json_has_meta_and_the_original_times(wired):
+    """Body JSON thật của route: đủ khoá, giây của BẢN GỐC, tiếng Việt không escape.
+
+    `_SOURCE` là thứ DUY NHẤT có mốc thời gian (0–1 và 1–2 giây), còn `_VIETNAMESE`
+    chỉ là chữ — nên một bản vá lấy `start`/`end` từ "đoạn dịch" sẽ đỏ ngay ở đây.
+    """
+    c, repos, _out, _worker = wired
+    tid, tr_id = _ready(repos)
+
+    r = c.get(f"/api/export/{tr_id}?format=json")
+
+    assert r.status_code == 200, r.text
+    assert r.headers["content-type"].startswith("application/json")
+    body = json.loads(r.text)
+    assert set(body) == {"meta", "segments"}
+    assert [s["i"] for s in body["segments"]] == [1, 2]
+    assert [(s["start"], s["end"]) for s in body["segments"]] == [(0.0, 1.0), (1.0, 2.0)]
+    assert [s["start_timecode"] for s in body["segments"]] == [
+        "00:00:00.000", "00:00:01.000"]
+    assert [s["text"] for s in body["segments"]] == [s.text for s in _SOURCE]
+    assert [s["translation"] for s in body["segments"]] == _VIETNAMESE
+    # UTF-8 THẬT trong body, không `\uXXXX`.
+    assert "Xin chào" in r.text and "\\u" not in r.text
+
+
+def test_export_json_meta_names_the_translation_row(wired):
+    """`meta` trả lời được "tệp này từ bản dịch nào, dịch từ bản ghi version mấy".
+
+    Đây là các khoá mà đường job KHÔNG thể điền (payload job không mang hàng
+    `translations`) — xem `test_export_json_..._differs_from_the_job_route`.
+    """
+    c, repos, _out, _worker = wired
+    tid, tr_id = _ready(repos)
+
+    meta = json.loads(c.get(f"/api/export/{tr_id}?format=json").text)["meta"]
+
+    assert meta["transcript_id"] == tid
+    assert meta["translation_id"] == tr_id
+    assert meta["engine"] == "opus-mt"
+    assert meta["target_lang"] == "vi"
+    assert meta["prompt_version"] == "opus-p1"
+    assert meta["transcript_version"] == 1
+    assert meta["stale"] is False
+    assert meta["qa_issues"] == []
+
+
+def test_export_json_stale_is_true_after_the_transcript_changes(wired):
+    """Sửa bản ghi ⇒ `meta.stale` là `true` trong TỆP XUẤT, không chỉ trên màn hình.
+
+    Cùng nguồn với `list_translations` (`is_stale`), nên trả cứng `false` ở đây là
+    nói dối ngay trên tệp người dùng đem đi dùng.
+
+    Và hai khoá version phải NÓI HAI CHUYỆN KHÁC NHAU: `transcript_version` là bản
+    NGUỒN hiện tại (2), `translated_from_transcript_version` là bản mà hàng dịch
+    khai nó dịch từ (1). Gộp chúng thành một khoá là làm mất đúng câu trả lời mà
+    `stale=true` vừa nêu ra.
+    """
+    c, repos, _out, _worker = wired
+    tid, tr_id = _ready(repos)
+    edited = [dataclasses.replace(seg, text="đổi chữ") for seg in _SOURCE]
+    repos.update_transcript_segments(tid, edited)
+
+    meta = json.loads(c.get(f"/api/export/{tr_id}?format=json").text)["meta"]
+
+    assert meta["transcript_version"] == 2, "bản NGUỒN hiện tại"
+    assert meta["translated_from_transcript_version"] == 1, "bản mà hàng dịch dịch từ"
+    assert meta["stale"] is True
+
+
+def test_export_json_differs_from_the_job_route_only_in_the_row_meta(wired):
+    """HAI đường export, MỘT định dạng json: khác nhau ĐÚNG bốn khoá của hàng dịch.
+
+    Đây là chênh lệch ĐÃ KHAI, không phải trôi: đường job (`POST /api/export` →
+    tải về) nhận một payload chỉ có `transcript_id` + danh sách chữ, nên nó KHÔNG
+    BIẾT `translation_id`/`engine`/`target_lang`/`prompt_version`/`stale`. Bịa ra
+    chúng là nói dối; để `null` là "chưa đo được". Phần `segments` phải GIỐNG
+    NHAU từng byte — nếu không thì hai đường đã trôi khỏi nhau thật.
+    """
+    c, repos, out_dir, worker = wired
+    tid, tr_id = _ready(repos)
+
+    spec = json.loads(c.get(f"/api/export/{tr_id}?format=json").text)
+    old = json.loads(_run_the_old_route(c, repos, worker, out_dir, tid,
+                                        _translation_texts(repos, tr_id),
+                                        fmt="json").content.decode("utf-8"))
+
+    assert spec["segments"] == old["segments"], "phần nội dung phải giống nhau"
+    declared = {"translation_id", "engine", "target_lang", "prompt_version", "stale",
+                "translated_from_transcript_version"}
+    assert set(spec["meta"]) == set(old["meta"])
+    assert {k: v for k, v in spec["meta"].items() if k not in declared} == \
+           {k: v for k, v in old["meta"].items() if k not in declared}
+    for key in declared:
+        assert old["meta"][key] is None, (
+            f"đường job KHÔNG có hàng dịch nên `{key}` phải là null: {old['meta']!r}")
+    assert spec["meta"]["translation_id"] == tr_id
 
 
 # ---------------------------------------------------------------------------

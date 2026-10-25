@@ -449,9 +449,51 @@ def test_engine_batched_branch_uses_batched_pipeline(asr_spec, monkeypatch):
     assert batched.calls[0][1] == {
         "language": "zh", "batch_size": 4, "vad_filter": True,
         "word_timestamps": True, "condition_on_previous_text": False,
+        "without_timestamps": False,
         "initial_prompt": "xin chào",
     }
     assert [s.text for s in first] == ["你好"]
+
+
+def test_batched_path_never_runs_in_fast_mode(asr_spec, monkeypatch):
+    """Chế độ nhanh (`without_timestamps=True`) làm MẤT CHỮ ở chunk đầu.
+
+    `BatchedInferencePipeline.transcribe` mặc định `without_timestamps=True`,
+    còn `WhisperModel.transcribe` mặc định `False`. Adapter cũ không khai gì,
+    nên nhánh batch thừa hưởng chế độ nhanh. Đo trên clip thật 234,17 s
+    (`_realpipe`, CC BY-SA 4.0), CÙNG chunk 0 cửa sổ 0,000 -> 29,904 s,
+    CÙNG model `large-v3-turbo`:
+
+        without_timestamps=True  -> out[0] = 4 token  ("文章名"), mất ~130 chữ
+        without_timestamps=False -> out[0] = 153 token, đủ chữ
+
+    Bài này khoá ĐỐI SỐ mà adapter truyền xuống nên chạy được ở mọi máy, không
+    cần model: xoá dòng `without_timestamps=False` là bài này ĐỎ. Bản dùng clip
+    thật là `tests/test_asr_first_chunk_live.py` (dấu `live`).
+    """
+    _FakeBatchedPipeline.instances = []
+    fake_module = types.ModuleType("faster_whisper")
+    fake_module.BatchedInferencePipeline = _FakeBatchedPipeline
+    monkeypatch.setitem(sys.modules, "faster_whisper", fake_module)
+
+    factory = _RecordingModelFactory()
+    engine = FasterWhisperEngine(_with_opts(asr_spec, batch_size=4),
+                                 model_factory=factory)
+    engine.transcribe("a.wav", "zh")
+
+    batched_kwargs = _FakeBatchedPipeline.instances[0].calls[0][1]
+    assert batched_kwargs.get("without_timestamps") is False, (
+        "nhánh batch phải khai without_timestamps=False; thiếu khoá này thì "
+        "pipeline rơi về mặc định True và chunk đầu mất chữ"
+    )
+
+    seq_factory = _RecordingModelFactory()
+    FasterWhisperEngine(_with_opts(asr_spec, batch_size=0),
+                        model_factory=seq_factory).transcribe("a.wav", "zh")
+    seq_kwargs = seq_factory.models[0].transcribe_calls[0][1]
+    assert seq_kwargs.get("without_timestamps", False) is False, (
+        "nhánh tuần tự cũng không được bật chế độ nhanh"
+    )
 
 
 def _block_torch_import(monkeypatch) -> None:

@@ -1,4 +1,4 @@
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS schema_meta (
@@ -41,6 +41,10 @@ CREATE TABLE IF NOT EXISTS translations (
   tokens_in INTEGER,
   tokens_out INTEGER,
   duration_ms INTEGER,
+  -- Chế độ CHIMERA (§8.7.5): một JSON gồm kế hoạch (N ứng viên + lượt pha), ước
+  -- lượng chi phí ĐÃ GHI LÚC TẠO HÀNG (trước khi người dùng bấm), và số đo THẬT
+  -- của từng ứng viên. NULL = hàng này không chạy ở chế độ Chimera.
+  chimera TEXT,
   created_at TEXT NOT NULL
 );
 

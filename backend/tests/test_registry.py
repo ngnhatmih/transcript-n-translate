@@ -232,13 +232,16 @@ def test_phase_key_matches_job_state_phase_of_for_every_shipped_engine():
 
 
 def test_shipped_registry_pins_every_engine_and_its_vram():
-    """Ghim đủ 8 engine + vram_mb: con số này điều khiển VRAM arbitration.
+    """Ghim đủ 9 engine + vram_mb: con số này điều khiển VRAM arbitration.
 
     Sai một số, hoặc mất một entry, là lỗi thật mà các test khác không bắt được.
+    `fw-large-v3` (3 200 MB) được thêm sau khi đo: timed mean CER trên 84 caption
+    OCR là 0,049750 so với 0,065835 của turbo — cùng adapter, cùng reference.
     """
     specs = load_registry()
     assert {s.id: s.vram_mb for s in specs} == {
         "fw-large-v3-turbo": 1600,
+        "fw-large-v3": 3200,
         "fw-medium": 1500,
         "fw-small": 500,
         "sensevoice-small": 1000,

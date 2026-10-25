@@ -595,6 +595,52 @@ const dem = {
   /** Bat nhanh 409 cua retry. ⚠️ CHI co hieu luc khi trang thai THAT cua job KHONG chay lai duoc
       (`failed`/`interrupted` la `RETRYABLE_STATES` ⇒ backend KHONG BAO GIO tra 409 cho chung). */
   retry409: false,
+  // ---------------------------------------------------------------------------
+  // ITEM 5 — `POST /api/jobs` (BÓC LẠI bằng engine ASR khác), đếm ở PHÍA MÁY CHỦ.
+  //
+  // ⚠️ VÌ SAO PHẢI ĐẾM Ở PHÍA MÁY CHỦ: "bấm `bóc lại` ⇒ có job mới" có thể xanh vì một lý do
+  // khác (hàng đợi tự đổi do SSE, hoặc do fixture). Chỉ bộ đếm này + BODY THẬT phân biệt được
+  // "request đã ĐI RA với đúng engine/source" với "giao diện tự bịa ra một job".
+  //
+  // ⚠️ TÊN KHOÁ PHẢI TRÁNH `jobTao`: khoá đó ĐÃ CÓ ở trên (trạng thái JOB mà server trả trong
+  // body 201 của `POST /api/translations`, kiểu `"queued" | "running"`). Một bản nháp của item
+  // này đặt bộ đếm số đếm TRÙNG tên đó ⇒ khoá ĐỨNG SAU trong object literal thắng ⇒ server fixture
+  // trả `job.state = 0` ⇒ cột phải của màn Đối chiếu in *"job: undefined"* và bài
+  // `W3 BAT DAU DICH` ĐỎ. ĐO ĐƯỢC (không phải giả thuyết): đó đúng là câu đã xuất hiện trong DOM
+  // thật của lượt chạy. Vì thế các khoá dưới đây mang hậu tố/tiền tố KHÁC hẳn.
+  // ---------------------------------------------------------------------------
+  jobMoi: 0,
+  /** Body JSON THẬT của lần `POST /api/jobs` gần nhất. */
+  bodyJobMoi: null as Record<string, unknown> | null,
+  /** Chuỗi JSON THÔ của lần đó — để báo cáo được BYTE client gửi. */
+  rawJobMoi: "",
+  /** Độ trễ (ms) của route tạo job — chỉ bài "đang bay" bật, để cửa sổ đo là xác định. */
+  jobMoiTre: 0,
+  /** Số lời gọi tạo job đã TRẢ XONG (chứng nhân hai chiều của trạng thái "đang bay"). */
+  jobMoiXong: 0,
+  /** Bật để route tạo job trả 422 kèm câu NGUYÊN VĂN của backend (nhánh LỖI). */
+  jobMoiLoi: false,
+  // ---------------------------------------------------------------------------
+  // ĐƯỜNG XOÁ KÊNH (`DELETE /api/sources/{id}`), đếm ở PHÍA MÁY CHỦ.
+  //
+  // ⚠️ VÌ SAO PHẢI ĐẾM Ở PHÍA MÁY CHỦ: "bấm xoá hai lần ⇒ kênh biến mất" có thể xanh vì một
+  // lý do khác (giao diện tự cắt hàng khỏi danh sách). Chỉ bộ đếm này phân biệt được "request đã
+  // ĐI RA" với "giao diện tự sửa state tại chỗ" — và cú bấm ĐẦU TIÊN (bước xác nhận) phải để nó
+  // bằng 0.
+  // ---------------------------------------------------------------------------
+  xoaSource: 0,
+  xoaTheoId: {} as Record<number, number>,
+  /**
+   * Id kênh mà máy chủ ĐÃ XOÁ. Route `GET /api/sources` phải QUÊN chúng — chỉ trả 204 mà danh
+   * sách còn hàng thì "đọc lại danh sách" là một lời khai không kiểm được.
+   *
+   * ⚠️ GIỮ DẠNG DANH SÁCH PHỤ, KHÔNG `splice` khỏi `SOURCES`: `beforeEach` khôi phục mảng bằng
+   * `SOURCES.length = SO_SOURCE_GOC` (nó giả định chỉ có `push`), nên một hàng bị cắt khỏi GIỮA
+   * mảng sẽ để lại lỗ và phép khôi phục đọc ra `undefined`.
+   */
+  xoaDaXoa: [] as number[],
+  /** Bật để route xoá trả 409 kèm câu NGUYÊN VĂN của backend (job đang xếp hàng/đang chạy). */
+  xoaLoi: false,
 };
 
 /**
@@ -646,6 +692,36 @@ function xoaDemGhi(): void {
 function xoaDemMedia(): void {
   dem.play = 0;
   dem.pause = 0;
+}
+
+/**
+ * Xoa MOI bo dem/gia tri cua duong TAO JOB (`POST /api/jobs`, item 5) ve goc.
+ *
+ * ⚠️ VI SAO LA MOT HELPER: cung bai hoc `M5` cua review D1 — mot lan reset thieu mot bo dem lam
+ * khang dinh SAU moc reset doc gia tri CU va XANH gia. `bodyJobMoi`/`rawJobMoi` la hai thu DE QUEN
+ * nhat.
+ */
+function xoaDemBocLai(): void {
+  dem.jobMoi = 0;
+  dem.bodyJobMoi = null;
+  dem.rawJobMoi = "";
+  dem.jobMoiTre = 0;
+  dem.jobMoiXong = 0;
+  dem.jobMoiLoi = false;
+}
+
+/**
+ * Xoa MOI bo dem/gia tri cua duong XOA KENH ve goc.
+ *
+ * Cung bai hoc `M5` cua review D1 — MOT helper, khong liet ke tay: `xoaDaXoa` la thu DE QUEN
+ * nhat, va mot id con sot lai trong do lam moi bai sau thay mot kenh "da bi xoa" ma khong co
+ * request nao.
+ */
+function xoaDemXoa(): void {
+  dem.xoaSource = 0;
+  dem.xoaTheoId = {};
+  dem.xoaDaXoa = [];
+  dem.xoaLoi = false;
 }
 
 /** Them mot ban ghi MOI vao ca hai route — dung cho ngoi no doc lai (`Minor #3`). */
@@ -857,6 +933,53 @@ const server: Server = createServer((req, res) => {
     const treLenh = chayLai ? dem.retryTre : dem.cancelTre;
     if (treLenh > 0) setTimeout(traLenh, treLenh);
     else traLenh();
+    return;
+  }
+  // ---------------------------------------------------------------------------
+  // ITEM 5 — TẠO JOB (`POST /api/jobs`): đường DUY NHẤT để bóc lại bằng một engine ASR khác.
+  //
+  // ⚠️ Phải đứng TRƯỚC nhánh `url.startsWith("/api/jobs")` dưới đây: nhánh đó KHÔNG phân nhánh
+  // theo method, nên một `POST /api/jobs` sẽ bị nó NUỐT và trả về MẢNG job cho một request TẠO
+  // — đúng cái bẫy đã ghi cho `/api/translations` và `/api/sources/upload`.
+  // ---------------------------------------------------------------------------
+  if (url === "/api/jobs" && req.method === "POST") {
+    dem.jobMoi += 1;
+    let raw = "";
+    req.on("data", (chunk) => { raw += String(chunk); });
+    req.on("end", () => {
+      dem.rawJobMoi = raw;
+      let body: Record<string, unknown> = {};
+      try { body = JSON.parse(raw) as Record<string, unknown>; } catch { body = {}; }
+      dem.bodyJobMoi = body;
+      const tra = (): void => {
+        dem.jobMoiXong += 1;
+        if (dem.jobMoiLoi) {
+          // 422 NGUYÊN VĂN của `routes_jobs.create_job` ⇒ `raise HTTPException(422, str(exc))`
+          // với `exc` từ `registry.by_id` (`KeyError(f"engine {engine_id!r} không có trong
+          // registry")`). ⚠️ DẤU NHÁY KÉP bọc ngoài là của `str(KeyError(...))` (nó trả `repr`
+          // của tham số), KHÔNG phải do test tự thêm — một fixture bỏ nó đi là một câu mà máy
+          // chủ KHÔNG BAO GIỜ nói, và nó sẽ làm bài "lỗi nguyên văn" xanh với một câu sai.
+          res.writeHead(422, { "content-type": "application/json" });
+          res.end(JSON.stringify({
+            detail: "\"engine 'fw-large-v3' không có trong registry\"",
+          }));
+          return;
+        }
+        // Hang job TRA VE theo dung `_job_json` (15 khoa cua `Job`) + 201 nhu route that.
+        const job = makeJob(
+          90 + dem.jobMoi,
+          "asr",
+          "queued",
+          `asr:${String(body["engine"])}`,
+          0,
+          (body["payload"] ?? {}) as Record<string, unknown>,
+        );
+        res.writeHead(201, { "content-type": "application/json" });
+        res.end(JSON.stringify(job));
+      };
+      if (dem.jobMoiTre > 0) setTimeout(tra, dem.jobMoiTre);
+      else tra();
+    });
     return;
   }
   if (url.startsWith("/api/jobs")) {
@@ -1089,6 +1212,38 @@ const server: Server = createServer((req, res) => {
     res.end(JSON.stringify([]));
     return;
   }
+  if (req.method === "DELETE" && url.startsWith("/api/sources/")) {
+    // ⚠️ PHẢI ĐỨNG TRƯỚC nhánh `/api/sources` bên dưới: nhánh đó KHÔNG phân nhánh theo
+    // method, nên một `DELETE` sẽ bị nó nuốt và trả về MẢNG `SOURCES` (200) — đúng cái bẫy
+    // mà tệp này đã cảnh báo cho `/api/translations` và `/api/sources/upload`.
+    dem.xoaSource += 1;
+    const id = Number(url.split("/")[3]);
+    dem.xoaTheoId[id] = (dem.xoaTheoId[id] ?? 0) + 1;
+    if (dem.xoaLoi) {
+      // 409 NGUYÊN VĂN của backend: `routes_sources.delete_source` +
+      // `app/api/delete_guard.mot_loi_409` — câu này nêu ĐÍCH DANH id job.
+      res.writeHead(409, { "content-type": "application/json" });
+      res.end(JSON.stringify({
+        detail: `không xoá được nguồn ${id}: job #7 đang xếp hàng hoặc đang chạy trên nó `
+          + `— huỷ job đó trước rồi xoá`,
+      }));
+      return;
+    }
+    if (!SOURCES.some((s) => s.id === id)) {
+      // 404 NGUYÊN VĂN của cổng (`sqlite_repos.get_source`).
+      res.writeHead(404, { "content-type": "application/json" });
+      res.end(JSON.stringify({ detail: `source ${id} không tồn tại` }));
+      return;
+    }
+    // Máy chủ PHẢI QUÊN hàng đã xoá: chỉ trả 204 mà `GET /api/sources` còn hàng thì "đọc lại
+    // danh sách" là một lời khai không kiểm được (xem `dem.xoaDaXoa`).
+    dem.xoaDaXoa.push(id);
+    // 204 KHÔNG thân — đúng hình dạng `routes_sources.delete_source` (và `client.call` đã
+    // phân nhánh riêng cho 204, không gọi `json()`).
+    res.writeHead(204);
+    res.end();
+    return;
+  }
   if (url.startsWith("/api/sources/upload")) {
     // ⚠️ DUONG NAP — phai kiem NHANH NAY TRUOC `/api/sources`, va phai phan nhanh theo METHOD.
     // Nhanh `/api/sources` (duoi day) khong phan nhanh theo method, nen mot
@@ -1160,7 +1315,7 @@ const server: Server = createServer((req, res) => {
       return;
     }
     res.writeHead(200, { "content-type": "application/json" });
-    res.end(JSON.stringify(SOURCES));
+    res.end(JSON.stringify(SOURCES.filter((s) => !dem.xoaDaXoa.includes(s.id))));
     return;
   }
   res.writeHead(404, { "content-type": "text/plain" });
@@ -1612,6 +1767,10 @@ describe("App: KENH THAT + HANG DOI THAT tu server node:http trong tien trinh", 
     xoaDemLenh();
     // DUONG MEDIA (vong sua 1, I-3): hai bo dem nay cung la bo dem TICH LUY ⇒ phai ve 0 moi bai.
     xoaDemMedia();
+    // DUONG TAO JOB (item 5): cung ly do — MOT helper, khong liet ke tay.
+    xoaDemBocLai();
+    // DUONG XOA KENH: cung ly do — MOT helper, khong liet ke tay.
+    xoaDemXoa();
     dem.nguoiGhiKhac = false;
     // ⚠️ CA MANG KENH: mot luot nap THEM mot hang THAT (`SOURCES.push`) ⇒ khong cat ve anh goc thi
     // bai sau se thay kenh cua bai truoc, va "kenh MOI xuat hien" xanh ngay ca khi khong doc lai.
@@ -1874,6 +2033,90 @@ describe("App: KENH THAT + HANG DOI THAT tu server node:http trong tien trinh", 
     assert.equal(dem.soYeuCauIdKhongHopLe, 0, "khong request nao duoc mang id null/0");
 
     assert.deepEqual(tiengOn, [], "chon kenh khong duoc sinh tieng on console");
+    unmount();
+  });
+
+  it("XOÁ KÊNH: hai bước ⇒ DELETE + ĐỌC LẠI danh sách; kênh ĐANG CHỌN bị xoá ⇒ BỎ CHỌN", async () => {
+    // ⚠️ BẤT BIẾN ĐƯỢC GHIM Ở ĐÂY: xoá kênh đang mở KHÔNG được để app trỏ vào một id đã chết.
+    // `App.xoaKenh` làm điều đó bằng `clearChannel` (cùng bộ vị trí mà `selectChannel` dọn khi
+    // ĐỔI kênh), và phép đo dưới đây đọc DOM THẬT: không còn `.ch__item[aria-pressed="true"]`,
+    // và màn Biên tập rơi về trạng thái rỗng "chưa có bản ghi".
+    const { container, unmount } = render(taoPhanTu(App));
+
+    await choChu(container, "kenh-mot.wav");
+    // CHỌN kênh 1 bằng nút CHỌN (không phải nút xoá) để có một lựa chọn thật cần được dọn.
+    fireEvent.click(nutKenh(container, "kenh-mot.wav"));
+    await choChu(container, "câu 1");
+    assert.ok((kenhDangChon(container) ?? "").includes("kenh-mot.wav"), "kênh 1 phải đang được chọn");
+
+    const nut = phanTu(container, '[data-testid="xoa-kenh-1"]');
+    // CÚ BẤM THỨ NHẤT: chỉ mở bước xác nhận. Bộ đếm ở PHÍA MÁY CHỦ phải bằng 0 — đó là bằng
+    // chứng duy nhất phân biệt "nút đổi chữ" với "request đã đi".
+    fireEvent.click(nut);
+    assert.equal((nut.textContent ?? "").trim(), "xóa?", "cú bấm đầu phải hỏi lại bằng CHỮ");
+    assert.equal(dem.xoaSource, 0, "cú bấm ĐẦU không được gọi API (đếm ở phía server)");
+
+    // CÚ BẤM THỨ HAI: ĐÚNG MỘT `DELETE /api/sources/1`, rồi `sources.reload()`.
+    fireEvent.click(nut);
+    await waitFor(
+      () => {
+        assert.equal(dem.xoaSource, 1, `phải có ĐÚNG MỘT DELETE; đo được ${dem.xoaSource}`);
+        assert.equal(dem.xoaTheoId[1], 1, "đúng id kênh đã bấm");
+      },
+      { timeout: 5000, interval: 20 },
+    );
+    // Hàng biến mất KHÔNG phải vì client tự cắt state: máy chủ giả chỉ quên nó khi ĐÃ nhận
+    // request, và hàng chỉ đi khỏi DOM sau lần `GET /api/sources` kế tiếp.
+    await waitFor(
+      () => {
+        assert.equal(
+          container.querySelectorAll('[data-testid="xoa-kenh-1"]').length,
+          0,
+          "kênh đã xoá phải biến mất sau lần ĐỌC LẠI danh sách",
+        );
+      },
+      { timeout: 5000, interval: 20 },
+    );
+    assert.ok(
+      dem.sources >= 2,
+      `phải có một lần đọc lại /api/sources sau khi xoá; đo được ${dem.sources}`,
+    );
+    assert.equal(kenhDangChon(container), null, "kênh đang chọn bị xoá ⇒ app KHÔNG được trỏ vào id chết");
+    await choChu(container, "chưa có bản ghi để biên tập");
+
+    assert.deepEqual(tiengOn, [], "luồng xoá kênh không được sinh tiếng ồn console");
+    unmount();
+  });
+
+  it("XOÁ KÊNH 409: job đang xếp hàng ⇒ hiện NGUYÊN VĂN câu backend, kênh CÒN, lựa chọn KHÔNG đổi", async () => {
+    // ⚠️ Vì sao câu này phải hiện NGUYÊN VĂN: 409 của backend nêu ĐÍCH DANH id job
+    // (`delete_guard.mot_loi_409`), và đó là thứ duy nhất nói người dùng phải huỷ cái gì.
+    // Thay bằng "có lỗi xảy ra" là bỏ mất đúng thông tin cần để sửa.
+    dem.xoaLoi = true;
+    const { container, unmount } = render(taoPhanTu(App));
+
+    await choChu(container, "kenh-mot.wav");
+    const nut = phanTu(container, '[data-testid="xoa-kenh-2"]');
+    fireEvent.click(nut);
+    fireEvent.click(nut);
+
+    await choPhanTu(
+      container,
+      '[data-testid="xoa-kenh-2-loi"]',
+      (t) => t.includes("đang xếp hàng"),
+      "câu 409 của backend chưa hiện trong ô lỗi của nút xoá",
+    );
+    assert.equal(dem.xoaSource, 1, "request PHẢI đã đi ra — lỗi đến từ máy chủ, không phải từ client");
+    assert.ok(
+      (container.querySelector('[data-testid="xoa-kenh-2-loi"]')?.textContent ?? "").includes("#7"),
+      "câu lỗi phải nêu ĐÍCH DANH id job đang chặn",
+    );
+    // Kênh CÒN: 409 nói "chưa xoá được", nên hàng phải nguyên chỗ (và mọi kênh khác cũng vậy).
+    assert.ok(container.querySelector('[data-testid="xoa-kenh-2"]') !== null, "kênh phải còn sau 409");
+    assert.equal(dem.xoaDaXoa.length, 0, "máy chủ KHÔNG được xoá hàng nào");
+    assert.equal(kenhDangChon(container), null, "lượt xoá hỏng không được đổi kênh đang chọn");
+
+    assert.deepEqual(tiengOn, [], "luồng xoá lỗi không được sinh tiếng ồn console");
     unmount();
   });
 
@@ -5397,6 +5640,172 @@ describe("App: KENH THAT + HANG DOI THAT tu server node:http trong tien trinh", 
     assert.equal(container.innerHTML, truoc, "phím chưa có đích KHÔNG được đổi DOM");
 
     assert.deepEqual(tiengOn, [], "phim chua co dich khong duoc sinh tieng on console");
+    unmount();
+  });
+
+  // ===========================================================================
+  // ITEM 5 — BÓC LẠI BẰNG ENGINE ASR KHÁC (`POST /api/jobs`) VÀ RAIL HAI MỐC
+  //
+  // Hai mệnh đề, cùng một cò: (1) bấm `bóc lại` ⇒ ĐÚNG MỘT `POST /api/jobs` với `workspace: 1`,
+  // `type: "asr"`, `engine` ĐANG CHỌN và `payload.source_id` của BẢN GHI đang mở — đo ở PHÍA MÁY
+  // CHỦ, trên BODY THẬT; (2) trạng thái của lời gọi được NÓI RA bằng CHỮ (đang bay / lỗi nguyên
+  // văn), và điều khiển VÔ HIỆU khi đang bay.
+  //
+  // ⚠️ VẾ "job xong ⇒ bản ghi mới hiện ra" KHÔNG được đo lại ở đây: nó đã có bài ghim riêng
+  // (`W1` — "job `asr` xong ⇒ BẢN GHI MỚI hiện ra", ngòi nổ `/api/transcripts`). Đường này chỉ
+  // XẾP job, cố ý không `reload()` gì — xem docblock `bocLai`.
+  // ===========================================================================
+
+  it("BÓC LẠI: bấm ⇒ ĐÚNG MỘT `POST /api/jobs` (workspace 1 · type asr · engine ĐANG CHỌN · payload.source_id của bản ghi đang mở), và nói ra 'đang bóc lại…'", async () => {
+    // Độ trễ để cửa sổ "đang bay" là XÁC ĐỊNH, không phải một cuộc đua (cùng khuôn `approveTre`).
+    dem.jobMoiTre = 200;
+    const { container, unmount } = render(taoPhanTu(App));
+    await toiBienTapBonDoan(container); // kênh HAI, bản ghi #3 (source_id 2, lang "en")
+
+    // Ô chọn ASR phải có lựa chọn TRƯỚC khi bấm: registry của fixture có ĐÚNG MỘT engine ASR, và
+    // `transcript.engine` ("sensevoice-small") KHÔNG có trong đó ⇒ chọn sẵn engine đầu tiên.
+    const chon = phanTu(container, '[data-testid="chon-engine-asr"]') as HTMLSelectElement;
+    assert.deepEqual(
+      [...chon.querySelectorAll("option")].map((o) => o.getAttribute("value")),
+      ["faster-whisper-large"],
+      "ô chọn ASR phải lấy engine từ `/api/registry` (spec ASR thiếu `capabilities.available` ⇒ "
+      + "nếu lọc theo khoá đó thì danh sách RỖNG)",
+    );
+    assert.equal(chon.value, "faster-whisper-large");
+    assert.equal(dem.jobMoi, 0, "chưa bấm thì chưa được có request nào");
+
+    fireEvent.click(phanTu(container, '[data-testid="boc-lai"]'));
+
+    // (1) TRẠNG THÁI NÓI RA BẰNG CHỮ + HAI ĐIỀU KHIỂN VÔ HIỆU (một nút bấm được mà không gửi gì
+    //     là một lời nói dối), trong lúc lời gọi CHẮC CHẮN còn bay (trễ 200 ms ở server).
+    assert.equal(
+      chu(container, '[data-testid="dang-boc-lai"]'),
+      "đang bóc lại…",
+      "trong lúc lời gọi đang bay, màn phải NÓI RA là đang bóc lại",
+    );
+    assert.equal(
+      (phanTu(container, '[data-testid="boc-lai"]') as HTMLButtonElement).disabled,
+      true,
+      "đang bay ⇒ nút phải VÔ HIỆU",
+    );
+    assert.equal(
+      (phanTu(container, '[data-testid="chon-engine-asr"]') as HTMLSelectElement).disabled,
+      true,
+      "đang bay ⇒ ô chọn engine phải VÔ HIỆU (đổi engine giữa lúc bay là bấm vào một id không đi đâu)",
+    );
+
+    await waitFor(
+      () => {
+        assert.equal(dem.jobMoiXong, 1, "lời gọi tạo job chưa trả về");
+      },
+      { timeout: 5000, interval: 20 },
+    );
+    await waitFor(
+      () => {
+        assert.equal(
+          container.querySelectorAll('[data-testid="dang-boc-lai"]').length,
+          0,
+          "câu `đang bóc lại…` phải BIẾN MẤT khi xong",
+        );
+      },
+      { timeout: 5000, interval: 20 },
+    );
+
+    // (2) BẰNG CHỨNG DUONG THAT Ở PHÍA MÁY CHỦ: ĐÚNG MỘT request, và body là HỢP ĐỒNG của
+    //     `routes_jobs.JobIn` + `AsrPayload` — `payload.source_id` là của BẢN GHI ĐANG MỞ (#3 ⇒
+    //     source 2), không phải một id hard-code.
+    assert.equal(dem.jobMoi, 1, "bấm `bóc lại` ⇒ ĐÚNG MỘT request tạo job");
+    assert.deepEqual(
+      dem.bodyJobMoi,
+      {
+        workspace: 1,
+        type: "asr",
+        engine: "faster-whisper-large",
+        payload: { source_id: 2, lang: "en" },
+      },
+      "body phải là ĐÚNG hợp đồng `POST /api/jobs` của route (engine ASR đang chọn, source của bản "
+      + "ghi đang mở); body thật: " + dem.rawJobMoi,
+    );
+    // Xong ⇒ hai điều khiển bật lại, và KHÔNG có câu lỗi nào.
+    assert.equal(
+      (phanTu(container, '[data-testid="boc-lai"]') as HTMLButtonElement).disabled,
+      false,
+      "xong ⇒ nút phải bấm được lần nữa",
+    );
+    assert.equal(
+      container.querySelectorAll('[data-testid="loi-boc-lai"]').length,
+      0,
+      "không có lỗi ⇒ không được có câu lỗi",
+    );
+
+    assert.deepEqual(tiengOn, [], "boc lai thanh cong khong duoc sinh tieng on console");
+    unmount();
+  });
+
+  it("BÓC LẠI: bấm HAI lần KHÔNG chờ ⇒ ĐÚNG MỘT request ở PHÍA MÁY CHU (guard theo NGUỒN)", async () => {
+    // Làm CHẬM phản hồi: cách DUY NHẤT khiến hai lần bấm CHẮC CHẮN chồng lấn (khuôn `C1`/`D2`).
+    dem.jobMoiTre = 250;
+    const { container, unmount } = render(taoPhanTu(App));
+    await toiBienTapBonDoan(container);
+
+    const nut = phanTu(container, '[data-testid="boc-lai"]');
+    fireEvent.click(nut);
+    fireEvent.click(nut); // KHÔNG chờ
+    assert.equal(dem.jobMoiXong, 0, "hai lần bấm phải CHỒNG LẤN: lần hai xảy ra khi lần một CHƯA xong");
+    await waitFor(
+      () => {
+        assert.equal(dem.jobMoiXong, 1, "lời gọi tạo job chưa trả về");
+      },
+      { timeout: 5000, interval: 20 },
+    );
+    // 🔴 KHANG DINH O PHIA MAY CHU: mot lan bam thu hai lot qua guard se thanh HAI job `asr` cho
+    // CUNG mot nguon ⇒ hai ban ghi trung, va `chonTranscript` (id lon nhat) doi ban dang mo vo co.
+    assert.equal(dem.jobMoi, 1, "bấm HAI lần KHÔNG chờ ⇒ chỉ được có MỘT request tạo job");
+
+    assert.deepEqual(tiengOn, [], "bam hai lan khong duoc sinh tieng on console");
+    unmount();
+  });
+
+  it("BÓC LẠI: lỗi là NGUYÊN VĂN `ApiError.message`, và nó KHÔNG sống qua một lần ĐỔI KÊNH", async () => {
+    dem.jobMoiLoi = true;
+    const { container, unmount } = render(taoPhanTu(App));
+    await toiBienTapBonDoan(container);
+
+    fireEvent.click(phanTu(container, '[data-testid="boc-lai"]'));
+    const cau = await choPhanTu(
+      container,
+      '[data-testid="loi-boc-lai"]',
+      (t) => t.length > 0,
+      "không thấy câu báo lỗi của lời gọi `bóc lại`",
+    );
+    // NGUYÊN VĂN `<status>: <detail>` — câu tiếng Việt của `registry.by_id` (đi qua
+    // `routes_jobs.create_job` ⇒ `HTTPException(422, str(exc))`), KHÔNG phải một câu chung.
+    assert.equal(cau, '422: "engine \'fw-large-v3\' không có trong registry"');
+    // Lỗi KHÔNG được khoá nút: người dùng phải bấm lại được (sau khi sửa registry/chọn engine khác).
+    assert.equal(
+      (phanTu(container, '[data-testid="boc-lai"]') as HTMLButtonElement).disabled,
+      false,
+      "lỗi ⇒ nút phải bật lại (nếu không thì một lần 422 là ngõ cụt)",
+    );
+    assert.equal(dem.jobMoi, 1);
+
+    // ĐỔI KÊNH ⇒ câu 422 của nguồn CŨ không được nằm cạnh thanh trên của nguồn MỚI (cùng lỗi
+    // `I1` mà vòng sửa W3 đã đóng cho `loiTao`, và `I3b` cho cờ "đang bay").
+    await choChu(container, "kenh-mot.wav");
+    fireEvent.click(nutKenh(container, "kenh-mot.wav"));
+    await choChu(container, "câu 1");
+    await waitFor(
+      () => {
+        assert.equal(
+          container.querySelectorAll('[data-testid="loi-boc-lai"]').length,
+          0,
+          "câu lỗi của nguồn CŨ phải biến mất khi đổi kênh",
+        );
+      },
+      { timeout: 5000, interval: 20 },
+    );
+
+    assert.deepEqual(tiengOn, [], "loi boc lai khong duoc sinh tieng on console");
     unmount();
   });
 });

@@ -245,6 +245,158 @@ export interface TranslationCps {
 export interface TranslationDetail extends Translation {
   segments: Segment[];
   cps: TranslationCps;
+  /**
+   * Dấu vết chế độ CHIMERA (§4.5). Backend LUÔN gửi khoá này — `null` trên một bản
+   * dịch thường, và `null` KHÁC `{}`: `{}` nghĩa là "có chạy mà chưa có dữ liệu".
+   *
+   * ⚠️ Đánh dấu TUỲ CHỌN vì test truyền prop dựng tay, KHÔNG phải vì backend có thể
+   * bỏ khoá — mọi hàng đọc từ `GET /api/translations/{id}` đều có nó.
+   */
+  chimera?: ChimeraRun | null;
+}
+
+/**
+ * Một ỨNG VIÊN Chimera — phần KẾ HOẠCH (đọc trước khi chạy).
+ *
+ * Ứng viên là DỮ LIỆU của `registry.json` (`chimera.candidates`), nên giao diện
+ * KHÔNG được hard-code số sáu hay tên engine nào: `declared`/`runnable` là hai con số
+ * phải đọc từ response.
+ */
+export interface ChimeraCandidate {
+  id: string;
+  engine: string;
+  label: string;
+  /** `null` = ứng viên không khai nhiệt độ; adapter dùng mặc định của nó. */
+  temperature: number | null;
+  /**
+   * Cảnh báo CHẤT LƯỢNG đã đo, đi KÈM cảnh báo chi phí mà §4.5 đòi.
+   *
+   * Vì sao nó là một trường chứ không phải câu chữ trong giao diện: `qwen2.5-3b` đã
+   * đo được là CHÉP nguyên chữ nguồn, và một chế độ gọi nó sáu lần rồi "pha" sáu bản
+   * chữ Hán là một chế độ vô dụng. Một cảnh báo chi phí không kèm cảnh báo chất
+   * lượng là một lời mời dùng sai.
+   */
+  quality_note: string | null;
+  available: boolean;
+  /** Lý do KHÔNG chạy được, bằng chữ. `null` khi `available` là `true`. */
+  reason: string | null;
+}
+
+/** Ước lượng chi phí của CẢ lượt Chimera, suy tỉ lệ từ một bản dịch THẬT đã xong. */
+export interface ChimeraEstimate {
+  calls_per_batch: number;
+  /** `null` = KHÔNG ĐO ĐƯỢC (engine không trả token/thời gian). KHÁC `0`. */
+  duration_ms: number | null;
+  tokens_in: number | null;
+  tokens_out: number | null;
+}
+
+/** Bản dịch THẬT được dùng làm cơ sở đo — có `translation_id` và engine để đối chiếu. */
+export interface ChimeraBaseline {
+  translation_id: number | null;
+  engine: string;
+  segments: number;
+  duration_ms: number | null;
+  tokens_in: number | null;
+  tokens_out: number | null;
+}
+
+/**
+ * `GET /api/chimera/cost` — CẢNH BÁO CHI PHÍ hiện TRƯỚC khi người dùng bấm (§4.5).
+ *
+ * `estimate: null` là một câu trả lời HỢP LỆ, và `estimate_basis`/`estimate_hint` nói
+ * vì sao chưa đo được cùng việc cần làm. Bịa một con số ở đây là làm hỏng đúng thứ
+ * dòng 423 của spec UI đòi.
+ */
+export interface ChimeraCost {
+  segments: number;
+  /** Số ứng viên ĐÃ KHAI trong registry. */
+  declared: number;
+  /** Số ứng viên THẬT SỰ chạy được trên máy này. */
+  runnable: number;
+  /** Số lượt chạm engine cho MỘT lô: `runnable` ứng viên + ĐÚNG MỘT lượt pha. */
+  calls_per_batch: number;
+  /** Hệ số so với một lượt dịch một-engine. Bằng `calls_per_batch`. */
+  multiplier: number;
+  merge_engine: string;
+  candidates: ChimeraCandidate[];
+  baseline: ChimeraBaseline | null;
+  estimate: ChimeraEstimate | null;
+  estimate_basis: string;
+  /** Việc cần làm khi `estimate` là `null`. `null` khi đã có số đo. */
+  estimate_hint?: string | null;
+}
+
+/** Một ứng viên ĐÃ CHẠY (hoặc đã bị bỏ qua) trong bản ghi của một bản dịch. */
+export interface ChimeraCandidateRun extends ChimeraCandidate {
+  ran: boolean;
+  /** Lý do bị bỏ qua / thất bại. `null` khi nó chạy được. */
+  skipped: string | null;
+  /** Số cờ QA của tầng 1 (§8.8) trên bản dịch của ứng viên này. */
+  qa: number;
+  /** Số đoạn VƯỢT NGƯỠNG ĐỌC. */
+  cps_over: number;
+  /**
+   * Số đoạn DỊCH GIỐNG HỆT bản nguồn — phép đo trực tiếp của thất bại đã biết.
+   *
+   * ĐO ĐƯỢC trên máy này: bốn ứng viên `qwen2.5-3b`/`qwen2.5-7b` ở ba mức nhiệt độ cho
+   * `echo = 6/6` (chép nguyên chữ Hán), còn `opus-mt` cho `0/6`.
+   */
+  echo: number;
+  calls: number;
+  tokens_in: number | null;
+  tokens_out: number | null;
+  duration_ms: number | null;
+  /** Chữ của ứng viên này theo từng đoạn — nguồn của bốn cửa sổ xếp chồng ở §4.5. */
+  segments: { i: number; text: string }[];
+}
+
+export interface ChimeraMerge {
+  engine: string;
+  calls: number;
+  tokens_in: number | null;
+  tokens_out: number | null;
+  duration_ms: number | null;
+  /** Đoạn đã LÙI VỀ MỎ NEO vì lượt pha hỏng. Rỗng = lượt pha chạy được. */
+  fallback_segments: number[];
+  fallback_reason: string | null;
+  /**
+   * Đoạn mà lượt pha trả về CHUỖI Y HỆT mỏ neo — lượt gọi thứ `N+1` không đổi lấy được gì.
+   *
+   * ⚠️ Tuỳ chọn: một hàng ghi trước bản này không có khoá. ĐO ĐƯỢC trên máy này: cả
+   * sáu đoạn đều nằm trong danh sách này.
+   */
+  identical_segments?: number[];
+  /** `Segment.i` (khoá CHUỖI, vì JSON) -> chỉ số 1-based của ứng viên làm mỏ neo. */
+  anchor_by_segment: Record<string, number>;
+}
+
+/** `translations.chimera` — dấu vết đầy đủ của MỘT bản dịch chạy ở chế độ Chimera. */
+export interface ChimeraRun {
+  enabled: boolean;
+  declared: number;
+  run_count: number;
+  ran_count: number;
+  calls_per_batch: number;
+  merge_engine: string;
+  /** `{id_ứng_viên: số đoạn nó làm mỏ neo}`. */
+  anchors: Record<string, number>;
+  candidates: ChimeraCandidateRun[];
+  merge: ChimeraMerge;
+  /**
+   * Số CHUỖI KHÁC NHAU giữa các ứng viên đã chạy, theo từng đoạn.
+   *
+   * `1` nghĩa là mọi ứng viên trả về y hệt nhau — lượt pha không có gì để pha, và đó
+   * là con số khiến "chế độ đắt gấp N" trở thành một phép đo thay vì một lời khai.
+   * ĐO ĐƯỢC: `qwen2.5-3b`/`qwen2.5-7b` ở ba nhiệt độ cho `1` ở cả sáu đoạn.
+   *
+   * ⚠️ Tuỳ chọn: hàng ghi trước bản này không có khoá.
+   */
+  distinct_by_segment?: Record<string, number>;
+  estimate?: ChimeraEstimate | null;
+  estimate_basis?: string;
+  baseline?: ChimeraBaseline | null;
+  segments?: number;
 }
 
 /**
@@ -288,6 +440,12 @@ export interface TranslationCreate {
   transcript_id: number;
   engine: string;
   target_lang?: string;
+  /**
+   * Bật chế độ CHIMERA (§8.7.5). Khi bật, `engine` chỉ còn là một phép kiểm hợp lệ:
+   * kế hoạch ứng viên của registry quyết định, và `translations.engine` ghi engine
+   * PHA — engine thật sự viết ra chữ được giữ.
+   */
+  chimera?: boolean;
 }
 
 /** Body của `POST /api/translations`: hàng bản dịch + ĐÚNG MỘT job `translate`. */

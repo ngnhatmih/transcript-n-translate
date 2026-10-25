@@ -15,6 +15,38 @@ class Repos(Protocol):
     def get_source(self, source_id: int) -> Source: ...
     def list_sources(self) -> list[Source]: ...
     def set_source_audio(self, source_id: int, audio_path: str, duration: float) -> None: ...
+    def delete_source(self, source_id: int) -> None:
+        """Xoá MỘT nguồn cùng MỌI transcript và MỌI bản dịch của nó.
+
+        Vì sao cascade phải TƯỜNG MINH chứ không dựa vào schema: `schema.py` khai
+        `REFERENCES sources(id)`/`REFERENCES transcripts(id)` mà KHÔNG có
+        `ON DELETE CASCADE`, nên `DELETE FROM sources` khi còn transcript sẽ bị
+        `PRAGMA foreign_keys=ON` từ chối (`FOREIGN KEY constraint failed`) — và
+        nếu ai đó tắt ràng buộc thì thứ ở lại là transcript mồ côi, hiện lên
+        `GET /api/transcripts` và trỏ vào một kênh không còn tồn tại. Ba câu lệnh
+        (translations → transcripts → sources) PHẢI nằm trong CÙNG một giao dịch:
+        chết giữa chừng ở câu thứ hai là để lại một nguồn đã mất bản dịch nhưng
+        còn transcript.
+
+        Thứ tự là bắt buộc: `translations.transcript_id` trỏ tới `transcripts`, nên
+        bản dịch phải đi TRƯỚC transcript của nó.
+
+        Id không tồn tại ném `LookupError` (cùng lớp `NotFound` với `get_source`),
+        không phải no-op: người gọi là một route `DELETE` đã hứa 404 cho id lạ, và
+        một lần xoá "thành công" trên hàng không có là câu trả lời sai.
+
+        Hàm này KHÔNG chạm bảng `jobs` và KHÔNG chạm tệp trên đĩa: quyết định
+        "có được xoá không" (409 khi còn job sống) là của tầng route, còn tệp
+        media nằm NGOÀI giao dịch SQLite (xem `routes_sources.delete_source`).
+        """
+        ...
+    def delete_translation(self, translation_id: int) -> None:
+        """Xoá MỘT hàng `translations`. Không chạm transcript của nó.
+
+        Bản dịch là con của transcript, nên xoá con không cần cascade. Id không
+        tồn tại ném `LookupError`, cùng lý do với `delete_source`.
+        """
+        ...
 
     # transcripts
     def add_transcript(self, *, source_id: int, engine: str, lang: str,
