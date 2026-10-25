@@ -415,6 +415,14 @@ describe("§4.5 CHE DO CHIMERA", () => {
       uvC5.includes("model chưa được pull"),
       `ung vien khong chay duoc phai noi LY DO ngay tai dong: ${uvC5}`,
     );
+    // 🔴 MOC THOI GIAN: `skipped` la trang thai LUC LUOT CHAY, con dai o tren la ke
+    // hoach NGAY BAY GIO. Do tren DB that: dai ghi "6/6 ung vien chay duoc" trong khi
+    // o c6 cua chinh ban dang xem ghi "engine chua duoc pull" — nguoi doc thay mau
+    // thuan ma khong co gi giai thich. Tu nay cau do phai mang moc cua no.
+    assert.ok(
+      uvC5.includes("trong lượt này:"),
+      `ly do phai noi ro moc thoi gian (luc luot chay), nhan duoc: ${uvC5}`,
+    );
   });
 
   it("dong 2 co mo neo KHAC ⇒ hyp 2, va ung vien c2 sang hon", () => {
