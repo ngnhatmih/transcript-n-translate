@@ -258,7 +258,11 @@ Mục này **không tô hồng**. Câu nào chưa đo thì ghi **CHƯA ĐO**.
   ⚠️ **TRẦN đo được, đừng đọc dòng trên thành "Chimera tốt hơn":** với bộ ứng viên trên máy này
   (`qwen2.5-3b`/`qwen2.5-7b` **nhại bản nguồn** 6/6), bản hợp nhất **giống từng byte** bản của mỏ
   neo `opus-mt` ⇒ chế độ Chimera tiêu 6 lượt gọi để ra đúng thứ **một** lượt `opus-mt` cho ra.
-  Chưa làm: **ETA trên hàng đợi** (§4.5) và **transcript dài** (dài nhất mới 6 đoạn).
+  **Chi phí lưu ở transcript dài: ĐO ĐƯỢC bằng số học, không cần lượt chạy mới** — một hàng
+  `chimera` thật trong `data/app.db` (105 đoạn, 6 ứng viên) chiếm **28 866 byte** ⇒
+  **275 byte/đoạn** ⇒ 600 đoạn ≈ **0,16 MB** một bản dịch. `O(đoạn × ứng viên)` không phải
+  một trần đáng lo. Còn **ETA trên hàng đợi** (§4.5): **không làm** — ước lượng hiện sai
+  22–39% (luôn cao), nên một ETA là con số bịa; làm khi có mô hình chi phí đúng hơn.
 
 ### CHƯA LÀM (có chủ ý)
 
@@ -268,7 +272,18 @@ Mục này **không tô hồng**. Câu nào chưa đo thì ghi **CHƯA ĐO**.
 | **Layout điện thoại** | chưa làm. |
 | **Sáng/tối & đổi theme** | chưa làm. |
 | **Kéo-thả sắp xếp cột** | chưa làm. |
-| **"Thuật ngữ cấm" của spec §8 (QA tất định)** | **CHƯA LÀM** và đây là chỗ ghi nhận chính thức; cần một quyết định về mô hình dữ liệu trước (`backend/README.md:209-217`). |
+| **"Thuật ngữ cấm" của spec §8 (QA tất định)** | **CHƯA LÀM**, đã ghi nhận chính thức. **Quyết định:** hoãn tới khi có **cổng QA đọc nó** — hôm nay chưa route/handler nào tiêu thụ danh sách cấm, nên chọn mô hình dữ liệu lúc này là đoán. |
+
+**Quyết định các mục trên (chốt, không phải "chờ"):**
+
+- **Bảng eval §4.6/§4.7 · layout điện thoại · sáng/tối · kéo-thả cột** — **KHÔNG làm** trong
+  giai đoạn này (ngoài phạm vi đã thoả thuận).
+- **"Thuật ngữ cấm"** — **KHÔNG làm** tới khi có cổng QA tiêu thụ; làm khi có cổng đó (dữ liệu
+  lúc ấy mới tự chỉ ra nó thuộc `glossary` hay bảng riêng).
+- **Chất lượng dịch (BLEU/MQM)** — **KHÔNG làm**: không có tham chiếu của người để chấm, nên
+  mọi điểm số bây giờ là bịa. Làm khi có bản dịch tham chiếu cho một tập câu.
+- **Hai định nghĩa CPS (20,0 vs 21,0)** — **ĐỂ NGUYÊN, đã tài liệu hoá**: hợp nhất là đổi
+  ngưỡng sản phẩm, và không có số nào cho thấy ngưỡng hiện tại sai.
 
 ### CHƯA BIẾT / CHƯA ĐO (trung thực)
 
