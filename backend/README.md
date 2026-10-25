@@ -199,16 +199,16 @@ lần dịch lại), nên bốn cột trên so được với nhau. **Chia đôi
 nó là hạ cấp ALIGNMENT — nửa 7 mục của lô 60–89 trả 6/7 mục HAI lần rồi mới hạ
 xuống từng mục — **không** phải cổng echo dịch lại đoạn nào. Nhưng nó **không
 rẻ**: 25 lời gọi vẫn trên mục tiêu "< ~20", và wall time 95,72 s tệ hơn đối chứng
-vì lượt chia dịch **287 mục-lượt** (tổng số mục của mọi lời gọi, kể cả lô 30 bị
-vứt) so với 204 của đối chứng. Cây chia giải thích tại sao (`repeat-halving/` lặp
-lại y hệt): các NỬA cũng bị chép — ở 15 mục 5/14 lô (2/8 lô của lượt 15 thẳng +
-3/6 nửa của lượt chia), ở 8 mục 1/2, ở 4 mục 0/2 — nên chế độ này bám vào LỜI GỌI
-với xác suất tăng theo độ dài, không phải một ngưỡng mà phép chia cắt ngang được;
-phép chia chỉ rẻ khi nửa đầu tình cờ sạch. Vì vậy **không nối phép chia vào sản
+vì lượt chia dịch **250 mục-lượt** (tổng số mục của mọi lời gọi, kể cả lô 30 bị
+vứt: cây gọi 22 lời / 225 mục, cộng lô cuối 25) so với 204 của đối chứng. Cây chia
+giải thích tại sao (`repeat-halving/` lặp lại y hệt): các NỬA cũng bị chép — ở 15
+mục **4/14** lô (2/8 lô của lượt 15 thẳng + 2/6 nửa của lượt chia), ở 8 mục 1/2, ở
+4 mục 0/2 — nên chế độ này bám vào LỜI GỌI, không phải một ngưỡng mà phép chia cắt
+ngang được; phép chia chỉ rẻ khi nửa đầu tình cờ sạch. Vì vậy **không nối phép chia vào sản
 phẩm**: con số quyết định là 95,72 s / 88,67 s so với 78,91 s của đường đang ship
 (và 59,09 s của lô 15 thẳng — phép chia chỉ rẻ hơn về SỐ LỜI GỌI). Ghi chú cho
-lượt sau: mọi lời gọi **25 mục** đo được tới nay đều sạch (`0/25` ở ba lượt đối
-chứng v0 và hai lượt chia), nhưng lô 25 là ĐUÔI của clip trong mọi lượt nên độ dài
+lượt sau: mọi lời gọi **25 mục** đo được tới nay đều sạch (**0/13** hàng
+`echo_by_batch`), nhưng lô 25 là ĐUÔI của clip trong mọi lượt nên độ dài
 và nội dung còn lẫn nhau — muốn coi đó là ngưỡng thì phải đo một phép chia 25/5.
 
 Smoke của lượt đo đó (cùng clip 115 đoạn, cùng 5 thuật ngữ, cùng engine, lô 30,

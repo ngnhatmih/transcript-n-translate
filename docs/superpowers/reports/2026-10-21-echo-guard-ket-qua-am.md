@@ -104,17 +104,18 @@ với 59–89).
 ## 5. Bài học phương pháp
 
 **Kiểm tra đường cơ sở trước khi đặt mục tiêu.** Mục tiêu ban đầu là "kéo thời gian về
-khoảng 33 s", lấy từ một lượt chạy 32,92 s — nhưng lượt đó **thất bại** (`EchoProblem` ở
-đoạn 7 sau khi hạ cấp alignment, **0 đoạn** được nhận), nên 32,92 s là thời gian của một lượt
-không cho ra sản phẩm nào. Lượt sạch nhanh nhất đo được là 48,03 s (prompt thử, model nạp
-sẵn), còn dưới prompt đang ship thì lượt lô 30 rẻ nhất là 77,86 s. Mục tiêu bất khả ngay từ
-đầu.
+khoảng 33 s", lấy từ hai lượt chạy **32,84 và 32,89 s** — nhưng cả hai đều **chép nguồn**:
+4 lời gọi, trạng thái `done`, **89/115 đoạn vẫn là chữ Trung** (67 đoạn trùng khít nguồn),
+629 chữ Hán. 32,89 s là thời gian của một lượt không dịch. Lượt sạch nhanh nhất đo được là
+48,03 s (prompt thử, model nạp sẵn), còn dưới prompt đang ship thì lượt lô 30 rẻ nhất là
+77,86 s. Mục tiêu bất khả ngay từ đầu.
 
 **Số dẫn xuất phải tính lại từ nguồn, và nguồn phải đúng đơn vị đếm.** Ba con số xuất
-hiện trong quá trình viết đều sai cùng một kiểu: một con số mục-lượt (287) không tái lập
-được từ artifact; một mẫu số (46) trộn lô gốc với lần thử lại; và một tỉ lệ (5/14) đếm
-từ lượt không ghi dữ liệu theo lô. Cả ba đều trông hợp lý. Bài học: chọn đơn vị đếm
-trước, rồi mới cộng.
+hiện trong quá trình viết đều sai, và cả ba đều trông hợp lý: một con số mục-lượt (287)
+không tái lập được từ cây chia (đúng là **250** = 225 + lô cuối 25); một mẫu số (46) trộn
+lô gốc với lần thử lại; và một tỉ lệ (5/14) cộng sai một ô của cây chia (2/6 nửa bị chép
+ghi thành 3/6, đúng là **4/14**). Bài học: chọn đơn vị đếm trước, rồi mới cộng — và cộng
+lại từ artifact, không từ trí nhớ.
 
 **Một khai báo không có người đọc thì xoá.** Seam "sưởi" và capability `echo_warmup` được
 đo, bị từ chối, rồi bị xoá khỏi mã — số đo ở lại tài liệu và artifact. Đây là lần thứ hai
@@ -151,7 +152,8 @@ Mọi đòn bẩy rẻ khác đã bị loại bằng số; hybrid là thay đổ
 | số liệu | nguồn |
 |---|---|
 | VRAM (đỉnh 7258, ổn định 7013, chừa 934 MiB, 87 mẫu) | `20261019-vram-sample/batch-30.json`, khối `vram`; đỉnh rơi vào pha hạ cấp alignment nên là đỉnh đường xấu nhất; nền rảnh 1781 MiB không phải GPU trống |
-| echo 59–89/115, 389–629 chữ Hán; lô 8/15/30 | `20261019-echo-guard/`, `20261019-term-placeholder-clip/sweep/` |
+| echo 59–89/115, 389–629 chữ Hán; lô 8/15/30 | `20261019-echo-guard/`, `20261019-term-placeholder-clip/sweep/b30-r{1,2,3}.json` (r1 59/389 chữ Hán, r2 và r3 89/629, đều `done`) |
+| mục tiêu "~33 s" là lượt không dịch | `20261019-term-placeholder-clip/sweep/b30-r2.json` (32,84 s) và `b30-r3.json` (32,89 s): 4 lời gọi, `done`, 89/115 đoạn `vi` còn chữ Trung (67 đoạn trùng khít `zh`), 629 chữ Hán |
 | chi phí 23 lượt (bảng ở mục 2) | `echo-guard/{batch-8,batch-15,batch-30}`; `echo-warmup/{config-A,config-B,config-C,config-D,config-E,repeat-C/config-C}` + `echo-warmup/control-v2-{warm-model,warm-model-2,no-warmup}/v2-batch-30`; `echo-halving/{control-batch-30,half-straight-batch-15,halving-batch-30}` + `echo-halving/repeat-halving/halving-batch-30`; `vram-sample/batch-30`; `echo-batch30-repeat/{run1,run2}/config-A`; `echo-batch15-repeat/{run1,run2}/config-A`; `echo-batch15-real/{run1,run2}/config-A`. Đúng 23 tệp, mỗi tệp một tiến trình. Sáu lượt chạy prompt thử `v2` (`echo-warmup/{config-C,config-E,repeat-C/config-C}` và ba lượt `control-v2-*`), còn lại là prompt đang ship. Hai thư mục `echo-batch15-repeat/*` có `batch_items = 30` vì driver khi đó **bỏ qua** tham số cỡ lô; lỗi đã được vá kèm bốn test ghim (`test_echo_guard_batches.py`), nên chúng tính vào lô 30 và `echo-batch15-real/*` mới là lô 15 thật |
 | ba giả thuyết (V0–V3, A–E, cây chia) | `20261019-prompt-echo-sweep/` (lượt `v3` 32,92 s: `translation_status = failed`, `accepted_segments = 0`, `error.type = EchoProblem`), `20261019-echo-warmup/`, `20261019-echo-halving/` |
 | 250 mục-lượt so với 204 | `20261019-echo-halving/halving-batch-30.json`, tổng `attempt_tree[].calls[].items` = 225 (22 lời gọi) + lô cuối 25 = 250; đối chứng 115 + 89 lần dịch lại = 204 |
