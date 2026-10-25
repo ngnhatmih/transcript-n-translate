@@ -31,16 +31,23 @@ Kết quả: **0 echo ở lô 30 và lô 15**. Cái giá là thời gian:
 | lô 8, prompt đang ship | 1 | 61,00 s | 32 | 6,3× |
 | lô 30 chia đôi, prompt đang ship | 2 | 88,67 · 95,72 s | 24 · 25 | 9,1 – 9,8× |
 
-Dưới prompt đang ship, **cả mười lượt lô 30 đều bị chép ít nhất một lô**, nên không lượt nào
-dưới 77,86 s. Lượt lô 30 sạch duy nhất đo được (48,03 s, 4 lời gọi) dùng prompt thử `v2` và
-thừa hưởng model **đã nạp sẵn từ ngoài tiến trình**, nên nó là cận dưới lạc quan. Lô 15 rẻ
-nhất là 57,72 s, thấp hơn 77,86 s, nhưng bốn lượt lô 15 chia thành hai cặp (57,72 · 59,09 s
-đầu phiên, 92,17 · 95,42 s cuối phiên), nên chênh lệch không quy được cho cỡ lô; một lượt lô
-15 vẫn gọi 37 lời gọi, so với 4 của lượt lô 30 sạch. Số lời gọi là đại lượng so sánh được:
-lượt sạch 4 lời gọi, lượt ba lô bị chép 93–96 — nhưng mười lượt cùng 93–96 lời gọi vẫn chênh
-**77,86 – 118,57 s**, nên số giây thừa hưởng cả tải máy. Vì vậy `default_mt` vẫn là `opus-mt`;
-nếu dùng `hy-mt` thì chọn cỡ lô theo số lời gọi muốn chấp nhận, không phải theo niềm tin rằng
-lô nhỏ nhanh hơn.
+Hai mốc `opus-mt` trong báo cáo là **hai lượt đo khác nhau, không so chéo**: 9,75 s ở bảng này
+(`sweep-opus/b30-r2.json`, lô 30, 4 lời gọi) và 11,86 s ở §6 (`hybrid-spike/opus-whole-clip`,
+cùng lượt với 5,23 s của `hy-mt`).
+
+Dưới prompt đang ship, **cả mười lượt lô 30 chạy thẳng đều bị chép ít nhất một lô** — hai lượt
+chia đôi là hàng riêng, không nằm trong mười lượt này, và chúng cũng bị chép cả 3/3 lô gốc
+(`tree_stats.copied_batches = 3`). Nên không lượt lô 30 nào dưới 77,86 s. Lượt lô 30 sạch duy
+nhất đo được (48,03 s, 4 lời gọi) dùng prompt thử `v2` và thừa hưởng model **đã nạp sẵn từ
+ngoài tiến trình**, nên nó là cận dưới lạc quan.
+
+**Thời gian dao động lớn, nguyên nhân chưa xác định.** Bốn lượt lô 15 có cấu trúc lời gọi
+giống hệt nhau — 8 lời gọi cấp lô + 29 lời gọi một mục = 37 — vậy mà đo 57,72 · 59,09 · 92,17
+· 95,42 s; mười lượt lô 30 cũng đều 93–96 lời gọi mà chênh 77,86 – 118,57 s. Không có đại
+lượng nào trong artifact giải thích được khoảng 35 s đó, nên **không gán nó cho số lần dịch
+lại**. Số lời gọi là con số ĐẾM được để so sánh cấu hình; số giây thì không. Vì vậy `default_mt`
+vẫn là `opus-mt`; nếu dùng `hy-mt` thì chọn cỡ lô theo số lời gọi muốn chấp nhận, không phải
+theo niềm tin rằng lô nhỏ nhanh hơn.
 
 ## 3. Ba giả thuyết bị bác bỏ
 
@@ -79,10 +86,11 @@ một lô 25 mục nằm giữa clip chưa từng được đo (§6). Prompt `v2
 không ship) chỉ chép 3/21 lời gọi 30 mục, nên gộp hai prompt vào một ô sẽ làm nhẹ đi hiện
 tượng ở prompt đang ship.
 
-**Chép cả lô, không phải một tỉ lệ.** Không có hàng nào ở mức "chép một nửa": mọi lời gọi bị
-chép trả về **29/30 hoặc 30/30** (và 14/15 hoặc 15/15 ở lô 15). Đoạn không bị chép luôn là
-cùng một đoạn — đoạn 9, nguồn `2288`, chỉ có số nên không có chữ Hán. Vì vậy "29" không phải
-con số đặc biệt: nó là 30 trừ đúng đoạn không có chữ Hán.
+**Chép cả lô, không phải một tỉ lệ.** Không có hàng nào ở mức "chép một nửa": cả **26** lời
+gọi bị chép ở cỡ 30 (23 + 3) trả về **29/30 hoặc 30/30**, và 6 lời gọi bị chép ở lô 15 trả về
+**14/15 hoặc 15/15**. Đoạn không bị chép luôn là cùng một đoạn — đoạn 9, nguồn `2288`, chỉ có
+số nên không có chữ Hán. Vì vậy "29" không phải con số đặc biệt: nó là 30 trừ đúng đoạn không
+có chữ Hán.
 
 **Vì vậy không có cỡ lô nào an toàn.** Cỡ 30 hỏng 74% lời gọi, cỡ 15 hỏng 29%, và cỡ 1 cũng
 không miễn nhiễm: một lượt (`v3`, 32,92 s) chết vì `EchoProblem` khi đoạn 7 **vẫn** là bản
@@ -124,13 +132,14 @@ lại từ artifact, không từ trí nhớ.
 
 ## 6. Hướng phát triển
 
-**Hybrid.** `opus-mt` dịch cả clip (11,86 s); đoạn nào **chứa thuật ngữ đã duyệt** thì chuyển
-sang `hy-mt` dịch riêng từng câu. Trên clip: 7/115 đoạn (6,1%), 7 lời gọi một mục của `hy-mt`
-mất 5,23 s — tổng **17,09 s**, tức 1,4× `opus-mt` một mình và rẻ hơn **2,8×** so với lượt
-`hy-mt` cả lô nhanh nhất (48,03 s), **3,4–6,9×** so với các lượt còn lại (57,72–118,57 s).
-Cả 7 câu ra đúng thuật ngữ (0/7 → **7/7**). Điều kiện kích hoạt phải là **sự có mặt của thuật
-ngữ**, không phải một cờ QA: `missing_term` chỉ nổi lên khi phép dò thuật ngữ được bật, còn
-`cps:`/`length:` là lỗi hình dạng nên không được dùng làm điều kiện.
+**Hybrid — spike MỘT clip, n = 7 đoạn.** `opus-mt` dịch cả clip (11,86 s); đoạn nào **chứa
+thuật ngữ đã duyệt** thì chuyển sang `hy-mt` dịch riêng từng câu. Trên clip đó: 7/115 đoạn
+(6,1%), 7 lời gọi một mục của `hy-mt` mất 5,23 s — tổng **17,09 s**, tức 1,4× `opus-mt` một
+mình và rẻ hơn **2,8×** so với lượt `hy-mt` cả lô nhanh nhất (48,03 s), **3,4–6,9×** so với các
+lượt còn lại (57,72–118,57 s). Cả 7 câu ra đúng thuật ngữ (0/7 → **7/7**), nhưng **n = 7 là
+tín hiệu, không phải kết quả** — chưa nói được gì cho clip khác. Điều kiện kích hoạt phải là
+**sự có mặt của thuật ngữ**, không phải một cờ QA: `missing_term` chỉ nổi lên khi phép dò thuật
+ngữ được bật, còn `cps:`/`length:` là lỗi hình dạng nên không được dùng làm điều kiện.
 
 **`fw-large-v3` không phải mặc định, dù CER trên dev thấp hơn.** Cùng clip, nó cần **3,2 GB
 VRAM** so với 1,6 GB của turbo và **~18 s** so với ~12 s. Máy 8 GB chỉ chừa 934 MiB cho MT,
@@ -138,9 +147,9 @@ nên `default_asr` vẫn là `fw-large-v3-turbo`; đổi mặc định là một
 
 **`name_patch` chỉ chạy được qua đường hybrid.** Sửa tên riêng từ OCR trước khi dịch chỉ có
 tác dụng khi engine nhận capability đó — hiện chỉ `hy-mt` khai, còn `default_mt` là `opus-mt`.
-Ép chạy trên `opus-mt` với 7 câu thử: **0 câu** ra thuật ngữ trong glossary và phần lớn câu
-**xấu đi** (`福州燕台山` được sửa đúng thành `烟台山` nhưng bản dịch ra "thị trường chứng
-khoán, tiểu bang Virginia"). Vì vậy nó chưa bật.
+Ép chạy trên `opus-mt` với 7 câu thử: **3/7 câu dịch xấu đi** rõ rệt (`福州燕台山` được sửa
+đúng thành `烟台山` nhưng bản dịch ra "thị trường chứng khoán, tiểu bang Virginia"), và không
+câu nào nhận được thuật ngữ từ glossary. Vì vậy nó chưa bật.
 
 **Một ứng viên rẻ chưa bị loại:** chia lô 25/5. Cả **13** lời gọi 25 mục đo được đều sạch,
 nhưng tất cả đều là đuôi clip nên chưa kết luận được; cần một lượt đo với lô 25 mục nằm giữa
@@ -160,4 +169,6 @@ Mọi đòn bẩy rẻ khác đã bị loại bằng số; hybrid là thay đổ
 | 250 mục-lượt so với 204 | `20261019-echo-halving/halving-batch-30.json`, tổng `attempt_tree[].calls[].items` = 225 (22 lời gọi) + lô cuối 25 = 250; đối chứng 115 + 89 lần dịch lại = 204 |
 | bảng cỡ lời gọi (93 hàng, 18 lượt) | prompt đang ship — 65 hàng, 12 lượt: `echo-warmup/{config-A,config-B,config-D}`, `echo-halving/{control-batch-30,half-straight-batch-15}`, `vram-sample/batch-30`, `echo-batch30-repeat/{run1,run2}/config-A`, `echo-batch15-repeat/{run1,run2}/config-A`, `echo-batch15-real/{run1,run2}/config-A`. Prompt thử `v2` — 28 hàng, 6 lượt: `echo-warmup/{config-C,config-E,repeat-C/config-C}` + `echo-warmup/control-v2-{warm-model,warm-model-2,no-warmup}/v2-batch-30`. Mỗi hàng là một lời gọi `size > 1`, đúng như `echo_by_batch` định nghĩa. **Không** dùng hai lượt chia đôi (dụng cụ tắt cổng, `echoed` luôn 0 dù `tree_stats.copied_batches = 3`) và **không** dùng ba lượt `echo-guard/*` (không có bảng theo lô) |
 | 25 mục sạch 0/13, 15 mục 6/21 | cùng bảng trên; 13 lời gọi 25 mục đều là lô cuối của clip (id 90–114), nên chưa nói được gì về một lô 25 mục nằm giữa clip |
-| hybrid 7/115 đoạn (6,1%), 17,09 s, 0/7 → 7/7 thuật ngữ | `20261019-hybrid-spike/hybrid-spike.json`: `definitions.wide` (7 id), `phases.opus_whole_clip` 11,86 s, `phases.hymt_flagged_only` 5,23 s / 7 lời gọi, `segments_detail[].vi_hy` cho cả 7 câu |
+| hybrid 7/115 đoạn (6,1%), 17,09 s, 0/7 → 7/7 thuật ngữ | `20261019-hybrid-spike/hybrid-spike.json`: `definitions.wide` (7 id), `phases.opus_whole_clip` 11,86 s, `phases.hymt_flagged_only` 5,23 s / 7 lời gọi (`cost.hymt_seconds_per_flagged_segment` 0,747), `segments_detail[].vi_hy` cho cả 7 câu. **n = 7 đoạn của một clip** |
+| hai mốc `opus-mt`: 9,75 s và 11,86 s | 9,75 s = `20261019-term-placeholder-clip/sweep-opus/b30-r2.json` (lô 30, 4 lời gọi); 11,86 s = `20261019-hybrid-spike/opus-whole-clip/whole-clip.json` (cả clip, 4 lời gọi; lượt lặp `run2` là 12,16 s). Hai lượt khác nhau, không so chéo |
+| `name_patch` trên `opus-mt`: 3/7 câu xấu đi | `20261019-name-patch-translation-eval/eval.json`, 7 câu có `vi_before`/`vi_after`; `hit_after` rỗng ở **cả hai** engine. "3/7" là đếm thủ công trên 7 cặp câu, không phải trường có sẵn trong artifact |
