@@ -25,12 +25,17 @@ Kết quả: **0 echo ở lô 30 và lô 15**. Cái giá là thời gian:
 
 | cấu hình | thời gian | so với `opus-mt` (9,75 s) |
 |---|---|---|
-| lô 30 + guard | 78,85 s (một lượt sau: 85,49 s) | 8,1× (8,8×) |
-| lô 15 + guard | 57,72 s | 5,9× |
+| lô 30 + guard | 78,91 – 118,57 s (sáu lượt) | 8,1 – 12,2× |
+| lô 15 + guard | 57,72 s (**một** lượt) | 5,9× |
 
-Thời gian phụ thuộc **số đoạn bị chép** (59–89 đoạn ở các lượt đo; mỗi đoạn bị chép phải
-gọi lại một mình). Vì vậy `default_mt` vẫn là `opus-mt`; `hy-mt` chỉ dùng được kèm
-`echo_guard` và lô ≤ 15.
+Thời gian phụ thuộc **số lời gọi một mục**, cộng nhiễu giữa các lượt: cả sáu lượt lô 30
+đều có đúng 89 lời gọi một mục (89 + 0, 89 + 0, 59 + 30, 59 + 30 và hai lượt 89 + 0), vậy
+mà thời gian chạy từ 79 đến 119 s. Hai lượt chậm nhất chạy khi máy còn làm việc khác, nên
+biên trên phản ánh cả tải hệ thống — đại lượng ổn định giữa các lượt là **số lời gọi**, 
+không phải số giây. Hàng lô 15 chỉ có **một** lượt đo: đây là điểm yếu đã biết của khuyến
+nghị "lô ≤ 15", và một lần thử lặp lại đã thất bại vì driver bỏ qua tham số cỡ lô (hai
+artifact sinh ra vẫn là lô 30). Vì vậy `default_mt` vẫn là `opus-mt`; `hy-mt` chỉ dùng được
+kèm `echo_guard` và lô ≤ 15, với lưu ý độ vững của vế sau còn thấp hơn vế trước.
 
 ## 3. Ba giả thuyết bị bác bỏ
 
@@ -48,38 +53,43 @@ gọi lại một mình). Vì vậy `default_mt` vẫn là `opus-mt`; `hy-mt` ch
 
 ## 4. Phát hiện chính
 
-Chép nguyên văn là thuộc tính của từng lời gọi: 13/17 lời gọi cỡ 30 bị chép, so với 4/13
+Chép nguyên văn là thuộc tính của từng lời gọi: 19/23 lời gọi cỡ 30 bị chép, so với 4/13
 ở 15 mục, 0/1 ở 10 mục (đuôi clip của lượt lô 15), 1/2 ở 8 mục, 0/2 ở 4 mục và 0/7 ở lời
 gọi một mục. Các hàng cỡ nhỏ có n rất nhỏ, và nhiều lời gọi trong số đó chỉ phát sinh sau
 khi lô cha bị chép, nên bảng cho thấy xu hướng, không cho phép xếp thứ tự giữa các cỡ.
-Khi một lời gọi bị chép thì bị chép gần như toàn bộ: trong **mười lô bị chép** đo được
-qua bốn lượt, số đoạn bị chép luôn là **29/30 hoặc 30/30**; riêng lượt đối chứng là 89
-trong 115 đoạn của clip. Con số "29/30" ban đầu thực chất là 30 trừ đoạn chỉ có số.
+Khi một lời gọi bị chép thì bị chép gần như toàn bộ: mọi lô bị chép ở cỡ 30 đều có số đoạn
+bị chép là **29/30 hoặc 30/30**; riêng lượt đối chứng là 89 trong 115 đoạn của clip. Con
+số "29/30" ban đầu thực chất là 30 trừ đoạn chỉ có số.
+
+`19/23` gộp **bảy lượt** (sáu lượt chạy thẳng lô 30 và lượt chia đôi), nên số lô bị chép
+và số lời gọi bị chép là hai phép đếm khác nhau, không phải mâu thuẫn. Cách phát biểu
+không phụ thuộc cách đếm, và nên dùng khi bảo vệ: **cả sáu lượt chạy thẳng lô 30 đều bị
+chép ở ít nhất hai lô đầy** (số lô bị chép mỗi lượt: 3, 2, 3, 2, 3, 3).
 
 | cỡ lời gọi | bị chép | n |
 |---|---|---|
-| 30 | 13 | 17 |
-| 25 | 0 | 4 — lời gọi đuôi của lượt chia đôi không có `attempts` |
+| 30 | 19 | 23 |
+| 25 | 0 | 6 — lời gọi đuôi của lượt chia đôi không có `attempts` |
 | 15 | 4 | 13 |
 | 10 | 0 | 1 |
 | 8 | 1 | 2 |
 | 4 | 0 | 2 |
 | 1 | 0 | 7 |
 
-Bỏ lượt `vram-sample` khỏi bảng thì cỡ 30 là **11/13** và kết luận không đổi — kết quả
-không phụ thuộc lượt đo có bản ghi mơ hồ. Cỡ 30 có 17 chứ không phải 18 là đúng số học
+Bỏ lượt `vram-sample` khỏi bảng thì cỡ 30 là **17/19** và kết luận không đổi — kết quả
+không phụ thuộc lượt đo có bản ghi mơ hồ. Cỡ 30 có 23 chứ không phải 24 là đúng số học
 của các lượt đó: một lượt có 94 lời gọi = 5 lời gọi cấp lô (bốn cỡ 30 gồm ba lô gốc và
 một lần gửi lại cả lô sau lệch alignment, cộng một lô cuối 25 mục) + 29 và 30 lời gọi dịch
 lại do echo + 30 lời gọi dịch lại do lệch alignment. Các bản ghi `echoed = 0` kèm 30 lời
 gọi một mục là **pha alignment**, không phải trường bị ghi sai: đó là lời gọi cỡ 30 thật
-và sạch. Cỡ 25 có 4 chứ không phải 5 vì lượt chia đôi có lời gọi đuôi 25 mục nhưng không
+và sạch. Cỡ 25 có 6 chứ không phải 7 vì lượt chia đôi có lời gọi đuôi 25 mục nhưng không
 lưu danh sách lần gọi.
 
-Bảng chỉ dùng sáu artifact có bản ghi từng lời gọi và **chỉ đếm lời gọi cấp lô** (lô gốc,
+Bảng chỉ dùng tám artifact có bản ghi từng lời gọi và **chỉ đếm lời gọi cấp lô** (lô gốc,
 lần gửi lại, và lần chia); các lời gọi một mục do echo chỉ được tính khi bản ghi có danh
-sách (lượt chia đôi: 7). Vì vậy tổng `n = 46` **không phải** tổng số lời gọi của sáu
-artifact, vốn là 436. Kết luận thực dụng: cỡ 30 không dùng được nếu thiếu guard, và
-lô ≤ 15 kèm guard là cấu hình tử tế nhất đo được.
+sách (lượt chia đôi: 7). Vì vậy tổng `n = 56` **không phải** tổng số lời gọi của tám
+artifact, vốn là 622. Kết luận thực dụng: cỡ 30 không dùng được nếu thiếu guard, và
+lô ≤ 15 kèm guard là cấu hình tử tế nhất đo được — nhưng vế sau mới có một lượt đo.
 
 ## 5. Bài học phương pháp
 
@@ -116,7 +126,7 @@ Mọi đòn bẩy rẻ khác đã bị loại bằng số; hybrid là thay đổ
 |---|---|
 | VRAM (đỉnh 7258, ổn định 7013, chừa 934 MiB, 87 mẫu) | `20261019-vram-sample/batch-30.json`, khối `vram`; đỉnh rơi vào pha hạ cấp alignment nên là đỉnh đường xấu nhất; nền rảnh 1781 MiB không phải GPU trống |
 | echo 59–89/115, 389–629 chữ Hán; lô 8/15/30 | `20261019-echo-guard/`, `20261019-term-placeholder-clip/sweep/` |
-| chi phí 78,85 s và 85,49 s | `20261019-echo-guard/batch-30.json`, `20261019-vram-sample/batch-30.json` |
+| chi phí lô 30 (78,91 – 118,57 s, sáu lượt) | `echo-halving/control-batch-30.json`, `vram-sample/batch-30.json`, `echo-batch30-repeat/{run1,run2}`, `echo-batch15-repeat/{run1,run2}` — hai thư mục cuối ra `batch_items = 30`, không phải 15: driver **bỏ qua** tham số cỡ lô, nên hàng lô 15 vẫn chỉ có một lượt |
 | ba giả thuyết (V0–V3, A–E, cây chia) | `20261019-prompt-echo-sweep/`, `20261019-echo-warmup/`, `20261019-echo-halving/` |
 | 250 mục-lượt so với 204 | `20261019-echo-halving/halving-batch-30.json`, `attempt_tree[].calls[].items` (225) + lô cuối 25 |
-| bảng cỡ lời gọi | sáu artifact có `echo_by_batch`: `vram-sample/batch-30`, `echo-halving/{control-batch-30, half-straight-batch-15, halving-batch-30}`, và hai lượt lặp `echo-batch30-repeat/{run1,run2}`. Ba chỗ dữ liệu không sạch, đã ghi rõ khi đọc bảng: `vram-sample` và `echo-batch30-repeat/run2` mỗi lượt có một bản ghi của **lần gửi lại cả lô** (trường `echoed` ghi 0 và cả 30 mục bị gọi lại một mình = 30 lời gọi cỡ 1 của pha alignment); `halving-batch-30` có lời gọi đuôi 25 mục nhưng **không lưu danh sách lần gọi**; `half-straight-batch-15` có đuôi 10 mục, là hàng `10` trong bảng |
+| bảng cỡ lời gọi | tám artifact có `echo_by_batch`: `vram-sample/batch-30`, `echo-halving/{control-batch-30, half-straight-batch-15, halving-batch-30}`, và bốn lượt lặp `echo-batch30-repeat/{run1,run2}` + `echo-batch15-repeat/{run1,run2}`. Ba chỗ dữ liệu không sạch, đã ghi rõ khi đọc bảng: ba lượt (`vram-sample`, `echo-batch30-repeat/run2`, `echo-batch15-repeat/*`) có một bản ghi của **lần gửi lại cả lô** (trường `echoed` ghi 0 và cả 30 mục bị gọi lại một mình = 30 lời gọi cỡ 1 của pha alignment); `halving-batch-30` có lời gọi đuôi 25 mục nhưng **không lưu danh sách lần gọi**; `half-straight-batch-15` có đuôi 10 mục, là hàng `10` trong bảng |
