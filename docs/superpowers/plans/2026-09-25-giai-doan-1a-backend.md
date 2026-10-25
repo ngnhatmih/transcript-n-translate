@@ -1266,7 +1266,11 @@ git commit -m "feat(domain): chia lo dich theo ngan sach token"
 - Consumes: `app.domain.models.Segment`
 - Produces:
   - `reading_cps(text, start, end) -> float` · `is_too_fast(text, start, end, threshold=CPS_WARN) -> bool` · `CPS_WARN = 20.0`
-  - `check(source_text, translated_text, glossary_terms=(), *, length_ratio_max=3.0) -> list[str]` — trả về mã lỗi dạng chuỗi
+  - `check(source_text, translated_text, glossary_terms=(), *, length_ratio_max=5.0) -> list[str]` — trả về mã lỗi dạng chuỗi
+
+  **SỬA SAU KHI SHIP (R18, R22).** Bản đầu ghi `length_ratio_max=3.0` — **sai**: 3.0 gắn cờ `too_long` cho
+  **mọi** bản dịch Trung→Việt đúng (đo được: ca sạch 3,86; ca glossary 4,33). Code đã ship dùng **5.0**.
+  Và `glossary_terms` **phải là các bản dịch ĐÍCH**, không phải thuật ngữ nguồn — xem R22.
 
 - [ ] **Step 1: Viết test thất bại**
 
@@ -1324,7 +1328,7 @@ def test_missing_glossary_term_is_flagged():
 
 
 def test_glossary_term_present_is_clean():
-    assert check("大模型很重要", "Mô hình lớn rất quan trọng", glossary_terms=["大模型"]) == []
+    assert check("大模型很重要", "Mô hình lớn rất quan trọng", glossary_terms=["Mô hình lớn"]) == []
 
 
 def test_overlong_translation_is_flagged():
@@ -1379,12 +1383,18 @@ không đốt token. Xem spec §8.8.
 
 Tên riêng không có NER ở đây — dùng chính thuật ngữ glossary làm đại diện. Đó
 là thứ duy nhất người dùng đã nói rõ là quan trọng.
+
+    HỢP ĐỒNG NGÔN NGỮ (làm rõ sau khi ship, R22): `glossary_terms` phải chứa các
+    bản dịch ĐÍCH, không phải thuật ngữ nguồn. Hàm so chúng với `translated_text`,
+    nên truyền thuật ngữ nguồn (ví dụ "大模型") sẽ báo `missing_term` cho MỌI dòng
+    đúng, và đẩy mọi dòng có thuật ngữ lên QA tầng 2 — ồn và tốn, không sai phụ đề.
+là thứ duy nhất người dùng đã nói rõ là quan trọng.
 """
 from __future__ import annotations
 
 import re
 
-LENGTH_RATIO_MAX = 3.0
+LENGTH_RATIO_MAX = 5.0   # SỬA SAU KHI SHIP (R18): spec §8.8 ghi 3.0 và 3.0 SAI cho Trung→Việt
 _NUMBER_RE = re.compile(r"\d+(?:[.,]\d+)*")
 _GARBAGE_RE = re.compile(r"^[\W_]+$", re.UNICODE)
 
@@ -2256,7 +2266,10 @@ def test_shipped_registry_file_is_valid():
     ids = {s.id for s in specs}
     assert "fw-large-v3-turbo" in ids
     assert "sensevoice-small" in ids
-    assert all(s.phase_key.startswith(("asr:", "mt:")) for s in specs)
+    assert all(s.phase_key.startswith(("asr:", "translate:")) for s in specs)
+    # SỬA SAU KHI SHIP (R28): bản đầu khẳng định ("asr:", "mt:") — không thể đỏ với giá trị
+    # dựng từ `kind`. Và phải thêm test liên module: phase_key == phase_of(job_type, id)
+    # với cặp (asr, asr) và (mt, translate) trên registry đã ship.
     # Moonshine KHÔNG được có mặt: nó không sinh timestamp (spec §6)
     assert not any("moonshine" in s.id.lower() for s in specs)
 ```
@@ -2387,8 +2400,17 @@ class EngineSpec:
 
     @property
     def phase_key(self) -> str:
-        """Khoá giai đoạn của hàng đợi. Phải khớp `job_state.phase_of`."""
-        return f"{self.kind}:{self.id}"
+        """Khoá giai đoạn của hàng đợi. Phải khớp `job_state.phase_of`.
+
+        SỬA SAU KHI SHIP (R28). Bản đầu trả `f"{self.kind}:{self.id}"` ⇒ `mt:qwen2.5-7b`,
+        nhưng loại job dịch là `translate` nên khoá mà `jobs.phase` lưu là
+        `translate:qwen2.5-7b` — LỆCH cả 4 engine MT (ASR thì khớp, nên trông như đúng).
+        Uỷ quyền cho `phase_of` để hai bên không thể trôi khỏi nhau lần nữa.
+        Cần ở đầu module: `from app.domain.job_state import phase_of` (job_state không
+        import gì ⇒ không có vòng; guard chỉ ràng buộc `app/domain/**`) và
+        `_JOB_TYPE_OF_KIND = {"asr": "asr", "mt": "translate"}`.
+        """
+        return phase_of(_JOB_TYPE_OF_KIND[self.kind], self.id)
 
 
 def of_kind(specs: Iterable[EngineSpec], kind: str) -> list[EngineSpec]:
@@ -3128,7 +3150,17 @@ git commit -m "feat(worker): phuc hoi sau crash + huy hop tac qua checkpoint"
   - `extract_audio(media_path, out_dir, *, stem) -> tuple[Path, float]` — trả `(wav_path, duration)`
   - `download_url(url, out_dir, *, on_progress=None) -> Path`
   - `AUDIO_SAMPLE_RATE = 16000`
-  - `IngestHandler(repos, clock)` với `handles() -> "ingest"`
+
+> **ĐÍNH CHÍNH (R48 = DOC-01, R53 = DOC-03).** Khối Interfaces bản đầu còn một dòng
+> `IngestHandler(repos, clock)` với `handles() -> "ingest"`. Dòng đó **sai ở hai tầng** và đã bị bỏ:
+> (a) `IngestHandler` **không thuộc Task 11** — nó được thêm ở **Task 15** (mục "Task 15: FastAPI app +
+> route sources & registry", đoạn *"Thêm `IngestHandler` vào `backend/app/pipeline/ingest.py`"*), nên đây
+> là một phép chiếu tới task sau bị viết như đặc tả của task hiện tại; và (b) chữ ký nêu ra cũng sai:
+> chữ ký **đã ship** là
+> `IngestHandler(repos, *, audio_dir=None, media_root=None, specs=None, declared_default_asr=None)`
+> (`IngestHandler.__init__` trong `backend/app/pipeline/ingest.py`) — **không** có tham số `clock`, và ba
+> tham số từ khoá cuối chỉ `app/main.py` truyền (I-3, I-6). DOC-03 ("R53 = thông tin", ledger ghi
+> *không làm gì*) tự đóng kèm DOC-01: cùng một dòng, cùng một edit.
 
 - [ ] **Step 1: Viết test thất bại**
 
@@ -3136,6 +3168,7 @@ git commit -m "feat(worker): phuc hoi sau crash + huy hop tac qua checkpoint"
 # backend/tests/test_ingest.py
 from __future__ import annotations
 
+import json
 import shutil
 import subprocess
 
@@ -3183,14 +3216,20 @@ def test_extract_audio_produces_mono_16k_wav(tone_wav, tmp_path):
     assert wav.name == "abc.wav"
     assert 2.8 < duration < 3.2
 
+    # Đọc theo TÊN trường, không theo thứ tự: ffprobe 8.1.1 luôn xuất
+    # sample_rate TRƯỚC channels (`16000,1`) bất kể thứ tự liệt kê trong
+    # -show_entries, nên khẳng định vị trí `startswith("1,")` là sai.
     probe = subprocess.run(
         ["ffprobe", "-v", "error", "-select_streams", "a:0",
-         "-show_entries", "stream=channels,sample_rate", "-of", "csv=p=0", str(wav)],
+         "-show_entries", "stream=channels,sample_rate", "-of", "json", str(wav)],
         capture_output=True, text=True, check=True,
-    ).stdout.strip()
-    assert probe.startswith("1,"), f"phải là mono, nhận được {probe!r}"
+    ).stdout
+    stream = json.loads(probe)["streams"][0]
+    assert stream["channels"] == 1, f"phải là mono, nhận được {stream['channels']!r}"
     assert ingest.AUDIO_SAMPLE_RATE == 16000
-    assert ",16000" in probe, f"phải là 16kHz, nhận được {probe!r}"
+    assert int(stream["sample_rate"]) == 16000, (
+        f"phải là 16kHz, nhận được {stream['sample_rate']!r}"
+    )
 
 
 def test_extract_audio_is_idempotent(tone_wav, tmp_path):
@@ -3237,6 +3276,14 @@ def test_download_url_uses_injected_runner(tmp_path):
 - [ ] **Step 2: Chạy test — phải ĐỎ**
 
 Run: `.venv\Scripts\python.exe -m pytest tests/test_ingest.py -v`
+
+> **ĐÍNH CHÍNH (R49 = DOC-02).** Hai assertion bản đầu — `assert probe.startswith("1,")` và
+> `assert ",16000" in probe` trên `-of csv=p=0` — **không thể xanh** trên máy này: ffprobe **8.1.1**
+> xuất cột theo thứ tự ĐĂNG KÝ TRƯỜNG của chính binary (`16000,1`), không theo thứ tự yêu cầu trong
+> `-show_entries` (đảo thứ tự yêu cầu **không** đổi thứ tự CSV; yêu cầu `channels,codec_name` cũng
+> trả `pcm_s16le,1`). Bản sửa **đã ship** trong `backend/tests/test_ingest.py:63-76` dùng `-of json`
+> rồi đọc trường có tên, và khối test phía trên đã được đồng bộ với nó. Đây là **đồng bộ văn bản**,
+> không phải một bản sửa test mới.
 
 Expected: FAIL — `ModuleNotFoundError: No module named 'app.pipeline'`
 
@@ -4845,6 +4892,12 @@ if __name__ == "__main__":
 
 Thêm `IngestHandler` vào `backend/app/pipeline/ingest.py`:
 
+> **Ghi chú (R53 = DOC-03).** Chữ ký trong khối dưới đây là bản **đầu** của plan; code **đã ship**
+> rộng hơn: `IngestHandler(repos, *, audio_dir=None, media_root=None, specs=None, declared_default_asr=None)`
+> (`IngestHandler.__init__` trong `backend/app/pipeline/ingest.py`) — ba tham số cuối do I-3/I-6 thêm và
+> chỉ `app/main.py` (khối `handlers` trong `build_components()`) truyền. `main.py` vì vậy cũng không còn
+> là `IngestHandler(repos)` như khối `build_components()` ở dưới.
+
 ```python
 class IngestHandler:
     """Job 'ingest': extract audio từ media đã có, đặt duration và lang."""
@@ -4928,9 +4981,14 @@ from fastapi.testclient import TestClient
 from app.adapters.clock_system import SystemClock
 from app.adapters.persist.sqlite_repos import SqliteRepos
 from app.api.app import create_app
-from app.api.sse import JobEventBroker
+from app.api.sse import JobEventBroker, stream_events
 from app.domain import job_state as js
 from app.domain.models import Job
+from app.registry import EngineSpec
+
+_ASR_SPEC = EngineSpec(id="fw-large-v3-turbo", label="FW", kind="asr",
+                       runtime="inprocess", model_ref="large-v3-turbo",
+                       vram_mb=1600, langs=("zh", "en"), capabilities={}, opts={})
 
 
 @pytest.fixture()
@@ -4938,7 +4996,7 @@ def env(tmp_path):
     repos = SqliteRepos(tmp_path / "t.db", clock=SystemClock())
     repos.init_schema()
     broker = JobEventBroker()
-    app = create_app(repos=repos, specs=[], media_dir=tmp_path / "m",
+    app = create_app(repos=repos, specs=[_ASR_SPEC], media_dir=tmp_path / "m",
                      out_dir=tmp_path / "o", broker=broker)
     with TestClient(app) as c:
         c.repos = repos
@@ -4979,7 +5037,9 @@ def test_cancel_sets_flag_not_kill(env):
                                        "engine": "fw-large-v3-turbo", "payload": {}})
     jid = resp.json()["id"]
     assert env.post(f"/api/jobs/{jid}/cancel").json()["cancel_requested"] is True
-    assert env.repos.get_job(jid).state == js.QUEUED, "job trong hàng đợi chưa chạy thì chưa đổi state"
+    assert env.repos.get_job(jid).state == js.CANCELLED, (
+        "huỷ job đang queued là xong ngay (spec §5.4: 'job chưa chạy, huỷ là xong')"
+    )
 
 
 def test_retry_only_from_retryable_states(env):
@@ -4994,17 +5054,26 @@ def test_retry_only_from_retryable_states(env):
 
 
 def test_sse_stream_emits_published_events(env):
-    with env.stream("GET", "/api/jobs/stream") as resp:
-        assert resp.status_code == 200
-        assert resp.headers["content-type"].startswith("text/event-stream")
+    """Kiểm generator TRỰC TIẾP — KHÔNG qua `TestClient.stream()`.
+
+    `TestClient` chạy app trong một portal rồi CHỜ app kết thúc, nên một
+    `StreamingResponse` bọc generator vô hạn (`while True` + heartbeat 15s) làm
+    `with env.stream(...)` **không bao giờ trả về**: test TREO chứ không đỏ.
+    Gọi thẳng generator vẫn kiểm đúng tính chất cần kiểm — sự kiện publish ra
+    thì có mặt trên luồng, đúng định dạng SSE — mà không cần app kết thúc.
+    """
+    gen = stream_events(env.broker, heartbeat=0.05)
+    try:
+        assert next(gen) == ": connected\n\n"
         env.broker.publish({"id": 7, "state": "done", "progress": 1.0})
-        for line in resp.iter_lines():
-            if not line:
-                continue
-            if line.startswith("data: "):
-                payload = json.loads(line[len("data: "):])
-                assert payload["id"] == 7
-                break
+        line = next(gen)
+        assert line.startswith("data: ")
+        assert json.loads(line[len("data: "):])["id"] == 7
+    finally:
+        gen.close()
+    assert any(getattr(r, "path", None) == "/api/jobs/stream" for r in env.app.routes), (
+        "route SSE phải được đăng ký trên app"
+    )
 
 
 def test_broker_drops_oldest_when_subscriber_is_slow():
@@ -5238,19 +5307,21 @@ def create_app(*, repos, specs: list[EngineSpec], media_dir, out_dir,
         allow_headers=["*"],
     )
 
-    from app.api import routes_jobs, routes_media, routes_registry, routes_sources
-    from app.api import routes_export, routes_transcripts
+    from app.api import routes_jobs, routes_registry, routes_sources
 
     app.include_router(routes_registry.router)
     app.include_router(routes_sources.router)
     app.include_router(routes_jobs.router)
-    app.include_router(routes_media.router)
-    app.include_router(routes_transcripts.router)
-    app.include_router(routes_export.router)
     return app
 ```
 
-> **Thứ tự trong file là quan trọng, không phải ở đây.** Ở T16 và T18, mỗi lần thêm router mới thì thêm đúng một dòng `app.include_router(...)`. Các router chưa tồn tại ở T15 — vì vậy ở T15 chỉ include `routes_registry` và `routes_sources`. Bản đầy đủ ở trên là **đích cuối cùng sau T18**.
+> **Thứ tự trong file là quan trọng, không phải ở đây.** Router được thêm DẦN theo từng task, và mỗi task chỉ được import những router **đã tồn tại** tại thời điểm đó — import một module chưa có là `ModuleNotFoundError`, không phải "chuẩn bị trước":
+> - **T15:** `routes_registry`, `routes_sources` (2 dòng).
+> - **T16 (task này):** thêm `routes_jobs` — **một** dòng.
+> - **T17:** thêm `routes_media` — **một** dòng.
+> - **T18:** thêm `routes_transcripts` **và** `routes_export` — **hai** dòng.
+>
+> Khối code ngay trên là bản **của T16** (đúng ba router). Bản đầy đủ sáu router chỉ đúng **sau T18**.
 
 > **Bẫy thứ tự route:** `GET /api/jobs/stream` phải được khai báo **TRƯỚC** `GET /api/jobs/{job_id}`, nếu không FastAPI sẽ khớp `stream` vào `job_id` và trả 422. Đặt `stream` ngay sau `POST ""`.
 
@@ -5538,6 +5609,18 @@ git commit -m "feat(api): endpoint media ho tro HTTP Range cho trinh phat"
   - `GET /api/transcripts/{id}/readability` — danh sách đoạn vượt ngưỡng CPS
   - `POST /api/export` → tạo job export; `GET /api/export/{job_id}/download`
 
+> **Quyết định tường minh (R75 = DOC-04).** Hình dạng export của GĐ1a **cố ý** khác spec §11:
+> plan (và code đã ship ở `backend/app/api/routes_export.py:59,83`) dùng
+> **`POST /api/export`** + **`GET /api/export/{job_id}/download`**, còn spec §11 ghi
+> `GET /api/export/{translation_id}?format=&bilingual=`. Lý do: GĐ1a **chưa có `translation_id`**
+> để tham chiếu — chưa có handler `translate`, bảng `translations` chưa có người ghi — nên hình dạng
+> của spec không dùng được. Đây là **điều chỉnh có ý thức**, không phải lệch im lặng; khi bảng
+> `translations` có người ghi (GĐ2) thì chuyển sang hình dạng spec, hoặc giữ nguyên và ghi rõ lý do.
+> Ba nhóm endpoint spec §11 chưa ship — `GET /api/translations?transcript_id=`,
+> `PATCH /api/translations/{id}`, `GET`/`POST`/`PATCH /api/glossary` — là **đúng phạm vi**
+> (workspace 2 ⇒ GĐ2), đã ghi trong bảng "Đã biết, NGOÀI phạm vi GĐ1a" ở cuối plan này để review
+> toàn nhánh **không** đếm nhầm chúng thành thiếu sót.
+
 - [ ] **Step 1: Viết test thất bại**
 
 ```python
@@ -5599,10 +5682,24 @@ def test_patch_rejects_malformed_segment(client):
 
 
 def test_readability_endpoint_flags_long_line(client):
-    body = client.get(f"/api/transcripts/{client.tid}/readability").json()
+    """Số đo THẬT của fixture, tính bằng `reading_cps` (không đoán):
+
+        đoạn 0 · 大家好 · 3 ký tự / 3,0 s = **1,00 CPS**
+        đoạn 1 · 今天我们要聊的是人工智能 · 12 ký tự / 2,0 s = **6,00 CPS**
+        đoạn 2 · 这个模型它其实…… · 9 ký tự / 3,0 s = **3,00 CPS**
+
+    `CPS_WARN = 20,0` nên ở ngưỡng mặc định **không đoạn nào** bị gắn cờ và phép
+    kiểm vô nghĩa. Hạ ngưỡng xuống **5,0** — nằm giữa 3,00 và 6,00 — thì đúng đoạn
+    1 bị gắn cờ. (Bản trước của plan khẳng định ngưỡng mặc định, kèm thông báo
+    "19 ký tự trong 2 giây" — con số đó = 9,5 CPS, **cũng không đạt** 20,0, tức
+    plan sai ở cả phép kiểm lẫn thông báo.)
+    """
+    body = client.get(f"/api/transcripts/{client.tid}/readability",
+                      params={"threshold": 5.0}).json()
+    assert body["threshold"] == 5.0
     flagged = [item["i"] for item in body["too_fast"]]
-    assert 1 in flagged, "dòng dài 19 ký tự trong 2 giây phải vượt ngưỡng"
-    assert 0 not in flagged
+    assert 1 in flagged, "đoạn 1 = 6,00 CPS phải vượt ngưỡng 5,0"
+    assert 0 not in flagged, "đoạn 0 = 1,00 CPS không được vượt ngưỡng 5,0"
 
 
 def test_approve_moves_status_to_reviewed(client):
@@ -5654,7 +5751,9 @@ def test_export_creates_job_and_download_serves_file(client):
 
     dl = client.get(f"/api/export/{job['id']}/download")
     assert dl.status_code == 200
-    assert dl.headers["content-type"].startswith("text/plain")
+    assert dl.headers["content-type"].startswith("application/x-subrip"), (
+        "SRT dùng MIME application/x-subrip (media_types['srt']), KHÔNG phải text/plain"
+    )
     assert "1\n00:00:00,000 --> 00:00:03,000\n大家好" in dl.text
 
 
@@ -5915,7 +6014,7 @@ from app.adapters.clock_system import SystemClock
 from app.adapters.governor.single_gpu import SingleGpuGovernor
 from app.adapters.persist.sqlite_repos import SqliteRepos
 from app.api.app import create_app
-from app.domain.models import Segment
+from app.domain.models import Job, Segment
 from app.pipeline.export import ExportHandler
 from app.pipeline.ingest import IngestHandler
 from app.pipeline.transcribe import TranscribeHandler
@@ -5978,7 +6077,18 @@ def wired(tmp_path):
         def run(self, job, report) -> None:
             sid = job.payload["source_id"]
             source = repos.get_source(sid)
-            repos.set_source_audio(sid, source.media_path.replace(".mp4", ".wav"), 8.0)
+            # R37: tệp wav phải TỒN TẠI. Bản trước suy tên qua `.replace(".mp4", ".wav")`
+            # nhưng KHÔNG ai tạo tệp đó, nên `TranscribeHandler` ném FileNotFoundError
+            # và job ASR thành FAILED. Dùng `open` (builtin) để khỏi thêm import.
+            audio = source.media_path.replace(".mp4", ".wav")
+            with open(audio, "wb") as fh:
+                fh.write(b"stub-wav")
+            repos.set_source_audio(sid, audio, 8.0)
+            # R7: và phải TẠO JOB ASR — không có nó thì không có gì chạy bóc băng.
+            repos.add_job(Job(id=None, workspace=1, type="asr",
+                              engine="fw-large-v3-turbo",
+                              phase="asr:fw-large-v3-turbo",
+                              payload={"source_id": sid}))
             report(1.0, "ingest giả")
 
     handlers["ingest"] = StubIngest()
@@ -6017,8 +6127,11 @@ def test_full_pipeline_from_upload_to_srt(wired):
     running = wired.get("/api/status").json()
     assert running["queue_depth"] == 0, "hàng đợi phải cạn; job dịch không có handler nên sẽ failed"
 
-    read = wired.get(f"/api/transcripts/{tid}/readability").json()
-    assert 1 in [item["i"] for item in read["too_fast"]]
+    read = wired.get(f"/api/transcripts/{tid}/readability",
+                     params={"threshold": 5.0}).json()
+    assert 1 in [item["i"] for item in read["too_fast"]], (
+        "đoạn 1 = 6,00 CPS > ngưỡng 5,0 (CPS_WARN 20,0 sẽ không gắn cờ đoạn nào)"
+    )
 
     exp = wired.post("/api/export", json={"transcript_id": tid, "format": "srt"})
     assert exp.status_code == 201
@@ -6227,6 +6340,13 @@ if __name__ == "__main__":
 
 - [ ] **Step 3: Viết README backend**
 
+> **ĐÍNH CHÍNH (R40/DOC-07).** Ba dòng in trong script ghi `eval/report.md` vì `scripts/smoke_asr.py`
+> chạy với cwd `backend\`; đường dẫn **đúng theo spec §10** là **`backend/eval/report.md`**
+> (subsystem `backend/eval/`, `report.md` là bảng kết quả). Đây là **smoke THỦ CÔNG của Task 20**,
+> **không** phải test tự động — GĐ1a chưa nạp model thật lần nào. Thư mục `backend/eval/` **chưa tồn tại**
+> và **cố ý không được tạo** ở vòng dọn này (tạo thư mục rỗng chỉ để "cho khớp" là giả); việc sinh báo cáo
+> thật thuộc GĐ1b. Xem bảng "Đã biết, NGOÀI phạm vi GĐ1a" ở cuối plan.
+
 ```markdown
 # phu-de-lab · backend
 
@@ -6328,17 +6448,53 @@ git commit -m "chore(backend): script cai dat + smoke test model that + README"
 | §13 kiểm thử | Toàn bộ; T19 E2E fake |
 | §16 GĐ1a | Toàn bộ kế hoạch |
 
-**Khoảng trống đã biết, nằm ngoài phạm vi:** mọi thứ ở cột "Kế hoạch 2", và toàn bộ GĐ1b/2/3.
+**Khoảng trống đã biết, nằm ngoài phạm vi:** mọi thứ ở cột "Kế hoạch 2", và toàn bộ GĐ1b/2/3 —
+danh sách cụ thể, từng dòng một, ở bảng **"Đã biết, NGOÀI phạm vi GĐ1a"** cuối plan này.
 
 **Quét placeholder:** không có "TBD"/"TODO". Hai chỗ cố tình để ngỏ và **có ghi rõ lý do**:
 `TOKENS_PER_SOURCE_CHAR = 1.0` (phải đo ở GĐ1b) và `governor.can_run_parallel` trả `False`
 (hành vi thật của GĐ1a, không phải chỗ trống).
 
 **Nhất quán kiểu:** `Segment` dùng `t` cho bản dịch (khớp JSON §5.2) và `translation` chỉ là
-tên cũ trong ghi chú — **không** xuất hiện trong code. `phase_of` ở `domain/job_state.py` và
-`EngineSpec.phase_key` ở `registry.py` phải cho cùng chuỗi; T8 có test `phase_key` và T3 có
-test `phase_of` — cả hai đều dùng tiền tố `asr:`/`mt:`.
+tên cũ trong ghi chú — **không** xuất hiện trong code.
+
+> **ĐÍNH CHÍNH (R28).** Bản đầu của đoạn này ghi: *"`phase_of` ở `domain/job_state.py` và
+> `EngineSpec.phase_key` ở `registry.py` phải cho cùng chuỗi … cả hai đều dùng tiền tố `asr:`/`mt:`"*
+> — **SAI**, và chính câu đó đã che mất một lỗi thật. `phase_key` bản đầu trả `f"{kind}:{id}"` với
+> `kind ∈ {"asr","mt"}`, còn khoá hàng đợi thật do `phase_of(job_type, engine)` sinh ra với
+> `job_type ∈ {ingest, asr, translate, export}` — **loại job dịch là `translate`, không phải `mt`**.
+> ⇒ Lệch cả 4 engine MT; 4 engine ASR khớp nên hợp đồng trông như đang đúng nếu chỉ thử với ASR.
+> Đúng ra phải viết: **`phase_key` phải UỶ QUYỀN cho `phase_of`**, chứ không phải "cùng dùng một tiền tố".
+> Đã sửa ở T8 và trong mục §7.2 của spec. **Bài học:** "hai bên dùng cùng quy ước" là khẳng định
+> phải **kiểm bằng test liên module**, không phải bằng cách đọc hai đoạn code cạnh nhau.
 
 **Hai task đã sửa so với spec, có ghi chú tại chỗ:** thêm `domain/subtitle_format.py` (T14) và
 `api/deps.py` (T15); thêm `Repos.list_sources()` (T15 Step 5) thay vì để route chọc vào
 `_connect()`.
+
+---
+
+## Đã biết, NGOÀI phạm vi GĐ1a
+
+> Mục đích: một review toàn nhánh đọc bảng này và **không đếm nhầm các mục HOÃN CÓ KẾ HOẠCH thành
+> THIẾU SÓT**. Mọi dòng đã được đối chiếu với code ở HEAD `90a689b` (bảng viết ở `65c03b5`, đã đối
+> chiếu lại sau hai batch code của vòng dọn); lệnh grep/read dùng để
+> chứng minh nằm trong `.superpowers/sdd/2026-09-25-giai-doan-1a-backend/cleanup-C-report.md`.
+> Không dòng nào ở đây là việc bị bỏ quên, và không dòng nào có test — lý do "không test" ghi ngay
+> trong cột Vì sao.
+
+| # | Mục đã biết là NGOÀI phạm vi GĐ1a | Vì sao (một dòng) |
+|---|---|---|
+| 1 | **Toàn bộ frontend** (spec §9.2–§9.4: ghim dòng, bàn phím, font self-host) | Thuộc "Kế hoạch 2"; cây repo chỉ có `.superpowers/`, `backend/`, `docs/` — không có mã frontend nào. |
+| 2 | **Workspace 2 / dịch máy (MT)** — không có handler `translate` | `backend/app/pipeline/` chỉ có `ingest.py`/`export.py`/`transcribe.py`; `app/main.py` (`build_components()`, khối `handlers`) cố ý đặt `auto_forward="0"` vì GĐ1a chưa có handler `translate`, nên job dịch (nếu ai bật) chỉ bị worker đánh `FAILED`. |
+| 3 | **`GET /api/translations?transcript_id=` và `PATCH /api/translations/{id}`** (spec §11) | Không có route tương ứng trong `backend/app/api/`: grep `translations` = **5 hit** và **không hit nào là route** — `routes_transcripts.py:14` (docstring), `:64`/`:66` (khoá payload + biểu thức sinh giá trị qua `list_translations_for_transcript`), `routes_jobs.py:46` và `routes_export.py:103` (hai trường payload, đều có từ trước vòng dọn); workspace 2 ⇒ GĐ2. |
+| 4 | **`GET`/`POST`/`PATCH /api/glossary`** (spec §11) | Grep `glossary` trong `backend/app/api/` → 0 hit (port `upsert_term` có sẵn nhưng chưa có route); glossary là workspace 2 ⇒ GĐ2 — **cùng một nguyên nhân hoãn với dòng 9**, không phải hai hạng mục. |
+| 5 | **GĐ1b: subsystem `eval/` + benchmark** (spec §10, `backend/eval/report.md`) | `backend/eval/` chưa tồn tại và **cố ý không được tạo**; Task 20 chỉ thu hai số đầu (RTF, thời gian nạp) bằng smoke **thủ công**, không phải test tự động. |
+| 6 | **Task ASS riêng (EX-02)** | `to_ass` join bằng `"\N"` rồi `_ass_escape` nhân đôi backslash ⇒ tệp ASS song ngữ in một `\` thừa: lỗi người-dùng-thấy-được, nhưng `task-14-brief.md:209` **buộc** giữ ở GĐ1a; sửa cùng adjudication brace-escaping ở task ASS riêng. Vòng dọn **đã trả món nợ marker**: `# TODO(ASS-escape): separator phải là một \N` nay nằm ngay trên hai chỗ test xanh (`tests/test_export.py`, khẳng định ASS song ngữ và nhánh `ass` của bài export) để test xanh **không bị đọc thành chứng thực**; bản thân lỗi vẫn thuộc task ASS riêng. |
+| 7 | **`.vi` hardcode (EX-08)** | `backend/app/pipeline/export.py:35` (`artifact_name`) gắn `.vi` theo cờ `translated`, không theo ngôn ngữ đích — đúng khi Việt là đích duy nhất; khi có đích thứ hai thì đổi thành `payload.get("lang", "vi")`. Không test: hành vi hiện tại là hợp đồng đúng của GĐ1a. |
+| 8 | **Bảng `translations` chưa có người ghi (DC-04)** | Schema (`schema.py`, `CREATE TABLE IF NOT EXISTS translations`) và đường ĐỌC qua port (`list_translations`, `ports/repos.py`) có, nhưng **không writer production** nào gọi `add_translation` (grep toàn `backend/` chỉ thấy định nghĩa `add_translation` trong `sqlite_repos.py` + test); GĐ1a chỉ đọc nếu có, GĐ2 mới ghi — viết test sẽ phải tự chế writer, tức test chính cái không tồn tại. |
+| 9 | **`initial_prompt` lấy từ glossary (DOC-06/R40)** | `faster_whisper.py:89,96` đọc `spec.opts["initial_prompt"]` mà `registry.json` **không có khoá đó** (grep), nên "mồi thuật ngữ" của spec §8.2.4 không có đường vào; glossary là workspace 2 ⇒ GĐ2 — **cùng nguyên nhân hoãn với dòng 4** (glossary là workspace 2), không phải hạng mục thứ hai; GĐ1a không có nguồn dữ liệu để test. |
+| 10 | **API-05 (N7): `origin` thô + `fallback` một-đường** | Route upload (`routes_sources.py`, `repos.add_source(kind="file", origin=file.filename or final.name)`) lưu `origin` **nguyên vẹn kể cả thành phần đường dẫn** (`a/b/c.mp4`), còn `fallback` của `safe_basename` chỉ tới được khi `filename is None`; re-review kết luận **no action required** — quan sát, không phải defect, không nơi nào dùng `origin` làm đường dẫn (grep `origin` trong `backend/app`: chỉ gán/lưu/đọc để hiển thị). Không test: lý do là "quyết định giữ nguyên", không phải "thiếu test". |
+| 11 | **`digest[:16]` thay vì `<sha256>` đầy đủ (API-06/R40, đối chiếu spec §8.1)** | Điều chỉnh **có ý thức**: tên tệp ngắn, 16 hex (64 bit) đủ chống trùng ở quy mô GĐ1a; đổi sang 64 hex là đổi hợp đồng `media_path` (R37/StubIngest, Task 19) nên phải làm cùng lúc. Quyết định được ghim bằng chú thích + khẳng định độ dài 16 trong `test_upload_still_accepts_a_normal_filename` — **không phải** lệch im lặng. |
+| 12 | **API-03 (M6): `/api/status` gọi `probe_ollama` (probe mạng) MỖI request** | Quyết định của GĐ1a: **GIỮ NGUYÊN** — route là `def` nên FastAPI chạy nó trong threadpool, không chặn event loop, và `/api/status` chỉ được poll thưa; chi phí xấu nhất ~300 ms khi host không tới được (`_OLLAMA_PROBE_SECONDS`). Cache TTL (hoặc tách endpoint riêng) là việc của **GĐ2**. Không test: đây là quyết định giữ nguyên, **không phải** thiếu test. |
+

@@ -1,0 +1,101 @@
+/* tokens.css — giá trị thiết kế chép từ spec UI `docs/superpowers/specs/2026-09-25-phu-de-lab-ui-design.md` §2.
+   Ô nào spec không ghi số thì giá trị ở đây là số CHỌN, ghi rõ ngay cạnh.
+   Không có TBD: mọi token đều có giá trị thật. */
+:root {
+  color-scheme: dark; /* §10.1 — chỉ MỘT chế độ tối, không chuyển đổi */
+
+  /* ── §2.2 Màu — graphite ẤM, không phải đen xanh ───────────────────────── */
+  --panel-0: #12110f; /* nền app */
+  --panel-1: #1a1917; /* mặt panel */
+  --panel-2: #232220; /* mặt nổi */
+  --panel-3: #2b2a27; /* rãnh, track */
+  --ink-0: #e8e4dc; /* trắng ngà ấm — ≈14:1 trên --panel-0 */
+  --ink-1: #9a948a; /* ≈5,4:1 trên --panel-1 */
+  --ink-2: #6b665c;
+  --rule: #34322e; /* đường kẻ 1px */
+  --signal: #ffb020; /* HIỆU ỨNG DUY NHẤT — đèn báo amber */
+  /* 🔴 VÒNG THIẾT KẾ 1 — NÂNG TƯƠNG PHẢN. Bản cũ `#b4443c` cho **2,90:1** khi làm MỰC chữ trên
+     `--panel-2` (`rgb(35,34,32)`) ở cỡ 9,5 px — đo trong Chrome thật, và **trượt WCAG AA**
+     (cần 4,5:1 cho chữ nhỏ). `#cf7268` giữ ĐÚNG sắc "gạch đỏ đã khử bão hoà" (hue ≈ 4° → ≈ 6°,
+     độ bão hoà 44% → 52%) nhưng nâng độ chói: **4,74:1** trên `--panel-2`, **5,24:1** trên
+     `--panel-1`. Đo được ở cả hai chỗ bằng công thức độ chói tương đối trong Chrome.
+     ⚠️ `--fault` còn dùng làm VÂN (`repeating-linear-gradient` của `.ed__item.is-suspect`/
+     `.od__van`/`.tl__van`) và làm một CHẤM 8 px (`.stt[data-ollama="down"] .stt__cham`): sáng hơn
+     thì vân và chấm cũng sáng hơn — vân 1 px trên nền `--panel-0` đọc rõ hơn, không đổi nghĩa. */
+  --fault: #cf7268; /* CHỈ lỗi thật và vân "nghi ngờ" */
+  --ok: #7e8c6a; /* xác nhận, rất tiết chế — không phải accent thứ ba */
+  /* §2.3: phân tầng bằng đường kẻ 1px + chênh lệch độ sáng nền 4–6% — chọn 4% */
+  --surface-step: 4%;
+
+  /* ── §2.1 Chữ ──────────────────────────────────────────────────────────── */
+  /* Ràng buộc cứng §2.1/§8.1: ba mặt chữ self-host woff2, KHÔNG nạp từ Google Fonts CDN.
+     Stack dưới đây là ĐÍCH danh; tệp woff2 + @font-face chưa có trong giai đoạn này
+     (không task nào trong plan tạo chúng — đã ghi ở báo cáo Task 1). */
+  --font-label: "Archivo Expanded", "Archivo", system-ui, sans-serif; /* tiêu đề, nhãn khắc (trục wdth) */
+  --font-ui: "Archivo", system-ui, sans-serif; /* nội dung, giao diện */
+  --font-mono: "IBM Plex Mono", ui-monospace, "Cascadia Mono", monospace; /* số liệu, timecode */
+
+  --fs-label: 9.5px; /* nhãn mono in hoa — cỡ nhỏ nhất được phép (§7) */
+  --fs-num: 10.5px; /* số liệu phụ */
+  --fs-note: 11.5px; /* phụ chú */
+  --fs-ui: 12.5px; /* giao diện — sàn của nội dung (§7) */
+  --fs-line: 13.5px; /* dòng phụ đề, chế độ mật độ cao */
+  --fs-read: 15px; /* phụ đề chế độ đọc — spec ghi 15–16px, CHỌN 15px */
+  --lh-tight: 1.2; /* CHỌN */
+  --lh-body: 1.5; /* CHỌN */
+  --track-label: 0.08em; /* CHỌN — nhãn khắc giãn rộng, spec không cho số */
+
+  /* ── §2.3 Không gian ───────────────────────────────────────────────────── */
+  --col-channels: 214px; /* §3 — KÊNH, bất đối xứng có chủ ý */
+  --col-queue: 286px; /* §3 — HÀNG ĐỢI */
+  --rail: 72px; /* rail thời gian cố định, không cuộn ngang, không co giãn */
+  --row-1: 32px; /* nhịp dọc: một dòng */
+  --row-2: 44px; /* nhịp dọc: hai dòng, mặc định */
+  --head-h: 48px; /* Task 1 Step 4 — header */
+  --transport-h: 56px; /* Task 1 Step 4 — transport */
+  --radius: 2px; /* bo góc — 0 trông như lỗi render */
+  --rule-w: 1px; /* phân tầng bằng đường kẻ, không shadow mềm */
+  /* Thang khoảng cách: §2.3 không cho thang, CHỌN bội số 4px */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 24px;
+  --sp-6: 32px;
+
+  /* ── §2.5 "nghi ngờ" là VÂN, không phải màu ────────────────────────────── */
+  --suspect-hatch-w: 6px; /* vân chéo 45° ở lề trái, rộng 6px */
+  --suspect-hatch-angle: 45deg;
+  --suspect-hatch-step: 4px; /* CHỌN — bước sọc, spec không cho số */
+
+  /* ── §2.4 Bề mặt ───────────────────────────────────────────────────────── */
+  /* Spec §2.4: grain 2,8% → 0.028. Brief Task 1 Step 3 ghi 0.035; luật dẫn của plan
+     ("spec là nguồn có thẩm quyền khi plan mâu thuẫn") chọn §2.4. Xem báo cáo Task 1. */
+  --grain-opacity: 0.028;
+  --grain-size: 140px; /* CHỌN — ô nhiễu lặp */
+  --z-grain: 1; /* lớp phủ nằm trên nội dung nhưng không bắt chuột */
+  /* CHỌN — bảng phím tắt §11.4 nằm TRÊN lớp grain: nó là NỘI DUNG, không phải trang trí. */
+  --z-bang-phim: 2;
+  /* CHỌN — nền lớp phủ của bảng phím: CÙNG sắc `--panel-0` nhưng trong suốt, để lớp phủ vẫn là
+     "graphite ấm" chứ không phải một tấm đen lạ. */
+  --nen-phu: rgb(18 17 15 / 72%);
+  /* CHỌN — bề rộng khung bảng phím, và bề rộng cột nhãn phím (nhãn dài nhất: `Ctrl+Enter`). */
+  --bp-rong: 560px;
+  --bp-phim-rong: 96px;
+
+  /* ── §2.6 Chuyển động — tổng số chuyển động có chủ đích: HAI ───────────── */
+  --dur-1: 120ms; /* transition duy nhất cho hover/focus */
+  --ease-1: ease-out; /* không bounce, không spring, không parallax */
+
+  /* ── VÒNG THIẾT KẾ 1 — chuyển động vào MỘT LẦN của "tấm rỗng"/"tấm lỗi" ────────────
+     Đây là chuyển động THỨ BA của hệ, và nó được KHAI RA ở đây thay vì viết một hằng số trong
+     `app.css`: brief vòng 1 §4 đòi đúng `cubic-bezier(0.16, 1, 0.3, 1)` trong khoảng 120–160 ms,
+     tức KHÁC `--ease-1` (`ease-out`) đang dùng cho hover/focus. Chỉ `transform`/`opacity`, chạy
+     MỘT lần khi tấm vào DOM, và tắt hẳn khi người dùng xin `prefers-reduced-motion`. */
+  --dur-vao: 140ms;
+  --ease-vao: cubic-bezier(0.16, 1, 0.3, 1);
+
+  /* ── §7 Khả năng tiếp cận ──────────────────────────────────────────────── */
+  --focus-w: 2px; /* focus ring 2px --signal, không bao giờ outline:none */
+  --focus-color: var(--signal);
+}

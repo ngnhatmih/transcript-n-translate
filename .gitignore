@@ -7,12 +7,29 @@ __pycache__/
 frontend/node_modules/
 frontend/.next/
 frontend/out/
+frontend/dist/
+frontend/test-results/
+# Ảnh của tầng Chrome thật (`npm run e2e` không truyền `--out` thì ghi vào đây).
+# Thiếu dòng này thì MỘT lượt chạy e2e là `git status` hết RỖNG — re-review Task 12 (Minor m-e) đo được.
+frontend/e2e/anh/
+# DB gieo của tầng e2e (scratch cạnh repo là mặc định, nhưng chốt chặn cho phép đổi chỗ;
+# nếu ai đó trỏ nó vào trong repo thì đừng để nó làm bẩn cây).
+frontend/_seed-e2e/
+_seed-e2e/
 
 # Dữ liệu chạy — không commit
 data/media/
 data/output/
+data/experiments/
 data/app.db
+data/logs/
 *.db-journal
+# SQLite ở chế độ WAL tạo hai tệp phụ khi DB đang mở. Thiếu hai dòng này thì CHỈ CẦN
+# chạy backend thật (`python run_api.py`, việc Task 12 bắt buộc làm) là `git status`
+# hiện `?? data/` — và luật của dự án là status phải RỖNG. (Task 2 phát hiện: đo được
+# `data/app.db-wal` + `data/app.db-shm` xuất hiện sau khi khởi động backend.)
+*.db-wal
+*.db-shm
 
 # Model không bao giờ nằm trong repo (đặt ở D:\models)
 models/
@@ -29,3 +46,12 @@ models/
 .idea/
 Thumbs.db
 desktop.ini
+
+# Thư mục làm việc của agent và bản sao lưu reference: scratch, không phải mã đồ án.
+# Ba mục này từng nằm untracked qua nhiều lượt, làm `git status` không BAO GIỜ rỗng —
+# tức cái luật "status phải rỗng" mất tác dụng đúng vào lúc cần nó nhất.
+.agents/
+.reference-backups/
+# Lockfile của bộ skill đã cài trên máy: không thuộc app. Muốn ghim bộ skill vào lịch sử
+# thì bỏ dòng dưới và commit nó như một quyết định có chủ.
+skills-lock.json

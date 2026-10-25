@@ -1,0 +1,150 @@
+{
+  "_ghi_chu": "Thêm model mới = sửa file này. KHÔNG hard-code ở pipeline hay giao diện. Frontend đọc qua GET /api/registry.",
+  "_ghi_chu_default_asr": "I-3: engine ASR mặc định của mọi upload là DỮ LIỆU ở đây (đổi được không cần sửa code). Id phải có trong danh sách `asr` bên dưới, nếu không tiến trình sẽ từ chối khởi động kèm chỉ dẫn.",
+  "default_asr": "fw-large-v3-turbo",
+  "_ghi_chu_default_mt": "R58: engine DỊCH mặc định khi auto_forward bật. Id phải có trong danh sách `mt` bên dưới. Không khai báo khoá này thì pipeline rơi về phần tử ĐẦU của mảng `mt` (thứ tự dòng), nên hãy khai báo tường minh.",
+  "default_mt": "opus-mt",
+  "_ghi_chu_batch": "Chế độ NHANH (BatchedInferencePipeline) là DỮ LIỆU ở `opts.batch_size`: >1 thì chạy đường batched, 0/1 thì chạy `WhisperModel.transcribe`. Đã XOÁ TƯƠNG TỰ khoá `capabilities.batch_json` khỏi mọi engine MT: grep toàn repo chỉ ra `registry.json`, artifact và tài liệu, KHÔNG mã nào đọc nó. Hợp đồng đầu ra của một engine `http` nay là DỮ LIỆU ở `opts.contract` (`json` | `lines`), nơi `app/adapters/mt/openai_chat_mt.py` thật sự đọc; engine `http` khai thêm `opts.base_url` (BẮT BUỘC, gồm `/v1`) và `opts.api_key_env` (TÊN biến môi trường, KHÔNG phải khoá) — xem mục `runtime: http` trong `backend/README.md`. Đã XOÁ khoá `capabilities.batch_infer` khỏi mọi engine ASR vì ĐO ĐƯỢC là KHÔNG mã nào trong sản phẩm đọc nó (grep toàn repo chỉ ra một fixture test): hai entry khác nhau ở khoá đó nhưng cùng `batch_size: 8` cho ra transcript GIỐNG NHAU đến sáu chữ số, nên nó là một khai báo nói dối về khả năng. Một nguồn sự thật duy nhất, không hai.",
+  "_ghi_chu_term_placeholder": "`term_placeholder` = engine giữ token `ZXQ{n}` nguyên vẹn để bản dịch thuật ngữ lấy từ hàng glossary thay vì do model chọn (`app/domain/term_placeholder.py`, người đọc là `TranslateHandler._placeholder_terms`). `name_patch` = được phép vá tên riêng nghe nhầm trong chữ NGUỒN bằng caption OCR (`experiments/accuracy_pipelines/name_patch.py::name_patch_allowed`, người đọc là `patch_transcript` và CLI `scripts/patch_names_from_ocr.py`). CẢ HAI chỉ khai cho `hy-mt-1.5-7b`, và đó là DỮ LIỆU ĐO ĐƯỢC chứ không phải sở thích: đo qua adapter thật, `ZXQ{n}` sống sót 6/6 trong lô 7 câu; còn bản vá tên đo trên `opus-mt` làm 3 trong 7 câu TỆ ĐI. Engine không khai ⇒ không bật (mặc định), nên không có nhánh nào được kích hoạt bằng cách thiếu cấu hình.",
+  "asr": [
+    {
+      "id": "fw-large-v3-turbo",
+      "label": "Faster-Whisper large-v3-turbo",
+      "runtime": "inprocess",
+      "model_ref": "large-v3-turbo",
+      "vram_mb": 1600,
+      "langs": ["zh", "en"],
+      "capabilities": { "timestamps": true, "word_timestamps": true, "confidence": true, "emotion": false },
+      "opts": { "batch_size": 8, "compute_type": "int8_float16" }
+    },
+    {
+      "id": "fw-large-v3",
+      "label": "Faster-Whisper large-v3 (chính xác hơn turbo)",
+      "runtime": "inprocess",
+      "model_ref": "large-v3",
+      "vram_mb": 3200,
+      "langs": ["zh", "en"],
+      "capabilities": { "timestamps": true, "word_timestamps": true, "confidence": true, "emotion": false },
+      "opts": { "batch_size": 8, "compute_type": "int8_float16" }
+    },
+    {
+      "id": "fw-medium",
+      "label": "Faster-Whisper medium",
+      "runtime": "inprocess",
+      "model_ref": "medium",
+      "vram_mb": 1500,
+      "langs": ["zh", "en"],
+      "capabilities": { "timestamps": true, "word_timestamps": true, "confidence": true, "emotion": false },
+      "opts": { "batch_size": 8, "compute_type": "int8_float16" }
+    },
+    {
+      "id": "fw-small",
+      "label": "Faster-Whisper small",
+      "runtime": "inprocess",
+      "model_ref": "small",
+      "vram_mb": 500,
+      "langs": ["zh", "en"],
+      "capabilities": { "timestamps": true, "word_timestamps": true, "confidence": true, "emotion": false },
+      "opts": { "batch_size": 8, "compute_type": "int8_float16" }
+    },
+    {
+      "id": "sensevoice-small",
+      "label": "SenseVoice-Small",
+      "runtime": "inprocess",
+      "model_ref": "iic/SenseVoiceSmall",
+      "vram_mb": 1000,
+      "langs": ["zh", "yue", "en", "ja", "ko"],
+      "capabilities": { "timestamps": true, "word_timestamps": false, "confidence": false, "emotion": true },
+      "opts": { "use_itn": true }
+    }
+  ],
+  "mt": [
+    {
+      "id": "opus-mt",
+      "label": "OPUS-MT (Marian)",
+      "runtime": "inprocess",
+      "model_ref": "Helsinki-NLP/opus-mt-zh-vi",
+      "vram_mb": 0,
+      "langs": ["zh", "en"],
+      "capabilities": { "glossary_prompt": false, "glossary_patch": false, "chimera": false },
+      "opts": {}
+    },
+    {
+      "id": "qwen2.5-3b",
+      "label": "Qwen2.5-3B (Ollama)",
+      "runtime": "ollama",
+      "model_ref": "qwen2.5:3b-instruct-q4_K_M",
+      "vram_mb": 2500,
+      "langs": ["zh", "en"],
+      "capabilities": { "glossary_prompt": true, "glossary_patch": false, "chimera": false },
+      "opts": {}
+    },
+    {
+      "id": "qwen2.5-7b",
+      "label": "Qwen2.5-7B (Ollama)",
+      "runtime": "ollama",
+      "model_ref": "qwen2.5:7b-instruct-q4_K_M",
+      "vram_mb": 5200,
+      "langs": ["zh", "en"],
+      "capabilities": { "glossary_prompt": true, "glossary_patch": false, "chimera": false },
+      "opts": {}
+    },
+    {
+      "id": "hy-mt-1.5-7b",
+      "label": "HY-MT1.5-7B (Hunyuan-MT)",
+      "runtime": "ollama",
+      "model_ref": "hy-mt1.5-7b:q4_K_M",
+      "vram_mb": 5200,
+      "langs": ["zh", "en"],
+      "capabilities": { "glossary_prompt": false, "glossary_patch": true, "chimera": true, "term_placeholder": true, "name_patch": true, "echo_retry": true, "echo_guard": true, "max_items_per_call": 1 },
+      "opts": {}
+    }
+  ],
+  "_ghi_chu_max_items_per_call": "Trần SỐ MỤC của MỘT lời gọi engine cho engine đó (`TranslateHandler._batch_items_for`), thay cho `mt.DEFAULT_MAX_ITEMS` = 30. Đây là DỮ LIỆU ĐO ĐƯỢC, cùng clip 115 đoạn và cùng prompt p2: `hy-mt-1.5-7b` echo 90/115 đoạn ở lô 30 nhưng **0/115 ở lô 1** (55,3 s, 116 lời gọi) — nên với engine này một lời gọi chỉ chịu được MỘT mục. `opus-mt` không khai vì nó echo 0/115 ở cả ba lô 8/15/30 (11,19 / 9,83 / 9,75 s) và lô 1 chỉ làm nó chậm hơn. Số cụ thể truyền vào constructor vẫn THẮNG khoá này, để phép đo còn đo được lô khác.",
+  "_ghi_chu_echo_retry": "`echo_retry` = engine được phép DỊCH LẠI RIÊNG từng đoạn bị chép nguyên chữ nguồn (`TranslateHandler._retry_echoed`, người đọc là `TranslateHandler._echo_retry`). Đây là DỮ LIỆU ĐO ĐƯỢC: trên clip 115 đoạn `20261019-name-patch-smoke/large-v3-beam5-prevfalse.json`, `hy-mt-1.5-7b` trả nguyên chữ Trung cho 59–89/115 đoạn ở lô 30 và 8–29/115 ở lô 8–15, còn `opus-mt` là 0/115 ở cả ba lô — nên chỉ engine này khai cờ. Số mục vẫn khớp trong mọi ca echo, tức `check_alignment` KHÔNG bắt được kiểu hỏng này; trước khi có cờ này, một lượt dịch hỏng 77% số đoạn vẫn ghi `done`.",
+  "_ghi_chu_echo_guard": "`echo_guard` = engine bị TỪ CHỐI cả lô khi đầu ra vẫn CHÉP NGUYÊN chữ nguồn sau khi đã dịch lại riêng từng đoạn (`TranslateHandler._echo_guard`/`_guard_echoes`, phép đo là `app/domain/mt_qa.echoes_source`; lỗi là `pipeline.translate.EchoProblem`). Số đo (cùng clip 115 đoạn `20261019-name-patch-smoke/large-v3-beam5-prevfalse.json`, 5 thuật ngữ, cùng prompt): `hy-mt-1.5-7b` echo **0–8/115** đoạn ở lô 8 (0–54 chữ Hán), **29/115** ở lô 15 (181 chữ Hán), **59–89/115** ở lô 30 (389–629 chữ Hán); `opus-mt` cùng clip là **0/115**, **0** chữ Hán ở cả ba lô. Vì echo có mặt ở cả lô 8 nên cổng này CỐ Ý độc lập với kích thước lô: hạ lô không phải cách sửa, và cổng mới là thứ quyết định. Chỉ `hy-mt-1.5-7b` khai; engine không khai đi đúng đường cũ từng byte và KHÔNG chạy phép kiểm lấy một lần. `echo_retry` và `echo_guard` cùng khai trên engine này: cổng chạy TRƯỚC và ĐÈ `echo_retry`, vì nhận bản chép kèm một cờ QA là đúng hành vi đang được sửa (một hàng `done` chứa nguyên chữ Trung).",
+  "_ghi_chu_chimera": "Chimera (spec kien truc §8.7.5 + spec UI §4.5) = N UNG VIEN + MOT luot pha, chay TUAN TU. Day la DU LIEU: them/bot ung vien = sua file nay, KHONG hard-code o pipeline hay giao dien. `engine` phai co trong mang `mt` o tren. `temperature` vang = mac dinh cua adapter (0,1); OPUS-MT chay trong tien trinh nen bo qua truong nay. `quality_note` la canh bao CHAT LUONG di kem canh bao chi phi (bat buoc voi ung vien da do duoc la nhai lai nguon).",
+  "chimera": {
+    "merge_engine": "qwen2.5-3b",
+    "candidates": [
+      {
+        "id": "c1",
+        "engine": "opus-mt",
+        "label": "OPUS-MT (Marian, tất định)"
+      },
+      {
+        "id": "c2",
+        "engine": "qwen2.5-3b",
+        "temperature": 0.1,
+        "label": "Qwen-3B nhiệt độ 0,1",
+        "quality_note": "ĐÃ ĐO: ở prompt p1 engine này CHÉP nguyên chữ nguồn 43/44 đoạn; p2 mới dịch được. Số đoạn nhại lại được ĐO LẠI sau mỗi lần chạy (trường `echo`)."
+      },
+      {
+        "id": "c3",
+        "engine": "qwen2.5-3b",
+        "temperature": 0.7,
+        "label": "Qwen-3B nhiệt độ 0,7",
+        "quality_note": "Cùng engine như c2, lấy mẫu rộng hơn: đa dạng hơn nhưng cũng dễ trôi khỏi bản gốc hơn."
+      },
+      {
+        "id": "c4",
+        "engine": "qwen2.5-3b",
+        "temperature": 1.0,
+        "label": "Qwen-3B nhiệt độ 1,0",
+        "quality_note": "Cùng engine như c2, lấy mẫu rộng nhất trong ba mức: dùng để ĐO độ tất định của engine, không phải để tin."
+      },
+      {
+        "id": "c5",
+        "engine": "qwen2.5-7b",
+        "temperature": 0.1,
+        "label": "Qwen-7B nhiệt độ 0,1"
+      },
+      {
+        "id": "c6",
+        "engine": "hy-mt-1.5-7b",
+        "temperature": 0.1,
+        "label": "HY-MT 1.5 nhiệt độ 0,1 (đúng §8.7.5)"
+      }
+    ]
+  }
+}

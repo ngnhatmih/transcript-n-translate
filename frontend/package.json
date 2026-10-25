@@ -1,0 +1,32 @@
+{
+  "name": "frontend",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "dev": "node dev-server.mjs",
+    "build": "tsc --noEmit && rollup -c",
+    "typecheck": "tsc --noEmit",
+    "test": "node --import ./test/swc-loader.mjs --test --test-isolation=none \"**/*.test.{ts,tsx,mjs,js}\"",
+    "e2e": "node e2e/session.mjs e2e/plans/bon-man.json --out e2e/anh",
+    "e2e:phim": "node e2e/session.mjs e2e/plans/phim-va-12-5.json --out e2e/anh",
+    "e2e:t7": "node e2e/session.mjs e2e/plans/ban-ghi-dai-t7.json --out e2e/anh"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "dependencies": {
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0"
+  },
+  "devDependencies": {
+    "@swc/core": "^1.16.2",
+    "@testing-library/react": "^16.3.3",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "jsdom": "^30.1.1",
+    "rollup": "^4.63.5",
+    "typescript": "^7.0.2"
+  }
+}

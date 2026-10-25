@@ -1,0 +1,34 @@
+# --- API ---
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+python-multipart==0.0.20
+
+# --- ASR ---
+# faster-whisper dùng CTranslate2, KHÔNG cần torch
+faster-whisper==1.1.1
+# R71: faster_whisper 1.1.1 làm `import requests` trong utils.py, còn
+# huggingface_hub 1.x đã BỎ phụ thuộc `requests`. Thiếu dòng này thì
+# `import faster_whisper` ném ModuleNotFoundError và cả đường ASR chết ở runtime
+# dù toàn bộ test đều xanh. Ghim TƯỜNG MINH, không phó mặc cho phụ thuộc bắc cầu.
+requests==2.32.3
+
+# --- SenseVoice (torch PHẢI cài riêng trước, xem scripts/install.ps1) ---
+funasr==1.2.6
+modelscope==1.22.0
+
+# --- MT: OPUS-MT (Marian) chạy trong tiến trình, CPU (Task 9) ---
+# KHÔNG cần service ngoài — đây là engine dịch duy nhất chạy được trên máy này
+# hôm nay. `sentencepiece` là BẮT BUỘC: tokenizer của OPUS-MT là SentencePiece,
+# thiếu nó thì `MarianTokenizer.from_pretrained` ném ở runtime dù mọi test xanh.
+transformers==4.46.3
+sentencepiece==0.2.0
+sacremoses==0.1.1
+
+# --- Tiện ích ---
+httpx==0.28.1
+yt-dlp==2025.1.15
+soundfile==0.12.1
+numpy==1.26.4
+
+# --- Test ---
+pytest==8.3.4
