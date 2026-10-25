@@ -60,10 +60,19 @@ export function StatusStrip({ status }: { status: Status | null }) {
       </span>
       <span className="stt__vram">
         {"VRAM: "}
-        {/* GĐ1a: backend trả `null` TƯỜNG MINH (chưa có API đọc VRAM) — "chưa đo được",
-            không được bịa một con số. Khi có số thì in SỐ; client KHÔNG tự thêm đơn vị
-            mà backend không nói. */}
-        {status === null || status.vram === null ? "chưa đo được" : String(status.vram)}
+        {/* Ba trạng thái, không phải hai:
+            * `status === null` (chưa có phản hồi) ⇒ "chưa đọc được";
+            * `vram === null` ⇒ "chưa đo được" — backend trả `null` TƯỜNG MINH khi
+              không đọc được card; KHÔNG bịa số, và 0 KHÔNG phải giá trị thay thế
+              (0 nói "card trống");
+            * có số ⇒ in SỐ + ĐƠN VỊ backend nói (`vram_unit`). Client KHÔNG tự
+              thêm đơn vị: `3200` trần trụi là con số vô nghĩa, còn tự gắn "MiB"
+              là bịa một thứ backend chưa khẳng định. */}
+        {status === null
+          ? "chưa đọc được"
+          : status.vram === null
+            ? "chưa đo được"
+            : `${status.vram} ${status.vram_unit}`}
       </span>
       <span className="stt__gd">
         {"GĐ: "}

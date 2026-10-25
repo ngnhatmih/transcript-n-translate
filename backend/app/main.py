@@ -14,6 +14,7 @@ from fastapi import FastAPI
 
 from app.adapters.clock_system import SystemClock
 from app.adapters.governor.single_gpu import SingleGpuGovernor
+from app.adapters.gpu import VramReader
 from app.adapters.mt.chimera_merge import OllamaMergeEngine
 from app.adapters.mt.ollama_mt import OllamaMtEngine
 from app.adapters.mt.openai_chat_mt import OpenAiChatMt, prompt_version_for
@@ -444,7 +445,12 @@ def build_app(repos, specs, worker, broker, mt_engines, *, chimera_plan=None) ->
     return create_app(repos=repos, specs=specs, media_dir=MEDIA_DIR,
                       out_dir=OUTPUT_DIR, worker=worker, log_dir=LOG_DIR,
                       broker=broker, mt_engines=mt_engines,
-                      chimera_plan=chimera_plan)
+                      chimera_plan=chimera_plan,
+                      # Một callable, không phải số: route `/api/status` đo LÚC
+                      # GỌI (VRAM đổi theo model đang nạp), và tầng HTTP không
+                      # được import `app.adapters` nên nó chỉ gọi thứ có sẵn
+                      # trong `app.state`.
+                      vram_reader=VramReader())
 
 
 def _prepare_local_model_caches() -> None:

@@ -403,6 +403,7 @@ const STATUS_HTTP = {
   running: [7],
   current_phase: "asr:faster-whisper-large",
   phase_switches: 3,
+  vram_unit: "MiB",
   vram: null,
   ollama: "up" as const,
 };

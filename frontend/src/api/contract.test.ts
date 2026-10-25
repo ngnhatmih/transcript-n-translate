@@ -274,7 +274,8 @@ describe("hop dong API that (backend 8620)", () => {
 
   it("GET /api/status: khoá mà giao diện đọc", async () => {
     const body = (await getJson("/status")) as Status;
-    for (const key of ["queue_depth", "running", "current_phase", "phase_switches", "vram", "ollama"]) {
+    for (const key of ["queue_depth", "running", "current_phase", "phase_switches",
+      "vram", "vram_unit", "ollama"]) {
       assert.ok(Object.hasOwn(body, key), `thiếu khoá ${key}`);
     }
     assert.equal(typeof body.queue_depth, "number");
@@ -286,6 +287,9 @@ describe("hop dong API that (backend 8620)", () => {
     // GĐ1a trả `vram: null` TƯỜNG MINH (khoá vẫn có). Null là giá trị thật, không
     // phải khoá thiếu — frontend đọc thẳng `body.vram`, không phòng thủ bằng `in`.
     assert.ok(body.vram === null || typeof body.vram === "number", "vram phải là null hoặc số");
+// Đơn vị đi KÈM số — và có cả khi `vram` là null (nó nói đơn vị SẼ dùng).
+assert.equal(typeof body.vram_unit, "string", "vram_unit phải là chuỗi");
+assert.ok(body.vram_unit.length > 0, "vram_unit không được rỗng");
   });
 
   it("GET /api/registry: khoá theo kind (asr/mt), KHÔNG phải mảng phẳng", async () => {

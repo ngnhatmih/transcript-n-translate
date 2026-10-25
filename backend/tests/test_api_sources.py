@@ -76,14 +76,19 @@ def test_status_endpoint_reports_phase_and_queue(client):
 def test_status_reports_the_vram_key_the_spec_promises(client):
     """API-04 (R77): spec §11 ghim `GET /api/status` trả cả VRAM.
 
-    GĐ1a CHƯA đo được VRAM (chưa có API đọc số của card), nên giá trị phải là
-    `None` TƯỜNG MINH — khoá vẫn có, JSON là `null` — cùng khuôn với
-    `ollama: "unknown"`. Frontend code theo hình dạng hợp đồng nên nó đọc
-    `body["vram"]`, không phải phòng thủ bằng `if "vram" in body`.
+    App ở fixture này dựng **không có** `vram_reader` (test chỉ đọc, không GPU),
+    nên giá trị `None` là đúng nghĩa "chưa đọc được" — khoá vẫn có, JSON là
+    `null` — cùng khuôn với `ollama: "unknown"`. Frontend code theo hình dạng hợp
+    đồng nên nó đọc `body["vram"]`, không phải phòng thủ bằng `if "vram" in body`.
+
+    Đường SẢN XUẤT (có reader, đo thật bằng `nvidia-smi`) được ghim ở
+    `tests/test_status_vram.py` — đừng thêm reader vào fixture này: bài này đang
+    đo đúng ca "không có đường đo", và trộn hai ca vào một fixture là làm nó mù.
     """
     body = client.get("/api/status").json()
     assert "vram" in body, sorted(body)
     assert body["vram"] is None
+    assert body["vram_unit"] == "MiB", "đơn vị phải có kể cả khi chưa đo được"
 
 
 def test_status_counts_queued_jobs_and_ignores_finished_ones(client):

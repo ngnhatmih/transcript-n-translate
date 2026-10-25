@@ -569,12 +569,23 @@ export interface Registry {
  */
 export type OllamaState = "up" | "down" | "unknown";
 
-/** `GET /api/status`. `vram` là `null` TƯỜNG MINH (GĐ1a chưa đo được) — khoá vẫn có. */
+/**
+ * `GET /api/status`.
+ *
+ * `vram` là VRAM ĐANG DÙNG, backend đọc thật từ `nvidia-smi`; `null` nghĩa là
+ * CHƯA ĐỌC ĐƯỢC (không GPU/không binary, hoặc app dựng không có reader) —
+ * không bao giờ là 0, vì 0 là một con số nói "card trống".
+ *
+ * `vram_unit` đi kèm vì giao diện KHÔNG được tự thêm đơn vị mà backend không
+ * nói: `3200` trần trụi là một con số vô nghĩa. Trường này có cả khi `vram` là
+ * `null` — nó nói đơn vị của con số SẼ có nếu đo được.
+ */
 export interface Status {
   queue_depth: number;
   running: number[];
   current_phase: string | null;
   phase_switches: number;
   vram: number | null;
+  vram_unit: string;
   ollama: OllamaState;
 }

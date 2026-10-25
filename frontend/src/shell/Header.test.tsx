@@ -207,7 +207,7 @@ describe("Header: bo chon CHE DO (Task W1)", () => {
     // W1 them vao `Header`; no KHONG duoc lam roi dai trang thai ma Task 10 vua noi vao.
     const { container, unmount } = render(
       taoPhanTu(Header, {
-        status: { queue_depth: 0, running: [], current_phase: null, phase_switches: 0, vram: null, ollama: "unknown" },
+        status: { queue_depth: 0, running: [], current_phase: null, phase_switches: 0, vram: null, vram_unit: "MiB", ollama: "unknown" },
         mode: "edit",
         onModeChange: () => {},
       }),

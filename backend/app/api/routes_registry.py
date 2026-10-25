@@ -10,7 +10,8 @@ from dataclasses import asdict
 
 from fastapi import APIRouter, Depends
 
-from app.api.deps import get_repos, get_specs, get_worker
+from app.api.deps import get_repos, get_specs, get_vram_reader, get_worker
+from app.domain.vram import VRAM_UNIT
 
 router = APIRouter(prefix="/api", tags=["registry"])
 
@@ -33,7 +34,8 @@ def get_registry(specs=Depends(get_specs)):
 
 
 @router.get("/status")
-def get_status(repos=Depends(get_repos), worker=Depends(get_worker)):
+def get_status(repos=Depends(get_repos), worker=Depends(get_worker),
+               vram_reader=Depends(get_vram_reader)):
     """Trạng thái để giao diện hiện băng-rôn.
 
     `worker` là None khi app được dựng mà chưa có worker (test, hoặc chế độ chỉ
@@ -46,13 +48,20 @@ def get_status(repos=Depends(get_repos), worker=Depends(get_worker)):
         "running": [j.id for j in running],
         "current_phase": getattr(worker, "current_phase", None),
         "phase_switches": getattr(worker, "phase_switches", 0),
-        # API-04 (R77): spec §11 ghim `GET /api/status` trả cả VRAM. GĐ1a chưa
-        # ĐO được VRAM (chưa có API đọc số của card và chưa có model nào giữ
-        # VRAM lâu dài), nên giá trị là `None` TƯỜNG MINH — khoá vẫn có, JSON
-        # là `null` — cùng khuôn với `ollama: "unknown"`: frontend đọc
-        # `body["vram"]` chứ không phải phòng thủ bằng `if "vram" in body`.
-        # Đo VRAM thật là việc của GĐ2.
-        "vram": None,
+        # API-04 (R77): spec §11 ghim `GET /api/status` trả cả VRAM. Số là VRAM
+        # ĐANG DÙNG, do composition root đặt vào `app.state.vram_reader`
+        # (`adapters/gpu.py` đọc `nvidia-smi`) — KHÔNG phải `vram_mb` khai báo
+        # trong registry, vốn là số cho bộ điều phối.
+        # Không có reader, hoặc đọc hỏng ⇒ `None` TƯỜNG MINH (khoá vẫn có, JSON
+        # là `null`) — cùng khuôn với `ollama: "unknown"`: frontend đọc
+        # `body["vram"]` chứ không phòng thủ bằng `if "vram" in body`, và "chưa
+        # biết" là một giá trị nói thật, không được thay bằng 0.
+        "vram": vram_reader() if vram_reader is not None else None,
+        # Đơn vị đi KÈM số, vì giao diện KHÔNG được tự thêm đơn vị mà backend
+        # không nói (`screens/OllamaDown.tsx`): "3200" trần trụi là một con số vô
+        # nghĩa. Khi `vram` là `null` thì trường này vẫn có — nó nói đơn vị SẼ
+        # dùng nếu đo được, không nói rằng đã đo được.
+        "vram_unit": VRAM_UNIT,
         # API-03 (M6): `probe_ollama` chạy MỖI request (tối đa ~300 ms khi host
         # không tới được). Quyết định của GĐ1a: GIỮ NGUYÊN — route này là `def`
         # nên FastAPI chạy nó trong threadpool, không chặn event loop, và

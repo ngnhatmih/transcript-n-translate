@@ -63,38 +63,45 @@ GPU. Nó tự ép UTF-8 cho stdout (console Windows mặc định cp1252, còn s
 tiếng Trung/Việt) và tự đặt cache model trước khi nạp `faster_whisper`.
 
 Con số nền của lần chạy mặc định, đo sau khi xoá `__pycache__` (lệnh ở mục
-"Kiểm thử" trên, chạy từ trong `backend\`). Thứ có nghĩa là **1269 / 15**, không
+"Kiểm thử" trên, chạy từ trong `backend\`). Thứ có nghĩa là **1286 / 15**, không
 phải số giây — thời gian trôi giữa các lần chạy (đã thấy 24,00–30,94 s) còn con
 số bài thì không:
 
 ```
-1269 passed, 15 deselected, 1 warning
+1286 passed, 15 deselected, 1 warning
 ```
 
 Hai con số đó là SỐ BÀI ĐƯỢC CHỌN, và chúng khớp với số mà `--collect-only` báo
-(`1269/1284`, 15 bài `live` bị bỏ;
+(`1286/1301`, 15 bài `live` bị bỏ;
 `tests/test_backend_readme.py::test_readme_baseline_matches_the_tests_actually_
 collected` đối chiếu mỗi lần chạy).
 
-Máy này **CÓ** `ffmpeg 8.1.1` + `ffprobe` trên PATH (đã đo), nên `1269/15` ở trên
+Máy này **CÓ** `ffmpeg 8.1.1` + `ffprobe` trên PATH (đã đo), nên `1286/15` ở trên
 là số THẬT của nó. Máy **không có** `ffmpeg`/`ffprobe` cho một kết quả KHÁC: cả
 `tests/test_ingest.py` bị `skipif` ở cấp module — **9** bài cùng skip một lượt —
-nên dòng tổng kết của máy đó là **`1260 passed, 9 skipped, 15 deselected`** (=
-`1269 − 9`; con số này TỪNG ghi `978`, tức một baseline rất cũ, và nó lệch phép
+nên dòng tổng kết của máy đó là **`1277 passed, 9 skipped, 15 deselected`** (=
+`1286 − 9`; con số này TỪNG ghi `978`, tức một baseline rất cũ, và nó lệch phép
 trừ của chính khối nền ngay trên nó). Đó là
 con số của máy thiếu ffmpeg, **không phải** con số máy này từng in ra; đừng chép
 nó vào khối nền ở trên, và đừng "sửa" số nền xuống chỉ vì thiếu ffmpeg.
 
 ⚠️ Con số `856` ở đây TỪNG không khớp phép trừ của chính nó: `865 − 9 = 856`, tức
 nó là số của lượt TRƯỚC `V1` (+3 bài) còn sót lại. Phép trừ của khối nền hiện tại
-là `1269 − 9` = `1260`.
+là `1286 − 9` = `1277`.
 
 (Con số này từng bị ghi là `798`: bài `test_a_failed_translation_leaves_the_
 transcript_reviewed` được thêm ở `a428334` — **cùng commit đã sửa tệp này** — mà
 số nền không được bump. Nó tồn tại để phát hiện TRÔI, nên một số sai làm mọi lần
 chạy báo dương tính giả.
 
-Lần bump này, `1206/15` → `1269/15` (**+63 bài**), do **hợp đồng đầu ra `lines`**,
+Lần bump này, `1269/15` → `1286/15` (**+17 bài**), do **VRAM hiện thật** ở
+`GET /api/status`: `tests/test_status_vram.py` ghim parser (`nvidia-smi` dòng đầu,
+số nguyên không âm, chuỗi lạ ⇒ `None`), ba ca lỗi tiến trình (không có binary,
+timeout, returncode khác 0 ⇒ `None`, không 500) và hợp đồng HTTP (`vram` là số
+hoặc `null`, `vram_unit` LUÔN có). Trước đó route trả `vram: null` CỐ ĐỊNH nên
+giao diện luôn in "chưa đo được".
+
+Lần bump trước, `1206/15` → `1269/15` (**+63 bài**), do **hợp đồng đầu ra `lines`**,
 adapter OpenAI-compatible, và **nối dây runtime `http`**. `tests/test_mt_lines_contract.py` (**+24**) ghim parser dòng:
 đủ số dòng, đúng tập `id`, id trùng, mục có id mà không có bản dịch, và — quan trọng
 nhất — một dòng KHÔNG mang id nằm GIỮA khối bản dịch là LỖI chứ không phải lời dẫn bị bỏ
@@ -487,6 +494,30 @@ riêng, model đã nạp sẵn trong tiến trình), **KHÔNG** phải của `sm
 21,48 s — đo được **3,7 s**, vì tiến trình mới còn phải nạp model. Sau **mọi** lần
 `release()`, `ollama ps` **rỗng** — model dịch thật sự rời VRAM, không chỉ được
 đánh dấu là đã rời.
+
+#### VRAM hiện trên header (`GET /api/status`) — đo thật, kèm đơn vị
+
+Trước lượt này route trả `"vram": None` **CỐ ĐỊNH** (GĐ1a chưa có đường đọc), nên
+giao diện luôn in `VRAM: chưa đo được`. Nay `app/adapters/gpu.py` đọc
+`nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits`, và
+`app/main.py::build_app` đặt callable đó vào `app.state.vram_reader` (route
+**không** import adapter — `tests/test_api_sources.py` cấm).
+
+Số đo trên máy này (RTX 3070 8 GB, 2026-10-25), 20 lần gọi liên tiếp:
+
+| tổng 20 lần | mỗi lần | giá trị khi không model nào trong VRAM |
+|---|---|---|
+| 811,3 ms | **~40,6 ms** | 1467–1468 MiB |
+
+⇒ đo **mỗi request** được: route này đã probe Ollama mỗi request (trần 0,3 s) và
+frontend **không poll** nó, nên 40 ms là cùng bậc; **không cache** (cache là thêm
+trạng thái để test và để lệch số).
+
+Hợp đồng: `vram` là số hoặc `null` (không đọc được ⇒ `null`, KHÔNG phải `0` —
+`0` nói "card trống"), và `vram_unit` **luôn có** (`"MiB"`), kể cả khi `vram` là
+`null`. Giao diện in `1467 MiB`; nó **không** tự gắn đơn vị. Đơn vị nằm ở
+`app/domain/vram.py::VRAM_UNIT` vì cả `app/api` (nơi trả JSON) lẫn
+`app/adapters` (nơi cầm số) đều đọc, mà `app/api` không được import adapter.
 
 #### VRAM của lượt dịch (`--sample-vram`) — có artifact, trích dẫn được
 

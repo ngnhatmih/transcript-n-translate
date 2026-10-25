@@ -22,6 +22,17 @@ def get_worker(request: Request):
     return getattr(request.app.state, "worker", None)
 
 
+def get_vram_reader(request: Request):
+    """Callable đọc VRAM, do composition root đặt vào `app.state`.
+
+    Mặc định `None`: app dựng để test chỉ đọc (hoặc để đọc dữ liệu cũ) không có
+    đường đo, và khi đó route trả `vram: null` — đúng nghĩa "chưa đọc được",
+    không phải 0. `app/api` KHÔNG tự import adapter GPU
+    (`tests/test_api_sources.py::test_api_layer_does_not_import_adapters`).
+    """
+    return getattr(request.app.state, "vram_reader", None)
+
+
 def get_dirs(request: Request) -> dict[str, Any]:
     return request.app.state.dirs
 

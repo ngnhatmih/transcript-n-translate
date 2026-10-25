@@ -59,6 +59,7 @@ const STATUS_HTTP: Status = {
   current_phase: "asr:faster-whisper-large",
   phase_switches: 3,
   vram: null,
+  vram_unit: "MiB",
   ollama: "unknown",
 };
 
@@ -299,6 +300,7 @@ function status(ollama: Status["ollama"], vram: number | null = null): Status {
     current_phase: null,
     phase_switches: 0,
     vram,
+    vram_unit: "MiB",
     ollama,
   };
 }
@@ -380,6 +382,10 @@ describe("§4.8 trang thai Ollama: dai trang thai + panel hang nhat + dropdown e
       "ollama === 'up' phai noi ro la dang chay");
     assert.ok(chu(up.container, ".stt__vram").includes("3200"),
       "vram co so thi phai hien SO do (khong duoc im lang)");
+    // ĐƠN VỊ là một nửa của phép đo: "3200" không nói được gì. Backend trả
+    // `vram_unit` chính vì client không được tự gắn đơn vị.
+    assert.ok(chu(up.container, ".stt__vram").includes("MiB"),
+      "vram co so thi phai hien ca DON VI backend noi (MiB)");
     up.unmount();
 
     const down = render(taoPhanTu(StatusStrip, { status: status("down") }));
