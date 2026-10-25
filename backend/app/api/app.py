@@ -20,17 +20,18 @@ FRONTEND_DEV_ORIGINS = ["http://localhost:3100", "http://127.0.0.1:3100"]
 
 
 def create_app(*, repos, specs: list[EngineSpec], media_dir, out_dir,
-               worker=None, log_dir=None, broker=None, mt_engines=None,
+               worker=None, log_dir=None, broker=None,
                chimera_plan=None, vram_reader=None) -> FastAPI:
     app = FastAPI(title="phu-de-lab", version="0.1.0")
     app.state.repos = repos
     app.state.specs = specs
     app.state.worker = worker
-    # `mt_engines` là dict `{spec.id: engine}` do `app/main.py` dựng và trao cho
-    # CÙNG một `TranslateHandler`. Mặc định `None` để test chỉ đọc vẫn dựng được
-    # app; production luôn truyền ĐÚNG object đó, không phải bản sao — một dict
-    # chép lại sẽ khiến tầng HTTP nói về engine khác với engine đang chạy.
-    app.state.mt_engines = mt_engines
+    # M-13: KHÔNG có `app.state.mt_engines`. Bản cũ ghi thuộc tính đó kèm một
+    # comment khẳng định "tầng HTTP cần object đó", nhưng KHÔNG route, KHÔNG
+    # dependency nào đọc nó — code chết cộng một comment nói dối. Bất biến thật
+    # ("handler và composition root dùng CÙNG một dict engine") được ghim ở
+    # `tests/test_mt_wiring.py` bằng `assert handler._engines is mt_engines`,
+    # tức ở ĐÚNG chỗ nó có nghĩa: chỗ handler được dựng.
     # `chimera_plan` là DỮ LIỆU DẪN XUẤT của composition root (registry + cờ
     # `available` đã dò), tính MỘT lần ở `main.py`. Route Chimera KHÔNG được đọc
     # `registry.json` và cũng không được dò Ollama: nó chỉ tiêu thụ — cùng khuôn

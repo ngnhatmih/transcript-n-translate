@@ -11,7 +11,7 @@ upload -> ingest -> asr -> export -> tải về.
 `PhaseQueueWorker`/`create_app`. Nhờ vậy mọi dây của production đều được chạy
 thật và test không thể trôi khỏi nó: vòng `governor.register()` cho từng spec ASR
 và từng engine dịch (main.py), `auto_forward="1"` mặc định, `publish=broker.publish`
-ở worker, và `broker=`/`mt_engines=` ở app. Chỉ DUY NHẤT hai adapter model bị thay
+ở worker, và `broker=` ở app. Chỉ DUY NHẤT hai adapter model bị thay
 (`StubIngest` cho khúc ffmpeg của `IngestHandler`, `FakeMtEngine` cho khúc HTTP
 tới Ollama).
 
@@ -137,9 +137,14 @@ class FakeMtEngine:
     """
 
     def __init__(self, model_ref: str, *, supports_glossary: bool = False,
-                 engine_id: str | None = None) -> None:
+                 engine_id: str | None = None,
+                 base_url: str | None = None) -> None:
         self.model_ref = model_ref
         self._supports_glossary = supports_glossary
+        #: M-10: `OllamaMtEngine` THẬT nhận `base_url` (địa chỉ do composition
+        #: root phân giải từ `OLLAMA_HOST`); bản giả phải nuốt được đúng cách gọi
+        #: đó, nếu không `_build_mt_engines` nổ `TypeError` ngay ở fixture.
+        self.base_url = base_url
         #: Fix round 1 (I-2): `_build_mt_engines` truyền `spec.id` TƯỜNG MINH vào
         #: adapter Ollama, nên engine giả phải nhận tham số đó (giống chữ ký của
         #: `OllamaMtEngine`) — và ghi lại để bài ghim dây nối đọc được.
@@ -219,7 +224,7 @@ def wired(tmp_path, monkeypatch):
     repos, specs, worker, broker, mt_engines = main.build_components()
     # ingest thật cần ffmpeg; đó là khúc duy nhất còn giả.
     worker.handlers["ingest"] = StubIngest(repos, specs)
-    app = main.build_app(repos, specs, worker, broker, mt_engines)
+    app = main.build_app(repos, specs, worker, broker)
 
     with TestClient(app) as c:
         c.repos = repos

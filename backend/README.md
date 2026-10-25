@@ -63,38 +63,43 @@ GPU. Nó tự ép UTF-8 cho stdout (console Windows mặc định cp1252, còn s
 tiếng Trung/Việt) và tự đặt cache model trước khi nạp `faster_whisper`.
 
 Con số nền của lần chạy mặc định, đo sau khi xoá `__pycache__` (lệnh ở mục
-"Kiểm thử" trên, chạy từ trong `backend\`). Thứ có nghĩa là **1289 / 15**, không
+"Kiểm thử" trên, chạy từ trong `backend\`). Thứ có nghĩa là **1291 / 15**, không
 phải số giây — thời gian trôi giữa các lần chạy (đã thấy 24,00–30,94 s) còn con
 số bài thì không:
 
 ```
-1289 passed, 15 deselected, 1 warning
+1291 passed, 15 deselected, 1 warning
 ```
 
 Hai con số đó là SỐ BÀI ĐƯỢC CHỌN, và chúng khớp với số mà `--collect-only` báo
-(`1289/1304`, 15 bài `live` bị bỏ;
+(`1291/1306`, 15 bài `live` bị bỏ;
 `tests/test_backend_readme.py::test_readme_baseline_matches_the_tests_actually_
 collected` đối chiếu mỗi lần chạy).
 
-Máy này **CÓ** `ffmpeg 8.1.1` + `ffprobe` trên PATH (đã đo), nên `1289/15` ở trên
+
+Máy này **CÓ** `ffmpeg 8.1.1` + `ffprobe` trên PATH (đã đo), nên `1291/15` ở trên
 là số THẬT của nó. Máy **không có** `ffmpeg`/`ffprobe` cho một kết quả KHÁC: cả
 `tests/test_ingest.py` bị `skipif` ở cấp module — **9** bài cùng skip một lượt —
-nên dòng tổng kết của máy đó là **`1280 passed, 9 skipped, 15 deselected`** (=
-`1289 − 9`; con số này TỪNG ghi `978`, tức một baseline rất cũ, và nó lệch phép
+nên dòng tổng kết của máy đó là **`1282 passed, 9 skipped, 15 deselected`** (=
+`1291 − 9`; con số này TỪNG ghi `978`, tức một baseline rất cũ, và nó lệch phép
 trừ của chính khối nền ngay trên nó). Đó là
 con số của máy thiếu ffmpeg, **không phải** con số máy này từng in ra; đừng chép
 nó vào khối nền ở trên, và đừng "sửa" số nền xuống chỉ vì thiếu ffmpeg.
 
 ⚠️ Con số `856` ở đây TỪNG không khớp phép trừ của chính nó: `865 − 9 = 856`, tức
 nó là số của lượt TRƯỚC `V1` (+3 bài) còn sót lại. Phép trừ của khối nền hiện tại
-là `1289 − 9` = `1280`.
+là `1291 − 9` = `1282`.
+
 
 (Con số này từng bị ghi là `798`: bài `test_a_failed_translation_leaves_the_
 transcript_reviewed` được thêm ở `a428334` — **cùng commit đã sửa tệp này** — mà
 số nền không được bump. Nó tồn tại để phát hiện TRÔI, nên một số sai làm mọi lần
 chạy báo dương tính giả.
 
-Lần bump này, `1288/15` → `1289/15` (**+1 bài**), do đóng nợ **`N-9`** (route export ghi
+
+Lần bump này, **gộp nhánh `gd2-mt`** (13 commit dọn nợ P2: `M-3`, `M-4`, `M-10`..`M-14`, `P1-1`): `1289/15` → `1291/15` (**+2 bài** ròng) — thêm `tests/test_ollama_probe.py`, `tests/test_schema_llm_calls_index.py`, `tests/test_transcribe_pipeline.py` và các ca mới ở `test_api_sources.py`/`test_api_jobs_sse.py`, đồng thời `M-3` gỡ đường GHI của route export (kèm bài ghim "không ghi tệp") và `M-13` gỡ `app.state.mt_engines` cùng bài ghim nó. Bản gộp chọn cách của `gd2-mt` cho `N-9`/`M-3` (**không** `?save=1`): một tham số không người gọi trong production là khai báo chết.
+
+Lần bump trước, `1288/15` → `1289/15` (**+1 bài**), do đóng nợ **`N-9`** (route export ghi
 tệp trên một `GET`): mặc định `GET /api/export/{translation_id}` chỉ TRẢ nội dung,
 `?save=1` mới ghi. Bài mới `test_export_without_save_does_not_touch_the_disk` đo cả hai
 vế; bốn bài cũ (đo đường GHI, so tên/byte trên đĩa) nay xin `save=1`. Mutation đã chạy:
@@ -128,6 +133,38 @@ trả lời, khai đúng `model_ref`, khoá API có trong biến môi trường)
 chỉ dò MỘT lần, hàng thiếu `base_url` là "chưa sẵn sàng" chứ không làm sập tiến trình,
 còn lúc DỰNG engine thì thiếu `base_url`/khoá là lỗi ồn và `runtime` lạ không được đoán
 thành `opus-mt`.
+
+📌 **Lịch sử bump của nhánh `gd2-mt` (đợt dọn nợ P2), ghi nguyên văn.** Bốn chữ số dưới đây là số của **nhánh đó**, KHÔNG phải của cây gộp — chúng được giữ lại để không mất dấu `M-3`, `M-4`, `M-10`..`M-14` và lý do từng bài bị gỡ/đổi tên; số nền của cây gộp là khối ở TRÊN.
+
+Sáu lần bump gần nhất, theo ĐÚNG thứ tự thời gian của commit. `819/13` → `821/13`:
+đợt dọn nợ thêm `tests/test_schema_llm_calls_index.py` (2 bài chọn được, cả 2
+chạy thật). `821/13` → `829/13`: đợt dọn nợ P2 (Giai đoạn 2) thêm **8** bài chọn
+được — `M-11` 3 bài (`safe_basename` trần độ dài + route upload thật), `M-14` 1
+bài (hai route nói cùng một câu cho lỗi engine lạ), `M-4` 1 bài (auto-forward
+ghim `glossary_version`), `M-12` 3 bài (`audio_path` phải chứng minh containment
++ `is_file()`). `829/13` → `828/13`: cùng đợt P2, `M-13` **gỡ** một bài —
+`test_app_exposes_the_same_mt_engines_object`, bài duy nhất ghim thuộc tính
+`app.state.mt_engines` mà KHÔNG mã sản xuất nào đọc; bất biến thật của nó
+("handler và composition root dùng CÙNG một dict engine") vẫn được ghim bằng
+`tests/test_mt_wiring.py::test_translate_handler_is_registered_with_the_same_
+engines_dict`. `828/13` → `829/13`: `M-10` thêm 1 bài ghim rằng **ba** đường
+Ollama (`/api/status`, phép dò availability, `base_url` của engine) cùng đi qua
+`app.config.resolve_ollama_base_url`, tức cùng tôn trọng `OLLAMA_HOST`.
+`829/13` → `827/13`: cùng đợt P2, `M-3` **gỡ HAI** bài vì tiền đề của chúng là
+lần GHI trên đĩa của route spec (`routes_translations._materialise` gọi
+`domain.paths.resolve_within`), thứ `M-3` xoá hẳn:
+`test_the_spec_route_proves_containment_before_writing` và
+`test_the_spec_route_still_serves_the_body_when_containment_fails`. Hai vế của
+chúng KHÔNG mất — xem khối thay thế ở cuối
+`tests/test_api_export_by_translation.py`;
+`test_the_spec_route_materialises_the_same_artifact_name` được ĐỔI TÊN thành
+`test_the_spec_route_writes_no_artifact_to_disk` (không đổi số lượng).
+`827/13` → `828/13` (bước CUỐI của đợt P2): `P1-1` thêm 1 bài vào
+`tests/test_schema_llm_calls_index.py` — một ca dựng DB **v2** (schema của
+`4a747e6`: đã có `translations.status` và `version='2'`, chỉ thiếu
+`idx_llm_calls_job`) để ghim rằng gate `executescript(SCHEMA_SQL)` sau
+`version < SCHEMA_VERSION` là HỒI QUY: nó giữ ca v1 xanh trong khi mọi DB v2
+đang tồn tại vĩnh viễn không nhận index.
 
 Lần bump gần nhất, `1202/15` → `1206/15` (**+4 bài**), do sửa lỗi **`--batches`
 bị `--configs` nuốt**: `main()` của `scripts/smoke_echo_guard.py` tự gán cứng lô
@@ -403,6 +440,7 @@ ghim nó ở đó sẽ nói sai lý do).
 Bump này cũng đổi `SCHEMA_VERSION` `2` → `3`: cột `translations.chimera` là một
 CỘT, nên nó cần một bước migration thật, khác hẳn index của `llm_calls` (một ĐỐI
 TƯỢNG, `CREATE INDEX IF NOT EXISTS` tự chạy trên DB cũ).
+
 
 Số này chỉ để phát hiện TRÔI: một thay đổi làm nó **giảm** là một bài đã bị gỡ
 hoặc bị bỏ quên, không phải "suite nhanh hơn".

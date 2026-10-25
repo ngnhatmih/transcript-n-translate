@@ -204,7 +204,7 @@ def _wired(tmp_path, monkeypatch, *, fail_times: int = 0):
         f"{DEFAULT_MT!r}: đã nhận {seen_ref!r}, phải là {registry_mt_ref!r}"
     )
 
-    app = main.build_app(repos, specs, worker, broker, mt_engines)
+    app = main.build_app(repos, specs, worker, broker)
     with TestClient(app) as c:
         c.repos = repos          # type: ignore[attr-defined]
         c.worker = worker        # type: ignore[attr-defined]

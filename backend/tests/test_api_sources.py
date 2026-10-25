@@ -1134,11 +1134,8 @@ def test_the_worker_and_the_stream_share_the_broker_of_the_assembled_app(built):
     """
     main, repos, specs, worker, engine, broker, mt_engines = built
     worker.handlers["asr"] = RecordingHandler(job_type="asr")
-    app = main.build_app(repos, specs, worker, broker, mt_engines)
+    app = main.build_app(repos, specs, worker, broker)
     assert app.state.broker is broker, "app phải đọc đúng broker của build_components()"
-    assert app.state.mt_engines is mt_engines, (
-        "app phải đọc ĐÚNG dict mt_engines của build_components(), không phải bản sao"
-    )
     repos.add_job(a_job(None, job_type="asr", engine="fw-large-v3-turbo"))
 
     async def run_a_job():
@@ -1513,6 +1510,7 @@ def test_safe_basename_treats_a_leading_colon_prefix_as_a_drive():
     assert safe_basename("x:y.mp4") == "y.mp4"
 
 
+
 # --------------------------------------------------------------------------
 # A1: tên tệp KHÔNG phải ASCII (tiếng Trung, tiếng Việt có dấu) phải qua được.
 #
@@ -1596,6 +1594,38 @@ def test_upload_writes_no_path_outside_media_for_a_non_ascii_path_name(client, m
     assert resp.json()["source"]["origin"] == "请您欣赏/../../../thoat-ra-ngoai.ogg"
 
 
+#: Trần của MỘT thành phần đường dẫn trên NTFS là 255 ký tự. Tên 302 ký tự toàn
+#: ký tự an toàn đi lọt qua cả ba phép kiểm cũ (không kết thúc bằng dấu chấm,
+#: không phải thiết bị, khớp `_SAFE_CHARS`) rồi làm `open()` ném `OSError` ở tận
+#: `_copy_upload` ⇒ route upload trả **500** cho một lỗi ĐẦU VÀO. Cùng lớp lỗi mà
+#: `a*b.mp4` và `CON` đã trả giá (C-1/API-01): hỏng ở `open()` thay vì 422.
+_OVERLONG_FILENAME = "a" * 302
+
+#: Tên ĐÚNG BẰNG trần: phải đi qua. Không có vế này thì một trần đặt lệch
+#: (`>= 255`, hay `> 200`) vẫn làm bài trên xanh.
+_MAX_LENGTH_FILENAME = "a" * 255
+
+
+def test_safe_basename_rejects_a_name_longer_than_the_filesystem_limit():
+    """Tên dài quá trần của hệ tệp là lỗi ĐẦU VÀO, không phải lỗi máy chủ.
+
+    Đo được trước bản vá: route upload trả 500 (xem
+    `test_upload_answers_422_for_an_overlong_filename` ngay dưới).
+    """
+    from app.domain.paths import InvalidBasename, safe_basename
+
+    with pytest.raises(InvalidBasename) as excinfo:
+        safe_basename(_OVERLONG_FILENAME)
+    assert "tên tệp" in str(excinfo.value)
+
+
+def test_safe_basename_keeps_a_name_exactly_at_the_filesystem_limit():
+    """Vế đối chứng của trần: 255 ký tự là tên HỢP LỆ, không được từ chối."""
+    from app.domain.paths import safe_basename
+
+    assert safe_basename(_MAX_LENGTH_FILENAME) == _MAX_LENGTH_FILENAME
+
+
 
 async def _post_upload(media_root: pathlib.Path, filename: str,
                        payload: bytes = b"x") -> int:
@@ -1661,6 +1691,19 @@ def test_upload_answers_422_promptly_for_a_reserved_device_name(tmp_path, name):
     """Ca nặng nhất của C-1, đo riêng: `CON` từng không bao giờ trả về."""
     status = _upload_status_within(tmp_path, name, timeout=5.0)
     assert status == 422, f"filename={name!r} -> {status}, phải là 422"
+
+
+def test_upload_answers_422_for_an_overlong_filename(tmp_path):
+    """Trần độ dài qua ĐƯỜNG THẬT: 302 ký tự an toàn ⇒ 422, không phải 500.
+
+    Đi qua `_upload_status_within` — hàm này gọi `_post_upload`, tức app ASGI
+    THẬT với `raise_app_exceptions=False`, trong một luồng daemon có trần thời
+    gian — chứ không gọi `safe_basename` trần: thứ hỏng trước bản vá là mã TRẠNG
+    THÁI của route, `open()` ném `OSError` trong `_copy_upload` và FastAPI biến
+    nó thành 500.
+    """
+    status = _upload_status_within(tmp_path, _OVERLONG_FILENAME)
+    assert status == 422, f"filename dài {len(_OVERLONG_FILENAME)} -> {status}, phải là 422"
 
 
 def test_upload_still_accepts_a_normal_filename(client):

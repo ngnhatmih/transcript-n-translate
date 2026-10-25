@@ -2,10 +2,24 @@
 
 Spec §11 ghi `GET /api/export/{translation_id}?format=&bilingual=`, còn Giai đoạn 1a
 đã ship `POST /api/export` + `GET /api/export/{job_id}/download`. Hai đường phải
-không trôi khỏi nhau — cùng `artifact_name()` nên cùng TÊN TỆP — và ba bài
-`test_both_export_routes_*` dưới đây ghim điều đó trên CẢ SÁU ô định dạng × song
-ngữ, bằng BYTE (không phải `.text`) và bằng TÊN TỆP mỗi đường ghi ra đĩa, không chỉ
-bằng nội dung.
+không trôi khỏi nhau — dùng CHUNG `FORMATS`/`MEDIA_TYPES` nên cùng một bản dịch cho
+ra cùng nội dung — và các bài `test_both_export_routes_*` dưới đây ghim điều đó trên
+CẢ SÁU ô định dạng × song ngữ, bằng BYTE (không phải `.text`).
+
+**`M-3` của đợt dọn nợ P2 đổi thứ so được.** Route spec từng ghi thêm một tệp phụ đề
+lên đĩa từ chính `GET` đó; người dùng đã chốt BỎ lần ghi ấy (một `GET` có tác dụng
+phụ, và tệp đó không có người đọc — thân phụ đề đã nằm trong `PlainTextResponse`,
+còn đường tải tệp là `GET /api/export/{job_id}/download`). Nên:
+
+* hai đường còn so được **thân phản hồi** (`r.content`, byte thô) — không còn tên
+  tệp nào của route spec để so;
+* route spec phải để lại **KHÔNG tệp nào**, và điều đó được khẳng định ngay trong
+  `_run_the_spec_route` nên mọi bài đi qua helper ấy đều ghim nó;
+* hai bài cũ sống bằng chính lần ghi đó (`..._proves_containment_before_writing`,
+  `..._still_serves_the_body_when_containment_fails`) đã bị bỏ: tiền đề của chúng là
+  `routes_translations.resolve_within`, thứ `M-3` xoá hẳn — không còn đường GHI nào
+  để chứng minh containment, còn "thân phụ đề vẫn được trả về" được ghim mạnh hơn ở
+  `test_the_spec_route_writes_no_artifact_to_disk`.
 
 Bốn chỗ khác brief, và lý do:
 
@@ -34,7 +48,6 @@ Bốn chỗ khác brief, và lý do:
 from __future__ import annotations
 
 import dataclasses
-import json
 import pathlib
 
 import pytest
@@ -94,7 +107,7 @@ def wired(tmp_path, monkeypatch):
 
     repos, specs, worker, broker, mt_engines = main.build_components()
     _assert_repo_data_dirs_untouched(before)
-    app = main.build_app(repos, specs, worker, broker, mt_engines)
+    app = main.build_app(repos, specs, worker, broker)
 
     with TestClient(app) as client:
         client.repos = repos            # type: ignore[attr-defined]
@@ -141,7 +154,11 @@ def _translation_texts(repos, translation_id: int) -> list[str]:
 
 @dataclasses.dataclass(frozen=True)
 class _Exported:
-    """Một lần xuất: BYTE client nhận, BYTE tệp trên đĩa, và TÊN TỆP đó."""
+    """Một lần xuất của ĐƯỜNG CŨ: BYTE client nhận, BYTE tệp trên đĩa, TÊN TỆP đó.
+
+    Chỉ đường CŨ còn dùng: `M-3` bỏ lần ghi đĩa của route spec nên route đó không
+    còn tệp trên đĩa lẫn tên tệp để đo.
+    """
 
     content: bytes
     disk: bytes
@@ -155,11 +172,10 @@ def _clear_format(out_dir: pathlib.Path, fmt: str) -> None:
 
 
 def _measure(out_dir: pathlib.Path, fmt: str, response, *, label: str) -> _Exported:
-    """Tệp `.<fmt>` mà `response` để lại trên đĩa, kèm byte của response.
+    """Tệp `.<fmt>` mà ĐƯỜNG CŨ để lại trên đĩa, kèm byte của response.
 
     ĐÚNG MỘT tệp: một lần xuất ghi một tệp phụ đề, còn tệp chỉ mục `.json` đi kèm
-    không khớp `*.<fmt>`. Nhiều hơn nghĩa là đường đó ghi thêm thứ khác, và khi đó
-    so tên hai đường là so hai tập hợp khác nhau.
+    không khớp `*.<fmt>`. Nhiều hơn nghĩa là đường đó ghi thêm thứ khác.
     """
     assert response.status_code == 200, f"{label}: {response.text}"
     written = sorted(p.name for p in out_dir.glob(f"*.{fmt}"))
@@ -167,6 +183,15 @@ def _measure(out_dir: pathlib.Path, fmt: str, response, *, label: str) -> _Expor
     return _Exported(content=response.content,
                      disk=(out_dir / written[0]).read_bytes(),
                      name=written[0])
+
+
+def _listings(out_dir: pathlib.Path) -> list[str]:
+    """Tên MỌI thứ trong thư mục đầu ra, thô — không lọc phần mở rộng.
+
+    `glob("*.srt")` chỉ bắt tệp phụ đề; một hồi quy ghi `.json`/`.tmp`/tệp tạm phải
+    cũng làm phép kiểm "route spec không ghi gì" đỏ, nên phép kiểm đi qua đây.
+    """
+    return sorted(p.name for p in out_dir.iterdir())
 
 
 def _run_the_old_route(c, repos, worker, out_dir, tid: int, translations: list[str],
@@ -197,16 +222,23 @@ def _run_the_old_route(c, repos, worker, out_dir, tid: int, translations: list[s
 
 
 def _run_the_spec_route(c, out_dir, tr_id: int, *, fmt: str = "srt",
-                        bilingual: bool = False) -> "_Exported":
-    """Đường spec, đo trên thư mục đã dọn: byte trả về + tên/byte tệp nó ghi ra.
+                        bilingual: bool = False):
+    """Đường spec: trả RESPONSE, và khẳng định nó KHÔNG để lại tệp nào (`M-3`).
 
-    `save=1` là CỐ Ý: từ lượt vá `N-9`, `GET` mặc định **không** ghi tệp
-    (`test_export_without_save_does_not_touch_the_disk` ghim vế đó). Nhóm bài này
-    so TÊN + BYTE giữa hai đường, nên nó phải xin bản có ghi.
+    Trả response chứ không trả `_Exported`: `M-3` bỏ lần ghi đĩa của route này nên
+    không còn tệp trên đĩa để đo. Phép kiểm "không ghi gì" nằm NGAY Ở ĐÂY — trên
+    danh sách thô của thư mục đầu ra, chụp trước và sau lần gọi — nên mọi bài đi
+    qua helper này đều ghim nó, không chỉ bài chuyên về nó.
     """
     _clear_format(out_dir, fmt)
-    r = c.get(f"/api/export/{tr_id}?format={fmt}&bilingual={int(bilingual)}&save=1")
-    return _measure(out_dir, fmt, r, label="route spec")
+    before = _listings(out_dir)
+    r = c.get(f"/api/export/{tr_id}?format={fmt}&bilingual={int(bilingual)}")
+    assert r.status_code == 200, r.text
+    after = _listings(out_dir)
+    assert after == before, (
+        f"route spec KHÔNG được ghi tệp nào: trước {before}, sau {after}")
+    return r
+
 
 
 # ---------------------------------------------------------------------------
@@ -253,36 +285,6 @@ def test_export_by_translation_returns_srt(wired):
     # Cùng MIME với đường cũ (`MEDIA_TYPES` của pipeline, không phải text/plain):
     # `application/x-subrip` là thứ trình phát nhận ra phụ đề.
     assert r.headers["content-type"].startswith("application/x-subrip")
-
-
-def test_export_without_save_does_not_touch_the_disk(wired):
-    """`N-9`: một `GET` đọc KHÔNG được ghi tệp; `?save=1` mới ghi.
-
-    Đo được trước khi vá: mỗi lần xem trước để lại một tệp `.srt` trong
-    `data/output`, nên hai lần xem là hai tệp (và một `GET` có tác dụng phụ trên
-    đĩa). Bài này đo CẢ HAI vế trên cùng một thư mục đã dọn:
-
-    * gọi KHÔNG `save` ⇒ **0** tệp mới, và byte trả về y hệt bản có `save`;
-    * gọi `?save=1` ⇒ **đúng 1** tệp, nội dung bằng byte của response.
-
-    Mutation: bỏ điều kiện `if save:` trong `export_translation` ⇒ vế đầu ĐỎ.
-    """
-    c, repos, out_dir, _worker = wired
-    _, tr_id = _ready(repos)
-    _clear_format(out_dir, "srt")
-
-    plain = c.get(f"/api/export/{tr_id}?format=srt")
-    assert plain.status_code == 200, plain.text
-    assert sorted(p.name for p in out_dir.glob("*.srt")) == [], (
-        "GET mặc định không được ghi tệp (nợ N-9)")
-
-    saved = c.get(f"/api/export/{tr_id}?format=srt&save=1")
-    assert saved.status_code == 200, saved.text
-    written = sorted(p.name for p in out_dir.glob("*.srt"))
-    assert len(written) == 1, f"save=1 phải ghi ĐÚNG một tệp: {written}"
-    assert (out_dir / written[0]).read_bytes() == saved.content
-    assert saved.content == plain.content, (
-        "ghi tệp không được đổi NỘI DUNG trả về — nếu không thì hai lần xem cho hai bản")
 
 
 def test_export_bilingual_contains_source_and_translation(wired):
@@ -374,113 +376,16 @@ def test_export_with_segment_counts_out_of_step_is_409(wired):
 
 
 # ---------------------------------------------------------------------------
-# `format=json` — định dạng DUY NHẤT mang mốc thời gian của BẢN GỐC + bản dịch
-# ---------------------------------------------------------------------------
-
-def test_export_json_has_meta_and_the_original_times(wired):
-    """Body JSON thật của route: đủ khoá, giây của BẢN GỐC, tiếng Việt không escape.
-
-    `_SOURCE` là thứ DUY NHẤT có mốc thời gian (0–1 và 1–2 giây), còn `_VIETNAMESE`
-    chỉ là chữ — nên một bản vá lấy `start`/`end` từ "đoạn dịch" sẽ đỏ ngay ở đây.
-    """
-    c, repos, _out, _worker = wired
-    tid, tr_id = _ready(repos)
-
-    r = c.get(f"/api/export/{tr_id}?format=json")
-
-    assert r.status_code == 200, r.text
-    assert r.headers["content-type"].startswith("application/json")
-    body = json.loads(r.text)
-    assert set(body) == {"meta", "segments"}
-    assert [s["i"] for s in body["segments"]] == [1, 2]
-    assert [(s["start"], s["end"]) for s in body["segments"]] == [(0.0, 1.0), (1.0, 2.0)]
-    assert [s["start_timecode"] for s in body["segments"]] == [
-        "00:00:00.000", "00:00:01.000"]
-    assert [s["text"] for s in body["segments"]] == [s.text for s in _SOURCE]
-    assert [s["translation"] for s in body["segments"]] == _VIETNAMESE
-    # UTF-8 THẬT trong body, không `\uXXXX`.
-    assert "Xin chào" in r.text and "\\u" not in r.text
-
-
-def test_export_json_meta_names_the_translation_row(wired):
-    """`meta` trả lời được "tệp này từ bản dịch nào, dịch từ bản ghi version mấy".
-
-    Đây là các khoá mà đường job KHÔNG thể điền (payload job không mang hàng
-    `translations`) — xem `test_export_json_..._differs_from_the_job_route`.
-    """
-    c, repos, _out, _worker = wired
-    tid, tr_id = _ready(repos)
-
-    meta = json.loads(c.get(f"/api/export/{tr_id}?format=json").text)["meta"]
-
-    assert meta["transcript_id"] == tid
-    assert meta["translation_id"] == tr_id
-    assert meta["engine"] == "opus-mt"
-    assert meta["target_lang"] == "vi"
-    assert meta["prompt_version"] == "opus-p1"
-    assert meta["transcript_version"] == 1
-    assert meta["stale"] is False
-    assert meta["qa_issues"] == []
-
-
-def test_export_json_stale_is_true_after_the_transcript_changes(wired):
-    """Sửa bản ghi ⇒ `meta.stale` là `true` trong TỆP XUẤT, không chỉ trên màn hình.
-
-    Cùng nguồn với `list_translations` (`is_stale`), nên trả cứng `false` ở đây là
-    nói dối ngay trên tệp người dùng đem đi dùng.
-
-    Và hai khoá version phải NÓI HAI CHUYỆN KHÁC NHAU: `transcript_version` là bản
-    NGUỒN hiện tại (2), `translated_from_transcript_version` là bản mà hàng dịch
-    khai nó dịch từ (1). Gộp chúng thành một khoá là làm mất đúng câu trả lời mà
-    `stale=true` vừa nêu ra.
-    """
-    c, repos, _out, _worker = wired
-    tid, tr_id = _ready(repos)
-    edited = [dataclasses.replace(seg, text="đổi chữ") for seg in _SOURCE]
-    repos.update_transcript_segments(tid, edited)
-
-    meta = json.loads(c.get(f"/api/export/{tr_id}?format=json").text)["meta"]
-
-    assert meta["transcript_version"] == 2, "bản NGUỒN hiện tại"
-    assert meta["translated_from_transcript_version"] == 1, "bản mà hàng dịch dịch từ"
-    assert meta["stale"] is True
-
-
-def test_export_json_differs_from_the_job_route_only_in_the_row_meta(wired):
-    """HAI đường export, MỘT định dạng json: khác nhau ĐÚNG bốn khoá của hàng dịch.
-
-    Đây là chênh lệch ĐÃ KHAI, không phải trôi: đường job (`POST /api/export` →
-    tải về) nhận một payload chỉ có `transcript_id` + danh sách chữ, nên nó KHÔNG
-    BIẾT `translation_id`/`engine`/`target_lang`/`prompt_version`/`stale`. Bịa ra
-    chúng là nói dối; để `null` là "chưa đo được". Phần `segments` phải GIỐNG
-    NHAU từng byte — nếu không thì hai đường đã trôi khỏi nhau thật.
-    """
-    c, repos, out_dir, worker = wired
-    tid, tr_id = _ready(repos)
-
-    spec = json.loads(c.get(f"/api/export/{tr_id}?format=json").text)
-    old = json.loads(_run_the_old_route(c, repos, worker, out_dir, tid,
-                                        _translation_texts(repos, tr_id),
-                                        fmt="json").content.decode("utf-8"))
-
-    assert spec["segments"] == old["segments"], "phần nội dung phải giống nhau"
-    declared = {"translation_id", "engine", "target_lang", "prompt_version", "stale",
-                "translated_from_transcript_version"}
-    assert set(spec["meta"]) == set(old["meta"])
-    assert {k: v for k, v in spec["meta"].items() if k not in declared} == \
-           {k: v for k, v in old["meta"].items() if k not in declared}
-    for key in declared:
-        assert old["meta"][key] is None, (
-            f"đường job KHÔNG có hàng dịch nên `{key}` phải là null: {old['meta']!r}")
-    assert spec["meta"]["translation_id"] == tr_id
-
-
-# ---------------------------------------------------------------------------
 # Hai đường KHÔNG được trôi khỏi nhau
 # ---------------------------------------------------------------------------
 
 def test_both_export_routes_produce_the_same_bytes(wired):
-    """Route cũ và route spec phải cho CÙNG byte VÀ CÙNG TÊN TỆP, một bản dịch."""
+    """Route cũ và route spec phải cho CÙNG byte thân phản hồi, một bản dịch.
+
+    `M-3` bỏ lần ghi đĩa của route spec nên thứ so được là BYTE hai client nhận
+    (`r.content`), không còn tệp nào của route spec để so — bản thân route spec
+    "không ghi gì" đã được ghim ngay trong `_run_the_spec_route`.
+    """
     c, repos, out_dir, worker = wired
     tid, tr_id = _ready(repos)
 
@@ -488,23 +393,21 @@ def test_both_export_routes_produce_the_same_bytes(wired):
     old_route = _run_the_old_route(c, repos, worker, out_dir, tid,
                                    _translation_texts(repos, tr_id))
 
-    assert spec_route.name == old_route.name
     assert spec_route.content == old_route.content
-    assert spec_route.disk == old_route.disk
 
 
 @pytest.mark.parametrize("fmt,bilingual", [("srt", True), ("srt", False),
                                            ("vtt", True), ("vtt", False),
                                            ("ass", True), ("ass", False)])
 def test_both_export_routes_agree_for_every_format(wired, fmt, bilingual):
-    """CẢ SÁU ô của ba định dạng × hai chế độ song ngữ: cùng BYTE và cùng TÊN TỆP.
+    """CẢ SÁU ô của ba định dạng × hai chế độ song ngữ: cùng BYTE thân phản hồi.
 
     Không thừa: `to_srt` tra bản dịch theo `n - 1` còn `to_vtt`/`to_ass` tra theo
     vị trí của `enumerate`, và `.vi` chỉ xuất hiện khi có bản dịch — ba định dạng
     là ba đường sinh nội dung khác nhau, không phải một đường lặp lại. So `.text`
-    là CHƯA ĐỦ theo hai hướng: `Path.read_text()` nuốt `\r\n`, và một mutant đổi
-    stem của route spec vẫn cho nội dung y hệt trong khi tên tệp đã trôi — nên tên
-    tệp phải được so riêng.
+    là CHƯA ĐỦ: `Path.read_text()` nuốt `\\r\\n`, còn byte thô thì không — nên
+    phép so ở đây đi qua `.content`, và `_run_the_spec_route` ghim luôn vế "route
+    spec không để lại tệp nào" cho cả sáu ô.
     """
     c, repos, out_dir, worker = wired
     tid, tr_id = _ready(repos)
@@ -515,22 +418,18 @@ def test_both_export_routes_agree_for_every_format(wired, fmt, bilingual):
                                    _translation_texts(repos, tr_id),
                                    fmt=fmt, bilingual=bilingual)
 
-    assert spec_route.name == old_route.name
     assert spec_route.content == old_route.content
-    assert spec_route.disk == old_route.disk
 
 
 def test_both_routes_write_byte_identical_files(wired):
-    """Không chỉ cùng nội dung TRẢ VỀ: cùng TỆP trên đĩa, từng byte một.
+    """Hai đường cho ra byte Y HỆT NHAU, và byte ấy là LF — không dựa vào `.text`.
 
-    `Path.read_text()` dịch `\\r\\n` thành `\\n`, nên một route ghi bằng
-    `Path.write_text()` mặc định (Windows: CRLF) vẫn cho ra nội dung "giống nhau"
-    khi đọc lại — đúng lớp lỗi mà `pipeline/export.py::_write_utf8` ra đời để chặn.
-    Bài này đọc BYTE THÔ, và xoá tệp trước khi gọi route spec để byte đọc sau
-    CHẮC CHẮN do route spec ghi ra.
-
-    `save=1` là CỐ Ý (nợ `N-9`): mặc định `GET` không ghi, nên muốn so byte TRÊN
-    ĐĨA của hai đường thì phải xin bản có ghi.
+    `PlainTextResponse(body)` là thứ route spec trả về, nên `r.content` CHÍNH LÀ
+    byte nó từng ghi; so với tệp mà đường CŨ để lại là so hai thân phụ đề đã sinh
+    từ cùng `FORMATS`/`MEDIA_TYPES`. Vế LF/CRLF vẫn cần đo riêng: `Path.write_text()`
+    mặc định trên Windows ghi `\\r\\n`, còn `Path.read_text()` DỊCH `\\r\\n` về `\\n`
+    và che mất đúng lớp lỗi mà `pipeline/export.py::_write_utf8` ra đời để chặn —
+    nên phép kiểm ở đây đi trên BYTE THÔ, không phải trên `.text`.
     """
     c, repos, out_dir, worker = wired
     tid, tr_id = _ready(repos)
@@ -538,111 +437,57 @@ def test_both_routes_write_byte_identical_files(wired):
 
     _run_the_old_route(c, repos, worker, out_dir, tid,
                        _translation_texts(repos, tr_id))
-    from_handler = target.read_bytes()
-    target.unlink()
-
-    r = c.get(f"/api/export/{tr_id}?format=srt&save=1")
-
-    assert r.status_code == 200, r.text
-    from_spec_route = target.read_bytes()
-    assert from_spec_route == from_handler
-    assert b"\r\n" not in from_spec_route, "phải là LF, như `_write_utf8` của handler"
-    assert from_spec_route.decode("utf-8") == r.text
-
-
-def test_the_spec_route_materialises_the_same_artifact_name(wired):
-    """Cùng `artifact_name()` ⇒ cùng TÊN TỆP, không chỉ cùng nội dung.
-
-    Tên `transcript-<transcript_id>.vi.<fmt>` là tên mà `ExportHandler` ghi và
-    `GET /api/export/{job_id}/download` đi tìm (nó tự tính lại từ payload job). Hai
-    chỗ ghép tên bằng tay là hai chỗ trôi khỏi nhau — đó là lý do `artifact_name()`
-    tồn tại, và bài này ghim route spec vào ĐÚNG nguồn đó.
-
-    `save=1` là CỐ Ý (nợ `N-9`): mặc định `GET` không ghi tệp, nên muốn so TÊN
-    trên đĩa thì phải xin bản có ghi.
-    """
-    c, repos, out_dir, worker = wired
-    tid, tr_id = _ready(repos)
-
-    r = c.get(f"/api/export/{tr_id}?format=srt&save=1")
-    assert r.status_code == 200, r.text
-    assert (out_dir / f"transcript-{tid}.vi.srt").is_file(), (
-        sorted(p.name for p in out_dir.iterdir()))
-
-    _run_the_old_route(c, repos, worker, out_dir, tid,
-                       _translation_texts(repos, tr_id))
-
-    # Đường cũ ghi CÙNG tệp đó, không phải một tệp thứ hai nằm cạnh.
-    assert [p.name for p in out_dir.iterdir() if p.suffix == ".srt"] == [
-        f"transcript-{tid}.vi.srt"]
-
-
-# ---------------------------------------------------------------------------
-# Đường GHI của route spec phải đi qua containment (M-3 của review cuối)
-# ---------------------------------------------------------------------------
-
-def test_the_spec_route_proves_containment_before_writing(wired, monkeypatch):
-    """Lần ghi trên đĩa phải đi QUA `domain.paths.resolve_within`, không ghi thẳng.
-
-    Giai đoạn 1a đã trả giá cho một `stem` chưa lọc trên đường export, nên mọi chỗ
-    GHI đều phải chứng minh đích thật nằm trong thư mục cho phép. Route này là chỗ
-    duy nhất trong giai đoạn ghi tệp mà không đi qua đó.
-
-    Đo bằng SPY trên chính hàm dùng chung (không phải bằng một bản sao logic trong
-    test): nếu route quay lại `(out_dir / name).open(...)`, spy không được gọi và
-    bài này đỏ ngay, dù hành vi trên đĩa y hệt (nên một test chỉ so byte sẽ không
-    bao giờ bắt được).
-    """
-    from app.api import routes_translations
-
-    seen: list[tuple[object, object]] = []
-    real = routes_translations.resolve_within
-
-    def spy(root, candidate):
-        seen.append((root, candidate))
-        return real(root, candidate)
-
-    c, repos, out_dir, _worker = wired
-    _, tr_id = _ready(repos)
-    # Vá ĐÚNG tên mà route gọi. `routes_translations` import hàm bằng `from ... import`,
-    # nên nó giữ tham chiếu RIÊNG: vá `app.domain.paths.resolve_within` không tới
-    # được chỗ gọi (xem bài dưới, nơi cùng lý do này được ghim bằng phép ĐỎ).
-    monkeypatch.setattr(routes_translations, "resolve_within", spy)
-
-    r = c.get(f"/api/export/{tr_id}?format=srt&save=1")
-
-    assert r.status_code == 200, r.text
-    assert len(seen) == 1, f"phải chứng minh containment ĐÚNG một lần: {seen}"
-    root, candidate = seen[0]
-    assert pathlib.Path(root) == out_dir
-    assert pathlib.Path(candidate) == out_dir / pathlib.Path(candidate).name
-    assert pathlib.Path(candidate).name.endswith(".vi.srt")
-    assert (pathlib.Path(candidate)).is_file(), "chứng minh xong thì vẫn phải ghi"
-
-
-def test_the_spec_route_still_serves_the_body_when_containment_fails(wired,
-                                                                    monkeypatch):
-    """Không chứng minh được containment ⇒ BỎ lần ghi, KHÔNG 500 và KHÔNG ghi bừa.
-
-    Thân phụ đề đã nằm trong response, nên client vẫn nhận đủ nội dung (route này
-    không phục vụ tệp — đường tải tệp là `GET /api/export/{job_id}/download`).
-    Đổi lại: một `500` vì thư mục đầu ra không phân giải được sẽ biến một lần xuất
-    đọc được thành lỗi máy chủ, còn ghi bất chấp là mở lại đúng lớp lỗi 1a.
-    """
-    from app.api import routes_translations
-    from app.domain import paths
-
-    def refuse(root, candidate):
-        raise paths.PathOutsideRoot(f"từ chối trong test: {candidate}")
-
-    c, repos, out_dir, _worker = wired
-    _, tr_id = _ready(repos)
-    monkeypatch.setattr(routes_translations, "resolve_within", refuse)
+    from_handler = target.read_bytes()      # đường job VẪN ghi tệp — giữ nguyên bước này
 
     r = c.get(f"/api/export/{tr_id}?format=srt")
 
     assert r.status_code == 200, r.text
-    assert "Xin chào" in r.text, "thân phụ đề vẫn phải được trả về"
-    assert list(out_dir.glob("*.srt")) == [], (
-        "containment không chứng minh được thì KHÔNG được ghi tệp nào"
-    )
+    assert r.content == from_handler, "hai đường phải cho ra byte y hệt nhau"
+    assert b"\r\n" not in r.content, "phải là LF, như `_write_utf8` của handler"
+    assert r.content.decode("utf-8") == r.text
+
+
+def test_the_spec_route_writes_no_artifact_to_disk(wired):
+    """`M-3` · route spec KHÔNG ghi đĩa — và thân phụ đề vẫn về đủ.
+
+    Bản trước ghim rằng route này ghi một tệp `transcript-<id>.vi.<fmt>` bằng CÙNG
+    `artifact_name()` với `ExportHandler`. Người dùng đã chốt BỎ lần ghi đó: một
+    `GET` có tác dụng phụ, và tệp ấy không có người đọc — thân phụ đề nằm trọn
+    trong `PlainTextResponse`, còn đường tải tệp là
+    `GET /api/export/{job_id}/download`.
+
+    Nên bài cũ mất tiền đề, và chỗ đáng ghim bây giờ là HAI điều, không phải một:
+    (a) **không tệp nào** xuất hiện trong `out_dir`; (b) **thân phản hồi vẫn đủ** —
+    bỏ `PlainTextResponse` là cách hỏng dễ nhất của bước này, và nó **không để lại
+    dấu vết nào trên đĩa**, nên một bài chỉ nhìn thư mục sẽ không bao giờ bắt được.
+    """
+    c, repos, out_dir, _worker = wired
+    _, tr_id = _ready(repos)
+    before = sorted(p.name for p in out_dir.iterdir())
+
+    r = c.get(f"/api/export/{tr_id}?format=srt")
+
+    assert r.status_code == 200, r.text
+    assert r.text.strip(), (
+        "thân phụ đề phải còn: route này TRẢ nội dung, không ghi tệp")
+    after = sorted(p.name for p in out_dir.iterdir())
+    assert after == before, (
+        f"route spec KHÔNG được ghi tệp nào; thư mục đổi từ {before} sang {after}")
+
+
+# ---------------------------------------------------------------------------
+# HAI BÀI "containment của đường ghi route spec" ĐÃ BỊ XOÁ (M-3, đợt dọn nợ P2)
+# ---------------------------------------------------------------------------
+#
+# `test_the_spec_route_proves_containment_before_writing` và
+# `test_the_spec_route_still_serves_the_body_when_containment_fails` sống bằng chính
+# lần GHI của route spec (`routes_translations._materialise` gọi
+# `domain.paths.resolve_within`). `M-3` xoá hẳn lần ghi đó, nên cả hai mất tiền đề:
+# không còn đường GHI nào để chứng minh containment.
+#
+# Hai vế của chúng KHÔNG bị mất, mà được ghim ở chỗ khác và mạnh hơn:
+#   * "route spec không ghi tệp nào" -> `_run_the_spec_route` (`assert after == before`,
+#     nên MỌI bài đi qua helper ấy đều ghim) và `test_the_spec_route_writes_no_artifact_to_disk`;
+#   * "thân phụ đề vẫn được trả về"  -> `test_the_spec_route_writes_no_artifact_to_disk`
+#     khẳng định `r.text` không rỗng: cùng bảo đảm đó, mà không cần một đường ghi
+#     hỏng để chứng minh.

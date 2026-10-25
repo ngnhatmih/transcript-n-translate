@@ -174,10 +174,15 @@ def build_mt_engine(engine_id: str):
     spec = _spec_or_report("mt", engine_id)
     if spec.runtime == "ollama":
         from app.adapters.mt.ollama_mt import OllamaMtEngine
+        from app.config import resolve_ollama_base_url
+        # M-10: CÙNG resolver với `app.main:_build_mt_engines`. Thiếu dây này thì
+        # `/api/status` và phép dò availability đi theo `OLLAMA_HOST`, còn smoke
+        # test dịch thật đi `127.0.0.1` — đúng loại bất đồng M-10 tồn tại để đóng.
         return spec, OllamaMtEngine(
             spec.model_ref,
             engine_id=spec.id,
             supports_glossary=bool(spec.capabilities.get("glossary_prompt", False)),
+            base_url=resolve_ollama_base_url(),
         )
     from app.adapters.mt.opus_mt import OpusMtEngine
     return spec, OpusMtEngine(spec.model_ref)

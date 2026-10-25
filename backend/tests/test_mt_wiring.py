@@ -52,7 +52,8 @@ class _RecordingMtEngine:
     trường bằng cách dựng tay).
     """
 
-    def __init__(self, model_ref: str, *, supports_glossary: bool = False,
+    def __init__(self, model_ref: str, *, base_url: str | None = None,
+                 supports_glossary: bool = False,
                  engine_id: str | None = None) -> None:
         self.model_ref = model_ref
         self._supports_glossary = supports_glossary
@@ -63,6 +64,12 @@ class _RecordingMtEngine:
         #: `None` = "không truyền gì", nên `main.py` bỏ tham số là bài ghim dây
         #: nối đỏ ngay, chứ không âm thầm rơi về điểm rơi suy từ tag.
         self.received_engine_id = engine_id
+        #: M-10: `OllamaMtEngine` THẬT đã có tham số `base_url` từ trước; bản giả
+        #: này chỉ chép thiếu nó, nên khi `_build_mt_engines` bắt đầu TRUYỀN
+        #: `base_url=` thì cả suite đỏ bằng `TypeError`. Ghi lại giá trị để dây
+        #: nối "engine phải trỏ cùng chỗ với phép dò" được ghim ngay ở đây, trên
+        #: `build_components()` THẬT.
+        self.received_base_url = base_url
 
     @property
     def engine_id(self) -> str:
@@ -246,6 +253,19 @@ def test_mt_engines_are_keyed_by_registry_spec_id_not_engine_id(harness):
                 f"`spec.model_ref` vào OllamaMtEngine(...), nhận được "
                 f"{engine.model_ref!r} thay vì {spec.model_ref!r} — tag đó đi "
                 f"thẳng vào `POST /api/chat` (`ollama_mt.py:139`)"
+            )
+            # M-10: vế thứ ba của CÙNG dây nối. Engine thật gọi HTTP tới
+            # `base_url`, nên nếu composition root không truyền địa chỉ đã phân
+            # giải thì `available` tính theo `OLLAMA_HOST` còn lời gọi dịch đi
+            # `127.0.0.1` — engine được khai sẵn sàng rồi chết ở tận worker.
+            # Kỳ vọng TÍNH bằng chính resolver, nên bài này đúng cả khi máy đang
+            # chạy có đặt `OLLAMA_HOST` hay không.
+            from app.config import resolve_ollama_base_url
+
+            assert engine.received_base_url == resolve_ollama_base_url(), (
+                f"{engine_id}: engine phải được dựng với `base_url` của CÙNG "
+                f"resolver (`app.config.resolve_ollama_base_url`), nhận được "
+                f"{engine.received_base_url!r}"
             )
 
 
@@ -504,12 +524,6 @@ def test_real_mt_engines_are_constructible_from_the_shipped_registry(tmp_path, m
         assert isinstance(engine.supports_glossary(), bool)
 
 
-def test_app_exposes_the_same_mt_engines_object(harness):
-    repos, specs, worker, broker, mt_engines = harness.build()
-    app = harness.main.build_app(repos, specs, worker, broker, mt_engines)
-    assert app.state.mt_engines is mt_engines
-
-
 # ---------------------------------------------------------------------------
 # Hành vi mà review sẽ thử nặng nhất: bóc băng xong THẬT SỰ đẻ ra một job dịch
 # với payload mà handler ăn được — đi qua `PhaseQueueWorker` + `SqliteRepos`
@@ -529,7 +543,13 @@ def test_a_finished_transcription_enqueues_a_translation_the_handler_consumes(
         "correction E: nay ĐÃ có handler `translate` nên mặc định phải BẬT"
     )
 
-    wav = tmp_path / "a.wav"
+    # M-12: wav nằm TRONG gốc media (`harness.data / "media"`), đúng chỗ mà
+    # `IngestHandler`/route upload ghi `audio_path` trong sản xuất. Bản cũ đặt nó
+    # ở `tmp_path` — NGOÀI gốc media — nên nó chỉ xanh được vì `TranscribeHandler`
+    # chưa chứng minh containment; đó là một vị trí mà production không bao giờ
+    # tạo ra, và ba bài anh em dưới đây vốn đã đặt đúng.
+    wav = harness.data / "media" / "a.wav"
+    wav.parent.mkdir(parents=True, exist_ok=True)
     wav.write_bytes(b"RIFF")
     sid = repos.add_source(kind="file", origin="a.mp4", media_path=str(wav),
                            lang="zh", audio_path=str(wav), duration=4.0)
@@ -659,6 +679,61 @@ def test_translation_records_the_version_at_forward_time_not_one(harness):
     )
     assert translation.transcript_version == repos.get_transcript(tid).version, (
         "giá trị ghi vào hàng `translations` phải là version ĐỌC TỪ REPO"
+    )
+
+
+def test_a_forwarded_translation_records_the_glossary_version(harness):
+    """M-4 · đường auto-forward phải GHIM `glossary_version`, không để NULL.
+
+    `translations.glossary_version` có HAI người ghi cho cùng một trạng thái
+    (hàng `queued`, 0 segment, job chưa chạy): `POST /api/translations` truyền
+    `repos.glossary_version()`, còn `_forward_to_translation` thì KHÔNG truyền —
+    `add_translation` nhận mặc định `None` và cột thành NULL. Nghĩa của cột vì
+    thế phụ thuộc vào ĐƯỜNG NÀO tạo ra hàng, không phải vào dữ liệu.
+
+    Đặt `glossary_version` = 7 TRƯỚC khi chuyển tiếp: mặc định là 0, và `0` không
+    phân biệt được "ghi đúng nguồn" với "hardcode 0".
+
+    Đo ở ĐÚNG MỘT nhịp worker: `tick()` chạy đúng một job, nên sau nhịp này hàng
+    `translations` đã được đường forward ghi, còn job `translate` vẫn `queued` —
+    chưa bị `TranslateHandler` (`set_translation_status(..., glossary_version=…)`)
+    ghi đè. Chạy hết hàng đợi rồi mới đọc thì cả một bản vá để NULL cũng xanh.
+    """
+    repos, _specs, worker, _broker, _engines = harness.build()
+    assert repos.get_setting("auto_forward") == "1", (
+        "bài này đo đường auto-forward, nên nó phải đang BẬT"
+    )
+    repos.set_setting("glossary_version", "7")
+
+    wav = harness.data / "media" / "g.wav"
+    wav.parent.mkdir(parents=True, exist_ok=True)
+    wav.write_bytes(b"RIFF")
+    sid = repos.add_source(kind="file", origin="g.mp4", media_path=str(wav),
+                           lang="zh", audio_path=str(wav), duration=4.0)
+    asr_engine = load_default_asr()
+    asr_job = Job(id=None, workspace=1, type="asr", engine=asr_engine,
+                  phase=js.phase_of("asr", asr_engine), payload={"source_id": sid})
+    asr_job.id = repos.add_job(asr_job)
+
+    assert worker.tick() is True, "nhịp này phải chạy job bóc băng"
+    assert repos.get_job(asr_job.id).state == "done", (
+        f"job bóc băng phải xong ở nhịp này: {repos.get_job(asr_job.id).state}"
+    )
+
+    mt_jobs = [j for j in repos.list_jobs() if j.type == "translate"]
+    assert len(mt_jobs) == 1, f"bóc băng xong phải có ĐÚNG một job dịch: {mt_jobs}"
+    assert mt_jobs[0].state == "queued", (
+        "job dịch chưa được chạy ở nhịp này — nếu nó đã `done` thì phép đo dưới "
+        "đây đang đọc giá trị do TranslateHandler ghi, không phải của đường forward"
+    )
+
+    translation = repos.get_translation(mt_jobs[0].payload["translation_id"])
+    assert translation.glossary_version == 7, (
+        "hàng `translations` do auto-forward tạo phải ghim `glossary_version` "
+        f"lúc tạo (7), không phải NULL: nhận được {translation.glossary_version!r}"
+    )
+    assert translation.glossary_version == repos.glossary_version(), (
+        "giá trị phải lấy từ CÙNG nguồn với đường API (`repos.glossary_version()`)"
     )
 
 

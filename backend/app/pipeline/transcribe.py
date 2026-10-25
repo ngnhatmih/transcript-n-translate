@@ -10,6 +10,7 @@ from typing import Callable, Iterable, Mapping
 
 from app.domain import job_state as js
 from app.domain.models import Job
+from app.domain.paths import PathOutsideRoot, resolve_within
 from app.ports.asr import ASREngine
 from app.ports.repos import Repos
 from app.registry import (MT_DEFAULT_SETTING, EngineSpec, by_id,
@@ -79,7 +80,24 @@ class TranscribeHandler:
                 f"source {source_id} chưa có audio; job ingest phải chạy trước"
             )
         audio = pathlib.Path(source.audio_path)
-        if not audio.exists():
+        # M-12: `audio_path` là dữ liệu ĐỌC TỪ DB, nên phải CHỨNG MINH nó nằm
+        # trong gốc media trước khi mở — cùng luật với `routes_media.py` (đường
+        # ĐỌC) và `pipeline/ingest.py` (đường GHI). `self._workdir` CHÍNH LÀ gốc
+        # media: `main.py:192` dựng handler này bằng `workdir=MEDIA_DIR`, nên
+        # không phải plumb thêm gì.
+        #
+        # KHÔNG có nhánh `if self._workdir is None`: `workdir` là tham số
+        # keyword-only BẮT BUỘC nên luôn có. Nhánh đó tồn tại ở `ingest.py:196`
+        # vì `media_root` ở đó là tham số tuỳ chọn — chép nguyên nó sang đây là
+        # bịa ra một trạng thái không tồn tại.
+        try:
+            audio = resolve_within(self._workdir, audio)
+        except PathOutsideRoot as exc:
+            raise FileNotFoundError(
+                f"tệp audio nằm ngoài gốc media ({self._workdir}): {exc}") from exc
+        # `is_file()` chứ không `exists()`: một THƯ MỤC cũng `exists()`, nên nó
+        # lọt qua phép kiểm cũ rồi nổ ở tận trong engine với thông báo mơ hồ.
+        if not audio.is_file():
             raise FileNotFoundError(f"tệp audio không tồn tại: {audio}")
 
         lang = source.lang or "zh"
@@ -134,6 +152,12 @@ class TranscribeHandler:
         repo), không phải "version hiện tại" tại thời điểm job chạy — job có thể
         chạy sau khi người dùng sửa transcript, và khi đó bản dịch này phải được
         coi là lệch thời (`is_stale`).
+
+        `glossary_version` đi qua ĐÚNG nguồn mà đường API dùng
+        (`routes_translations.create_translation` gọi `repos.glossary_version()`).
+        Thiếu nó thì `add_translation` nhận `None` và cột thành NULL, tức cùng
+        một trạng thái (hàng `queued`, 0 segment, job chưa chạy) có hai nghĩa
+        khác nhau tuỳ đường tạo hàng — M-4 của review cuối.
         """
         engine_id = self._default_mt_engine()
         transcript = self._repos.get_transcript(transcript_id)
@@ -144,6 +168,7 @@ class TranscribeHandler:
             target_lang=DEFAULT_TARGET_LANG,
             segments=[],
             prompt_version=self._prompt_versions.get(engine_id or "", "unknown"),
+            glossary_version=self._repos.glossary_version(),
             status="queued",
         )
         self._repos.add_job(Job(

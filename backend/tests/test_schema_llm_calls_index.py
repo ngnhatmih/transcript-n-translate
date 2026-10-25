@@ -14,6 +14,12 @@ Hai lý do khiến chỗ này đáng một tệp riêng:
 
 DB cũ được dựng bằng `V1_SQL` của `test_schema_migration` — nguyên văn schema
 TRƯỚC bản này — nên đây đúng là "DB tạo trước khi thêm index".
+
+Nhưng `V1_SQL` KHÔNG phải trạng thái thật của đĩa trước `b2ec7c6`: lúc đó
+`SCHEMA_VERSION` đã là 2 (DB đã có `translations.status`, `sources.kind` CHECK,
+`idx_jobs_state_phase`), chỉ thiếu mỗi index này. Vì vậy còn một ca thứ hai dựng
+bằng `V2_SQL` — nguyên văn `SCHEMA_SQL` của `4a747e6` (commit cuối trước khi thêm
+index), dán y nguyên chứ không suy diễn bằng `.replace()`.
 """
 import sqlite3
 
@@ -23,6 +29,109 @@ from app.adapters.persist.sqlite_repos import SqliteRepos
 from tests.test_schema_migration import V1_SQL
 
 INDEX = "idx_llm_calls_job"
+
+#: `SCHEMA_SQL` NGUYÊN VĂN của `backend/app/adapters/persist/schema.py` tại commit
+#: `4a747e6` (`git show 4a747e6:backend/app/adapters/persist/schema.py`) — schema
+#: v2 đúng như nó nằm trên đĩa TRƯỚC `b2ec7c6`, tức TRƯỚC index. Dán nguyên văn
+#: là chủ ý: suy diễn bằng
+#: `SCHEMA_SQL.replace("CREATE INDEX IF NOT EXISTS idx_llm_calls_job ON "
+#: "llm_calls(job_id);", "")` sẽ thành no-op im lặng ngay khi ai đó đổi chữ trong
+#: dòng DDL (thêm khoảng trắng, đổi tên index) — `V2_SQL` khi đó VẪN có index, DB
+#: dựng ra đã sẵn thứ cần kiểm, và ca v2 xanh vô nghĩa.
+V2_SQL = """
+CREATE TABLE IF NOT EXISTS schema_meta (
+  key TEXT PRIMARY KEY, value TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS sources (
+  id INTEGER PRIMARY KEY,
+  kind TEXT NOT NULL CHECK(kind IN ('file','url')),
+  origin TEXT NOT NULL,
+  media_path TEXT NOT NULL,
+  audio_path TEXT,
+  duration REAL,
+  lang TEXT,
+  created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS transcripts (
+  id INTEGER PRIMARY KEY,
+  source_id INTEGER NOT NULL REFERENCES sources(id),
+  engine TEXT NOT NULL,
+  lang TEXT NOT NULL,
+  segments TEXT NOT NULL,
+  version INTEGER NOT NULL DEFAULT 1,
+  status TEXT NOT NULL DEFAULT 'draft',
+  created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS translations (
+  id INTEGER PRIMARY KEY,
+  transcript_id INTEGER NOT NULL REFERENCES transcripts(id),
+  transcript_version INTEGER NOT NULL,
+  engine TEXT NOT NULL,
+  target_lang TEXT NOT NULL DEFAULT 'vi',
+  segments TEXT NOT NULL,
+  prompt_version TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'queued',
+  glossary_version INTEGER,
+  qa_issues TEXT,
+  tokens_in INTEGER,
+  tokens_out INTEGER,
+  duration_ms INTEGER,
+  created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS jobs (
+  id INTEGER PRIMARY KEY,
+  workspace INTEGER NOT NULL CHECK(workspace IN (1,2)),
+  type TEXT NOT NULL,
+  engine TEXT,
+  phase TEXT NOT NULL,
+  state TEXT NOT NULL,
+  cancel_requested INTEGER NOT NULL DEFAULT 0,
+  attempts INTEGER NOT NULL DEFAULT 0,
+  progress REAL NOT NULL DEFAULT 0,
+  log_tail TEXT NOT NULL DEFAULT '',
+  log_path TEXT,
+  error TEXT,
+  payload TEXT,
+  created_at TEXT NOT NULL,
+  started_at TEXT,
+  finished_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_jobs_state_phase ON jobs(state, phase, id);
+
+CREATE TABLE IF NOT EXISTS llm_calls (
+  id INTEGER PRIMARY KEY,
+  job_id INTEGER,
+  engine TEXT NOT NULL,
+  model_ref TEXT,
+  prompt_version TEXT,
+  tokens_in INTEGER,
+  tokens_out INTEGER,
+  duration_ms INTEGER,
+  ok INTEGER NOT NULL,
+  error TEXT,
+  created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS glossary (
+  id INTEGER PRIMARY KEY,
+  lang TEXT NOT NULL,
+  term TEXT NOT NULL,
+  translation TEXT NOT NULL,
+  note TEXT,
+  approved INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL,
+  UNIQUE(lang, term)
+);
+
+CREATE TABLE IF NOT EXISTS settings (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL
+);
+"""
 
 
 def _init(db) -> None:
@@ -110,4 +219,46 @@ def test_an_older_database_is_healed_without_a_migration(tmp_path):
         "init_schema() đóng dấu version HIỆN HÀNH; ở nhánh này nó là 3 vì cột "
         "`translations.chimera`, KHÔNG vì index — xem "
         "`test_the_index_is_not_a_migration_step`"
+    )
+
+
+def test_a_v2_database_without_the_index_is_healed(tmp_path):
+    """DB v2 THẬT (đúng thứ trên đĩa trước `b2ec7c6`) phải nhận index.
+
+    Ca `v1` ở trên KHÔNG phủ được trạng thái này. Một hồi quy kiểu "tối ưu khởi
+    động" — gate `conn.executescript(SCHEMA_SQL)` sau `if version < SCHEMA_VERSION`
+    — giữ ca v1 **XANH** (`1 < 2` nên vẫn chạy) trong khi MỌI DB v2 thật vĩnh
+    viễn không nhận index (`2 < 2` là sai), tức không cần migration nào chạy nữa.
+    Chỉ một ca dựng đúng v2 mới ghim được vế đó.
+    """
+    assert INDEX not in V2_SQL, (
+        "V2_SQL phải là schema TRƯỚC index; nếu dòng DDL trong đó đổi chữ mà V2_SQL "
+        "được suy diễn bằng .replace() thì phép cắt là no-op, DB 'v2' đã có sẵn đúng "
+        "thứ cần kiểm và ca này sẽ XANH vô nghĩa"
+    )
+    db = tmp_path / "v2.db"
+    conn = sqlite3.connect(db)
+    conn.executescript(V2_SQL)
+    conn.execute("INSERT INTO schema_meta(key, value) VALUES('version', '2')")
+    conn.commit()
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(translations)")}
+    conn.close()
+    assert "status" in cols, "dựng cảnh: V2_SQL phải là v2 THẬT (đã có status)"
+    assert INDEX not in _index_names(db), "dựng cảnh: DB v2 phải CHƯA có index"
+
+    _init(db)
+
+    assert INDEX in _index_names(db), (
+        "DB v2 — đúng trạng thái trên đĩa trước b2ec7c6, version '2' và ĐÃ có cột "
+        "status nên không migration nào chạy — vẫn phải nhận index từ chính "
+        "`executescript(SCHEMA_SQL)`; gate nó sau `version < SCHEMA_VERSION` là bỏ "
+        "rơi mọi DB đang tồn tại"
+    )
+    assert _version(db) == str(SCHEMA_VERSION), (
+        "init_schema() đóng dấu version HIỆN HÀNH lên DB vừa được heal. KHÔNG ghim "
+        "một chữ số cụ thể ở đây: `SCHEMA_VERSION` đã là 3 từ commit Chimera "
+        "(cột `translations.chimera`), tức nó đổi vì một LÝ DO KHÁC — ghim "
+        "\"2\" là ghim một sự kiện lịch sử, không phải một bất biến. Bất biến "
+        "thật của mục này là index KHÔNG phải một bước migration: nó là "
+        "`CREATE INDEX IF NOT EXISTS` trong `SCHEMA_SQL`, chạy trên DB đã tồn tại."
     )

@@ -143,6 +143,116 @@ def test_missing_audio_raises_actionable_error(repos, specs, tmp_path):
     assert "audio" in str(exc.value).lower()
 
 
+# ---------------------------------------------------------------------------
+# M-12: `audio_path` đến TỪ DB, nên trước khi mở nó phải CHỨNG MINH containment
+# ---------------------------------------------------------------------------
+
+def _an_asr_job(source_id: int, *, n: int = 1) -> Job:
+    return Job(id=n, workspace=1, type="asr", engine="fw-large-v3-turbo",
+               phase=js.phase_of("asr", "fw-large-v3-turbo"),
+               payload={"source_id": source_id}, created_at="2026-09-25T00:00:00Z")
+
+
+def test_audio_path_outside_the_media_root_is_refused(repos, specs, tmp_path):
+    """M-12(a) · `audio_path` ngoài gốc media ⇒ `FileNotFoundError` NÓI VỀ gốc media.
+
+    Cột `audio_path` đến từ DB, và đây là chỗ DUY NHẤT trong họ cột `*_path`
+    không chứng minh containment — `routes_media.py:125` và
+    `pipeline/ingest.py:199` đã đi qua `resolve_within` từ trước.
+
+    Tệp ngoài gốc được TẠO THẬT: nếu nó không tồn tại thì một bản vá bỏ hẳn
+    `resolve_within` vẫn đỏ vì "tệp audio không tồn tại", tức bài này xanh mà
+    không chứng minh được phép containment nào. Cùng lý do, khẳng định bám vào
+    chữ "gốc media" chứ không chỉ vào lớp ngoại lệ.
+    """
+    media = tmp_path / "media"
+    media.mkdir()
+    ngoai = tmp_path / "ngoai-goc-media"
+    ngoai.mkdir()
+    outside = ngoai / "a.wav"
+    outside.write_bytes(b"RIFF")
+    sid = repos.add_source(kind="file", origin="a.mp4", media_path="m", lang="zh",
+                           audio_path=str(outside), duration=4.0)
+    created: list[FakeEngine] = []
+
+    def factory(spec):
+        engine = FakeEngine(spec)
+        created.append(engine)
+        return engine
+
+    handler = TranscribeHandler(repos, specs, factory, workdir=media)
+    with pytest.raises(FileNotFoundError) as exc:
+        handler.run(_an_asr_job(sid), lambda p, line: None)
+
+    assert "gốc media" in str(exc.value), str(exc.value)
+    assert str(media) in str(exc.value), (
+        f"thông báo phải nêu gốc media ({media}): {exc.value}"
+    )
+    assert created == [], "engine không được nạp cho một tệp ngoài gốc media"
+    assert repos.list_transcripts() == [], "không được ghi transcript nào"
+
+
+def test_a_directory_as_audio_path_is_refused_before_the_engine(repos, specs, tmp_path):
+    """M-12(b) · một THƯ MỤC có thật lọt qua `exists()` rồi nổ ở tận trong engine.
+
+    `exists()` đúng cho cả thư mục, nên phép kiểm cũ cho nó đi qua và lỗi thật
+    hiện ra ở trong engine với thông báo mơ hồ (hoặc một transcript rỗng).
+    `is_file()` chặn ở ĐÚNG chỗ, trước khi `_engine_for` được gọi — nên khẳng
+    định `created == []` mới là vế phân biệt "lỗi sạch" với "lỗi từ engine".
+    """
+    media = tmp_path / "media"
+    media.mkdir()
+    a_dir = media / "khong-phai-tap-tin.wav"
+    a_dir.mkdir()                      # có THẬT trên đĩa, nhưng là THƯ MỤC
+    sid = repos.add_source(kind="file", origin="a.mp4", media_path="m", lang="zh",
+                           audio_path=str(a_dir), duration=4.0)
+    created: list[FakeEngine] = []
+
+    def factory(spec):
+        engine = FakeEngine(spec)
+        created.append(engine)
+        return engine
+
+    handler = TranscribeHandler(repos, specs, factory, workdir=media)
+    with pytest.raises(FileNotFoundError) as exc:
+        handler.run(_an_asr_job(sid), lambda p, line: None)
+
+    assert "audio" in str(exc.value).lower(), str(exc.value)
+    assert created == [], "lỗi phải xảy ra TRƯỚC khi engine được nạp"
+    assert repos.list_transcripts() == []
+
+
+def test_a_valid_audio_path_inside_the_media_root_is_unchanged(repos, specs, tmp_path):
+    """M-12(c) · vế đối chứng: đường dẫn HỢP LỆ không đổi hành vi.
+
+    Và đường dẫn giao cho engine vẫn là chính tệp đó SAU khi phân giải — một
+    phép containment trả về `None`/chuỗi rỗng/rơi mất đường dẫn sẽ làm engine mở
+    sai tệp, mà lỗi đó chỉ hiện ra ở tận adapter.
+    """
+    media = tmp_path / "media"
+    media.mkdir()
+    wav = media / "a.wav"
+    wav.write_bytes(b"RIFF")
+    sid = repos.add_source(kind="file", origin="a.mp4", media_path="m", lang="zh",
+                           audio_path=str(wav), duration=4.0)
+    created: list[FakeEngine] = []
+
+    def factory(spec):
+        engine = FakeEngine(spec)
+        created.append(engine)
+        return engine
+
+    handler = TranscribeHandler(repos, specs, factory, workdir=media)
+    handler.run(_an_asr_job(sid), lambda p, line: None)
+
+    assert len(repos.list_transcripts()) == 1
+    assert len(created) == 1
+    assert created[0].calls == [(str(wav.resolve()), "zh")], (
+        "engine phải nhận đường dẫn ĐÃ PHÂN GIẢI của chính tệp đó: "
+        f"{created[0].calls}"
+    )
+
+
 def test_engine_is_reused_across_jobs_of_the_same_phase(repos, specs, tmp_path):
     """Nạp model 4 lần cho 4 job là lãng phí 4-8 giây mỗi lần. Handler phải
     giữ engine theo id và chỉ tạo mới khi đổi engine."""

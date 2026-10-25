@@ -19,35 +19,37 @@ Bốn quyết định ở đây, và lý do chúng không hiển nhiên:
   và nuốt `speaker`/`words`/`emotion`/`events`/`t`/`qa`/`suspect` (lỗi đã bị bắt
   ở review Task 7 và lặp lại hai lần trong giai đoạn này). `start`/`end` là thời
   lượng của bản GỐC: sửa chữ không được phép làm phụ đề lệch.
-* **Route export hình dạng spec §11 ở ĐÂY, và đi CHUNG `artifact_name()` với
-  `pipeline/export.py`.** Spec ghim `GET /api/export/{translation_id}?format=&bilingual=`
+* **Route export hình dạng spec §11 ở ĐÂY, và đi CHUNG `FORMATS`/`MEDIA_TYPES`
+  với `pipeline/export.py`.** Spec ghim `GET /api/export/{translation_id}?format=&bilingual=`
   còn Giai đoạn 1a đã ship `POST /api/export` + `GET /api/export/{job_id}/download`.
   Đường CŨ không bị bỏ (nó đang chạy) và `routes_export.py` không bị sửa một byte:
-  hai đường gặp nhau ở đúng ba thứ dùng chung — `FORMATS`, `MEDIA_TYPES` và
-  `artifact_name()`. Tên tệp route này ghi là tên tệp handler của đường cũ ghi, và
-  `tests/test_api_export_by_translation.py` so nội dung của hai đường cho CÙNG một
-  bản dịch, nên chúng không thể trôi khỏi nhau mà không đỏ.
+  hai đường gặp nhau ở hai thứ dùng chung — `FORMATS` và `MEDIA_TYPES` — nên CÙNG
+  một bản dịch cho ra cùng nội dung, và `tests/test_api_export_by_translation.py` so
+  BYTE của hai đường cho cùng bản dịch đó, nên chúng không thể trôi khỏi nhau mà
+  không đỏ.
+* **Route này KHÔNG ghi đĩa (M-3 của đợt dọn nợ P2).** Thân phụ đề nằm trọn trong
+  `PlainTextResponse`; đường tải tệp là `GET /api/export/{job_id}/download`. Bản
+  trước còn ghi thêm một tệp phụ đề từ chính `GET` này: một `GET` có tác dụng phụ,
+  và tệp đó không có người đọc. Vì không còn ghi tệp, route này cũng không còn
+  dùng `artifact_name()` — hai đường chỉ còn chung phần SINH NỘI DUNG.
 """
 from __future__ import annotations
 
 import dataclasses
-import pathlib
 
 from fastapi import APIRouter, Depends, HTTPException, Response
 from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, Field
 
 from app.api.delete_guard import active_job_ids, mot_loi_409
-from app.api.deps import get_chimera_plan, get_dirs, get_repos, get_specs
+from app.api.deps import get_chimera_plan, get_repos, get_specs
 from app.api.routes_jobs import _job_json
 from app.domain.chimera import Baseline, cost_json
 from app.domain.job_state import phase_of
 from app.domain.models import Job
 from app.domain.mt_qa import QaLimits, cps_row
-from app.domain.paths import PathOutsideRoot, resolve_within
 from app.domain.staleness import is_stale, translation_summary_json
-from app.pipeline.export import (FORMATS, MEDIA_TYPES, artifact_name,
-                                 export_meta, render)
+from app.pipeline.export import FORMATS, MEDIA_TYPES, export_meta, render
 from app.registry import by_id
 
 router = APIRouter(prefix="/api/translations", tags=["translations"])
@@ -151,8 +153,12 @@ def create_translation(body: CreateIn, repos=Depends(get_repos),
     try:
         spec = by_id(specs, body.engine)
     except KeyError as exc:
-        raise HTTPException(
-            422, f"engine không có trong registry: {body.engine!r}") from exc
+        # M-14: dùng `exc.args[0]`, KHÔNG tự ghép câu thứ hai và KHÔNG dùng
+        # `str(exc)`. `KeyError.__str__` repr đối số của nó — `str(KeyError("x"))`
+        # là `"'x'"`, kèm một cặp nháy kép — nên "dùng lại `str(exc)`" gửi cho
+        # client một thông báo dính nháy lạ. `args[0]` là ĐỐI SỐ TRẦN mà `by_id`
+        # truyền, tức cùng một lỗi chỉ còn MỘT hình dạng thông báo.
+        raise HTTPException(422, exc.args[0]) from exc
 
     if spec.kind != "mt":
         # Nhận id ASR ở đây là xếp một job `translate` mà `mt_engines` chắc chắn
@@ -429,33 +435,34 @@ def chimera_cost(transcript_id: int, repos=Depends(get_repos),
 #:
 #: Không nằm trên `router` ở trên (router đó mang `prefix="/api/translations"`), và
 #: cũng KHÔNG nằm trong `routes_export.py`: tệp đó sở hữu hai route cũ ĐANG CHẠY và
-#: được giữ nguyên byte-for-byte. Hai đường gặp nhau ở `artifact_name()` chứ không ở
-#: tệp nguồn — đó chính là thứ `tests/test_api_export_by_translation.py` ghim.
+#: được giữ nguyên byte-for-byte. Hai đường gặp nhau ở `FORMATS`/`MEDIA_TYPES` chứ
+#: không ở tệp nguồn (và route này KHÔNG ghi tệp) — đó chính là thứ
+#: `tests/test_api_export_by_translation.py` ghim.
 export_router = APIRouter(prefix="/api/export", tags=["export"])
 
 
 @export_router.get("/{translation_id}", response_class=PlainTextResponse)
 def export_translation(translation_id: int, format: str = "srt", bilingual: int = 0,
-                       save: int = 0,
-                       repos=Depends(get_repos), dirs=Depends(get_dirs)):
+                       repos=Depends(get_repos)):
     """Xuất THẲNG nội dung phụ đề của một bản dịch (spec §11).
 
     Đường CŨ (`POST /api/export` -> job -> `GET /api/export/{job_id}/download`) vẫn
-    là đường chạy job và ghi tệp chỉ mục `.json`; đường này trả nội dung ngay, không
-    xếp job. Hai đường dùng CHUNG `FORMATS`/`MEDIA_TYPES`/`artifact_name()` của
-    `pipeline/export.py`, nên cùng một bản dịch ⇒ cùng nội dung và cùng tên tệp.
+    là đường chạy job và ghi tệp; đường này trả nội dung ngay, không xếp job và
+    KHÔNG ghi đĩa: thân phụ đề nằm trọn trong response, nên không có tệp nào để
+    lại và `GET` này không có tác dụng phụ. Hai đường dùng CHUNG
+    `FORMATS`/`MEDIA_TYPES` của `pipeline/export.py`, nên cùng một bản dịch ⇒ cùng
+    nội dung.
 
     `translations` ở đây là danh sách SONG SONG với `transcript.segments` (cả ba
     định dạng tra theo VỊ TRÍ, không theo `seg.i`) — đúng bất biến của
     `domain/subtitle_format.py`, và đúng thứ `ExportHandler.run` dựng từ
     `payload["translations"]`.
 
-    **`save` (mặc định 0) — vá nợ `N-9`.** Route này từng GHI một tệp vào
+    **Nợ `N-9` (M-3) — route này KHÔNG ghi đĩa.** Bản cũ GH我還 một tệp vào
     `data/output` như tác dụng phụ của chính một `GET`: đọc một URL làm thay đổi
-    đĩa, và hai lần xem trước để lại hai tệp. Nay việc ghi là **TƯỜNG MINH**:
-    không có `save` thì route chỉ TRẢ nội dung (đúng nghĩa `GET`), `?save=1` mới
-    ghi — và khi ghi thì vẫn đi qua `_materialise` với containment
-    (`domain/paths.py`), không có đường ghi thứ hai.
+    đĩa, và hai lần xem trước để lại hai tệp. Thân phụ đề nằm trọn trong response,
+    nên không có tệp nào để lại — đường GHI duy nhất còn lại là đường job
+    (`POST /api/export` -> `GET /api/export/{job_id}/download`).
     """
     fmt = format.lower()
     if fmt not in FORMATS:
@@ -490,45 +497,5 @@ def export_translation(translation_id: int, format: str = "srt", bilingual: int 
                       stale=is_stale(transcript.version,
                                      translation.transcript_version)))
 
-    # CÙNG `artifact_name()` với handler của đường cũ. `translated=True` vì route
-    # này LUÔN xuất theo một hàng `translations` — quy tắc `.vi` nằm ở
-    # `pipeline/export.py:92` (handler suy nó từ `payload["translations"] is not
-    # None`), và hai chỗ tự ghép tên là hai chỗ trôi khỏi nhau.
-    stem = f"transcript-{translation.transcript_id}"
-    name = artifact_name(stem, fmt, translated=True)
-
-    # `N-9`: ghi tệp là TÁC DỤNG PHỤ TƯỜNG MINH, không mặc định. Một `GET` đọc
-    # không được làm thay đổi đĩa — và hai lần xem trước không được để lại hai tệp.
-    if save:
-        _materialise(pathlib.Path(dirs["out"]), name, body)
-
     return PlainTextResponse(body, media_type=MEDIA_TYPES.get(fmt, "text/plain"))
 
-
-def _materialise(out_dir: pathlib.Path, name: str, body: str) -> pathlib.Path | None:
-    """Ghi bản xuất ra `<out_dir>/<name>`, CHỈ khi `resolve_within` chứng minh được.
-
-    Đường dẫn ghi của route này phải đi qua cùng hàm containment với mọi chỗ GHI
-    khác trong dự án (`domain/paths.py`), đúng như phép đọc đã đi từ Giai đoạn 1a:
-    `name` hôm nay là `artifact_name()` của một `stem` dựng từ `int` cộng một
-    `format` đã whitelist, nhưng "hôm nay an toàn" không phải một bất biến — đó
-    chính là cách lỗi `stem` chưa lọc của 1a sống sót qua nhiều vòng review.
-
-    Không chứng minh được thì BỎ lần ghi trên đĩa và trả `None`: thân phụ đề đã
-    nằm trong `PlainTextResponse`, nên client vẫn nhận đủ nội dung (route này
-    KHÔNG phục vụ tệp, đường tải tệp là `GET /api/export/{job_id}/download`), còn
-    một `500` vì thư mục đầu ra không phân giải được sẽ biến một lần xuất đọc được
-    thành một lỗi máy chủ.
-
-    `newline="\\n"` như `pipeline/export.py::_write_utf8`: mở ở chế độ văn bản mặc
-    định thì Windows dịch mọi `\\n` thành `\\r\\n`, và tệp ghi ở đây sẽ không còn
-    khớp với tệp mà handler ghi cho CÙNG một bản dịch.
-    """
-    out_dir.mkdir(parents=True, exist_ok=True)
-    try:
-        target = resolve_within(out_dir, out_dir / name)
-    except PathOutsideRoot:
-        return None
-    with target.open("w", encoding="utf-8", newline="\n") as handle:
-        handle.write(body)
-    return target

@@ -26,7 +26,8 @@ from app.adapters.registry_file import (load_chimera, load_default_asr,
 from app.api.app import create_app
 from app.api.sse import JobEventBroker
 from app.config import (API_HOST, API_PORT, DB_PATH, HF_HOME, LOG_DIR, MEDIA_DIR,
-                        OUTPUT_DIR, OLLAMA_MODELS, ensure_dirs)
+                        OUTPUT_DIR, OLLAMA_MODELS, ensure_dirs,
+                        resolve_ollama_base_url)
 from app.domain.chimera import ChimeraPlan, mark_availability, plan_from_raw
 from app.pipeline.export import ExportHandler
 from app.pipeline.ingest import IngestHandler
@@ -205,6 +206,12 @@ def _build_mt_engines(specs) -> dict[str, object]:
                 spec.model_ref,
                 engine_id=spec.id,
                 supports_glossary=bool(spec.capabilities.get("glossary_prompt", False)),
+                # M-10: CÙNG địa chỉ với phép dò availability và `/api/status`.
+                # Thiếu dây này thì `available` được tính theo `OLLAMA_HOST` còn
+                # mọi lời gọi dịch thật đi `127.0.0.1` — engine được khai sẵn sàng
+                # rồi chết ở tận worker. Phân giải LÚC DỰNG (một lần, ở composition
+                # root) là đủ: đổi `OLLAMA_HOST` là đổi cấu hình khởi động.
+                base_url=resolve_ollama_base_url(),
             )
         elif spec.runtime == "http":
             engines[spec.id] = _http_engine_from_spec(spec)
@@ -430,11 +437,16 @@ def build_components():
     return repos, specs, worker, broker, mt_engines
 
 
-def build_app(repos, specs, worker, broker, mt_engines, *, chimera_plan=None) -> FastAPI:
+def build_app(repos, specs, worker, broker, *, chimera_plan=None) -> FastAPI:
     """Ráp app HTTP từ ĐÚNG những thành phần `build_components()` trả về.
 
     Tách khỏi `main()` để test gọi được đường dây thật, không phải bản sao của
     nó: bỏ `broker=broker` ở đây là app tự dựng broker riêng và stream câm.
+
+    M-13: KHÔNG nhận `mt_engines`. App HTTP không có chỗ nào đọc dict engine, và
+    người dùng thật của nó là `TranslateHandler` — đã nhận nó trong
+    `build_components()`. Truyền thêm vào đây chỉ để gán một thuộc tính `app.state`
+    không ai đọc, kèm một comment khẳng định tầng HTTP cần nó.
     """
     if chimera_plan is None:
         # `chimera_plan_for` là hàm THUẦN trên `specs` (mọi thứ nó đọc đã nằm trong
@@ -444,7 +456,7 @@ def build_app(repos, specs, worker, broker, mt_engines, *, chimera_plan=None) ->
         chimera_plan = chimera_plan_for(specs)
     return create_app(repos=repos, specs=specs, media_dir=MEDIA_DIR,
                       out_dir=OUTPUT_DIR, worker=worker, log_dir=LOG_DIR,
-                      broker=broker, mt_engines=mt_engines,
+                      broker=broker,
                       chimera_plan=chimera_plan,
                       # Một callable, không phải số: route `/api/status` đo LÚC
                       # GỌI (VRAM đổi theo model đang nạp), và tầng HTTP không
@@ -482,9 +494,13 @@ def _engine_factory(spec):
 def main() -> None:
     import uvicorn
 
-    repos, specs, worker, broker, mt_engines = build_components()
+    # M-13: `mt_engines` KHÔNG đi vào app HTTP nữa (nó chỉ thuộc về
+    # `TranslateHandler`, đã nhận ở `build_components()`), nhưng nó vẫn là phần
+    # tử CUỐI của tuple trả về — đó là hợp đồng đã được ghim, và `main()` vẫn
+    # phải giải nén đủ năm phần tử.
+    repos, specs, worker, broker, _mt_engines = build_components()
     worker.recover()
-    app = build_app(repos, specs, worker, broker, mt_engines)
+    app = build_app(repos, specs, worker, broker)
     thread = threading.Thread(target=worker.run_forever, name="phase-queue", daemon=True)
     thread.start()
     uvicorn.run(app, host=API_HOST, port=API_PORT, log_level="info")

@@ -149,3 +149,74 @@ def test_empty_host_is_unknown_because_nobody_was_asked():
     nào được gửi đi. Bản cũ trả `down` cho ca này, tức lại bịa một sự thật chưa đo.
     """
     assert probe_ollama("") == "unknown"
+
+
+# ---------------------------------------------------------------------------
+# M-10: MỘT resolver URL Ollama — ba đường phải cùng trỏ về `OLLAMA_HOST`
+# ---------------------------------------------------------------------------
+
+def test_one_resolver_feeds_the_probe_the_availability_check_and_the_engine(
+        monkeypatch):
+    """M-10 · đặt `OLLAMA_HOST` ⇒ CẢ BA đường đi đúng host đó, không chỉ một.
+
+    Ba đường này từng mã hoá endpoint riêng và BẤT ĐỒNG: `probe_ollama` (cho
+    `/api/status`) đọc env; `ollama_available` ghim `127.0.0.1` ngay lúc ĐỊNH
+    NGHĨA hàm; còn `OllamaMtEngine` — cái gọi HTTP thật để dịch — không đọc
+    `OLLAMA_HOST` chút nào. Hệ quả trong sản xuất: `available` được tính theo
+    env trong khi mọi lời gọi dịch đi `127.0.0.1`, nên mọi engine Ollama đọc
+    `available: false` ⇒ tạo job bị 409.
+
+    Hai đường đầu được đo bằng một HTTP server THẬT trên loopback (không mock):
+    chúng chỉ trả lời đúng nếu thực sự gọi vào host trong env. Đường thứ ba quan
+    sát bằng bản ghi `OllamaMtEngine` — cùng cách
+    `tests/test_mt_wiring.py::_RecordingMtEngine` ghim dây nối của composition
+    root, vì ở đó địa chỉ là thứ `main.py` TRUYỀN VÀO chứ không phải thứ adapter
+    tự đoán.
+
+    `host` của stub KHÔNG có scheme, đúng dạng chính thức của `OLLAMA_HOST`, nên
+    phép chuẩn hoá `http://` cũng được đo luôn.
+    """
+    from app import main
+    from app.config import OLLAMA_DEFAULT_BASE_URL, resolve_ollama_base_url
+    from app.registry import EngineSpec, ollama_available
+
+    model = "qwen2.5:3b-instruct-q4_K_M"
+    with _stub_ollama(f'{{"models": [{{"name": "{model}"}}]}}'.encode()) as host:
+        monkeypatch.setenv("OLLAMA_HOST", host)
+
+        assert probe_ollama() == "up", (
+            "`/api/status` phải hỏi host trong OLLAMA_HOST, không phải 127.0.0.1"
+        )
+        assert ollama_available() == {model}, (
+            "phép dò availability phải hỏi host trong OLLAMA_HOST và đọc tên "
+            "model từ chính phản hồi đó"
+        )
+
+        spec = EngineSpec(id="qwen2.5-3b", label="Qwen 3B", kind="mt",
+                          runtime="ollama", model_ref=model, vram_mb=2600,
+                          langs=("zh", "vi"),
+                          capabilities={"available": True, "glossary_prompt": True},
+                          opts={})
+        seen: list[dict] = []
+
+        class _RecordingMtEngine:
+            def __init__(self, *args, **kwargs):
+                seen.append({"args": args, "kwargs": kwargs})
+
+        monkeypatch.setattr(main, "OllamaMtEngine", _RecordingMtEngine)
+        engines = main._build_mt_engines([spec])  # noqa: SLF001 - chính dây nối
+
+        assert set(engines) == {spec.id}, "engine `available` phải được dựng"
+        assert seen and seen[0]["kwargs"].get("base_url") == f"http://{host}", (
+            "engine mà composition root dựng phải nhận `base_url` từ CÙNG "
+            f"resolver: {seen}"
+        )
+
+    # Vế đối chứng: KHÔNG đặt env thì mặc định phải y nguyên (đây là thứ
+    # `tests/test_mt_ollama.py:403` ghim trên đường HTTP thật của adapter).
+    monkeypatch.delenv("OLLAMA_HOST", raising=False)
+    assert resolve_ollama_base_url() == OLLAMA_DEFAULT_BASE_URL == (
+        "http://127.0.0.1:11434")
+    assert resolve_ollama_base_url("127.0.0.1:9999/") == "http://127.0.0.1:9999", (
+        "thiếu `://` thì thêm `http://`, và bỏ `/` cuối"
+    )

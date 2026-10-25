@@ -55,9 +55,46 @@ def test_create_job_validates_type(env):
 
 
 def test_create_job_rejects_unknown_engine(env):
+    """M-14 · `POST /api/jobs` phải nói ĐÚNG chuỗi của registry, không thêm nháy kép.
+
+    Trước bản vá route này trả `str(exc)`, mà `KeyError.__str__` repr đối số của
+    nó, nên `detail` bị bọc thêm một cặp nháy kép. Cùng một `by_id`, cùng một
+    `KeyError`, cùng một mã 422 — nhưng `POST /api/translations` (đã sửa) và
+    `POST /api/jobs` (chưa) cho client HAI hình dạng thông báo khác nhau, tức
+    đúng thứ `M-14` nói phải hết.
+
+    Khẳng định mỗi `status_code == 422` chính là thứ đã để lớp lỗi này sống sót:
+    nó không hề đọc `detail`. Chuỗi kỳ vọng được TÍNH bằng cách gọi chính
+    `by_id`, nên bài này không thể trôi khỏi registry.
+
+    `payload` phải ĐỦ để qua phép kiểm schema ở trên: bản cũ gửi `{}` nên nó bị
+    chặn ở `payload của job 'asr' không hợp lệ: source_id: Field required` —
+    tức bài cũ xanh vì một lý do KHÁC, và nhánh `by_id` của route chưa từng được
+    chạy. `source_id` ở đây khiến phép đo rơi ĐÚNG vào nhánh cần đo.
+    """
+    from app.registry import by_id
+
     resp = env.post("/api/jobs", json={"workspace": 1, "type": "asr",
-                                      "engine": "khong-co", "payload": {}})
-    assert resp.status_code == 422
+                                      "engine": "khong-co",
+                                      "payload": {"source_id": 1}})
+
+    assert resp.status_code == 422, resp.text
+    try:
+        by_id([_ASR_SPEC, _MT_SPEC], "khong-co")
+    except KeyError as exc:
+        registry_message = exc.args[0]
+    else:  # pragma: no cover - dựng cảnh: id này KHÔNG được có trong registry
+        pytest.fail("by_id phải ném KeyError cho một id không có trong registry")
+
+    detail = resp.json()["detail"]
+    assert detail == registry_message, (
+        f"thông báo của route phải là CHÍNH chuỗi của registry: {detail!r} "
+        f"vs {registry_message!r}"
+    )
+    assert '"' not in detail, (
+        "`str(exc)` của KeyError bọc đối số trong nháy kép — thông báo gửi cho "
+        f"client không được dính nháy lạ: {detail!r}"
+    )
 
 
 def test_create_job_rejects_a_type_with_no_registered_handler(env):

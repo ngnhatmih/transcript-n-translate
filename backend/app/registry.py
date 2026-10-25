@@ -5,9 +5,13 @@ Việc đọc tệp nằm ở adapters/registry_file.py.
 Một ngoại lệ CÓ GHI NHẬN cho tính "thuần" ở trên: `ollama_available()` dò sống
 tiến trình Ollama. Nó nằm đây theo đúng Step 4 của brief Task 12, và nó KHÔNG
 kéo `httpx` vào lúc import (import nằm trong hàm) — module này vẫn import được ở
-mọi tầng, kể cả nơi `httpx` chưa cài. Nếu sau này có chỗ dò Ollama dùng chung
-(`app/api/routes_registry.probe_ollama` cũng đang dò), gộp chúng lại là việc của
-task dọn dẹp, không phải lý do để bịa thêm một tầng nữa.
+mọi tầng, kể cả nơi `httpx` chưa cài.
+
+Hai phép dò Ollama (`ollama_available` ở đây và `routes_registry.probe_ollama`)
+vẫn là hai hàm vì chúng trả lời hai câu hỏi KHÁC nhau: "model nào đã pull" và
+"tiến trình có sống". Thứ đã được gộp ở `M-10` là ĐỊA CHỈ: cả hai (và `base_url`
+của engine mà `main.py` dựng) nay đi qua `app.config.resolve_ollama_base_url`,
+nguồn duy nhất đọc `OLLAMA_HOST`.
 
 Fix round 1 (I-1): `ollama_available()` nay trả TÊN các model đã pull, không
 phải một `bool`. "Ollama sống" là điều kiện CẦN nhưng KHÔNG ĐỦ để một engine
@@ -20,6 +24,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Iterable
 
+from app.config import resolve_ollama_base_url
 from app.domain.job_state import phase_of
 
 # `kind` là loại ENGINE trong registry; `phase_of` nhận loại JOB. Hai từ vựng
@@ -130,14 +135,16 @@ def estimate_vram_mb(specs: Iterable[EngineSpec], engine_ids: Iterable[str]) -> 
     return sum(by_id(specs, eid).vram_mb for eid in engine_ids)
 
 
-#: Ollama mặc định nghe ở đây. `OLLAMA_HOST` (biến chính thức của Ollama) được
-#: `routes_registry.probe_ollama` tôn trọng cho endpoint `/api/status`; ở đây
-#: dùng hằng số tường minh để một biến môi trường dạng `host:port` (không scheme)
-#: không âm thầm làm phép dò này trả `False` — đúng lỗi API-02 của GĐ1a.
-DEFAULT_OLLAMA_BASE_URL = "http://127.0.0.1:11434"
+#: Ollama mặc định nghe ở đâu: hằng số nằm ở `app/config.py` (`M-10`), KHÔNG
+#: chép lại ở đây. `OLLAMA_HOST` được `app.config.resolve_ollama_base_url` đọc
+#: LÚC GỌI, và cả ba đường dùng nó — phép dò dưới đây, `probe_ollama` của
+#: `/api/status`, và `base_url` của engine mà `app/main.py` dựng. Trước bản vá
+#: endpoint bị mã hoá bốn chỗ và bất đồng: đặt `OLLAMA_HOST` trỏ nơi khác thì
+#: `/api/status` báo theo env trong khi phép dò (và mọi lời gọi dịch thật) đi
+#: `127.0.0.1` ⇒ mọi engine Ollama đọc `available: false` ⇒ tạo job bị 409.
 
 
-def ollama_available(base_url: str = DEFAULT_OLLAMA_BASE_URL,
+def ollama_available(base_url: str | None = None,
                      timeout: float = 1.5) -> set[str]:
     """TÊN các model Ollama đã pull. Dò MỘT lần lúc dựng, KHÔNG dò mỗi request.
 
@@ -168,8 +175,17 @@ def ollama_available(base_url: str = DEFAULT_OLLAMA_BASE_URL,
     `spec.model_ref`. Giữ luôn cả `name` lẫn `model`: Ollama trả `model` ở các
     bản cũ và `name` ở các bản mới, và bỏ sót một khoá thì một model ĐÃ pull bị
     coi là thiếu — tức lại rơi về đúng lỗi "engine sẵn sàng mà job chết".
+
+    M-10: `base_url` mặc định là `None` chứ KHÔNG phải một hằng số. Mặc định của
+    tham số được đánh giá LÚC ĐỊNH NGHĨA HÀM, nên một hằng số ở đây sẽ ghim địa
+    chỉ ngay lúc import và `monkeypatch.setenv("OLLAMA_HOST", ...)` không tác
+    động được — đúng lỗi mà bản vá này đóng lại. `None` ⇒ phân giải LÚC GỌI qua
+    `app.config.resolve_ollama_base_url` (nguồn duy nhất của địa chỉ đó).
     """
     import httpx
+
+    if base_url is None:
+        base_url = resolve_ollama_base_url()
 
     try:
         with httpx.Client(timeout=timeout) as client:
