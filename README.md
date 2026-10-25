@@ -392,13 +392,14 @@ nghĩa này là nợ phải ghi, không phải một quyết định đã chốt
   nhưng job kết thúc `failed` trước ranh giới".
 - ✅ **ĐÃ ĐÓNG — `N-9` route export GHI TỆP trên một `GET`.** (Nợ design spec §7 dòng 111 / §9 dòng 135;
   đừng nhầm với `containment`, thứ đã đóng từ Giai đoạn 2 — xem ERRATA **#48** mục 1.)
-  Cách vá: việc ghi trở thành **TƯỜNG MINH** — `GET /api/export/{translation_id}` mặc định **chỉ trả nội
-  dung**, `?save=1` mới ghi tệp (và khi ghi thì vẫn đi qua `_materialise` + `resolve_within`, không có
-  đường ghi thứ hai). Bài ghim mới: `test_export_without_save_does_not_touch_the_disk` đo **cả hai vế**
-  trên cùng thư mục đã dọn — không `save` ⇒ **0** tệp và byte y hệt; `save=1` ⇒ **đúng 1** tệp, byte bằng
-  response. Mutation đã chạy: bỏ `if save:` ⇒ bài đó ĐỎ. Bốn bài cũ vẫn đo đường GHI nên nay xin
-  `save=1` (chúng so tên/byte trên đĩa, và ghi chú điều đó ngay trong docstring).
-  ⚠️ **Quyết định này có thể đảo**: nếu muốn mọi lần xem trước đều để lại tệp trong `data/output` thì bỏ
-  tham số `save` và cho `_materialise` chạy vô điều kiện — nhưng khi đó `GET` lại có tác dụng phụ, và bài
-  ghim trên phải bị xoá cùng lý do.
+  Cách vá (chốt sau khi gộp nhánh `gd2-mt`): route **KHÔNG ghi đĩa nữa** — bỏ hẳn lần ghi, bỏ
+  `_materialise`, bỏ `dependency` `dirs` của route này. Thân phụ đề nằm trọn trong response, nên không có
+  tệp nào để lại và `GET` không còn tác dụng phụ. Đường GHI duy nhất còn lại là đường job (`POST
+  /api/export` → `GET /api/export/{job_id}/download`).
+  ⚠️ **Một bản vá khác của cùng nợ đã bị loại:** bản `?save=1` (mặc định không ghi, có cờ thì ghi) cũng
+  làm `GET` sạch, nhưng để lại **một tham số không người gọi nào trong production dùng** — đúng loại khai
+  báo chết mà repo này xoá. Hai bản không thể cùng tồn tại: cái giá của bản `save` là một đường ghi phải
+  giữ và bảo vệ (`resolve_within`, byte-exact, mutation), mà không ai dùng.
+  Bài ghim: `tests/test_api_export_by_translation.py` (bản của `gd2-mt`) khẳng định **route spec không để
+  lại tệp nào** ngay trong helper dùng chung, nên mọi bài đi qua nó đều ghim vế đó.
 
