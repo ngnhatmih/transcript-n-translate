@@ -162,6 +162,30 @@ def test_retry_only_from_retryable_states(env):
     assert env.repos.get_job(jid).state == js.QUEUED
 
 
+def test_retry_through_the_api_clears_a_stale_cancel_request(env):
+    """Nợ Giai đoạn 2 (`README.md`, ERRATA #46 mục 9) đóng ở tầng HTTP.
+
+    Đường hỏng đo được: job bị xin huỷ nhưng kết thúc `failed` TRƯỚC ranh giới ⇒
+    cờ còn ⇒ `worker._run_one` huỷ job mới ngay lượt đầu. Bài này đi qua ROUTE
+    (không phải `repos.retry_job` trực tiếp) để bắt cả trường hợp route tự dựng
+    lại hàng mà quên cờ.
+
+    Mutation: bỏ `cancel_requested=0` khỏi `retry_job` ⇒ bài này ĐỎ.
+    """
+    resp = env.post("/api/jobs", json={"workspace": 1, "type": "asr",
+                                       "engine": "fw-large-v3-turbo",
+                                       "payload": {"source_id": 1}})
+    jid = resp.json()["id"]
+    env.repos.set_job_state(jid, js.RUNNING)
+    env.repos.request_cancel(jid)
+    env.repos.set_job_state(jid, js.FAILED, error="hỏng trước ranh giới")
+
+    body = env.post(f"/api/jobs/{jid}/retry").json()
+    assert body["cancel_requested"] is False, (
+        "phản hồi của route phải nói cờ đã được xoá; còn cờ thì job mới bị huỷ ngay")
+    assert env.repos.get_job(jid).cancel_requested is False
+
+
 def test_cancel_a_missing_job_is_404_like_its_siblings(env):
     """Job không tồn tại là lỗi CLIENT (404), không phải 500.
 

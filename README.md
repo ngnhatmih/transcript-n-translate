@@ -364,20 +364,32 @@ nghĩa này là nợ phải ghi, không phải một quyết định đã chốt
 
 ### Nợ Giai đoạn 2 còn mở (đúng thực tế)
 
-- **`DEFAULT_MAX_CHARS` chưa đo** — xem ở trên (`backend/README.md:192-198`).
+- ✅ **ĐÃ ĐÓNG — `DEFAULT_MAX_CHARS = 1200` nay đã được ÉP.** Lượt đo
+  `20261025-batch-chars` (`backend/scripts/measure_batch_chars.py`, transcript tổng hợp,
+  `qwen2.5-3b`, không `echo_guard`): lô **30 mục / 750 ký tự** chạy sạch, lô **24 mục / 3600 ký
+  tự** làm **cả lượt `failed`** ⇒ biến quyết định là **số KÝ TỰ**, không phải số mục; ngưỡng vỡ
+  đo được nằm giữa **3000** và **3600** ký tự; 1200 là bảo thủ ~2,5× và còn làm echo giảm
+  (8 mục: 16/24 · 20 mục: 24/24). ⚠️ n = 1 mỗi cấu hình, một engine — xem bảng đầy đủ trong
+  `backend/README.md` mục "Giới hạn".
 - **Chất lượng dịch chưa đánh giá** — xem ở trên (`backend/README.md:199-205`).
-- **`retry_job` không xoá `cancel_requested`** — `backend/app/adapters/persist/sqlite_repos.py:525-536`
-  chỉ `UPDATE jobs SET state=?, attempts=attempts+1, finished_at=NULL, error=NULL, progress=0`, **không
-  đụng** cột `cancel_requested`; trong khi `backend/app/worker.py:215-221` (`_run_one`) **huỷ job ở
-  ranh giới nếu cờ còn**. ⇒ job đã xin huỷ → `failed` → bấm **chạy lại** có thể bị `cancelled` ở
-  lượt mới. **Có TRƯỚC D2** (ERRATA **#46 mục 9**). Đây là nợ **`backend/`**: task frontend **không**
-  được chạm vào, nên ghi ra chứ không sửa.
-- **`N-9` — route export GHI TỆP trên một `GET`** (nợ Giai đoạn 2, **CHƯA đóng**, *chờ người dùng quyết* —
-  design spec §7 dòng 111 và §9 dòng 135). Mã vẫn ghi tệp: `backend/app/api/routes_translations.py:282`
-  (`@export_router.get("/{translation_id}")`) → `:330` `_materialise(...)` → `:354` `out_dir.mkdir(...)`
-  → `:359-360` `target.open("w")` + `write`. ⚠️ **ĐÍNH CHÍNH một lời khai SAI của phiên chính:** ở vòng
-  Task 13 tôi đã ra lệnh *"đừng ghi nợ này là còn mở"* vì ánh xạ sai `N-9` → `M-3`. Cái **đã** đóng ở
-  Giai đoạn 2 là **`containment`** (`resolve_within`, `:355-358`, có bài ghim trong
-  `backend/tests/test_api_export_by_translation.py`), **không phải** gỡ side effect. ⇒ Mục này **phải**
-  nằm trong danh sách còn mở (xem ERRATA **#48** mục 1).
+- ✅ **ĐÃ ĐÓNG — `retry_job` không xoá `cancel_requested`.** (Nợ ghi từ ERRATA **#46 mục 9**.)
+  `retry_job` nay `UPDATE ... cancel_requested=0` (`backend/app/adapters/persist/sqlite_repos.py`),
+  vì `worker._run_one` **huỷ job ở ranh giới nếu cờ còn** — không xoá thì "chạy lại" trên một job
+  từng bị xin huỷ sẽ `queued` rồi `cancelled` ngay lượt đầu. Hai bài ghim: tầng repo
+  (`tests/test_repos.py::test_retry_clears_a_stale_cancel_request`) và tầng HTTP
+  (`tests/test_api_jobs_sse.py::test_retry_through_the_api_clears_a_stale_cancel_request`).
+  Mutation đã chạy: bỏ `cancel_requested=0` ⇒ **cả hai** bài đỏ. Lưu ý đường đi được là `failed`
+  và `interrupted`: `cancelled` **không** nằm trong `RETRYABLE_STATES`, nên ca hỏng là "xin huỷ
+  nhưng job kết thúc `failed` trước ranh giới".
+- ✅ **ĐÃ ĐÓNG — `N-9` route export GHI TỆP trên một `GET`.** (Nợ design spec §7 dòng 111 / §9 dòng 135;
+  đừng nhầm với `containment`, thứ đã đóng từ Giai đoạn 2 — xem ERRATA **#48** mục 1.)
+  Cách vá: việc ghi trở thành **TƯỜNG MINH** — `GET /api/export/{translation_id}` mặc định **chỉ trả nội
+  dung**, `?save=1` mới ghi tệp (và khi ghi thì vẫn đi qua `_materialise` + `resolve_within`, không có
+  đường ghi thứ hai). Bài ghim mới: `test_export_without_save_does_not_touch_the_disk` đo **cả hai vế**
+  trên cùng thư mục đã dọn — không `save` ⇒ **0** tệp và byte y hệt; `save=1` ⇒ **đúng 1** tệp, byte bằng
+  response. Mutation đã chạy: bỏ `if save:` ⇒ bài đó ĐỎ. Bốn bài cũ vẫn đo đường GHI nên nay xin
+  `save=1` (chúng so tên/byte trên đĩa, và ghi chú điều đó ngay trong docstring).
+  ⚠️ **Quyết định này có thể đảo**: nếu muốn mọi lần xem trước đều để lại tệp trong `data/output` thì bỏ
+  tham số `save` và cho `_materialise` chạy vô điều kiện — nhưng khi đó `GET` lại có tác dụng phụ, và bài
+  ghim trên phải bị xoá cùng lý do.
 

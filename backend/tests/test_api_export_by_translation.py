@@ -198,9 +198,14 @@ def _run_the_old_route(c, repos, worker, out_dir, tid: int, translations: list[s
 
 def _run_the_spec_route(c, out_dir, tr_id: int, *, fmt: str = "srt",
                         bilingual: bool = False) -> "_Exported":
-    """Đường spec, đo trên thư mục đã dọn: byte trả về + tên/byte tệp nó ghi ra."""
+    """Đường spec, đo trên thư mục đã dọn: byte trả về + tên/byte tệp nó ghi ra.
+
+    `save=1` là CỐ Ý: từ lượt vá `N-9`, `GET` mặc định **không** ghi tệp
+    (`test_export_without_save_does_not_touch_the_disk` ghim vế đó). Nhóm bài này
+    so TÊN + BYTE giữa hai đường, nên nó phải xin bản có ghi.
+    """
     _clear_format(out_dir, fmt)
-    r = c.get(f"/api/export/{tr_id}?format={fmt}&bilingual={int(bilingual)}")
+    r = c.get(f"/api/export/{tr_id}?format={fmt}&bilingual={int(bilingual)}&save=1")
     return _measure(out_dir, fmt, r, label="route spec")
 
 
@@ -248,6 +253,36 @@ def test_export_by_translation_returns_srt(wired):
     # Cùng MIME với đường cũ (`MEDIA_TYPES` của pipeline, không phải text/plain):
     # `application/x-subrip` là thứ trình phát nhận ra phụ đề.
     assert r.headers["content-type"].startswith("application/x-subrip")
+
+
+def test_export_without_save_does_not_touch_the_disk(wired):
+    """`N-9`: một `GET` đọc KHÔNG được ghi tệp; `?save=1` mới ghi.
+
+    Đo được trước khi vá: mỗi lần xem trước để lại một tệp `.srt` trong
+    `data/output`, nên hai lần xem là hai tệp (và một `GET` có tác dụng phụ trên
+    đĩa). Bài này đo CẢ HAI vế trên cùng một thư mục đã dọn:
+
+    * gọi KHÔNG `save` ⇒ **0** tệp mới, và byte trả về y hệt bản có `save`;
+    * gọi `?save=1` ⇒ **đúng 1** tệp, nội dung bằng byte của response.
+
+    Mutation: bỏ điều kiện `if save:` trong `export_translation` ⇒ vế đầu ĐỎ.
+    """
+    c, repos, out_dir, _worker = wired
+    _, tr_id = _ready(repos)
+    _clear_format(out_dir, "srt")
+
+    plain = c.get(f"/api/export/{tr_id}?format=srt")
+    assert plain.status_code == 200, plain.text
+    assert sorted(p.name for p in out_dir.glob("*.srt")) == [], (
+        "GET mặc định không được ghi tệp (nợ N-9)")
+
+    saved = c.get(f"/api/export/{tr_id}?format=srt&save=1")
+    assert saved.status_code == 200, saved.text
+    written = sorted(p.name for p in out_dir.glob("*.srt"))
+    assert len(written) == 1, f"save=1 phải ghi ĐÚNG một tệp: {written}"
+    assert (out_dir / written[0]).read_bytes() == saved.content
+    assert saved.content == plain.content, (
+        "ghi tệp không được đổi NỘI DUNG trả về — nếu không thì hai lần xem cho hai bản")
 
 
 def test_export_bilingual_contains_source_and_translation(wired):
@@ -493,6 +528,9 @@ def test_both_routes_write_byte_identical_files(wired):
     khi đọc lại — đúng lớp lỗi mà `pipeline/export.py::_write_utf8` ra đời để chặn.
     Bài này đọc BYTE THÔ, và xoá tệp trước khi gọi route spec để byte đọc sau
     CHẮC CHẮN do route spec ghi ra.
+
+    `save=1` là CỐ Ý (nợ `N-9`): mặc định `GET` không ghi, nên muốn so byte TRÊN
+    ĐĨA của hai đường thì phải xin bản có ghi.
     """
     c, repos, out_dir, worker = wired
     tid, tr_id = _ready(repos)
@@ -503,7 +541,7 @@ def test_both_routes_write_byte_identical_files(wired):
     from_handler = target.read_bytes()
     target.unlink()
 
-    r = c.get(f"/api/export/{tr_id}?format=srt")
+    r = c.get(f"/api/export/{tr_id}?format=srt&save=1")
 
     assert r.status_code == 200, r.text
     from_spec_route = target.read_bytes()
@@ -519,11 +557,14 @@ def test_the_spec_route_materialises_the_same_artifact_name(wired):
     `GET /api/export/{job_id}/download` đi tìm (nó tự tính lại từ payload job). Hai
     chỗ ghép tên bằng tay là hai chỗ trôi khỏi nhau — đó là lý do `artifact_name()`
     tồn tại, và bài này ghim route spec vào ĐÚNG nguồn đó.
+
+    `save=1` là CỐ Ý (nợ `N-9`): mặc định `GET` không ghi tệp, nên muốn so TÊN
+    trên đĩa thì phải xin bản có ghi.
     """
     c, repos, out_dir, worker = wired
     tid, tr_id = _ready(repos)
 
-    r = c.get(f"/api/export/{tr_id}?format=srt")
+    r = c.get(f"/api/export/{tr_id}?format=srt&save=1")
     assert r.status_code == 200, r.text
     assert (out_dir / f"transcript-{tid}.vi.srt").is_file(), (
         sorted(p.name for p in out_dir.iterdir()))
@@ -568,7 +609,7 @@ def test_the_spec_route_proves_containment_before_writing(wired, monkeypatch):
     # được chỗ gọi (xem bài dưới, nơi cùng lý do này được ghim bằng phép ĐỎ).
     monkeypatch.setattr(routes_translations, "resolve_within", spy)
 
-    r = c.get(f"/api/export/{tr_id}?format=srt")
+    r = c.get(f"/api/export/{tr_id}?format=srt&save=1")
 
     assert r.status_code == 200, r.text
     assert len(seen) == 1, f"phải chứng minh containment ĐÚNG một lần: {seen}"

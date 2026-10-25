@@ -436,6 +436,7 @@ export_router = APIRouter(prefix="/api/export", tags=["export"])
 
 @export_router.get("/{translation_id}", response_class=PlainTextResponse)
 def export_translation(translation_id: int, format: str = "srt", bilingual: int = 0,
+                       save: int = 0,
                        repos=Depends(get_repos), dirs=Depends(get_dirs)):
     """Xuất THẲNG nội dung phụ đề của một bản dịch (spec §11).
 
@@ -448,6 +449,13 @@ def export_translation(translation_id: int, format: str = "srt", bilingual: int 
     định dạng tra theo VỊ TRÍ, không theo `seg.i`) — đúng bất biến của
     `domain/subtitle_format.py`, và đúng thứ `ExportHandler.run` dựng từ
     `payload["translations"]`.
+
+    **`save` (mặc định 0) — vá nợ `N-9`.** Route này từng GHI một tệp vào
+    `data/output` như tác dụng phụ của chính một `GET`: đọc một URL làm thay đổi
+    đĩa, và hai lần xem trước để lại hai tệp. Nay việc ghi là **TƯỜNG MINH**:
+    không có `save` thì route chỉ TRẢ nội dung (đúng nghĩa `GET`), `?save=1` mới
+    ghi — và khi ghi thì vẫn đi qua `_materialise` với containment
+    (`domain/paths.py`), không có đường ghi thứ hai.
     """
     fmt = format.lower()
     if fmt not in FORMATS:
@@ -489,7 +497,10 @@ def export_translation(translation_id: int, format: str = "srt", bilingual: int 
     stem = f"transcript-{translation.transcript_id}"
     name = artifact_name(stem, fmt, translated=True)
 
-    _materialise(pathlib.Path(dirs["out"]), name, body)
+    # `N-9`: ghi tệp là TÁC DỤNG PHỤ TƯỜNG MINH, không mặc định. Một `GET` đọc
+    # không được làm thay đổi đĩa — và hai lần xem trước không được để lại hai tệp.
+    if save:
+        _materialise(pathlib.Path(dirs["out"]), name, body)
 
     return PlainTextResponse(body, media_type=MEDIA_TYPES.get(fmt, "text/plain"))
 

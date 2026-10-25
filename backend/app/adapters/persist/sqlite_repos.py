@@ -629,9 +629,15 @@ class SqliteRepos:
             if row is None:
                 raise NotFound(f"job {job_id} không tồn tại")
             js.assert_transition(row["state"], js.QUEUED)
+            # `cancel_requested=0` là một PHẦN của "chạy lại", không phải dọn
+            # dẹp: `worker._run_one` HUỶ job ở ranh giới nếu cờ còn
+            # (`worker.py:216`), nên bấm "chạy lại" trên một job từng bị xin huỷ
+            # mà không xoá cờ thì job mới `queued` bị `cancelled` ngay lượt đầu:
+            # người dùng thấy nút chạy lại vô tác dụng, còn log ghi "đã huỷ theo
+            # yêu cầu" của một yêu cầu đã cũ.
             conn.execute(
                 "UPDATE jobs SET state=?, attempts=attempts+1, finished_at=NULL,"
-                " error=NULL, progress=0 WHERE id=?",
+                " error=NULL, progress=0, cancel_requested=0 WHERE id=?",
                 (js.QUEUED, job_id),
             )
 

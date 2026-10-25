@@ -255,6 +255,32 @@ def test_retry_after_failure_resets_to_queued_and_bumps_attempts(repos):
     assert j.state == js.QUEUED and j.attempts == 1 and j.error is None
 
 
+def test_retry_clears_a_stale_cancel_request(repos):
+    """`retry_job` phải XOÁ `cancel_requested`, nếu không "chạy lại" là vô nghĩa.
+
+    Đo được đường hỏng (nợ đã ghi trong `README.md`, ERRATA #46 mục 9):
+    `worker._run_one` HUỶ job ở RANH GIỚI nếu cờ còn (`worker.py:216`). Trạng
+    thái đi được là `failed` (và `interrupted`) — `cancelled` KHÔNG nằm trong
+    `RETRYABLE_STATES`, nên đường hỏng là: job bị xin huỷ nhưng lại kết thúc
+    `failed`/`interrupted` **trước** ranh giới → cờ còn → bấm chạy lại → job
+    `queued` bị `cancelled` ngay lượt đầu, kèm log "đã huỷ theo yêu cầu" của một
+    yêu cầu đã cũ.
+
+    Mutation chứng minh bài này không rỗng: bỏ `cancel_requested=0` khỏi câu
+    UPDATE trong `retry_job` ⇒ bài này ĐỎ.
+    """
+    jid = repos.add_job(Job(id=None, workspace=1, type="asr", engine="e", phase="asr:e", payload={}))
+    repos.set_job_state(jid, js.RUNNING)
+    repos.request_cancel(jid)
+    assert repos.get_job(jid).cancel_requested is True, "tiền đề: cờ đã bật"
+    repos.set_job_state(jid, js.FAILED, error="hỏng trước ranh giới")
+    repos.retry_job(jid)
+    j = repos.get_job(jid)
+    assert j.state == js.QUEUED
+    assert j.cancel_requested is False, (
+        "chạy lại mà còn cờ huỷ thì worker sẽ huỷ job ngay ranh giới kế tiếp")
+
+
 def test_llm_calls_are_recorded(repos):
     jid = repos.add_job(Job(id=None, workspace=1, type="asr", engine="e", phase="asr:e", payload={}))
     repos.add_llm_call(job_id=jid, engine="e", model_ref="m", prompt_version=None,

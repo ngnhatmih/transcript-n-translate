@@ -63,38 +63,50 @@ GPU. Nó tự ép UTF-8 cho stdout (console Windows mặc định cp1252, còn s
 tiếng Trung/Việt) và tự đặt cache model trước khi nạp `faster_whisper`.
 
 Con số nền của lần chạy mặc định, đo sau khi xoá `__pycache__` (lệnh ở mục
-"Kiểm thử" trên, chạy từ trong `backend\`). Thứ có nghĩa là **1286 / 15**, không
+"Kiểm thử" trên, chạy từ trong `backend\`). Thứ có nghĩa là **1289 / 15**, không
 phải số giây — thời gian trôi giữa các lần chạy (đã thấy 24,00–30,94 s) còn con
 số bài thì không:
 
 ```
-1286 passed, 15 deselected, 1 warning
+1289 passed, 15 deselected, 1 warning
 ```
 
 Hai con số đó là SỐ BÀI ĐƯỢC CHỌN, và chúng khớp với số mà `--collect-only` báo
-(`1286/1301`, 15 bài `live` bị bỏ;
+(`1289/1304`, 15 bài `live` bị bỏ;
 `tests/test_backend_readme.py::test_readme_baseline_matches_the_tests_actually_
 collected` đối chiếu mỗi lần chạy).
 
-Máy này **CÓ** `ffmpeg 8.1.1` + `ffprobe` trên PATH (đã đo), nên `1286/15` ở trên
+Máy này **CÓ** `ffmpeg 8.1.1` + `ffprobe` trên PATH (đã đo), nên `1289/15` ở trên
 là số THẬT của nó. Máy **không có** `ffmpeg`/`ffprobe` cho một kết quả KHÁC: cả
 `tests/test_ingest.py` bị `skipif` ở cấp module — **9** bài cùng skip một lượt —
-nên dòng tổng kết của máy đó là **`1277 passed, 9 skipped, 15 deselected`** (=
-`1286 − 9`; con số này TỪNG ghi `978`, tức một baseline rất cũ, và nó lệch phép
+nên dòng tổng kết của máy đó là **`1280 passed, 9 skipped, 15 deselected`** (=
+`1289 − 9`; con số này TỪNG ghi `978`, tức một baseline rất cũ, và nó lệch phép
 trừ của chính khối nền ngay trên nó). Đó là
 con số của máy thiếu ffmpeg, **không phải** con số máy này từng in ra; đừng chép
 nó vào khối nền ở trên, và đừng "sửa" số nền xuống chỉ vì thiếu ffmpeg.
 
 ⚠️ Con số `856` ở đây TỪNG không khớp phép trừ của chính nó: `865 − 9 = 856`, tức
 nó là số của lượt TRƯỚC `V1` (+3 bài) còn sót lại. Phép trừ của khối nền hiện tại
-là `1286 − 9` = `1277`.
+là `1289 − 9` = `1280`.
 
 (Con số này từng bị ghi là `798`: bài `test_a_failed_translation_leaves_the_
 transcript_reviewed` được thêm ở `a428334` — **cùng commit đã sửa tệp này** — mà
 số nền không được bump. Nó tồn tại để phát hiện TRÔI, nên một số sai làm mọi lần
 chạy báo dương tính giả.
 
-Lần bump này, `1269/15` → `1286/15` (**+17 bài**), do **VRAM hiện thật** ở
+Lần bump này, `1288/15` → `1289/15` (**+1 bài**), do đóng nợ **`N-9`** (route export ghi
+tệp trên một `GET`): mặc định `GET /api/export/{translation_id}` chỉ TRẢ nội dung,
+`?save=1` mới ghi. Bài mới `test_export_without_save_does_not_touch_the_disk` đo cả hai
+vế; bốn bài cũ (đo đường GHI, so tên/byte trên đĩa) nay xin `save=1`. Mutation đã chạy:
+bỏ `if save:` ⇒ bài mới ĐỎ.
+
+Lần bump trước, `1286/15` → `1288/15` (**+2 bài**), do đóng nợ **`retry_job` không xoá
+`cancel_requested`** (ERRATA #46 mục 9): tầng repo (`test_repos.py`) và tầng HTTP
+(`test_api_jobs_sse.py`) mỗi nơi một bài. Mutation đã chạy: bỏ `cancel_requested=0`
+⇒ cả hai bài đỏ. Kèm theo, `DEFAULT_MAX_CHARS` nay đã được ÉP bằng lượt đo
+`20261025-batch-chars` (mục "Giới hạn" bên dưới) — nợ đó cũng đóng.
+
+Lần bump trước, `1269/15` → `1286/15` (**+17 bài**), do **VRAM hiện thật** ở
 `GET /api/status`: `tests/test_status_vram.py` ghim parser (`nvidia-smi` dòng đầu,
 số nguyên không âm, chuỗi lạ ⇒ `None`), ba ca lỗi tiến trình (không có binary,
 timeout, returncode khác 0 ⇒ `None`, không 500) và hợp đồng HTTP (`vram` là số
@@ -617,13 +629,34 @@ endpoint thật thì chưa khai. Ba điều phải nói trước khi bật nó:
 
 ### Giới hạn — đọc trước khi tin bất cứ con số nào ở trên
 
-1. **`DEFAULT_MAX_CHARS = 1200` CHƯA TỪNG BỊ ÉP.** Lô lớn nhất đo được chỉ **94 ký
-   tự**, và alignment **chưa lần nào vỡ** trên 18 segment. Giữ 1200 nghĩa là
-   *"không có cơ sở đo để đổi"*, **KHÔNG** phải *"đã xác nhận 1200 là đúng"*.
-   **Ngưỡng hỏng thật vẫn chưa biết.** Muốn biết thì phải đo lại: nạp một
-   transcript dài (hàng nghìn ký tự) rồi cho `TranslateHandler` chạy với
-   `batch_chars` giảm dần cho tới khi alignment vỡ. `smoke_mt.py` **không** có cờ
-   cho việc này (nó chạy đúng ngân sách mặc định) — phép đo đó phải viết mới.
+1. **`DEFAULT_MAX_CHARS = 1200` NAY ĐÃ ĐƯỢC ÉP — và nó có tác dụng thật.**
+   Lượt đo `20261025-batch-chars` (`scripts/measure_batch_chars.py`, transcript TỔNG
+   HỢP, `qwen2.5-3b`, `engine_capabilities={}` tức **không** `echo_guard`) chạy bốn
+   cấu hình, mỗi cấu hình **một lượt**:
+
+   | cấu hình | lô theo lý thuyết | giây | alignment | echo | kết quả |
+   |---|---|---|---|---|---|
+   | 24 đoạn × 150 ký tự, `batch_chars=1200` | 8 mục / 1200 ký tự × 3 | 29,34 | 1 | **16/24** | `done` (1 lời gọi phải thử lại) |
+   | 24 × 150, `batch_chars=3000` | 20 mục / 3000 + 4 / 600 | 29,65 | 0 | **24/24** | `done` |
+   | 24 × 150, `batch_chars=8000` | **1 lô 24 mục / 3600 ký tự** | 91,61 | 9 | 0 | **`failed`** (0/24 đoạn) |
+   | 60 × 25 (cỡ phụ đề thật), `batch_chars=1200` | **30 mục / 750 ký tự** × 2 | 17,30 | 0 | 33/60 | `done` |
+
+   Ba kết luận, mỗi kết luận một dòng đo:
+
+   * **Trần SỐ MỤC không phải thứ làm vỡ hợp đồng.** 30 mục / **750** ký tự chạy sạch
+     (0 alignment); 24 mục / **3600** ký tự mới vỡ. Cùng trần 30 mục, khác số ký tự ⇒
+     **ký tự** là biến quyết định, không phải số mục.
+   * **Ngưỡng vỡ đo được nằm giữa 3000 và 3600 ký tự** cho MỘT lời gọi (`qwen2.5-3b`,
+     transcript tổng hợp): 3000 ký tự còn qua, 3600 ký tự thì `AlignmentProblem` rồi
+     `ValueError`, hạ cấp xuống từng mục vẫn **hỏng cả lượt** (9 lỗi, 91,6 s).
+   * ⇒ Giữ **1200** là **bảo thủ ~2,5×** so với ngưỡng vỡ đo được, và nó còn có tác
+     dụng PHỤ đo được: lô 8 mục echo **16/24**, lô 20 mục echo **24/24** — lô nhỏ hơn
+     thì chép ít hơn (cùng hiện tượng đã ghi ở mục echo).
+
+   ⚠️ **Trần của phép đo:** n = 1 mỗi cấu hình, MỘT engine (`qwen2.5-3b`), chữ tổng
+   hợp (câu hợp lệ nhưng không phải ASR thật). Đừng trích "ngưỡng 3000–3600" như một
+   hằng số của mọi engine — nó là ngưỡng **đo được của cấu hình này**. Điều đã đủ để
+   nói: **1200 không phải con số tuỳ tiện**, và **tăng nó lên là tăng echo**.
 2. **Chất lượng dịch CHƯA được đánh giá.** Chưa có điểm BLEU/MQM, chưa có người
    đọc duyệt. Không có tuyên bố nào về chất lượng ở đây. Đổi lại, **lỗi thấy được
    trên đầu ra thật** thì được ghi, vì đó là số thật về sản phẩm chứ không phải
