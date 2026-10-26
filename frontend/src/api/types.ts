@@ -227,6 +227,50 @@ export interface Translation {
  * được parse một chuỗi hiển thị để lấy con số nó hiển thị, nên `GET /api/translations/{id}`
  * phát ra SỐ, sinh từ CÙNG hàm `mt_qa.cps_row` đã sinh chuỗi kia.
  */
+/**
+ * Kế hoạch tốc độ của MỘT lượt lồng tiếng — `GET /api/dubs/{id}/plan`.
+ *
+ * Đây là DẪN XUẤT của một lượt chạy (handler ghi `dub-<id>.plan.json` cạnh master), không phải
+ * một phép tính lại ở client. Bốn số `take`/`slot`/`avail`/`speed` CHỈ tồn tại trong lượt chạy
+ * đó: không đọc từ đây thì màn hình chỉ có hai lựa chọn — bịa, hoặc bắt người dùng chạy lại TTS
+ * (461 dòng ≈ 5–7 phút) để xem một lượt đã xong.
+ *
+ * `null` (route trả `null`) = CHƯA lồng lần nào. Đó KHÁC "không có bản dịch" (404) và KHÁC một
+ * kế hoạch rỗng: màn hình phải nói được ba câu khác nhau.
+ */
+export interface DubPlanRow {
+  /** `Segment.i` — khoá để ghép một hàng kế hoạch với dòng của bản dịch. */
+  i: number;
+  start: number;
+  end: number;
+  /** Câu của BẢN DỊCH (tiếng Việt), không phải bản gốc. */
+  text: string;
+  /** Độ dài take đo được, giây. */
+  take: number;
+  /** Chỗ của dòng (`end - start`), giây. */
+  slot: number;
+  /** Cửa sổ tới dòng sau (`start` dòng kế − `start` dòng này) — trần THẬT của việc nén. */
+  avail: number;
+  /** Tốc độ đã áp cho dòng này (1.00 = không nén). */
+  speed: number;
+  /** `take / avail` — mức nén CẦN để vừa chỗ; `> 1` nghĩa là phải nén. */
+  need: number;
+  /** Ba câu KHÁC NHAU, không phải ba mức của một thang — xem `DubPlan.dem`. */
+  trang_thai: "vua" | "nen" | "phai-sua";
+}
+
+export interface DubPlan {
+  translation_id: number;
+  /** Trần nén (`TOC_DO_TRAN`, mặc định 1.35). */
+  tran: number;
+  /** Độ dài canvas master, giây — bằng `end` của dòng cuối. */
+  tong_giay: number;
+  so_dong: number;
+  dem: { vua: number; nen: number; phai_sua: number };
+  /** Trung vị tốc độ — con số ở đầu dải thời gian. */
+  trung_vi_toc_do: number;
+  dong: DubPlanRow[];
+}
 export interface TranslationCpsRow {
   /** `Segment.i` — khoá để ghép một hàng CPS với dòng ở hai cột. */
   i: number;

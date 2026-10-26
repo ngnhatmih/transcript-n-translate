@@ -55,7 +55,15 @@ let Header: (props: unknown) => unknown;
 let react: any;
 
 /** Ba chế độ của `state/reducer.ts::Mode` — chép ra đây vì tệp này không import reducer. */
-const BA_CHE_DO = ["Biên tập", "Đối chiếu", "Thuật ngữ"];
+/**
+ * BỐN nhãn, theo ĐÚNG thứ tự DOM.
+ *
+ * ⚠️ ĐÍNH CHÍNH: tên cũ là `BA_CHE_DO` và nó đúng với spec UI §3 — nhưng demo đã vẽ tab thứ tư
+ * (`mode__tab--moi` trong `_demo-long-tieng/index.html`), và bước lồng tiếng là bước SAU CÙNG
+ * của đường ống nạp → phiên âm → dịch → lồng. Giữ ba nhãn ở đây là ghim một lời khai đã hết
+ * đúng, và nó sẽ đỏ ngay khi header có tab thật.
+ */
+const BON_CHE_DO = ["Biên tập", "Đối chiếu", "Thuật ngữ", "Lồng tiếng"];
 
 /** Tất cả `input[type=radio]` theo ĐÚNG thứ tự DOM. */
 function cacRadio(container: HTMLElement): HTMLInputElement[] {
@@ -110,7 +118,7 @@ describe("Header: bo chon CHE DO (Task W1)", () => {
     teardownDom();
   });
 
-  it("radiogroup + BA `input type=\"radio\"` THAT (khong phai `div` + `role`)", () => {
+  it("radiogroup + BỐN `input type=\"radio\"` THAT (khong phai `div` + `role`)", () => {
     const { container, unmount } = render(
       taoPhanTu(Header, { status: null, mode: "edit", onModeChange: () => {} }),
     );
@@ -119,7 +127,9 @@ describe("Header: bo chon CHE DO (Task W1)", () => {
     assert.equal(nhom.length, 1, "phai co DUNG MOT nhom chon che do");
 
     const radios = cacRadio(container);
-    assert.equal(radios.length, 3, "spec UI §3 co BA che do: Bien tap / Doi chieu / Thuat ngu");
+    assert.equal(radios.length, 4,
+      "spec UI §3 co BA che do, va demo ve them tab LONG TIENG ⇒ BON: "
+      + "Bien tap / Doi chieu / Thuat ngu / Long tieng");
     for (const radio of radios) {
       // `input` THAT ⇒ bàn phím native dùng được. `div` + `role="radio"` sẽ trượt dòng này.
       assert.equal(radio.tagName, "INPUT", "che do phai la input THAT, khong phai div + role");
@@ -131,12 +141,12 @@ describe("Header: bo chon CHE DO (Task W1)", () => {
     );
 
     // TÊN ĐỌC ĐƯỢC — chính cách Task 12 tìm control này.
-    for (const ten of BA_CHE_DO) {
+    for (const ten of BON_CHE_DO) {
       const tim = getByRole(container, "radio", { name: new RegExp(ten, "i") });
       assert.equal(tim.tagName, "INPUT", `radio "${ten}" phai tim duoc bang VAI TRO + TEN`);
     }
-    // Va nhan HIEN THI dung ba chu cua spec (nguoi dung doc chu, khong doc `value`).
-    assert.deepEqual(cacRadio(container).map((r) => nhanCua(container, r)), BA_CHE_DO);
+    // Va nhan HIEN THI dung bon chu (nguoi dung doc chu, khong doc `value`).
+    assert.deepEqual(cacRadio(container).map((r) => nhanCua(container, r)), BON_CHE_DO);
 
     assert.deepEqual(tiengOn, [], "render Header khong duoc sinh tieng on console");
     unmount();

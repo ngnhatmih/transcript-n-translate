@@ -215,3 +215,75 @@ def test_route_tu_choi_409_TRUOC_KHI_ghi_job_khi_may_chua_co_tts(repos, tmp_path
         assert resp.status_code == 409, resp.text
         assert "chưa có TTS" in resp.json()["detail"]
     assert len(r.list_jobs()) == truoc, "409 phải KHÔNG để lại hàng `jobs` nào"
+
+def test_plan_ghi_du_sau_so_cua_tung_dong(repos, tmp_path):
+    """`dub-<tid>.plan.json` là thứ DUY NHẤT mang `take`/`chỗ`/tốc độ về cho giao diện.
+
+    Bốn số đó chỉ tồn tại trong lượt chạy. Không ghi ra thì bảng dòng ở màn Lồng tiếng chỉ có
+    hai lựa chọn: bịa, hoặc bắt người dùng chạy lại TTS (5–7 phút) để xem một lượt đã xong.
+    """
+    import json
+
+    r, tid = repos
+    out = tmp_path / "dubs"
+    h = DubHandler(r, out, _tts_gia_1_giay)
+    job_id = r.add_job(Job(id=None, workspace=2, type="dub", engine="vieneu-v3-turbo",
+                           phase="dub:vieneu-v3-turbo", payload={"translation_id": tid}))
+    h.run(r.get_job(job_id), lambda p, line: None)
+
+    tep = out / f"dub-{tid}.plan.json"
+    assert tep.is_file(), "lượt chạy phải để lại kế hoạch cạnh master"
+    kh = json.loads(tep.read_text(encoding="utf-8"))
+    assert kh["translation_id"] == tid
+    assert kh["so_dong"] == 2, f"bản dịch fixture có hai dòng, đo được {kh['so_dong']}"
+    assert kh["tong_giay"] == 5.0
+    # take 1,0 s: dòng #0 (chỗ 2,0 s) vừa, dòng #1 (chỗ 2,0 s) vừa ⇒ 0 nén, 0 phải sửa.
+    assert kh["dem"] == {"vua": 2, "nen": 0, "phai_sua": 0}, kh["dem"]
+    mot = kh["dong"][0]
+    assert set(mot) == {"i", "start", "end", "text", "take", "slot", "avail", "speed", "need",
+                        "trang_thai"}, f"hàng phải có đúng chín khoá, đo được {sorted(mot)}"
+    assert mot["text"] == "Xin chào", "câu của dòng phải là của BẢN DỊCH, không phải bản gốc"
+    assert mot["take"] == 1.0 and mot["slot"] == 2.0 and mot["speed"] == 1.0
+
+
+def test_plan_la_null_khi_chua_long_lan_nao(repos, tmp_path):
+    """Chưa lồng ⇒ `null`, KHÔNG phải 404 và KHÔNG phải một kế hoạch rỗng bịa ra.
+
+    "Chưa có số đo" và "không có bản dịch" là hai câu khác nhau; giao diện phải phân biệt được.
+    """
+    r, tid = repos
+    app = create_app(repos=r, specs=[], media_dir=tmp_path / "m", out_dir=tmp_path / "o")
+    with TestClient(app) as c:
+        resp = c.get(f"/api/dubs/{tid}/plan")
+        assert resp.status_code == 200, resp.text
+        assert resp.json() is None, f"chưa lồng thì phải là null, đo được {resp.json()!r}"
+
+
+def test_take_cat_dung_doan_cua_dong(repos, tmp_path):
+    """Nghe thử một dòng: trả wav dài ĐÚNG `take / tốc độ`, không phải `end - start`.
+
+    ⚠️ Vì sao không dùng `end - start`: khi take NGẮN hơn chỗ (chuyện thường), `end - start` dài
+    hơn tiếng thật và người dùng nghe thấy một khoảng lặng không có trong bản lồng.
+    """
+    r, tid = repos
+    out = tmp_path / "dubs"
+    h = DubHandler(r, out, _tts_gia_1_giay)
+    job_id = r.add_job(Job(id=None, workspace=2, type="dub", engine="vieneu-v3-turbo",
+                           phase="dub:vieneu-v3-turbo", payload={"translation_id": tid}))
+    h.run(r.get_job(job_id), lambda p, line: None)
+
+    app = create_app(repos=r, specs=[], media_dir=tmp_path / "m", out_dir=out.parent)
+    with TestClient(app) as c:
+        resp = c.get(f"/api/dubs/{tid}/take", params={"i": 0})
+        assert resp.status_code == 200, resp.text
+        assert resp.headers["content-type"].startswith("audio/wav")
+        tam = tmp_path / "take.wav"
+        tam.write_bytes(resp.content)
+        mau, sr = sf.read(str(tam))
+        assert sr == 48_000
+        # take 1,0 s ở tốc độ 1,00 ⇒ 1,0 s. Chỗ của dòng là 2,0 s — con số SAI sẽ là 2,0.
+        assert abs(len(mau) / sr - 1.0) < 0.02, f"take phải dài 1,0 s, đo được {len(mau) / sr:.3f}"
+
+        khong = c.get(f"/api/dubs/{tid}/take", params={"i": 99})
+        assert khong.status_code == 404
+        assert "không có dòng 99" in khong.json()["detail"]

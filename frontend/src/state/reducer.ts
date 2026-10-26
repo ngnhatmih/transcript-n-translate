@@ -12,8 +12,14 @@
  * `mode` là BA chế độ của spec UI §3, không phải route: shell không có router.
  */
 
-/** Ba chế độ làm việc. Đo lường (§4.6/§4.7) không nằm ở đây — nó là task sau. */
-export type Mode = "edit" | "compare" | "glossary";
+/** BỐN chế độ làm việc. Đo lường (§4.6/§4.7) không nằm ở đây — nó là task sau.
+ *
+ * `dub` là chế độ THỨ TƯ, không phải một tab con của `compare`: demo đã vẽ nó thành một tab ngang
+ * hàng (`mode__tab--moi` trong `_demo-long-tieng/index.html`), và nó có bố cục riêng — cột kênh,
+ * dải thời gian take/chỗ, bảng dòng. Nhét nó vào `compare` là biến một màn thành hai màn chồng
+ * nhau, và đo được rằng bản đầu làm thế thì một job hỏng chiếm mất chỗ của cả bản dịch.
+ */
+export type Mode = "edit" | "compare" | "glossary" | "dub";
 
 export interface UiState {
   mode: Mode;

@@ -20,6 +20,7 @@ import { useShortcuts } from "../keys/useShortcuts.ts";
 import { CompareScreen } from "../screens/CompareScreen.tsx";
 import { EditScreen } from "../screens/EditScreen.tsx";
 import { GlossaryScreen } from "../screens/GlossaryScreen.tsx";
+import { LongTiengScreen } from "../screens/LongTiengScreen.tsx";
 import { OllamaDown } from "../screens/OllamaDown.tsx";
 import { chonTranscript, chonTranslation } from "../state/channelData.ts";
 import { initialState, reduce } from "../state/reducer.ts";
@@ -431,6 +432,33 @@ function dubJobCuaBan(id: number | null): Job | null {
     datLoiLongTieng(null);
     try {
       await endpoints.makeDub(id, voice);
+      // ⚠️ KHÔNG đọc lại `jobs` ở đây: `useJobStream` trả thẳng một `Map` (không có hàm
+      // đọc lại), và đường cập nhật DUY NHẤT là SSE `GET /api/jobs/stream`. Thêm một lượt
+      // `GET /api/jobs` là nguồn sự thật thứ hai cho cùng câu "job tới đâu rồi".
+    } catch (loi: unknown) {
+      datLoiLongTieng(loi instanceof Error ? loi.message : String(loi));
+    }
+  }
+
+  /**
+   * HUỶ lượt lồng đang chạy của MỘT bản dịch.
+   *
+   * Vì sao cần nút này: một bản dịch thật có 461 dòng ≈ 5–7 phút TTS trên CPU. Không có đường
+   * huỷ thì bấm nhầm là chờ hết, hoặc phải tắt tiến trình — và tắt tiến trình giết luôn mọi job
+   * khác của cùng worker.
+   *
+   * Huỷ ở đây là `cancelJob` của ĐÚNG job `dub` đang sống (cùng bộ lọc với `dubJobCuaBan`: chỉ
+   * `queued`/`running` mới là "lượt này"). Handler đọc `cancel_requested` giữa các dòng nên nó
+   * dừng ở dòng kế tiếp, không phải chờ hết.
+   */
+  async function huyLongTieng(id: number): Promise<void> {
+    const job = dubJobCuaBan(id);
+    if (job === null) return;
+    datLoiLongTieng(null);
+    try {
+      await endpoints.cancelJob(job.id);
+      // Cùng lý do với `longTieng`: `cancel_requested` mới đến qua SSE, không qua một lượt
+      // đọc `/api/jobs` thêm.
     } catch (loi: unknown) {
       datLoiLongTieng(loi instanceof Error ? loi.message : String(loi));
     }
@@ -1485,6 +1513,24 @@ function dubJobCuaBan(id: number | null): Job | null {
               dubJob={dubJobCuaBan(banDangXemId)}
               loiLongTieng={loiLongTieng}
               onLongTieng={(voice) => { if (banDangXemId !== null) void longTieng(banDangXemId, voice); }}
+            />
+          ) : ui.mode === "dub" ? (
+            /* TAB THỨ TƯ — LỒNG TIẾNG (đúng `mode__tab--moi` của demo).
+               Vì sao là MÀN RIÊNG chứ không phải khối trong Đối chiếu: đo được trên Chrome thật
+               rằng một job `dub` hỏng nằm trong `.cmp__bans` làm khối rộng 2004 px, chữ tràn
+               khung, và ô giọng + nút biến mất — tức một bước hỏng của đường ống chiếm mất chỗ
+               của chính bản dịch. Mỗi màn một việc. */
+            <LongTiengScreen
+              sourceId={ui.channelId}
+              sources={sources.data ?? []}
+              translations={translations.data ?? []}
+              macDinhId={banDangXemId}
+              onChonNguon={(id) => dispatch({ type: "selectChannel", id })}
+              onChonBanDich={chonBanDich}
+              dubJob={dubJobCuaBan(banDangXemId)}
+              onLongTieng={(voice) => { if (banDangXemId !== null) void longTieng(banDangXemId, voice); }}
+              onHuy={() => { if (banDangXemId !== null) void huyLongTieng(banDangXemId); }}
+              loiLongTieng={loiLongTieng}
             />
           ) : ui.mode === "glossary" ? (
             /* §4.4 tab THUẬT NGỮ (Task 9). Màn này KHÔNG nhận prop: nó độc lập với

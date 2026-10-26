@@ -74,6 +74,63 @@ def _thu_muc(dirs) -> pathlib.Path:
     return pathlib.Path(dirs["out"]) / "dubs"
 
 
+@router.get("/{translation_id}/plan")
+def plan(translation_id: int, dirs=Depends(get_dirs)):
+    """Kế hoạch tốc độ của lượt lồng GẦN NHẤT — số đo TỪNG dòng cho bảng ở màn Lồng tiếng.
+
+    `null` (không phải 404) khi chưa lồng lần nào: "chưa có số đo" và "không có bản dịch" là hai
+    câu khác nhau, và màn hình phải phân biệt được. Tệp là DẪN XUẤT của một lượt chạy (xem
+    `DubHandler._ghi_ke_hoach`) — thiếu nó thì giao diện nói chưa đo, KHÔNG bịa số.
+    """
+    import json as _json
+
+    tep = _thu_muc(dirs) / f"dub-{translation_id}.plan.json"
+    if not tep.is_file():
+        return None
+    return _json.loads(tep.read_text(encoding="utf-8"))
+
+
+@router.get("/{translation_id}/take")
+def take(translation_id: int, i: int, dirs=Depends(get_dirs)):
+    """NGHE THỬ một dòng: trả wav của take đã ép tốc độ cho dòng `i` của bản dịch.
+
+    Vì sao cần: người dùng phải nghe được một dòng TRƯỚC khi chờ cả clip (461 dòng ≈ 5–7 phút).
+    Route này KHÔNG chạy TTS — nó chỉ trả đoạn đã cắt từ master, nên nó không thể sinh ra một
+    lượt lồng thứ hai. Dòng nào không có trong kế hoạch thì 404 kèm câu nói phải làm gì.
+    """
+    import json as _json
+
+    import soundfile as sf
+
+    ke_hoach = _thu_muc(dirs) / f"dub-{translation_id}.plan.json"
+    master = _thu_muc(dirs) / f"dub-{translation_id}.wav"
+    if not ke_hoach.is_file() or not master.is_file():
+        raise HTTPException(404, f"chưa có bản lồng tiếng cho bản dịch #{translation_id} "
+                                 f"(chạy lồng tiếng trước)")
+    du_lieu = _json.loads(ke_hoach.read_text(encoding="utf-8"))
+    dong = next((d for d in du_lieu.get("dong", []) if d.get("i") == i), None)
+    if dong is None:
+        raise HTTPException(404, f"bản lồng tiếng của bản dịch #{translation_id} không có dòng {i}")
+
+    # Cắt ĐÚNG đoạn của dòng: từ `start` tới `start + take/tốc độ` — take đã ép tốc độ nên dài
+    # hơn `take` gốc một chút, và lấy theo `end` của dòng là sai khi take ngắn hơn chỗ.
+    mau, sr = sf.read(str(master), dtype="float32", always_2d=False)
+    if mau.ndim > 1:
+        mau = mau.mean(axis=1)
+    dai = float(dong["take"]) / max(float(dong["speed"]), 1e-6)
+    dau = max(0, int(round(float(dong["start"]) * sr)))
+    cuoi = min(len(mau), dau + max(1, int(round(dai * sr))))
+    doan = mau[dau:cuoi]
+    if doan.size == 0:
+        raise HTTPException(404, f"dòng {i} của bản dịch #{translation_id} không có tiếng")
+
+    import tempfile
+
+    tam = pathlib.Path(tempfile.mkdtemp(prefix="take-")) / f"take-{translation_id}-{i}.wav"
+    sf.write(str(tam), doan, sr, subtype="PCM_16")
+    return FileResponse(tam, media_type="audio/wav", filename=tam.name)
+
+
 @router.get("/{translation_id}/download")
 def download(translation_id: int, format: str = "wav", dirs=Depends(get_dirs)):
     """Tải một định dạng của bản lồng tiếng. 404 nói RÕ: chưa lồng hay sai định dạng."""

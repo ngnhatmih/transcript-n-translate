@@ -137,15 +137,34 @@ Lượt đo của tài liệu này (8620/8621 trống — kiểm bằng `Get-Net
 `PHUDE_DB`/`PHUDE_DATA` trỏ thư mục rỗng ngoài repo):
 
 ```
-ℹ tests 361   ℹ suites 34   ℹ pass 359   ℹ fail 2   ℹ cancelled 0
+ℹ tests 369   ℹ suites 35   ℹ pass 367   ℹ fail 2   ℹ cancelled 0
 ℹ skipped 0   ℹ todo 0      ℹ duration_ms 35486.345
 EXIT=1
 0 dòng "asynchronous activity" ; [guard thoat] 10/10 global da ve nguyen trang
 ```
 
-Số **361** = **359** của lượt trước + **2 bài LỒNG TIẾNG (TTS)**, cả hai đều ghim một lỗi ĐO ĐƯỢC trên
-app thật chứ không phải một quy ước:
+Số **369** = **361** của lượt trước + **8 bài MÀN LỒNG TIẾNG** (tab thứ tư), và mỗi bài ghim một
+lỗi ĐO ĐƯỢC trên app thật chứ không phải một quy ước:
 
+* `src/screens/LongTiengScreen.test.tsx` (**8**): màn riêng thay cho khối nhét trong Đối chiếu —
+  ba tầng của demo (cột kênh, dải thời gian, bảng dòng); ba trạng thái `vừa chỗ`/`nén`/`phải sửa`
+  nói bằng CHỮ; `plan === null` KHÔNG được vẽ một dải rỗng trông như đã đo; bốn trạng thái của job
+  (đang chạy có nút HUỶ, hỏng thì lỗi gọn trong `<details>` mà cửa vào VẪN mở); đổi kênh thì lựa
+  chọn bản dịch cũ không được đi theo; và phép ghim hai chiều `.lt*` ↔ `app.css`.
+
+⚠️ **Hai lần bài test này XANH GIẢ, và cả hai đều bị bắt bằng mutation:**
+
+1. Bài "đổi kênh" đầu tiên render HAI instance riêng biệt, nên nó xanh kể cả khi bỏ `useEffect`
+   reset — mutant SỐNG (`pass 8 / fail 0`). Sửa sang `rerender` CÙNG instance thì đo lại mới đúng
+   cơ chế.
+2. Đo lại lần hai phát hiện `useEffect` reset đó **là mã chết**: bỏ nó đi, `aria-checked` của bản
+   dịch kênh mới VẪN là `"true"`, vì `find` trượt thì `chon` tự rơi về `macDinhId`. Nó đã bị XOÁ,
+   và lý do đo được ghi ngay chỗ nó từng nằm.
+
+Phép ghim CSS mới cũng được kiểm mutation: đổi `.lt__take--phai-sua` → `…X` (luật mồ côi) và xoá
+luật `.lt__dem-dai` (lớp không luật) đều làm bài hình thức ĐỎ với đúng tên lớp; khôi phục thì xanh.
+
+**2 bài của lượt trước** vẫn nguyên:
 * `src/screens/CompareScreen.test.tsx` (**1**): bốn trạng thái của job `dub` nói bằng CHỮ, năm
   đường tải dựng từ id, và — quan trọng hơn — **job `failed` KHÔNG được khoá nút**: bản đầu đặt ô
   giọng + nút trong nhánh `dub === null`, nên một lượt hỏng làm mất luôn đường thử lại (đo trên

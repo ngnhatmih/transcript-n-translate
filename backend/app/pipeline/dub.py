@@ -262,6 +262,14 @@ class DubHandler:
         self._out_dir.mkdir(parents=True, exist_ok=True)
         master_path = self._out_dir / f"dub-{tid}.wav"
         sf.write(str(master_path), master, sr, subtype="PCM_16")
+
+        # KẾ HOẠCH TỐC ĐỘ, ghi cạnh master: bảng dòng của màn Lồng tiếng cần `take`, `chỗ`,
+        # tốc độ và trạng thái của TỪNG dòng — bốn số chỉ tồn tại trong lượt chạy này. Không ghi
+        # ra thì giao diện chỉ có thể bịa, hoặc phải chạy lại TTS (5–7 phút) để xem lại một lượt
+        # đã xong. Tệp là DẪN XUẤT của lượt chạy, không phải nguồn sự thật thứ hai: xoá nó đi
+        # thì route trả `null` và giao diện nói "chưa có số đo", KHÔNG bịa số.
+        self._ghi_ke_hoach(tid, dung, takes, slots, avails, toc_do, need, qua_tran)
+
         report(0.92, f"xuất {len(self._dinh_dangs)} định dạng")
         xuat_dinh_dang(master_path, self._out_dir, self._dinh_dangs)
         if qua_tran:
@@ -269,6 +277,48 @@ class DubHandler:
                         f"dòng sau): " + ", ".join(str(dung[k].i) for k in qua_tran))
         else:
             report(1.0, "xong")
+
+    def _ghi_ke_hoach(self, tid: int, dung, takes, slots, avails, toc_do, need, qua_tran) -> None:
+        """Ghi `dub-<tid>.plan.json`: số đo của TỪNG dòng cho bảng ở màn Lồng tiếng.
+
+        `trang_thai` là ba câu KHÁC NHAU, không phải ba mức của một thang:
+          * `vua`      — take ≤ chỗ, không phải nén;
+          * `nen`      — take > chỗ, đã nén trong trần, vẫn nằm trong dòng;
+          * `phai-sua` — nén TỚI TRẦN vẫn tràn sang dòng sau ⇒ phải sửa chữ, không phải tăng tốc.
+
+        Ghi bằng `ensure_ascii=False` để tệp đọc được bằng mắt khi cần chẩn đoán.
+        """
+        import json as _json
+
+        qua = set(qua_tran)
+        dong = []
+        for k, s in enumerate(dung):
+            dong.append({
+                "i": s.i,
+                "start": round(float(s.start), 3),
+                "end": round(float(s.end), 3),
+                "text": s.text,
+                "take": round(float(takes[k]), 3),
+                "slot": round(float(slots[k]), 3),
+                "avail": round(float(avails[k]), 3),
+                "speed": round(float(toc_do[k]), 3),
+                "need": round(float(need[k]), 3),
+                "trang_thai": "phai-sua" if k in qua else ("nen" if need[k] > 1.0 + 1e-9 else "vua"),
+            })
+        so_vua = sum(1 for d in dong if d["trang_thai"] == "vua")
+        so_nen = sum(1 for d in dong if d["trang_thai"] == "nen")
+        trung_vi = float(np.median([d["speed"] for d in dong])) if dong else 0.0
+        ke_hoach = {
+            "translation_id": tid,
+            "tran": float(self._tran),
+            "tong_giay": round(float(max(s.end for s in dung)), 3),
+            "so_dong": len(dong),
+            "dem": {"vua": so_vua, "nen": so_nen, "phai_sua": len(qua)},
+            "trung_vi_toc_do": round(trung_vi, 3),
+            "dong": dong,
+        }
+        (self._out_dir / f"dub-{tid}.plan.json").write_text(
+            _json.dumps(ke_hoach, ensure_ascii=False, indent=1), encoding="utf-8")
 
     def _bi_huy(self, job) -> bool:
         try:

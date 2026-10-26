@@ -29,11 +29,16 @@ import type { Status } from "../api/types.ts";
 import type { Mode } from "../state/reducer.ts";
 import { StatusStrip } from "../screens/OllamaDown.tsx";
 
-/** Ba chế độ của spec UI §3, theo THỨ TỰ hiển thị. Nhãn là chữ người dùng đọc. */
-const BA_CHE_DO: ReadonlyArray<{ mode: Mode; nhan: string }> = [
+/** BỐN chế độ của spec UI §3 (+ Lồng tiếng), theo THỨ TỰ hiển thị. Nhãn là chữ người dùng đọc.
+ *
+ * `Lồng tiếng` đứng CUỐI, đúng thứ tự demo: nó là bước sau cùng của đường ống (nạp → phiên âm →
+ * dịch → lồng), nên nó ở sau `Thuật ngữ` là chỗ dễ đoán nhất cho người đã quen ba tab kia.
+ */
+const BON_CHE_DO: ReadonlyArray<{ mode: Mode; nhan: string }> = [
   { mode: "edit", nhan: "Biên tập" },
   { mode: "compare", nhan: "Đối chiếu" },
   { mode: "glossary", nhan: "Thuật ngữ" },
+  { mode: "dub", nhan: "Lồng tiếng" },
 ];
 
 export interface HeaderProps {
@@ -52,7 +57,7 @@ export function Header({ status, mode, onModeChange }: HeaderProps) {
           di chuyển trong nhóm). `htmlFor` + `id` để bấm được vào chữ, và để TÊN ĐỌC ĐƯỢC
           của radio là nhãn — đó cũng là cách Task 12 tìm control này. */}
       <div className="cd" role="radiogroup" aria-label="Chế độ làm việc">
-        {BA_CHE_DO.map(({ mode: cheDo, nhan }) => (
+        {BON_CHE_DO.map(({ mode: cheDo, nhan }) => (
           <span key={cheDo} className="cd__o">
             <input
               className="cd__radio"

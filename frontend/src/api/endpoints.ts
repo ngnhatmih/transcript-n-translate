@@ -13,6 +13,7 @@ import { api, BASE } from "./client.ts";
 import type {
   AffectedPreview,
   ChimeraCost,
+  DubPlan,
   EngineSpec,
   GlossaryVersion,
   Job,
@@ -373,8 +374,23 @@ export const makeDub = (translationId: number, voice: string | null) =>
   api.post<{ job: { id: number; type: string; state: string; translation_id: number } }>(
     "/api/dubs", { translation_id: translationId, voice });
 
+/**
+ * Kế hoạch tốc độ của lượt lồng GẦN NHẤT — số đo TỪNG dòng cho bảng ở màn Lồng tiếng.
+ *
+ * `null` = CHƯA lồng lần nào (route trả `null`, không phải 404). Ba câu phải phân biệt được:
+ * "chưa có số đo" (`null`), "không có bản dịch" (lỗi HTTP), và "có số đo" (object).
+ */
+export const getDubPlan = (translationId: number): Promise<DubPlan | null> =>
+  api.get<DubPlan | null>(`/api/dubs/${translationId}/plan`);
+
+/** Đường NGHE THỬ một dòng: wav của take đã ép tốc độ, cắt từ master (route không chạy TTS). */
+export const dubTakeUrl = (translationId: number, i: number): string =>
+  `/api/dubs/${translationId}/take?i=${i}`;
+
 export const endpoints = {
   makeDub,
+  getDubPlan,
+  dubTakeUrl,
   listSources,
   getSource,
   uploadSource,
