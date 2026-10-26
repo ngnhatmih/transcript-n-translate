@@ -740,6 +740,12 @@ Ba điều phải nói trước khi bật nó:
 `none` giữ `ba ngàn`). Dịch phụ đề không cần suy luận dài — và `cached_tokens` trong `usage` cho
 thấy mỗi lượt là một lượt mới.
 
+**Chi phí:** hàng đó khai thêm `price_in_usd_per_mtok: 0.15` / `price_out_usd_per_mtok: 0.6` (bảng
+giá DeepSeek-flash mà gateway đang dùng). Nhờ vậy `GET /api/translations/{id}` trả `cost_usd` =
+token ĐÃ ĐO × giá ĐÃ KHAI, và màn **Đối chiếu** nối `~$0,006` vào nhãn của bản dịch đó
+(`app/domain/pricing.py`). Engine chạy trên máy không khai giá ⇒ `cost_usd: null`, **không phải
+`$0,00`**: "không tính được" và "miễn phí" là hai câu khác nhau, và cột `0` ở đó nói cả hai.
+
 `available` của hàng đó là câu trả lời THẬT: không chạy `whalegate` thì nó là `false` và giao
 diện không cho chọn (không có gì khác phải sửa). Muốn đổi endpoint/khoá, hoặc không muốn hàng
 này trong registry, thì trỏ `PHUDE_REGISTRY` vào một bản `registry.json` của riêng bạn.
