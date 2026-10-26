@@ -63,32 +63,32 @@ GPU. Nó tự ép UTF-8 cho stdout (console Windows mặc định cp1252, còn s
 tiếng Trung/Việt) và tự đặt cache model trước khi nạp `faster_whisper`.
 
 Con số nền của lần chạy mặc định, đo sau khi xoá `__pycache__` (lệnh ở mục
-"Kiểm thử" trên, chạy từ trong `backend\`). Thứ có nghĩa là **1331 / 15**, không
+"Kiểm thử" trên, chạy từ trong `backend\`). Thứ có nghĩa là **1336 / 15**, không
 phải số giây — thời gian trôi giữa các lần chạy (đã thấy 24,00–30,94 s) còn con
 số bài thì không:
 
 ```
-1331 passed, 15 deselected, 1 warning
+1336 passed, 15 deselected, 1 warning
 ```
 
 Hai con số đó là SỐ BÀI ĐƯỢC CHỌN, và chúng khớp với số mà `--collect-only` báo
-(`1331/1346`, 15 bài `live` bị bỏ;
+(`1336/1351`, 15 bài `live` bị bỏ;
 `tests/test_backend_readme.py::test_readme_baseline_matches_the_tests_actually_
 collected` đối chiếu mỗi lần chạy).
 
 
-Máy này **CÓ** `ffmpeg 8.1.1` + `ffprobe` trên PATH (đã đo), nên `1331/15` ở trên
+Máy này **CÓ** `ffmpeg 8.1.1` + `ffprobe` trên PATH (đã đo), nên `1336/15` ở trên
 là số THẬT của nó. Máy **không có** `ffmpeg`/`ffprobe` cho một kết quả KHÁC: cả
 `tests/test_ingest.py` bị `skipif` ở cấp module — **9** bài cùng skip một lượt —
-nên dòng tổng kết của máy đó là **`1322 passed, 9 skipped, 15 deselected`** (=
-`1331 − 9`; con số này TỪNG ghi `978`, tức một baseline rất cũ, và nó lệch phép
+nên dòng tổng kết của máy đó là **`1327 passed, 9 skipped, 15 deselected`** (=
+`1336 − 9`; con số này TỪNG ghi `978`, tức một baseline rất cũ, và nó lệch phép
 trừ của chính khối nền ngay trên nó). Đó là
 con số của máy thiếu ffmpeg, **không phải** con số máy này từng in ra; đừng chép
 nó vào khối nền ở trên, và đừng "sửa" số nền xuống chỉ vì thiếu ffmpeg.
 
 ⚠️ Con số `856` ở đây TỪNG không khớp phép trừ của chính nó: `865 − 9 = 856`, tức
 nó là số của lượt TRƯỚC `V1` (+3 bài) còn sót lại. Phép trừ của khối nền hiện tại
-là `1331 − 9` = `1322`.
+là `1336 − 9` = `1327`.
 
 
 (Con số này từng bị ghi là `798`: bài `test_a_failed_translation_leaves_the_
@@ -97,7 +97,7 @@ số nền không được bump. Nó tồn tại để phát hiện TRÔI, nên 
 chạy báo dương tính giả.
 
 
-Lần bump này, `1300/15` → `1331/15` (**+31 bài**), gồm hai cụm:
+Lần bump này, `1300/15` → `1336/15` (**+36 bài**), gồm hai cụm:
 
 **(a) Mười bài của `tests/test_asr_progress.py` — job `asr` phải NHÍCH và lần đầu tải model phải
 NÓI RA.** Sự cố đo được trên stack thật: một job `asr` với `fw-large-v3` đứng ở `15%` suốt **sáu
@@ -780,6 +780,28 @@ tham chiếu, và hai trong năm câu nguồn đã rác sẵn từ ASR. Điều 
 ở prompt p2 vẫn chép nguồn; `opus-mt` (engine MẶC ĐỊNH) rơi nội dung; và `hy-mt` có kiểu hỏng
 riêng là **bịa thêm thông tin** — nguy hiểm hơn rơi chữ, vì bản dịch vẫn đọc trôi.
 
+### Lồng tiếng (TTS) — `scripts/make_dub.py`
+
+```powershell
+# venv RIÊNG cho TTS: vieneu kéo huggingface_hub 2.x + starlette 1.x, xung đột với transformers 4.46
+.\.venv\Scripts\python.exe -m venv .venv-tts
+.\.venv-tts\Scripts\python.exe -m pip install vieneu
+
+# lồng 8 dòng của bản dịch #3 ra 5 định dạng
+.\.venv\Scripts\python.exe -B scripts\make_dub.py --so-dong 8 --voice "Minh Quân"
+```
+
+Đo được: nạp model **62,6 s** (lần đầu, kèm tải), `infer` **1,2 s** cho một câu, ra **48 kHz**;
+8 dòng → master **33,78 s** (dòng 7 đặt ở 32,46 s đúng `start`) và **5 file**
+wav 3167 kB · flac 462 · mp3 793 · aac 314 · m4a 310.
+
+Tốc độ KHÔNG phải mỗi dòng một số: `ke_hoach_toc_do` gom về thang bậc 0,05 (tối đa 1,35),
+vì đo trên 14 dòng thật `take/chỗ` rải 1,00–1,62× — mỗi dòng một tốc độ thì giọng đổi nhịp liên
+tục, còn một tốc độ chung thì phải lấy mức lớn nhất. 8 dòng trên dùng 5 mốc: 1,00/1,10/1,15/
+1,20/1,25. Dòng nào `need > 1,35` thì script IN RA là "phải sửa chữ" và không tự nén quá trần.
+
+`ponytail:` chưa có — trộn với tiếng gốc (ducking), gọi lại engine dịch để rút chữ, và đường
+job/route/UI. Bản này là CLI trên một bản dịch đã có.
 ### Giới hạn — đọc trước khi tin bất cứ con số nào ở trên
 
 1. **`DEFAULT_MAX_CHARS = 1200` NAY ĐÃ ĐƯỢC ÉP — và nó có tác dụng thật.**
