@@ -4,6 +4,7 @@
 """
 from __future__ import annotations
 
+import os
 from typing import Callable
 
 from app.adapters.asr.cuda_runtime import ensure_cuda_runtime
@@ -38,18 +39,39 @@ def to_segments(raw_segments: list[dict]) -> list[Segment]:
     return out
 
 
+def device_and_compute_type(spec: EngineSpec,
+                            device: str | None = None) -> tuple[str, str]:
+    """`(device, compute_type)` cho CTranslate2 — một cặp, không phải hai biến rời.
+
+    `float16`/`int8_float16` chỉ có nghĩa trên GPU; CTranslate2 NÉM trên CPU. Nên
+    "chạy CPU" bắt buộc phải hạ `compute_type` theo, nếu không thì đổi thiết bị là
+    đổi từ một lỗi sang một lỗi khác.
+
+    Thiết bị lấy theo thứ tự: tham số truyền vào → biến môi trường
+    `PHUDE_ASR_DEVICE` → `"cuda"` (giữ nguyên hành vi cũ trên máy có GPU).
+
+    `ponytail:` MỘT biến cho cả tiến trình, không phải `spec.opts["device"]` —
+    nâng cấp khi cần hai engine ASR khác thiết bị trong cùng một tiến trình.
+    """
+    chosen = device or os.environ.get("PHUDE_ASR_DEVICE") or "cuda"
+    compute = str(spec.opts.get("compute_type", "int8_float16"))
+    if not chosen.startswith("cuda") and "float16" in compute:
+        compute = "int8"
+    return chosen, compute
+
+
 class FasterWhisperEngine:
     def __init__(
         self,
         spec: EngineSpec,
         *,
-        device: str = "cuda",
+        device: str | None = None,
         download_root: str | None = None,
         model_factory: Callable[..., object] | None = None,
     ) -> None:
         self.engine_id = spec.id
         self.spec = spec
-        self.device = device
+        self.device, self.compute_type = device_and_compute_type(spec, device)
         self.download_root = download_root
         self._model_factory = model_factory
         self._model = None
@@ -70,7 +92,7 @@ class FasterWhisperEngine:
             self._model = factory(
                 self.spec.model_ref,
                 device=self.device,
-                compute_type=self.spec.opts.get("compute_type", "int8_float16"),
+                compute_type=self.compute_type,
                 download_root=self.download_root,
             )
         return self._model

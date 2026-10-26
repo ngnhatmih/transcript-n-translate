@@ -1,0 +1,39 @@
+# Để CHẠY API trong image Docker — tập con của `requirements.txt`, không phải bản thứ hai.
+#
+# Vì sao không dùng thẳng `requirements.txt`: nó có `funasr` + `modelscope`, hai gói kéo
+# `torch` (~800 MB wheel CPU) vào image, mà engine mặc định KHÔNG dùng SenseVoice —
+# `default_asr` là `fw-large-v3-turbo` (`faster-whisper`, CTranslate2, không torch) và
+# `default_mt` là `opus-mt` (in-process). Image chỉ để chạy sản phẩm, nên chỉ cài đường đó.
+#
+# Thiếu gì so với `requirements.txt`: `funasr`, `modelscope` (SenseVoice) và `pytest`
+# (test không chạy trong image). Cần SenseVoice trong container thì cài thêm đúng hai
+# dòng đó — nó cần torch, và đó là lý do nó KHÔNG nằm ở đây. Nhưng `torch` thì VẪN
+# phải có, cho OPUS-MT — xem mục MT bên dưới (đây là chỗ bản đầu của tệp này sai).
+
+# --- API ---
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+python-multipart==0.0.20
+
+# --- ASR (faster-whisper dùng CTranslate2, KHÔNG cần torch) ---
+faster-whisper==1.1.1
+# R71: faster_whisper 1.1.1 `import requests`, huggingface_hub 1.x đã bỏ phụ thuộc đó.
+requests==2.32.3
+
+# --- MT: OPUS-MT (Marian) in-process ---
+# `torch` KHÔNG phải tuỳ chọn: `MarianMTModel` của transformers cần PyTorch. Đo được:
+# thiếu nó thì job `translate` FAILED với "MarianMTModel requires the PyTorch library
+# but it was not found" — sau khi ASR đã chạy xong. Bản CPU (không kéo theo gói
+# `nvidia-*` ~2,5 GB) là bản duy nhất có nghĩa trong image không GPU.
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.5.1+cpu
+
+transformers==4.46.3
+sentencepiece==0.2.0
+sacremoses==0.1.1
+
+# --- Tiện ích ---
+httpx==0.28.1
+yt-dlp==2025.1.15
+soundfile==0.12.1
+numpy==1.26.4

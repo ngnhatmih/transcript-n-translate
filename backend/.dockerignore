@@ -1,0 +1,6 @@
+# Không đưa môi trường phát triển vào image: `.venv` nặng vài GB và chỉ đúng trên Windows.
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+data/

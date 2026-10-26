@@ -234,6 +234,35 @@ thiết kế ở `frontend/src/styles/tokens.css` (giá trị chép từ
 
 Chi tiết backend: `backend/README.md`.
 
+## Chạy bằng Docker
+
+Hai service, một lệnh; chỉ **đường mặc định** (`fw-large-v3-turbo` + `opus-mt`), chạy **CPU**:
+
+```powershell
+docker compose up --build      # web http://127.0.0.1:3100 · api http://127.0.0.1:8620
+```
+
+Lần đầu `api` tải model (~1,6 GB) vào volume `hf-models`, nên phút đầu chậm — `healthcheck`
+có `start_period: 120s` vì lý do đó.
+
+**TRONG image**: FastAPI + `ffmpeg` (bắt buộc cho job `ingest`) + faster-whisper CPU + torch CPU +
+opus-mt; `nginx` phục vụ bản tĩnh và proxy `/api` (tắt `proxy_buffering` cho SSE).
+**KHÔNG có**: GPU (image CPU), **Ollama** (nên `qwen*`/`hy-mt` hiện `available: false` và
+`/api/status` trả `ollama: "down"`), SenseVoice (cần `funasr` + torch; cài thêm nếu muốn).
+
+Ba chỗ **phải** sửa để image chạy được — đo bằng lượt chạy thật, không phải suy luận:
+
+| triệu chứng | nguyên nhân | cách sửa (đã có trong `backend/Dockerfile` / `requirements-docker.txt`) |
+|---|---|---|
+| map cổng ra ngoài không tới | `API_HOST` mặc định `127.0.0.1`; trong container nghĩa là chỉ nghe loopback | `PHUDE_HOST=0.0.0.0` |
+| job `asr` **FAILED**: *CUDA driver version is insufficient* | adapter mặc định `device="cuda"`, container không có driver | `PHUDE_ASR_DEVICE=cpu` (biến mới; kéo `compute_type` xuống `int8`) |
+| job `translate` **FAILED**: *MarianMTModel requires the PyTorch library* | `opus-mt` cần torch | `torch==2.5.1+cpu` (bản CPU; không kéo `nvidia-*` ~2,5 GB) |
+
+Lượt xác nhận (2026-10-26, Docker 29.4.2 + Compose v5.1.3): nạp `wav` 278 s → `ingest`/`asr`/
+`translate` **done**, transcript **90 đoạn** `translated`, `export` **200 · 9 366 byte** SRT;
+`web /` **200** và `web /api/status` **200** qua proxy. Ảnh image: `api` **2,6 GB**, `web`
+**97 MB**.
+
 ## CHƯA làm / CHƯA biết
 
 Mục này **không tô hồng**. Câu nào chưa đo thì ghi **CHƯA ĐO**.
