@@ -1,0 +1,38 @@
+# Chạy sản phẩm bằng Docker: hai service, một lệnh.
+#
+#   docker compose up --build
+#   → web  http://127.0.0.1:3100      (nginx phục vụ bản tĩnh, proxy /api sang api)
+#   → api  http://127.0.0.1:8620      (FastAPI + ffmpeg; mặc định fw-large-v3-turbo + opus-mt)
+#
+# KHÔNG có GPU và KHÔNG có Ollama trong hai image này — xem README mục "Chạy bằng Docker"
+# để biết cái gì chạy được và cái gì cần cài thêm trên máy chủ.
+services:
+  api:
+    build: ./backend
+    ports:
+      - "8620:8620"
+    volumes:
+      # `/data`: DB + media + log + output. `/models`: cache model HF (~1,6 GB tải lần đầu).
+      - phude-data:/data
+      - hf-models:/models
+    healthcheck:
+      # `start_period` rộng: lần chạy đầu phải tải model trước khi `/api/status` trả 200.
+      test: ["CMD", "python", "-c",
+             "import urllib.request;urllib.request.urlopen('http://127.0.0.1:8620/api/status',timeout=5)"]
+      interval: 15s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
+    restart: unless-stopped
+
+  web:
+    build: ./frontend
+    ports:
+      - "3100:80"
+    depends_on:
+      - api
+    restart: unless-stopped
+
+volumes:
+  phude-data:
+  hf-models:

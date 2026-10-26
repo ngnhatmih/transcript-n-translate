@@ -63,32 +63,32 @@ GPU. Nó tự ép UTF-8 cho stdout (console Windows mặc định cp1252, còn s
 tiếng Trung/Việt) và tự đặt cache model trước khi nạp `faster_whisper`.
 
 Con số nền của lần chạy mặc định, đo sau khi xoá `__pycache__` (lệnh ở mục
-"Kiểm thử" trên, chạy từ trong `backend\`). Thứ có nghĩa là **1291 / 15**, không
+"Kiểm thử" trên, chạy từ trong `backend\`). Thứ có nghĩa là **1298 / 15**, không
 phải số giây — thời gian trôi giữa các lần chạy (đã thấy 24,00–30,94 s) còn con
 số bài thì không:
 
 ```
-1291 passed, 15 deselected, 1 warning
+1298 passed, 15 deselected, 1 warning
 ```
 
 Hai con số đó là SỐ BÀI ĐƯỢC CHỌN, và chúng khớp với số mà `--collect-only` báo
-(`1291/1306`, 15 bài `live` bị bỏ;
+(`1298/1313`, 15 bài `live` bị bỏ;
 `tests/test_backend_readme.py::test_readme_baseline_matches_the_tests_actually_
 collected` đối chiếu mỗi lần chạy).
 
 
-Máy này **CÓ** `ffmpeg 8.1.1` + `ffprobe` trên PATH (đã đo), nên `1291/15` ở trên
+Máy này **CÓ** `ffmpeg 8.1.1` + `ffprobe` trên PATH (đã đo), nên `1298/15` ở trên
 là số THẬT của nó. Máy **không có** `ffmpeg`/`ffprobe` cho một kết quả KHÁC: cả
 `tests/test_ingest.py` bị `skipif` ở cấp module — **9** bài cùng skip một lượt —
-nên dòng tổng kết của máy đó là **`1282 passed, 9 skipped, 15 deselected`** (=
-`1291 − 9`; con số này TỪNG ghi `978`, tức một baseline rất cũ, và nó lệch phép
+nên dòng tổng kết của máy đó là **`1289 passed, 9 skipped, 15 deselected`** (=
+`1298 − 9`; con số này TỪNG ghi `978`, tức một baseline rất cũ, và nó lệch phép
 trừ của chính khối nền ngay trên nó). Đó là
 con số của máy thiếu ffmpeg, **không phải** con số máy này từng in ra; đừng chép
 nó vào khối nền ở trên, và đừng "sửa" số nền xuống chỉ vì thiếu ffmpeg.
 
 ⚠️ Con số `856` ở đây TỪNG không khớp phép trừ của chính nó: `865 − 9 = 856`, tức
 nó là số của lượt TRƯỚC `V1` (+3 bài) còn sót lại. Phép trừ của khối nền hiện tại
-là `1291 − 9` = `1282`.
+là `1298 − 9` = `1289`.
 
 
 (Con số này từng bị ghi là `798`: bài `test_a_failed_translation_leaves_the_
@@ -97,7 +97,13 @@ số nền không được bump. Nó tồn tại để phát hiện TRÔI, nên 
 chạy báo dương tính giả.
 
 
-Lần bump này, **gộp nhánh `gd2-mt`** (13 commit dọn nợ P2: `M-3`, `M-4`, `M-10`..`M-14`, `P1-1`): `1289/15` → `1291/15` (**+2 bài** ròng) — thêm `tests/test_ollama_probe.py`, `tests/test_schema_llm_calls_index.py`, `tests/test_transcribe_pipeline.py` và các ca mới ở `test_api_sources.py`/`test_api_jobs_sse.py`, đồng thời `M-3` gỡ đường GHI của route export (kèm bài ghim "không ghi tệp") và `M-13` gỡ `app.state.mt_engines` cùng bài ghim nó. Bản gộp chọn cách của `gd2-mt` cho `N-9`/`M-3` (**không** `?save=1`): một tham số không người gọi trong production là khai báo chết.
+Lần bump này, `1291/15` → `1298/15` (**+7 bài**), do **`PHUDE_ASR_DEVICE`** — biến chọn
+thiết bị ASR, thêm vì image Docker không có driver GPU nên job `asr` chết; kéo theo
+`compute_type` (`int8_float16` vô nghĩa trên CPU). `tests/test_asr_device.py` (+7) ghim
+cặp (thiết bị, kiểu số) và các ca: mặc định `cuda`, env `cpu` ⇒ hạ `int8`, `float32`
+giữ nguyên, tham số thắng env, env rỗng ⇒ `cuda`.
+
+Lần bump trước, **gộp nhánh `gd2-mt`** (13 commit dọn nợ P2: `M-3`, `M-4`, `M-10`..`M-14`, `P1-1`): `1289/15` → `1291/15` (**+2 bài** ròng) — thêm `tests/test_ollama_probe.py`, `tests/test_schema_llm_calls_index.py`, `tests/test_transcribe_pipeline.py` và các ca mới ở `test_api_sources.py`/`test_api_jobs_sse.py`, đồng thời `M-3` gỡ đường GHI của route export (kèm bài ghim "không ghi tệp") và `M-13` gỡ `app.state.mt_engines` cùng bài ghim nó. Bản gộp chọn cách của `gd2-mt` cho `N-9`/`M-3` (**không** `?save=1`): một tham số không người gọi trong production là khai báo chết.
 
 Lần bump trước, `1288/15` → `1289/15` (**+1 bài**), do đóng nợ **`N-9`** (route export ghi
 tệp trên một `GET`): mặc định `GET /api/export/{translation_id}` chỉ TRẢ nội dung,
@@ -761,6 +767,16 @@ pull model nào (`ollama_available → set()`), nên `qwen2.5-3b/7b` và `hy-mt-
 không được dựng và không được chạy; bài chỉ phủ đường **in-process** `opus-mt`.
 Đường Ollama do `tests/test_mt_live.py` phủ khi chạy `-m live` (cần model thật) và
 bởi `scripts/smoke_mt.py`.
+
+### Thiết bị ASR: `PHUDE_ASR_DEVICE` (mặc định `cuda`)
+
+Adapter `faster-whisper` chọn thiết bị theo thứ tự: tham số `device=` → biến môi trường
+**`PHUDE_ASR_DEVICE`** → `"cuda"`. Biến này tồn tại vì một chỗ hỏng ĐO ĐƯỢC: image Docker
+không có driver GPU, nên job `asr` đầu tiên chết với *"CUDA driver version is insufficient"*.
+
+Đổi thiết bị **kéo theo** `compute_type`: `int8_float16` chỉ có nghĩa trên GPU, CTranslate2
+từ chối nó trên CPU, nên `device_and_compute_type()` tự hạ về `int8`. Hai vế là một cặp,
+không phải hai biến rời — cặp đó được ghim ở `tests/test_asr_device.py` (7 bài).
 
 ### Lượt chạy THẬT đầu-cuối trên cây đã gộp (2026-10-25)
 

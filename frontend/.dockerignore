@@ -1,0 +1,5 @@
+# `node_modules` được cài LẠI trong image (`npm ci`), `dist` được dựng trong image.
+# Ảnh e2e là bằng chứng của máy này, không phải đầu vào của image.
+node_modules/
+dist/
+e2e/anh/
