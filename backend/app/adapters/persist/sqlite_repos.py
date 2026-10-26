@@ -732,6 +732,27 @@ class SqliteRepos:
             rows = conn.execute(sql, params).fetchall()
         return [dict(r) for r in rows]
 
+    def token_stats(self) -> list[dict]:
+        """`SUM` của token/thời lượng theo `(engine, model_ref)`.
+
+        `SUM` bỏ qua NULL, nhưng một NHÓM toàn NULL thì trả NULL — và đó là câu trả lời
+        ĐÚNG, không phải lỗi: `opus-mt` chạy trong tiến trình nên không có token để báo, còn
+        `llm_calls.duration_ms` của một engine `http` chỉ có từ bản vá tự đo thời gian. Ghi
+        `0` ở đây là biến "không đo được" thành "đã đo và bằng không".
+        """
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT engine, model_ref,"
+                " COUNT(*) AS calls,"
+                " SUM(ok) AS ok_calls,"
+                " SUM(tokens_in) AS tokens_in,"
+                " SUM(tokens_out) AS tokens_out,"
+                " SUM(duration_ms) AS duration_ms"
+                " FROM llm_calls GROUP BY engine, model_ref"
+                " ORDER BY engine, model_ref"
+            ).fetchall()
+        return [dict(r) for r in rows]
+
 
 def _chimera_from_row(row) -> dict | None:
     """Cột `chimera` của một hàng `translations` -> `dict`, hoặc `None`.

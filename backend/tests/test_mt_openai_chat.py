@@ -178,6 +178,13 @@ def test_stats_carry_token_counts_from_the_usage_block():
     eng.translate([seg(1)], [], MtOpts(source_lang="zh"))
     assert eng.last_stats is not None
     assert (eng.last_stats.tokens_in, eng.last_stats.tokens_out) == (111, 47)
+    # Thời lượng phải do CHÍNH adapter đo: endpoint OpenAI-compatible không trả
+    # `total_duration` như Ollama, nên trước bản vá này `llm_calls.duration_ms` LUÔN NULL cho
+    # mọi job `http` — đo được trên DB thật: 18 lời gọi `deepseek-web` có token đủ mà `ms`
+    # rỗng hết, tức nửa "chi phí" của engine đó không đọc được.
+    assert isinstance(eng.last_stats.duration_ms, int), (
+        f"duration_ms phải là số mili giây, đo được {eng.last_stats.duration_ms!r}")
+    assert eng.last_stats.duration_ms >= 0
 
 
 def test_empty_batch_never_touches_the_network():

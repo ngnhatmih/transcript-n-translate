@@ -63,32 +63,32 @@ GPU. Nó tự ép UTF-8 cho stdout (console Windows mặc định cp1252, còn s
 tiếng Trung/Việt) và tự đặt cache model trước khi nạp `faster_whisper`.
 
 Con số nền của lần chạy mặc định, đo sau khi xoá `__pycache__` (lệnh ở mục
-"Kiểm thử" trên, chạy từ trong `backend\`). Thứ có nghĩa là **1323 / 15**, không
+"Kiểm thử" trên, chạy từ trong `backend\`). Thứ có nghĩa là **1326 / 15**, không
 phải số giây — thời gian trôi giữa các lần chạy (đã thấy 24,00–30,94 s) còn con
 số bài thì không:
 
 ```
-1323 passed, 15 deselected, 1 warning
+1326 passed, 15 deselected, 1 warning
 ```
 
 Hai con số đó là SỐ BÀI ĐƯỢC CHỌN, và chúng khớp với số mà `--collect-only` báo
-(`1323/1338`, 15 bài `live` bị bỏ;
+(`1326/1341`, 15 bài `live` bị bỏ;
 `tests/test_backend_readme.py::test_readme_baseline_matches_the_tests_actually_
 collected` đối chiếu mỗi lần chạy).
 
 
-Máy này **CÓ** `ffmpeg 8.1.1` + `ffprobe` trên PATH (đã đo), nên `1323/15` ở trên
+Máy này **CÓ** `ffmpeg 8.1.1` + `ffprobe` trên PATH (đã đo), nên `1326/15` ở trên
 là số THẬT của nó. Máy **không có** `ffmpeg`/`ffprobe` cho một kết quả KHÁC: cả
 `tests/test_ingest.py` bị `skipif` ở cấp module — **9** bài cùng skip một lượt —
-nên dòng tổng kết của máy đó là **`1314 passed, 9 skipped, 15 deselected`** (=
-`1323 − 9`; con số này TỪNG ghi `978`, tức một baseline rất cũ, và nó lệch phép
+nên dòng tổng kết của máy đó là **`1317 passed, 9 skipped, 15 deselected`** (=
+`1326 − 9`; con số này TỪNG ghi `978`, tức một baseline rất cũ, và nó lệch phép
 trừ của chính khối nền ngay trên nó). Đó là
 con số của máy thiếu ffmpeg, **không phải** con số máy này từng in ra; đừng chép
 nó vào khối nền ở trên, và đừng "sửa" số nền xuống chỉ vì thiếu ffmpeg.
 
 ⚠️ Con số `856` ở đây TỪNG không khớp phép trừ của chính nó: `865 − 9 = 856`, tức
 nó là số của lượt TRƯỚC `V1` (+3 bài) còn sót lại. Phép trừ của khối nền hiện tại
-là `1323 − 9` = `1314`.
+là `1326 − 9` = `1317`.
 
 
 (Con số này từng bị ghi là `798`: bài `test_a_failed_translation_leaves_the_
@@ -97,7 +97,7 @@ số nền không được bump. Nó tồn tại để phát hiện TRÔI, nên 
 chạy báo dương tính giả.
 
 
-Lần bump này, `1300/15` → `1323/15` (**+23 bài**), gồm hai cụm:
+Lần bump này, `1300/15` → `1326/15` (**+26 bài**), gồm hai cụm:
 
 **(a) Mười bài của `tests/test_asr_progress.py` — job `asr` phải NHÍCH và lần đầu tải model phải
 NÓI RA.** Sự cố đo được trên stack thật: một job `asr` với `fw-large-v3` đứng ở `15%` suốt **sáu
@@ -728,7 +728,17 @@ Ba điều phải nói trước khi bật nó:
    là phiên web của một tài khoản, kèm ToS của dịch vụ đó).
 3. **Số đo của nó không tái lập được.** Không đặt được sampling, hành vi của dịch vụ đổi
    ngoài tầm kiểm soát. Một con số của engine `http` phải được dán nhãn như vậy, không được
-   trộn vào bảng so sánh local.
+   trộn vào bảng so sánh local. README của whalegate nói rõ hơn: `temperature`/`top_p`/
+   `max_tokens`/`stop`/`response_format` **have no web equivalent** — nên một hợp đồng đầu ra
+   dựa vào `response_format` là hợp đồng dựa vào may mắn (`lines` không dựa vào gì ngoài SỐ
+   DÒNG, và hỏng thì ỒN).
+
+`reasoning_effort` phải là **`none`** cho đường dịch: hàng `deepseek-web` khai khoá đó trong
+`opts`, và đây là DỮ LIỆU ĐO ĐƯỢC chứ không phải khẩu vị — cùng một lô 5 mục, `none` cho 1,77 s /
+121 token vào / **107** token ra, còn mặc định (`auto`, tức BẬT DeepThink) cho 12,55 s / 143 /
+**3 203**: **30 lần token ra, 7 lần chậm**, và bản dịch KHÔNG hơn (`auto` bịa `ba ngày` đúng chỗ
+`none` giữ `ba ngàn`). Dịch phụ đề không cần suy luận dài — và `cached_tokens` trong `usage` cho
+thấy mỗi lượt là một lượt mới.
 
 `available` của hàng đó là câu trả lời THẬT: không chạy `whalegate` thì nó là `false` và giao
 diện không cho chọn (không có gì khác phải sửa). Muốn đổi endpoint/khoá, hoặc không muốn hàng
