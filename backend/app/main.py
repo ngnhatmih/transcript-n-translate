@@ -27,7 +27,7 @@ from app.api.app import create_app
 from app.api.sse import JobEventBroker
 from app.config import (API_HOST, API_PORT, DB_PATH, HF_HOME, LOG_DIR, MEDIA_DIR,
                         OUTPUT_DIR, OLLAMA_MODELS, ensure_dirs,
-                        resolve_ollama_base_url)
+                        resolve_ollama_base_url, resolve_openai_base_url)
 from app.domain.chimera import ChimeraPlan, mark_availability, plan_from_raw
 from app.pipeline.export import ExportHandler
 from app.pipeline.ingest import IngestHandler
@@ -91,12 +91,20 @@ def _http_engine_opts(spec) -> dict:
     Không có mặc định cho `base_url`: một endpoint mặc định là một lời hứa về một
     dịch vụ bên ngoài mà ta không kiểm soát, và hứa sai ở đây nghĩa là job dịch
     gửi văn bản của người dùng tới một chỗ không ai chọn.
+
+    `base_url` đi qua `config.resolve_openai_base_url` — MỘT chỗ duy nhất, dùng chung với phép
+    dò `available` (`_http_engine_ready`): env `PHUDE_OPENAI_BASE_URL` thắng hàng registry, vì
+    cùng một hàng phải chạy được ở máy (`127.0.0.1`) và trong container
+    (`host.docker.internal`). Hai chỗ đọc hai địa chỉ khác nhau là giao diện hứa một engine
+    rồi job gửi văn bản tới chỗ khác — đúng lớp M-10 của Ollama.
     """
     opts = spec.opts if isinstance(spec.opts, dict) else {}
     if not isinstance(opts.get("base_url"), str) or not opts["base_url"].strip():
         raise RuntimeError(
             f"engine dịch {spec.id!r} khai runtime 'http' nhưng thiếu "
             f"`opts.base_url`; ví dụ: \"base_url\": \"https://api.deepseek.com/v1\"")
+    opts = dict(opts)
+    opts["base_url"] = resolve_openai_base_url(opts["base_url"])
     return opts
 
 

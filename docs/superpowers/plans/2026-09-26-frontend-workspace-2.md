@@ -4080,3 +4080,16 @@ Job `translate` thật qua `POST /api/translations` với engine `deepseek-web`,
 gieo vào DB scratch: **`done`**, 60/60 đoạn, 2 lời gọi, **7,4 s** (gồm cả dựng tiến trình), và
 `llm_calls` có `model_ref = 'deepseek-web'` (chuỗi thật), tokens 507/378 + 513/478. Bản dịch đầu
 tiên: 作为一个搞艺术的 → *"Là một người làm nghệ thuật"*.
+
+### 5. ⚠️ Hàng `http` trong CONTAINER: `127.0.0.1` là chính container (đúng lớp M-10)
+
+Sau khi sửa hình dạng adapter, engine vào được app chạy thẳng trên máy (`available: true`), nhưng
+trong `docker compose up` nó trả **`available: false`**: hàng registry khai
+`base_url: http://127.0.0.1:8790/v1`, mà trong container `127.0.0.1` là CHÍNH container — gateway
+nằm ở máy chủ. Sửa cùng khuôn `OLLAMA_HOST`/`resolve_ollama_base_url`: biến
+**`PHUDE_OPENAI_BASE_URL`** thắng hàng registry, đọc ở MỘT hàm (`config.resolve_openai_base_url`)
+mà **cả** phép dò `available` **lẫn** lúc dựng adapter dùng chung — hai chỗ đọc hai địa chỉ khác
+nhau là giao diện hứa một engine rồi job gửi văn bản của người dùng tới chỗ khác. Compose truyền
+`http://host.docker.internal:8790/v1`. Đo lại trong container: `available: true`, và một job THẬT
+trên clip 461 đoạn ⇒ **`done` sau 72,5 s**, echo **1/461** đoạn, 4 đoạn đầu đọc được
+(你绝对没吃过这样的东北烤冷面 → "Bạn tuyệt đối chưa từng ăn loại mì lạnh nướng Đông Bắc như thế này").

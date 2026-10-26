@@ -63,32 +63,32 @@ GPU. Nó tự ép UTF-8 cho stdout (console Windows mặc định cp1252, còn s
 tiếng Trung/Việt) và tự đặt cache model trước khi nạp `faster_whisper`.
 
 Con số nền của lần chạy mặc định, đo sau khi xoá `__pycache__` (lệnh ở mục
-"Kiểm thử" trên, chạy từ trong `backend\`). Thứ có nghĩa là **1309 / 15**, không
+"Kiểm thử" trên, chạy từ trong `backend\`). Thứ có nghĩa là **1313 / 15**, không
 phải số giây — thời gian trôi giữa các lần chạy (đã thấy 24,00–30,94 s) còn con
 số bài thì không:
 
 ```
-1309 passed, 15 deselected, 1 warning
+1313 passed, 15 deselected, 1 warning
 ```
 
 Hai con số đó là SỐ BÀI ĐƯỢC CHỌN, và chúng khớp với số mà `--collect-only` báo
-(`1309/1324`, 15 bài `live` bị bỏ;
+(`1313/1328`, 15 bài `live` bị bỏ;
 `tests/test_backend_readme.py::test_readme_baseline_matches_the_tests_actually_
 collected` đối chiếu mỗi lần chạy).
 
 
-Máy này **CÓ** `ffmpeg 8.1.1` + `ffprobe` trên PATH (đã đo), nên `1309/15` ở trên
+Máy này **CÓ** `ffmpeg 8.1.1` + `ffprobe` trên PATH (đã đo), nên `1313/15` ở trên
 là số THẬT của nó. Máy **không có** `ffmpeg`/`ffprobe` cho một kết quả KHÁC: cả
 `tests/test_ingest.py` bị `skipif` ở cấp module — **9** bài cùng skip một lượt —
-nên dòng tổng kết của máy đó là **`1300 passed, 9 skipped, 15 deselected`** (=
-`1309 − 9`; con số này TỪNG ghi `978`, tức một baseline rất cũ, và nó lệch phép
+nên dòng tổng kết của máy đó là **`1304 passed, 9 skipped, 15 deselected`** (=
+`1313 − 9`; con số này TỪNG ghi `978`, tức một baseline rất cũ, và nó lệch phép
 trừ của chính khối nền ngay trên nó). Đó là
 con số của máy thiếu ffmpeg, **không phải** con số máy này từng in ra; đừng chép
 nó vào khối nền ở trên, và đừng "sửa" số nền xuống chỉ vì thiếu ffmpeg.
 
 ⚠️ Con số `856` ở đây TỪNG không khớp phép trừ của chính nó: `865 − 9 = 856`, tức
 nó là số của lượt TRƯỚC `V1` (+3 bài) còn sót lại. Phép trừ của khối nền hiện tại
-là `1309 − 9` = `1300`.
+là `1313 − 9` = `1304`.
 
 
 (Con số này từng bị ghi là `798`: bài `test_a_failed_translation_leaves_the_
@@ -97,7 +97,7 @@ số nền không được bump. Nó tồn tại để phát hiện TRÔI, nên 
 chạy báo dương tính giả.
 
 
-Lần bump này, `1300/15` → `1309/15` (**+9 bài**), do **adapter `runtime: "http"` khai ba thuộc
+Lần bump này, `1300/15` → `1313/15` (**+13 bài**), do **adapter `runtime: "http"` khai ba thuộc
 tính của cổng `MtEngine` là METHOD thay vì `@property`** — đo được trên stack thật: job translate
 bằng `deepseek-web` chết ngay lô đầu với `sqlite3.InterfaceError: Error binding parameter 2 —
 probably unsupported type`, vì `TranslateHandler._record_call` đọc
@@ -109,6 +109,15 @@ hai ca ĐỎ. Kèm theo: hàng `deepseek-web` được KHAI trong `registry.json
 thật, và ba bài ghim registry (`test_registry`, `test_mt_wiring`, `test_worker_phases`) được cập
 nhật theo (9 → 10 engine; harness của `test_mt_wiring` vá thêm `OpenAiChatMt` +
 `openai_models_available` để test không chạm mạng và không đọc môi trường của máy chạy).
+
+Bốn bài còn lại là **`PHUDE_OPENAI_BASE_URL`** (`tests/test_openai_base_url_env.py`): cùng một hàng
+`registry.json` phải chạy được ở HAI chỗ với HAI địa chỉ — chạy thẳng trên máy thì gateway ở
+`127.0.0.1:8790`, còn trong container thì `127.0.0.1` là CHÍNH container. Đo được: hàng
+`deepseek-web` trong `docker compose up` trả `available: false` cho tới khi compose truyền
+`PHUDE_OPENAI_BASE_URL=http://host.docker.internal:8790/v1` (cùng khuôn **M-10** của `OLLAMA_HOST`,
+và cùng MỘT hàm với phép dò `available` để hai chỗ không thể đọc hai địa chỉ khác nhau). Sau khi
+sửa: `available: true` trong container, và một job THẬT trên clip **461 đoạn** của người dùng chạy
+**`done` sau 72,5 s**, echo **1/461** đoạn.
 
 Lần bump trước, `1298/15` → `1300/15` (**+2 bài**), do **worker chết vì một lỗi ở đường GHI SỔ**:
 một lượt dọn DB tay xoá hàng `jobs` trong lúc worker đang chạy nó ⇒ đường **báo lỗi** của

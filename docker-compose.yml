@@ -21,6 +21,12 @@ services:
       # Ollama KHÔNG chạy trong compose: dùng Ollama của MÁY CHỦ (model 5 GB đã có,
       # và nó đang dùng GPU của máy). `host-gateway` là địa chỉ máy chủ từ container.
       OLLAMA_HOST: http://host.docker.internal:11434
+      # Engine dịch `runtime: "http"` của registry trỏ `http://127.0.0.1:8790/v1` (gateway
+      # `whalegate` khi chạy THẲNG trên máy). Trong container, `127.0.0.1` là CHÍNH container
+      # ⇒ phép dò `available` trả false (đo được). Biến này là địa chỉ của MÁY CHỦ; nó thắng
+      # `opts.base_url` trong registry (`config.resolve_openai_base_url`), cùng khuôn M-10 của
+      # `OLLAMA_HOST` ở trên. Không chạy gateway ⇒ engine đó chỉ đơn giản là `available: false`.
+      PHUDE_OPENAI_BASE_URL: http://host.docker.internal:8790/v1
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
