@@ -5808,5 +5808,83 @@ describe("App: KENH THAT + HANG DOI THAT tu server node:http trong tien trinh", 
 
     assert.deepEqual(tiengOn, [], "loi boc lai khong duoc sinh tieng on console");
     unmount();
+
+  // -------------------------------------------------------------------------
+  // LỒNG TIẾNG (TTS) — job ĐÃ HỎNG KHÔNG được chặn cửa vào
+  // -------------------------------------------------------------------------
+  //
+  // ĐO ĐƯỢC trên app thật (Chrome, /api/dubs trong container trả 409): một job `dub` `failed`
+  // từ trước làm khối lồng tiếng hiện `<details>` lỗi MÃI MÃI, vì `dubJobCuaBan` lấy job MỚI
+  // NHẤT bất kể trạng thái. Người dùng cài TTS xong vẫn không thấy lại ô giọng + nút.
+  //
+  // Bài này ghim LUẬT: job `failed`/`cancelled` KHÔNG đại diện cho bản dịch, nên cửa vào vẫn
+  // mở; và nó ĐI QUA `App` thật (server `node:http` trong tiến trình), không gọi hàm riêng —
+  // `dubJobCuaBan` là hàm CỤC BỘ của tệp `App.tsx`, gọi thẳng nó là đo một bản sao.
+  it("LỒNG TIẾNG: job `dub` đã HỎNG không chặn cửa vào — ô giọng + nút vẫn hiện", async () => {
+    // Job `dub` hỏng của bản dịch #1 (bản dịch mà kênh đầu tiên trả về trong fixture).
+    JOBS.push(
+      makeJob(90, "dub", "failed", "dub:vieneu-v3-turbo", 0.4, { translation_id: 1 }),
+    );
+    const jobHong = JOBS[JOBS.length - 1];
+    assert.equal(jobHong.state, "failed", "fixture phải là job ĐÃ HỎNG, nếu không bài đo vô nghĩa");
+
+    const { container, unmount } = render(taoPhanTu(App));
+
+    // Vào màn Đối chiếu. `#che-do-compare` là một `<input type=radio>` ẨN (`.cd__radio` trong
+    // `app.css`), nên bấm NHÃN của nó — đó là đường người dùng đi.
+    const nhanCheDo = container.querySelector('label[for="che-do-compare"]');
+    assert.ok(nhanCheDo !== null, "khong thay nhan cua che do Doi chieu");
+    fireEvent.click(nhanCheDo as Element);
+    await choChu(container, "kenh-mot.wav");
+
+    // Vùng KÊNH gộp theo NGUỒN (`sources`), không theo bản ghi: kênh 1 có hai bản ghi trong
+    // `TRANSCRIPTS` nhưng chỉ MỘT mục ở đây — đo được (`do duoc 1`), và mục đó trỏ tới bản MỚI
+    // NHẤT (id 5), đúng bản có bản dịch #11.
+    fireEvent.click(nutKenh(container, "kenh-mot.wav"));
+
+    // `/api/translations` là một CHUỖI hai request (`listTranslations` -> `getTranslation` cho
+    // từng hàng), nên phải chờ tới khi hàng có mặt — không phải một nhịp.
+    await waitFor(
+      () => {
+        const hang = [...container.querySelectorAll(".cmp__bans button")]
+          .filter((el) => (el.textContent ?? "").includes("bản dịch #"));
+        assert.ok(hang.length >= 1, "dải chọn bản dịch chưa có hàng nào");
+      },
+      { timeout: 8000, interval: 25 },
+    );
+    // Chờ theo NODE, không theo chữ: ở trạng thái chưa lồng, khối chỉ có nhãn + input + nút.
+    await waitFor(
+      () => {
+        assert.ok(
+          container.querySelector('[data-testid="dub-khoi"]') !== null,
+          "khối lồng tiếng chưa xuất hiện",
+        );
+      },
+      { timeout: 5000, interval: 20 },
+    );
+
+    // VẾ 1: cửa vào còn mở. Đây là điều job `failed` từng lấy mất.
+    assert.equal(
+      container.querySelectorAll('[data-testid="dub-nut"]').length,
+      1,
+      "job `dub` đã hỏng KHÔNG được khoá nút: người dùng phải thử lại được sau khi sửa môi trường",
+    );
+    assert.equal(
+      container.querySelectorAll("input.dub__giong").length,
+      1,
+      "job `dub` đã hỏng KHÔNG được làm mất ô giọng",
+    );
+
+    // VẾ 2: và câu lỗi CŨ cũng không được hiện — nó thuộc một lượt đã kết thúc. Nếu hiện,
+    // người dùng đọc một lỗi KHÔNG còn đúng với lượt sắp bấm.
+    assert.equal(
+      container.querySelectorAll('[data-testid="dub-loi-hop"]').length,
+      0,
+      "job `dub` đã hỏng không được hiện như trạng thái HIỆN TẠI của bản dịch",
+    );
+
+    assert.deepEqual(tiengOn, [], "khối lồng tiếng không được sinh tiếng ồn console");
+    unmount();
+  });
   });
 });

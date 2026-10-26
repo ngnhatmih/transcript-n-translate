@@ -137,13 +137,31 @@ Lượt đo của tài liệu này (8620/8621 trống — kiểm bằng `Get-Net
 `PHUDE_DB`/`PHUDE_DATA` trỏ thư mục rỗng ngoài repo):
 
 ```
-ℹ tests 359   ℹ suites 34   ℹ pass 357   ℹ fail 2   ℹ cancelled 0
+ℹ tests 361   ℹ suites 34   ℹ pass 359   ℹ fail 2   ℹ cancelled 0
 ℹ skipped 0   ℹ todo 0      ℹ duration_ms 35486.345
 EXIT=1
 0 dòng "asynchronous activity" ; [guard thoat] 10/10 global da ve nguyen trang
 ```
 
-Số **359** gồm **7 bài mới** của hai lượt sửa mà một lượt dùng THẬT bác (ERRATA #50 + #51):
+Số **361** = **359** của lượt trước + **2 bài LỒNG TIẾNG (TTS)**, cả hai đều ghim một lỗi ĐO ĐƯỢC trên
+app thật chứ không phải một quy ước:
+
+* `src/screens/CompareScreen.test.tsx` (**1**): bốn trạng thái của job `dub` nói bằng CHỮ, năm
+  đường tải dựng từ id, và — quan trọng hơn — **job `failed` KHÔNG được khoá nút**: bản đầu đặt ô
+  giọng + nút trong nhánh `dub === null`, nên một lượt hỏng làm mất luôn đường thử lại (đo trên
+  app thật: `co_o_giong: false`, `co_nut: false`). Nó cũng ghim câu lỗi dài nằm trong `<details>`
+  (`summary` nói trạng thái bằng chữ, nguyên văn `job.error` ở trong) — trước đó khối rộng 2004 px
+  và chữ tràn ra ngoài khung.
+* `src/shell/App.test.tsx` (**1**): job `dub` `failed` KHÔNG được đại diện cho bản dịch trong
+  `dubJobCuaBan`, nên cửa vào vẫn mở. Bài này đi qua `App` thật trên server `node:http` trong tiến
+  trình — không gọi hàm cục bộ, vì gọi thẳng nó là đo một bản sao.
+
+Đã kiểm **mutation** cho phép ghim CSS mới: đổi `.dub__loi` → `.dub__loi-bay` (và cả `.dub__loiX`)
+làm bài "mồ côi" của `CompareScreen.test.tsx` **ĐỎ** với thông điệp nêu đúng tên lớp mồ côi; khôi
+phục thì xanh. ⚠️ Lượt đầu nó **SỐNG** với hậu tố CHỮ HOA vì regex lớp chỉ có `[a-z0-9_-]` — đã
+thêm `A-Z` và ghi lý do ngay trong bài.
+
+**7 bài của lượt sửa trước** (ERRATA #50 + #51) vẫn nguyên:
 
 * `src/styles/hinh-thuc.test.ts` (**5**): `.ch__ten` phải `overflow-wrap: anywhere`, và
   `nginx.conf` phải nâng `client_max_body_size` + trả JSON cho `413` + `no-cache` cho bản tĩnh.

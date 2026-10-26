@@ -397,12 +397,28 @@ export function App() {
    * mới nhất. Viết thêm một nhánh dọn nữa là nguồn sự thật thứ hai cho cùng câu
    * hỏi "bản nào đang xem" — và nó sẽ trôi khỏi `banDangXemId` ngay lần đổi quy ước.
    */
-  /** Job `dub` MỚI NHẤT của bản dịch đang xem — `null` = chưa lồng lần nào. */
-  function dubJobCuaBan(id: number | null): Job | null {
-    if (id === null) return null;
-    const cuaBan = [...jobs.values()].filter((j) => j.type === "dub" && j.payload?.translation_id === id);
-    return cuaBan.length === 0 ? null : cuaBan[cuaBan.length - 1];
-  }
+  /**
+   * Job `dub` đang SỐNG của bản dịch đang xem — `null` = chưa lồng lần nào (hoặc lượt trước đã hỏng).
+   *
+   * ⚠️ "Đang sống" = `queued`/`running`/`done`. Job `failed`/`cancelled` KHÔNG được đại diện cho
+   * bản dịch: nó là một lượt ĐÃ KẾT THÚC, và đo được trên app thật rằng để nó đại diện thì khối
+   * lồng tiếng hiện `<details>` lỗi MÃI MÃI — người dùng sửa môi trường (cài TTS) xong vẫn không
+   * thấy lại ô giọng + nút. Câu `409` của chính cú bấm mới đi đường khác (`loiLongTieng`).
+   */
+function dubJobCuaBan(id: number | null): Job | null {
+  if (id === null) return null;
+  const cuaBan = [...jobs.values()].filter((j) => j.type === "dub" && j.payload?.translation_id === id);
+  if (cuaBan.length === 0) return null;
+  // ⚠️ Job ĐÃ HỎNG không phải trạng thái hiện tại của bản dịch: nó là một lượt ĐÃ KẾT THÚC.
+  // Đo được trên app thật: một job `dub` hỏng từ trước (vết lỗi ~470 ký tự) làm khối lồng tiếng
+  // hiện `<details>` lỗi mãi mãi, nên không bao giờ thấy lại được ô giọng + nút để thử lại sau khi
+  // người dùng sửa môi trường (cài TTS). Chỉ ba trạng thái còn sống mới đại diện cho "lượt này":
+  // `queued`, `running`, `done`. Job hỏng BỊ BỎ QUA, nên lượt kế tiếp hiện đúng cửa vào.
+  // Câu lỗi của chính cú bấm mới (`409` của route) vẫn hiện qua `loiLongTieng` — nó KHÔNG đi qua đây.
+  const song = cuaBan.filter((j) => j.state === "queued" || j.state === "running" || j.state === "done");
+  if (song.length === 0) return null;
+  return song[song.length - 1] ?? null;
+}
 
   /**
    * Xếp job lồng tiếng cho MỘT bản dịch. Job đi vào `jobs` như mọi job khác, nên khối lồng tiếng
