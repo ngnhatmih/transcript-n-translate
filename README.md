@@ -137,16 +137,23 @@ Lượt đo của tài liệu này (8620/8621 trống — kiểm bằng `Get-Net
 `PHUDE_DB`/`PHUDE_DATA` trỏ thư mục rỗng ngoài repo):
 
 ```
-ℹ tests 357   ℹ suites 34   ℹ pass 355   ℹ fail 2   ℹ cancelled 0
-ℹ skipped 0   ℹ todo 0      ℹ duration_ms 35171.8699
+ℹ tests 358   ℹ suites 34   ℹ pass 356   ℹ fail 2   ℹ cancelled 0
+ℹ skipped 0   ℹ todo 0      ℹ duration_ms 35486.345
 EXIT=1
 0 dòng "asynchronous activity" ; [guard thoat] 10/10 global da ve nguyen trang
 ```
 
-Số **357** gồm **5 bài mới** của `src/styles/hinh-thuc.test.ts`, ghim hai luật mà một lượt dùng
-THẬT đã bác (ERRATA #50): `.ch__ten` phải `overflow-wrap: anywhere`, và `nginx.conf` phải nâng
-`client_max_body_size` + trả JSON cho `413` + `no-cache` cho bản tĩnh. Đã kiểm **mutation**: đổi
-`anywhere` → `break-word` và `2048m` → `1m` thì **đúng hai bài đó đỏ**, `pass 3 / fail 2`.
+Số **358** gồm **6 bài mới** của hai lượt sửa mà một lượt dùng THẬT bác (ERRATA #50 + #51):
+
+* `src/styles/hinh-thuc.test.ts` (**5**): `.ch__ten` phải `overflow-wrap: anywhere`, và
+  `nginx.conf` phải nâng `client_max_body_size` + trả JSON cho `413` + `no-cache` cho bản tĩnh.
+* `src/shell/ChannelZone.test.tsx` (**1**): NỀN của mục đang chọn thuộc về **HÀNG**
+  (`li.ch__dong.is-chon`), không thuộc nút chọn — nền khai trên nút hụt đúng phần nút co lại để
+  nhường chỗ cho `xóa`/`hủy` (đo được: hàng 213 px vs nút 182 px, và 145 px khi hiện hai nút).
+
+Đã kiểm **mutation** cho cả hai: `anywhere` → `break-word` và `2048m` → `1m` làm đúng hai bài của
+`hinh-thuc` đỏ (`pass 3 / fail 2`); bỏ luật `.ch__dong.is-chon` (hoặc trả `background` về
+`.ch__item[aria-pressed="true"]`) làm bài nền đỏ; bỏ lớp `is-chon` khỏi TSX cũng làm nó đỏ.
 
 🔴 **Trước mọi lượt `npm test`, 8620 và 8621 phải TRỐNG.** Nếu ai đang giữ 8620, khối hợp đồng
 nhận một server LẠ đã gieo dữ liệu là "backend dùng được": hai guard DB-rỗng thành **XANH** và

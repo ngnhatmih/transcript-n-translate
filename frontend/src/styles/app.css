@@ -1713,9 +1713,14 @@ body {
 }
 
 /* §2.2 quy tắc 1 — amber CHỈ có một nghĩa: đang hoạt động. Kênh ĐANG MỞ là trạng thái
-   hoạt động của bàn làm việc, nên mốc trái của nó là `--signal`. */
+   hoạt động của bàn làm việc, nên mốc trái của nó là `--signal`.
+   ⚠️ KHÔNG có `background` ở đây nữa, và đó là một phép ĐO chứ không phải dọn dẹp: nền khai
+   trên NÚT thì nó rộng đúng bằng nút, mà nút co lại để nhường chỗ cho nút xoá. Đo trong Chrome
+   thật (ảnh người dùng chụp: "vùng xám bị mất một mảng do nút xoá"): `li.ch__dong` 213 px nền
+   TRONG SUỐT, `button.ch__item` 182 px có nền `--panel-2` ⇒ hụt **31 px** ở góc phải; khi hiện
+   `xóa?`+`hủy` nút còn **145 px** ⇒ hụt **68 px**. Nền của mục đang chọn thuộc về HÀNG, xem
+   `.ch__dong.is-chon` bên dưới. */
 .ch__item[aria-pressed="true"] {
-  background: var(--panel-2);
   color: var(--ink-0);
   border-left-color: var(--signal);
 }
@@ -1780,6 +1785,19 @@ body {
   align-items: flex-start;
 }
 
+/* NỀN của mục ĐANG CHỌN thuộc về HÀNG, không thuộc nút chọn.
+   Lý do là một phép đo, không phải thẩm mỹ: nút chọn co lại để nhường chỗ cho nút xoá, nên
+   nền khai trên nó hụt đúng phần nhường đó — đo trong Chrome thật, `li` 213 px nền trong
+   suốt vs `button.ch__item` có nền `--panel-2` rộng 182 px (hiện `xóa?`+`hủy` thì còn 145 px)
+   ⇒ hụt 31/68 px ở góc phải. Người dùng thấy đúng cái hụt đó: "vùng xám bị mất một mảng do
+   nút xoá".
+   `is-chon` do `ChannelZone` đặt trên `<li>` (cùng nguồn sự thật với `aria-pressed` của nút
+   bên trong — hai thứ cùng trả lời "kênh nào đang mở"), KHÔNG phải một lớp trang trí thứ hai
+   tự quyết định trạng thái. */
+.ch__dong.is-chon {
+  background: var(--panel-2);
+}
+
 /* Nút CHỌN co lại để nhường chỗ cho nút xoá.
    ⚠️ `flex: 1 1 0` — KHÔNG phải `flex: 1 1 auto` (đo được trong Chrome thật): với
    `flex-basis: auto`, kích thước cơ sở của nút là BỀ RỘNG NỘI DUNG (tên tệp dài), nên nó
@@ -1816,6 +1834,13 @@ body {
 .ch__xoa:hover {
   color: var(--ink-0);
   border-color: var(--ink-2);
+}
+
+/* Trên hàng ĐANG CHỌN, nền hàng là `--panel-2` — nên chip xoá phải đảo xuống `--panel-1`, nếu
+   không nó cùng màu với hàng và chỉ còn lại đường viền 1 px. Cùng lý do với `.ch__dong.is-chon`:
+   đây là hệ quả của việc chuyển nền từ NÚT sang HÀNG, không phải một sở thích màu mới. */
+.ch__dong.is-chon .ch__xoa {
+  background: var(--panel-1);
 }
 
 /* BƯỚC XÁC NHẬN. Chữ trên nút đã là `xóa?` (tín hiệu NGƯỜI đọc được, và là tín hiệu

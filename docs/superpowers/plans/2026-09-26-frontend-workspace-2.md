@@ -3991,3 +3991,36 @@ Cache-Control "no-cache"` cho `/assets/` và `/` (vẫn `304` khi tệp không �
 2. **`getComputedStyle` trong Chrome thật là nguồn của mọi lời khai về CSS**, và nó phải được đọc với
    **cache đã tắt**. Một ảnh chụp không kèm con số `scrollW`/`clientW` không phân biệt được "chữ vừa
    khít" với "chữ tràn 22 px".
+
+---
+
+## ⚠️ ERRATA #51 — NỀN của mục đang chọn khai trên **NÚT** thì nó rộng đúng bằng nút: "vùng xám bị mất một mảng do nút xoá"
+
+Bối cảnh: sau vòng sửa ERRATA #50, ảnh người dùng chụp hàng kênh đang chọn cho thấy **vùng xám
+hụt một mảng chữ nhật ở góc phải, đúng chỗ hai nút `xóa?`/`hủy`**. Đây là lời khai của tôi trong
+`app.css` (`.ch__item[aria-pressed="true"] { background: var(--panel-2) }`) bị chính phép đo bác.
+
+| phép đo (Chrome thật, hàng kênh đang chọn) | trước | sau |
+|---|---|---|
+| `li.ch__dong` (cả HÀNG) | **213 px**, nền `rgba(0,0,0,0)` — trong suốt | 213 px, nền `rgb(35,34,32)` |
+| `button.ch__item` (nút chọn) | **182 px** có nền `--panel-2` | 182 px, nền trong suốt |
+| hụt giữa nền xám và mép hàng — trạng thái thường | **31 px** | 0 |
+| hụt — khi hiện `xóa?` + `hủy` | **68 px** | 0 |
+
+Cơ chế: nút chọn là flex item `flex: 1 1 0` nên nó **co lại** để nhường chỗ cho nút xoá (145 px
+khi có hai nút). Nền khai trên nó vì thế hụt đúng phần nhường. Không có gì "tràn ra" được: nền
+của một phần tử luôn rộng bằng hộp của chính nó.
+
+**Sửa:** nền chuyển sang HÀNG — `ChannelZone` đặt `is-chon` trên `<li>` (cùng nguồn sự thật với
+`aria-pressed` của nút bên trong), `app.css` thêm `.ch__dong.is-chon { background: var(--panel-2) }`;
+và chip xoá phải **đảo** xuống `--panel-1` trên hàng đang chọn, nếu không nó cùng màu với hàng và
+chỉ còn đường viền 1 px.
+
+**Ghim:** một bài mới trong `ChannelZone.test.tsx` (quan hệ ba chiều: `is-chon` có trên `<li>` của
+hàng đang chọn · `app.css` có luật nền cho `.ch__dong.is-chon` · `.ch__item[aria-pressed="true"]`
+**không** được khai `background`). Mutation đã chạy hai chiều: bỏ luật nền / trả `background` về
+nút ⇒ bài đỏ; bỏ lớp `is-chon` khỏi TSX ⇒ bài DOM đỏ.
+
+⚠️ Luật đo rút ra: **một trạng thái đổi HÌNH THỨC CỦA CẢ HÀNG thì lớp/key phải nằm ở HÀNG.** Khai
+nó trên một flex item bên trong là tự giới hạn bề rộng của hình thức đó bằng bề rộng của item — và
+item đó đã có lý do riêng để co lại.
