@@ -130,6 +130,8 @@ function banDich(
     status?: TranslationDetail["status"];
     /** Dấu vết CHIMERA (§4.5) — vắng ⇒ `null`, tức một bản dịch THƯỜNG. */
     chimera?: TranslationDetail["chimera"];
+    /** Chi phí ước lượng (USD) do MÁY CHỦ tính; vắng ⇒ không có khoá. */
+    costUsd?: number | null;
   } = {},
 ): TranslationDetail {
   return {
@@ -143,6 +145,7 @@ function banDich(
     stale: opts.stale ?? false,
     created_at: "2026-01-01T00:00:00Z",
     chimera: opts.chimera ?? null,
+    cost_usd: opts.costUsd,
     segments: texts.map((t, k) => doan(k + 1, t)),
     cps: {
       max_cps: opts.maxCps ?? 21,
@@ -1300,5 +1303,34 @@ describe("CompareScreen: §4.3 hai cot + cot CPS + segmented control + ghim ban 
     // TĂNG theo số bản dịch — đúng cơ chế làm chip CHIMERA trôi ra ngoài.
     assert.equal(demCon([mot]), demCon([mot, hai]),
       "thanh công cụ KHÔNG được mọc thêm phần tử theo số bản dịch");
+  });
+
+  // Chi phí ƯỚC LƯỢNG của một bản dịch, do MÁY CHỦ tính (`tokens × giá` của hàng registry).
+  //
+  // Hai vế, và vế thứ hai quan trọng ngang vế thứ nhất: một bản dịch KHÔNG có `cost_usd`
+  // (engine in-process: không giá, không token) phải hiện nhãn Y NHƯ TRƯỚC — không `$0,000`,
+  // không `—`. "Đo được và bằng không" và "không đo được" là hai câu khác nhau.
+  it("CHI PHÍ: nhãn bản dịch nối `~$` khi máy chủ tính được, và KHÔNG hiện gì khi không", () => {
+    const t = banGhi([doan(1, "你好")]);
+
+    const coGia = banDich(21, ["Xin chao"], [{ i: 1, cps: 4, over: false }],
+      { engine: "deepseek-web", costUsd: 0.0139564 });
+    const khongGia = banDich(22, ["Tam biet"], [{ i: 1, cps: 4, over: false }],
+      { engine: "opus-mt", costUsd: null });
+
+    const { container } = render(taoPhanTu(CompareScreen, {
+      transcript: t, translations: [coGia, khongGia], specs: SPECS,
+    }));
+    const nhan = [...container.querySelectorAll(".cmp__bans button")]
+      .map((el) => el.textContent ?? "");
+
+    const cuaCoGia = nhan.find((s) => s.includes("#21")) ?? "";
+    const cuaKhongGia = nhan.find((s) => s.includes("#22")) ?? "";
+    assert.ok(cuaCoGia.includes("~$0,014"),
+      `nhãn phải nối chi phí ước lượng (3 chữ số khi >= 1 xu), đo được ${JSON.stringify(cuaCoGia)}`);
+    assert.equal(cuaKhongGia.includes("$"), false,
+      `không tính được chi phí thì nhãn KHÔNG được có ký hiệu tiền, đo được ${JSON.stringify(cuaKhongGia)}`);
+    assert.equal(cuaKhongGia, "bản dịch #22 · opus-mt · done",
+      "nhãn của bản dịch không có giá phải Y NGUYÊN hình dạng cũ");
   });
 });

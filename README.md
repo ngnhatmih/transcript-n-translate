@@ -137,13 +137,13 @@ Lượt đo của tài liệu này (8620/8621 trống — kiểm bằng `Get-Net
 `PHUDE_DB`/`PHUDE_DATA` trỏ thư mục rỗng ngoài repo):
 
 ```
-ℹ tests 358   ℹ suites 34   ℹ pass 356   ℹ fail 2   ℹ cancelled 0
+ℹ tests 359   ℹ suites 34   ℹ pass 357   ℹ fail 2   ℹ cancelled 0
 ℹ skipped 0   ℹ todo 0      ℹ duration_ms 35486.345
 EXIT=1
 0 dòng "asynchronous activity" ; [guard thoat] 10/10 global da ve nguyen trang
 ```
 
-Số **358** gồm **6 bài mới** của hai lượt sửa mà một lượt dùng THẬT bác (ERRATA #50 + #51):
+Số **359** gồm **7 bài mới** của hai lượt sửa mà một lượt dùng THẬT bác (ERRATA #50 + #51):
 
 * `src/styles/hinh-thuc.test.ts` (**5**): `.ch__ten` phải `overflow-wrap: anywhere`, và
   `nginx.conf` phải nâng `client_max_body_size` + trả JSON cho `413` + `no-cache` cho bản tĩnh.

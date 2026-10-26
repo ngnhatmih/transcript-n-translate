@@ -21,7 +21,7 @@ import logging
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
-from app.api.deps import get_repos
+from app.api.deps import get_prices, get_repos
 from app.domain.models import Segment
 from app.domain.readability import CPS_WARN, reading_cps
 from app.domain.staleness import translation_summary_json
@@ -40,7 +40,7 @@ class PatchIn(BaseModel):
     status: str | None = None
 
 
-def _translation_json(row, current_version: int) -> dict:
+def _translation_json(row, current_version: int, *, prices=None) -> dict:
     """Hình dạng JSON của một bản dịch — UỶ QUYỀN cho builder dùng chung.
 
     Trước bản này route ở đây tự ghép khoá và phát `translated_from_version`
@@ -50,10 +50,10 @@ def _translation_json(row, current_version: int) -> dict:
     `tests/test_api_translations.py::test_the_two_endpoints_describe_a_translation_identically`
     (và bài kế tiếp đo lại sau khi transcript đổi version).
     """
-    return translation_summary_json(row, current_version)
+    return translation_summary_json(row, current_version, prices=prices)
 
 
-def _transcript_json(repos, transcript, *, include_segments: bool = True) -> dict:
+def _transcript_json(repos, transcript, *, prices=None, include_segments: bool = True) -> dict:
     out = {
         "id": transcript.id,
         "source_id": transcript.source_id,
@@ -85,20 +85,23 @@ def _require_transcript(repos, transcript_id: int):
 
 
 @router.get("")
-def list_transcripts(repos=Depends(get_repos)):
+def list_transcripts(repos=Depends(get_repos), prices=Depends(get_prices)):
     # KHÔNG kèm segments: một transcript vài nghìn đoạn sẽ làm phình response
     # của trang danh sách, mà trang đó không vẽ đoạn nào.
-    return [_transcript_json(repos, t, include_segments=False)
+    return [_transcript_json(repos, t, prices=prices, include_segments=False)
             for t in repos.list_transcripts()]
 
 
 @router.get("/{transcript_id}")
-def get_transcript(transcript_id: int, repos=Depends(get_repos)):
-    return _transcript_json(repos, _require_transcript(repos, transcript_id))
+def get_transcript(transcript_id: int, repos=Depends(get_repos),
+                   prices=Depends(get_prices)):
+    return _transcript_json(repos, _require_transcript(repos, transcript_id),
+                            prices=prices)
 
 
 @router.patch("/{transcript_id}")
-def patch_transcript(transcript_id: int, payload: PatchIn, repos=Depends(get_repos)):
+def patch_transcript(transcript_id: int, payload: PatchIn, repos=Depends(get_repos),
+                     prices=Depends(get_prices)):
     _require_transcript(repos, transcript_id)
 
     if payload.status is not None and payload.status not in VALID_STATUS:
@@ -115,7 +118,8 @@ def patch_transcript(transcript_id: int, payload: PatchIn, repos=Depends(get_rep
     if payload.status is not None:
         repos.set_transcript_status(transcript_id, payload.status)
 
-    return _transcript_json(repos, _require_transcript(repos, transcript_id))
+    return _transcript_json(repos, _require_transcript(repos, transcript_id),
+                           prices=prices)
 
 
 @router.get("/{transcript_id}/readability")
@@ -165,9 +169,9 @@ def readability(transcript_id: int, threshold: float = CPS_WARN,
 
 
 @router.post("/{transcript_id}/approve")
-def approve(transcript_id: int, repos=Depends(get_repos)):
+def approve(transcript_id: int, repos=Depends(get_repos), prices=Depends(get_prices)):
     # Cố ý KHÔNG đụng tới segments/version: xem docstring đầu tệp.
     _require_transcript(repos, transcript_id)
     repos.set_transcript_status(transcript_id, "reviewed")
     return _transcript_json(repos, _require_transcript(repos, transcript_id),
-                            include_segments=False)
+                            prices=prices, include_segments=False)

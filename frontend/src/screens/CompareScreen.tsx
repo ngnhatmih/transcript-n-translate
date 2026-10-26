@@ -245,6 +245,23 @@ function token(n: number | null | undefined): string {
 }
 
 /**
+ * Chi phí ƯỚC LƯỢNG của một bản dịch — `null` = KHÔNG TÍNH ĐƯỢC, và khi đó trả chuỗi RỖNG.
+ *
+ * Rỗng chứ không phải `$0,000`: engine chạy trên máy này (OPUS-MT, Ollama) không có giá dịch
+ * vụ, và `translations.tokens_in` của nó là `null` — hiện `$0,000` là nói hai điều sai cùng
+ * lúc ("đã đo" + "miễn phí"). Tiền tố `~` vì đây là token ĐÃ ĐO × giá ĐÃ KHAI, không phải
+ * hoá đơn; cùng luật với khối chi phí Chimera.
+ *
+ * Bốn chữ số thập phân khi dưới 1 xu: một lô 5 đoạn tốn ~$0,0002, và `toFixed(3)` sẽ làm nó
+ * thành `$0,000` — tức một con số trông như không tốn gì.
+ */
+function chiPhiUsd(v: number | null | undefined): string {
+  if (typeof v !== "number") return "";
+  const so = v < 0.01 ? v.toFixed(4) : v.toFixed(3);
+  return ` · ~$${so.replace(".", ",")}`;
+}
+
+/**
  * Tên các ENGINE không chạy được, KHÔNG trùng — vế "nói rõ cái thiếu" của §4.5.
  *
  * Trả về ENGINE chứ không phải ứng viên: ba ứng viên cùng thiếu `qwen2.5-7b` phải
@@ -448,8 +465,11 @@ export function CompareScreen({
                   {engine}`, tức DANH TÍNH của một bản dịch là CHỖ ĐỨNG của nó trong mảng — thêm/bớt
                   một bản dịch là mọi nhãn sau đổi số, và cùng một bản dịch mang hai tên khác nhau ở
                   hai lần đọc. Nay danh tính lấy từ CHÍNH DỮ LIỆU CỦA HÀNG: `id` (duy nhất), `engine`
-                  và `status` (đều của máy chủ). */}
-              {`bản dịch #${tr.id} · ${tr.engine} · ${tr.status}${tr.stale ? " · lỗi thời" : ""}`}
+                  và `status` (đều của máy chủ).
+                  CHI PHÍ nối vào CUỐI nhãn và để RỖNG khi không tính được: đây là câu trả lời cho
+                  "engine này tốn bao nhiêu" — thứ người dùng cần để chọn engine — và nó phải đứng
+                  cạnh tên engine, không phải trong một khối riêng phải bấm mới thấy. */}
+              {`bản dịch #${tr.id} · ${tr.engine} · ${tr.status}${tr.stale ? " · lỗi thời" : ""}${chiPhiUsd(tr.cost_usd)}`}
             </button>
             {onXoa === undefined ? null : (
               <NutXoa

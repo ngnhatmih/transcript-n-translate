@@ -200,6 +200,23 @@ export interface Translation {
   /** TÍNH Ở SERVER mỗi lần đọc (`is_stale`), không lưu cột — client không tự suy. */
   stale: boolean;
   created_at: string;
+  /**
+   * Số đo của lượt dịch — `null` = KHÔNG ĐO ĐƯỢC (engine in-process không báo token), KHÁC `0`.
+   *
+   * Tuỳ chọn (`?`) vì client phải đọc được cả một hàng do bản máy chủ CŨ trả (không có khoá) —
+   * nhưng khi CÓ khoá thì `null` là một câu trả lời thật, không phải "thiếu dữ liệu".
+   */
+  tokens_in?: number | null;
+  tokens_out?: number | null;
+  duration_ms?: number | null;
+  /**
+   * CHI PHÍ ƯỚC LƯỢNG (USD) = token ĐÃ ĐO × giá ĐÃ KHAI của engine trong `registry.json`.
+   *
+   * `null` khi không tính được (engine không khai giá, hoặc hàng chưa có token). KHÔNG phải
+   * hoá đơn, và KHÔNG được hiển thị như một con số chắc chắn — cùng luật với khối chi phí
+   * Chimera (§4.5): mọi chỗ hiện nó phải nói "ước lượng".
+   */
+  cost_usd?: number | null;
 }
 
 /**

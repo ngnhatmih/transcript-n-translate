@@ -42,7 +42,7 @@ from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, Field
 
 from app.api.delete_guard import active_job_ids, mot_loi_409
-from app.api.deps import get_chimera_plan, get_repos, get_specs
+from app.api.deps import get_chimera_plan, get_prices, get_repos, get_specs
 from app.api.routes_jobs import _job_json
 from app.domain.chimera import Baseline, cost_json
 from app.domain.job_state import phase_of
@@ -81,7 +81,7 @@ class PatchIn(BaseModel):
     segments: list[SegmentIn] = Field(default_factory=list)
 
 
-def _summary(row, *, stale: bool) -> dict:
+def _summary(row, *, stale: bool, prices) -> dict:
     """Hình dạng JSON của một bản dịch — UỶ QUYỀN cho builder dùng chung.
 
     `stale` truyền vào chứ không tính lại ở đây vì đã có route đọc transcript
@@ -91,7 +91,7 @@ def _summary(row, *, stale: bool) -> dict:
     nhau — xem
     `tests/test_api_translations.py::test_the_two_endpoints_describe_a_translation_identically`.
     """
-    return translation_summary_json(row, stale=stale)
+    return translation_summary_json(row, stale=stale, prices=prices)
 
 
 def _require_translation(repos, translation_id: int):
@@ -141,7 +141,7 @@ def _baseline_for(repos, transcript_id: int) -> Baseline | None:
 
 
 @router.post("", status_code=201)
-def create_translation(body: CreateIn, repos=Depends(get_repos),
+def create_translation(body: CreateIn, repos=Depends(get_repos), prices=Depends(get_prices),
                        specs=Depends(get_specs),
                        chimera_plan=Depends(get_chimera_plan)):
     """Tạo hàng `translations` TRƯỚC, rồi xếp ĐÚNG MỘT job `translate`.
@@ -254,22 +254,24 @@ def create_translation(body: CreateIn, repos=Depends(get_repos),
     # `job` là hàng ĐÃ GHI đọc lại, không phải object trong bộ nhớ: mọi route tạo
     # việc khác (`routes_jobs._job_json`) trả CÙNG hình dạng này, và một object
     # ba khoá ở riêng đây là chỗ client phải special-case theo endpoint.
-    return {"translation": _summary(stored, stale=False),
+    return {"translation": _summary(stored, stale=False, prices=prices),
             "job": _job_json(repos.get_job(job.id))}
 
 
 @router.get("")
-def list_translations(transcript_id: int, repos=Depends(get_repos)):
+def list_translations(transcript_id: int, repos=Depends(get_repos),
+                      prices=Depends(get_prices)):
     """Bản dịch của MỘT transcript, mới nhất trước, kèm cờ `stale` TÍNH Ở ĐÂY."""
     transcript = _require_transcript(repos, transcript_id)
     return [
-        _summary(row, stale=is_stale(transcript.version, row.transcript_version))
+        _summary(row, stale=is_stale(transcript.version, row.transcript_version), prices=prices)
         for row in repos.list_translations_for_transcript(transcript_id)
     ]
 
 
 @router.get("/{translation_id}")
-def get_translation(translation_id: int, repos=Depends(get_repos)):
+def get_translation(translation_id: int, repos=Depends(get_repos),
+                     prices=Depends(get_prices)):
     """Chi tiết MỘT bản dịch: đoạn ĐÃ DỊCH + CPS dạng SỐ — nguồn cho §4.3.
 
     Vì sao cần một route riêng thay vì thêm khoá vào `GET /api/translations`: hình
@@ -312,7 +314,8 @@ def get_translation(translation_id: int, repos=Depends(get_repos)):
     rows = [cps_row(source_by_id.get(t.i, t), t, limits=limits)
             for t in row.segments]
     return {
-        **_summary(row, stale=is_stale(transcript.version, row.transcript_version)),
+        **_summary(row, stale=is_stale(transcript.version, row.transcript_version),
+                   prices=prices),
         # Dấu vết CHIMERA (§4.5): kế hoạch N ứng viên, ƯỚC LƯỢNG chi phí đã hiện
         # TRƯỚC khi bấm, và số đo THẬT của từng ứng viên + lượt pha. `None` = hàng
         # này không chạy ở chế độ Chimera — KHÁC `{}` ("chạy mà chưa có dữ liệu").
@@ -337,7 +340,7 @@ def get_translation(translation_id: int, repos=Depends(get_repos)):
 
 @router.patch("/{translation_id}")
 def patch_translation(translation_id: int, body: PatchIn,
-                      repos=Depends(get_repos)):
+                      repos=Depends(get_repos), prices=Depends(get_prices)):
     translation = _require_translation(repos, translation_id)
 
     known = {s.i for s in translation.segments}
@@ -365,7 +368,7 @@ def patch_translation(translation_id: int, body: PatchIn,
     # sửa một bản dịch đã lệch thời (cùng nguồn sự thật với `list_translations`).
     fresh = _require_translation(repos, translation_id)
     current = _require_transcript(repos, fresh.transcript_id).version
-    return _summary(fresh, stale=is_stale(current, fresh.transcript_version))
+    return _summary(fresh, stale=is_stale(current, fresh.transcript_version), prices=prices)
 
 
 @router.delete("/{translation_id}", status_code=204)
