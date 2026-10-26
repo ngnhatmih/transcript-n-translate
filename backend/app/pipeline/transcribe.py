@@ -5,6 +5,7 @@ lại model cho từng job là lãng phí 4-8 giây mỗi lần.
 """
 from __future__ import annotations
 
+import inspect
 import pathlib
 from typing import Callable, Iterable, Mapping
 
@@ -23,6 +24,29 @@ AUTO_FORWARD_SETTING = "auto_forward"
 #: `translations` và payload của job — lệch một chữ ở đây là bản dịch được ghi
 #: bằng ngôn ngữ khác với thứ handler đọc từ payload.
 DEFAULT_TARGET_LANG = "vi"
+
+
+def dinh_dang_giay(giay: float) -> str:
+    """`mm:ss` cho câu tiến độ — đọc được trong một dòng log, không phải một số thực."""
+    tong = max(0, int(giay))
+    return f"{tong // 60}:{tong % 60:02d}"
+
+
+def _boc_bang(engine: ASREngine, audio: str, lang: str,
+              bao_tien_do: Callable[[float, float], None]):
+    """Gọi `engine.transcribe`, kèm `on_progress` NẾU adapter đó nhận.
+
+    Vì sao PHÉP DÒ chứ không phải một chữ ký cứng cho mọi adapter: tiến độ theo đoạn là thứ
+    adapter TUỲ CHỌN cung cấp (chỉ engine có vòng lặp đoạn mới báo được), còn `SenseVoice` và
+    mọi double trong test có chữ ký hai tham số. Truyền thẳng `on_progress=` cho chúng là
+    `TypeError` — tức bản vá "thêm tiến độ" sẽ làm sập mọi engine không có nó.
+
+    `inspect.signature`, KHÔNG `try/except TypeError`: một `TypeError` ném từ BÊN TRONG lần
+    bóc băng sẽ bị nuốt rồi gọi lại lần thứ hai, che mất lỗi thật và bóc băng hai lượt.
+    """
+    if "on_progress" not in inspect.signature(engine.transcribe).parameters:
+        return engine.transcribe(audio, lang)
+    return engine.transcribe(audio, lang, on_progress=bao_tien_do)
 
 
 class TranscribeHandler:
@@ -101,11 +125,38 @@ class TranscribeHandler:
             raise FileNotFoundError(f"tệp audio không tồn tại: {audio}")
 
         lang = source.lang or "zh"
-        report(0.05, f"nạp engine {job.engine}")
+        # Dựng adapter TRƯỚC khi báo (nó lười: chưa nạp model), để hỏi được "model đã có trên
+        # đĩa chưa". Lần ĐẦU dùng một engine là một lượt TẢI MODEL (fw-large-v3 = 2,9 GB),
+        # không phải một lượt bóc băng — và trước bản vá này nó hoàn toàn VÔ HÌNH: đo được trên
+        # stack thật, job `asr` với `fw-large-v3` đứng ở `15%` suốt **6 phút** trong khi thư
+        # mục `/models/models--Systran--faster-whisper-large-v3` đang được ghi. Người dùng đọc
+        # "nạp engine" + một thanh đứng im thì không phân biệt được "đang tải 2,9 GB" với
+        # "treo". Nên: NÓI RA trước khi nạp.
         engine = self._engine_for(job.engine or "")
+        hoi_cache = getattr(engine, "model_cached", None)
+        # CHỈ cảnh báo khi adapter trả ĐÚNG `False` ("chắc chắn không có"). `None` = không
+        # biết, và một câu "chưa có model" sai còn tệ hơn không nói gì — bản đầu của bản vá
+        # này báo sai cho MỌI job vì `spec.model_ref` là bí danh (`large-v3-turbo`) còn repo
+        # thật là `mobiuslabsgmbh/...`.
+        if callable(hoi_cache) and hoi_cache() is False:
+            report(0.05, f"chưa có model của {job.engine} trên đĩa — lần đầu phải tải về, "
+                         f"có thể mất vài phút (không phải treo)")
+        else:
+            report(0.05, f"nạp engine {job.engine}")
+
+        # `report` đi TIẾP vào trong vòng lặp của adapter để progress nhích theo số đoạn đã
+        # bóc, thay vì đứng ở 0,15 cho tới khi xong. Trần 0,89: ba bước sau (lưu transcript,
+        # tạo job dịch, xong) vẫn có chỗ riêng của chúng.
+        def bao_tien_do(da_toi: float, tong_giay: float) -> None:
+            if tong_giay <= 0:
+                return
+            ti_le = min(1.0, max(0.0, da_toi / tong_giay))
+            report(0.15 + 0.74 * ti_le,
+                   f"bóc băng {audio.name}: {dinh_dang_giay(da_toi)} / "
+                   f"{dinh_dang_giay(tong_giay)} ({round(100 * ti_le)}%)")
 
         report(0.15, f"bóc băng {audio.name} (lang={lang})")
-        segments = engine.transcribe(str(audio), lang)
+        segments = _boc_bang(engine, str(audio), lang, bao_tien_do)
 
         # R68, và cố ý đặt ở ĐÂY chứ không trong từng adapter: guard này phải
         # đúng cho MỌI engine. `SenseVoiceEngine` đã có guard riêng của nó

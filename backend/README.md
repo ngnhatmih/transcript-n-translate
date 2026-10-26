@@ -63,32 +63,32 @@ GPU. Nó tự ép UTF-8 cho stdout (console Windows mặc định cp1252, còn s
 tiếng Trung/Việt) và tự đặt cache model trước khi nạp `faster_whisper`.
 
 Con số nền của lần chạy mặc định, đo sau khi xoá `__pycache__` (lệnh ở mục
-"Kiểm thử" trên, chạy từ trong `backend\`). Thứ có nghĩa là **1313 / 15**, không
+"Kiểm thử" trên, chạy từ trong `backend\`). Thứ có nghĩa là **1323 / 15**, không
 phải số giây — thời gian trôi giữa các lần chạy (đã thấy 24,00–30,94 s) còn con
 số bài thì không:
 
 ```
-1313 passed, 15 deselected, 1 warning
+1323 passed, 15 deselected, 1 warning
 ```
 
 Hai con số đó là SỐ BÀI ĐƯỢC CHỌN, và chúng khớp với số mà `--collect-only` báo
-(`1313/1328`, 15 bài `live` bị bỏ;
+(`1323/1338`, 15 bài `live` bị bỏ;
 `tests/test_backend_readme.py::test_readme_baseline_matches_the_tests_actually_
 collected` đối chiếu mỗi lần chạy).
 
 
-Máy này **CÓ** `ffmpeg 8.1.1` + `ffprobe` trên PATH (đã đo), nên `1313/15` ở trên
+Máy này **CÓ** `ffmpeg 8.1.1` + `ffprobe` trên PATH (đã đo), nên `1323/15` ở trên
 là số THẬT của nó. Máy **không có** `ffmpeg`/`ffprobe` cho một kết quả KHÁC: cả
 `tests/test_ingest.py` bị `skipif` ở cấp module — **9** bài cùng skip một lượt —
-nên dòng tổng kết của máy đó là **`1304 passed, 9 skipped, 15 deselected`** (=
-`1313 − 9`; con số này TỪNG ghi `978`, tức một baseline rất cũ, và nó lệch phép
+nên dòng tổng kết của máy đó là **`1314 passed, 9 skipped, 15 deselected`** (=
+`1323 − 9`; con số này TỪNG ghi `978`, tức một baseline rất cũ, và nó lệch phép
 trừ của chính khối nền ngay trên nó). Đó là
 con số của máy thiếu ffmpeg, **không phải** con số máy này từng in ra; đừng chép
 nó vào khối nền ở trên, và đừng "sửa" số nền xuống chỉ vì thiếu ffmpeg.
 
 ⚠️ Con số `856` ở đây TỪNG không khớp phép trừ của chính nó: `865 − 9 = 856`, tức
 nó là số của lượt TRƯỚC `V1` (+3 bài) còn sót lại. Phép trừ của khối nền hiện tại
-là `1313 − 9` = `1304`.
+là `1323 − 9` = `1314`.
 
 
 (Con số này từng bị ghi là `798`: bài `test_a_failed_translation_leaves_the_
@@ -97,8 +97,24 @@ số nền không được bump. Nó tồn tại để phát hiện TRÔI, nên 
 chạy báo dương tính giả.
 
 
-Lần bump này, `1300/15` → `1313/15` (**+13 bài**), do **adapter `runtime: "http"` khai ba thuộc
-tính của cổng `MtEngine` là METHOD thay vì `@property`** — đo được trên stack thật: job translate
+Lần bump này, `1300/15` → `1323/15` (**+23 bài**), gồm hai cụm:
+
+**(a) Mười bài của `tests/test_asr_progress.py` — job `asr` phải NHÍCH và lần đầu tải model phải
+NÓI RA.** Sự cố đo được trên stack thật: một job `asr` với `fw-large-v3` đứng ở `15%` suốt **sáu
+phút** rồi bị một lượt dựng lại container cắt ngang. Hai nguyên nhân, cả hai là lỗi HIỂN THỊ:
+`progress` chỉ có ba nấc (`0` → `0,15` → `1,0`), và lần đầu dùng một engine là một lượt **TẢI
+MODEL** (`fw-large-v3` = 2,9 GB, đo được: `stat /models/models--Systran--faster-whisper-large-v3`
+= 10:14:53) trong khi job chỉ nói "nạp engine". Nay adapter báo tiến độ theo đoạn đã bóc
+(`on_progress(giây_đã_tới, tổng_giây)`, throttle 2 s vì mỗi lần báo là một lượt ghi DB + một sự
+kiện SSE), handler quy ra `0,15 … 0,89`, và job nói trước khi phải tải model. Ba lần mutation đã
+chạy: bỏ `bao(float(s.end))`, bỏ nhánh `model_cached`, hoặc bỏ phép dò `inspect.signature` ⇒ mỗi
+lần đúng một bài ĐỎ. `model_cached()` trả **ba** giá trị (`True`/`False`/`None`), không phải hai:
+bản đầu của bản vá trả `False` cho MỌI job vì `spec.model_ref` là **bí danh** (`large-v3-turbo`)
+còn repo thật là `mobiuslabsgmbh/...` — một câu "chưa có model" SAI còn tệ hơn im lặng.
+
+**(b) Mười ba bài của cụm engine `http`** (`test_mt_engine_contract.py` +9,
+`test_openai_base_url_env.py` +4). Nguyên nhân gốc: adapter `runtime: "http"` khai ba thuộc tính
+của cổng `MtEngine` là **METHOD** thay vì `@property` — đo được trên stack thật, job translate
 bằng `deepseek-web` chết ngay lô đầu với `sqlite3.InterfaceError: Error binding parameter 2 —
 probably unsupported type`, vì `TranslateHandler._record_call` đọc
 `getattr(engine, "model_ref")` và nhận **bound method**. `tests/test_mt_engine_contract.py` (+9

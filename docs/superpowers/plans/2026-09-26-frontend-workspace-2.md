@@ -4093,3 +4093,43 @@ nhau là giao diện hứa một engine rồi job gửi văn bản của ngườ
 `http://host.docker.internal:8790/v1`. Đo lại trong container: `available: true`, và một job THẬT
 trên clip 461 đoạn ⇒ **`done` sau 72,5 s**, echo **1/461** đoạn, 4 đoạn đầu đọc được
 (你绝对没吃过这样的东北烤冷面 → "Bạn tuyệt đối chưa từng ăn loại mì lạnh nướng Đông Bắc như thế này").
+
+---
+
+## ⚠️ ERRATA #53 — `15%` không nhích: job nói "nạp engine" trong khi nó đang **TẢI 2,9 GB**
+
+Triệu chứng người dùng báo: `#5 asr · fw-large-v3 · bị ngắt · 15%`. Hai chuyện khác nhau, cả hai
+đều thật:
+
+1. **`bị ngắt` là do TÔI**: job chạy từ 10:10:18 và bị `recover()` đánh `running → interrupted`
+   lúc 10:16:25, đúng lượt dựng lại container `api` (việc của tôi). `recover()` làm đúng hợp
+   đồng; người gây ra thì không.
+2. **`15%` đứng suốt sáu phút là lỗi HIỂN THỊ của sản phẩm.** Bằng chứng đo được:
+   `stat /models/models--Systran--faster-whisper-large-v3` = **10:14:53** ⇒ trong đúng sáu phút
+   đó thư mục model **2,9 GB** đang được ghi. Nghĩa là job đang TẢI MODEL, không phải đang bóc
+   băng — mà `progress` của handler chỉ có ba nấc (`0` → `0,15` → `1,0`) và dòng log chỉ nói
+   "nạp engine". Người dùng không có cách nào phân biệt "đang tải 2,9 GB" với "treo".
+
+**Sửa (ba chỗ, một đường):**
+
+* adapter `faster_whisper` báo tiến độ theo ĐOẠN: `on_progress(giây_đã_tới, tổng_giây)`, throttle
+  **2 s** (mỗi lần báo là một lượt ghi DB + một sự kiện SSE; clip 20:49 có 446 đoạn);
+* handler quy ra `0,15 … 0,89` và viết câu `bóc băng a.wav: 1:23 / 20:49 (6%)` — chừa chỗ cho ba
+  bước sau;
+* job NÓI TRƯỚC khi phải tải: `chưa có model của X trên đĩa — lần đầu phải tải về, có thể mất vài
+  phút (không phải treo)`.
+
+⚠️ **Cái bẫy của chính bản vá này** (đo được ở lượt chạy thật ĐẦU TIÊN sau khi sửa): phép dò cache
+trả `False` cho **mọi** job, kể cả engine đã có 1,6 GB trên đĩa — vì `spec.model_ref` là **bí
+danh** (`large-v3-turbo`) còn repo thật là `mobiuslabsgmbh/faster-whisper-large-v3-turbo`, nên
+`snapshot_download(local_files_only=True)` tra đúng cái thư mục không tồn tại. Nay phép dò đi qua
+`faster_whisper.utils._MODELS` (cùng bảng bí danh mà `WhisperModel` dùng) và trả **ba** giá trị:
+`True` / `False` (chỉ khi `LocalEntryNotFoundError`) / `None` = KHÔNG BIẾT. **Một câu "chưa có
+model" sai còn tệ hơn không nói gì**, nên `None` không được thành cảnh báo.
+
+**Ghim:** `tests/test_asr_progress.py` (+10): tiến độ theo đoạn, throttle, không có callback thì
+không nổ, bí danh được giải trước khi tra cache, `False` chỉ khi cache thiếu thật, `None` khi
+không kết luận được, handler quy ra đúng `0,335`/`0,89` cho 30/120 và 120/120 giây, engine KHÔNG
+nhận `on_progress` vẫn chạy (phép dò `inspect.signature` — KHÔNG `try/except TypeError`, vì một
+`TypeError` ném từ bên trong lần bóc băng sẽ bị nuốt rồi bóc băng hai lượt). Ba mutation đã chạy,
+mỗi lần đúng một bài ĐỎ.
