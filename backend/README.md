@@ -762,6 +762,29 @@ không được dựng và không được chạy; bài chỉ phủ đường **
 Đường Ollama do `tests/test_mt_live.py` phủ khi chạy `-m live` (cần model thật) và
 bởi `scripts/smoke_mt.py`.
 
+### Lượt chạy THẬT đầu-cuối trên cây đã gộp (2026-10-25)
+
+Bài `test_e2e_translate.py` ở trên thay engine bằng đồ giả. Lượt dưới đây **không
+thay gì**: wav thật (278 s, `data/media/8f4b5304daf42569.wav`) → `POST
+/api/sources/upload` → `ingest` → `asr` (`fw-large-v3-turbo`, model thật) →
+`translate` (`opus-mt`, in-process) → `GET /api/export/{id}?format=srt`, trên
+backend thật ở cổng **8622** với DB **scratch ngoài repo**:
+
+```
+jobs: [[1, "ingest", "done"], [2, "asr", "done"], [3, "translate", "done"]]
+transcript   id=1 status=translated segments=105
+translation  id=1 engine=opus-mt status=done
+export       200 bytes=10624 files_written=0
+srt head     1 / 00:00:00,000 --> 00:00:01,080 / Như một tác phẩm nghệ thuật.
+status       {"vram": 1143, "vram_unit": "MiB", "ollama": "up", ...}
+```
+
+Ba thứ lượt này chứng minh **trên sản phẩm**, không phải trên test: chuỗi ba job
+chạy hết và ghi đúng trạng thái; `GET /api/export/{id}` trả SRT và **không ghi tệp
+nào** (`files_written=0` — nợ `N-9` đóng đúng trên đường thật); `/api/status` trả
+**VRAM thật kèm đơn vị**. Nó **không** chứng minh chất lượng bản dịch (chưa ai
+chấm) và chỉ đo trên **một** clip.
+
 ## Chưa kiểm chứng
 
 * **Hình dạng thật của `timestamp` từ SenseVoice/FunASR.** Ba hình dạng
