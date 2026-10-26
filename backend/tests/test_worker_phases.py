@@ -391,7 +391,10 @@ def test_every_shipped_engine_phase_key_finds_the_stored_job_phase(repos):
     đợi đứng im mà không ném exception, nên phải khoá lại bằng 9/9.
     """
     specs = load_registry()
-    assert len(specs) == 9, f"registry phải có 9 engine, thấy {len(specs)}"
+    # 10 = 5 ASR + 5 MT, kể cả `deepseek-web` (`runtime: "http"`): engine chạy ở MÁY KHÁC
+    # vẫn đi qua CÙNG hàng đợi và CÙNG `PhaseQueueWorker`, nên `phase_key` của nó cũng phải
+    # tra ra được — một hàng `http` không phải ngoại lệ của bộ điều phối.
+    assert len(specs) == 10, f"registry phải có 10 engine, thấy {len(specs)}"
 
     not_found: list[str] = []
     for spec in specs:
@@ -408,7 +411,7 @@ def test_every_shipped_engine_phase_key_finds_the_stored_job_phase(repos):
         "phase_key không khớp phase đã lưu nên hàng đợi sẽ đứng im cho: "
         + ", ".join(not_found)
     )
-    assert len(specs) - len(not_found) == 9, "phải là 9/9, không được sót engine nào"
+    assert len(specs) - len(not_found) == 10, "phải là 10/10, không được sót engine nào"
 
 
 # ---------------------------------------------------------------------------

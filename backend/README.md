@@ -63,32 +63,32 @@ GPU. Nó tự ép UTF-8 cho stdout (console Windows mặc định cp1252, còn s
 tiếng Trung/Việt) và tự đặt cache model trước khi nạp `faster_whisper`.
 
 Con số nền của lần chạy mặc định, đo sau khi xoá `__pycache__` (lệnh ở mục
-"Kiểm thử" trên, chạy từ trong `backend\`). Thứ có nghĩa là **1300 / 15**, không
+"Kiểm thử" trên, chạy từ trong `backend\`). Thứ có nghĩa là **1309 / 15**, không
 phải số giây — thời gian trôi giữa các lần chạy (đã thấy 24,00–30,94 s) còn con
 số bài thì không:
 
 ```
-1300 passed, 15 deselected, 1 warning
+1309 passed, 15 deselected, 1 warning
 ```
 
 Hai con số đó là SỐ BÀI ĐƯỢC CHỌN, và chúng khớp với số mà `--collect-only` báo
-(`1300/1315`, 15 bài `live` bị bỏ;
+(`1309/1324`, 15 bài `live` bị bỏ;
 `tests/test_backend_readme.py::test_readme_baseline_matches_the_tests_actually_
 collected` đối chiếu mỗi lần chạy).
 
 
-Máy này **CÓ** `ffmpeg 8.1.1` + `ffprobe` trên PATH (đã đo), nên `1300/15` ở trên
+Máy này **CÓ** `ffmpeg 8.1.1` + `ffprobe` trên PATH (đã đo), nên `1309/15` ở trên
 là số THẬT của nó. Máy **không có** `ffmpeg`/`ffprobe` cho một kết quả KHÁC: cả
 `tests/test_ingest.py` bị `skipif` ở cấp module — **9** bài cùng skip một lượt —
-nên dòng tổng kết của máy đó là **`1291 passed, 9 skipped, 15 deselected`** (=
-`1300 − 9`; con số này TỪNG ghi `978`, tức một baseline rất cũ, và nó lệch phép
+nên dòng tổng kết của máy đó là **`1300 passed, 9 skipped, 15 deselected`** (=
+`1309 − 9`; con số này TỪNG ghi `978`, tức một baseline rất cũ, và nó lệch phép
 trừ của chính khối nền ngay trên nó). Đó là
 con số của máy thiếu ffmpeg, **không phải** con số máy này từng in ra; đừng chép
 nó vào khối nền ở trên, và đừng "sửa" số nền xuống chỉ vì thiếu ffmpeg.
 
 ⚠️ Con số `856` ở đây TỪNG không khớp phép trừ của chính nó: `865 − 9 = 856`, tức
 nó là số của lượt TRƯỚC `V1` (+3 bài) còn sót lại. Phép trừ của khối nền hiện tại
-là `1300 − 9` = `1291`.
+là `1309 − 9` = `1300`.
 
 
 (Con số này từng bị ghi là `798`: bài `test_a_failed_translation_leaves_the_
@@ -97,7 +97,20 @@ số nền không được bump. Nó tồn tại để phát hiện TRÔI, nên 
 chạy báo dương tính giả.
 
 
-Lần bump này, `1298/15` → `1300/15` (**+2 bài**), do **worker chết vì một lỗi ở đường GHI SỔ**:
+Lần bump này, `1300/15` → `1309/15` (**+9 bài**), do **adapter `runtime: "http"` khai ba thuộc
+tính của cổng `MtEngine` là METHOD thay vì `@property`** — đo được trên stack thật: job translate
+bằng `deepseek-web` chết ngay lô đầu với `sqlite3.InterfaceError: Error binding parameter 2 —
+probably unsupported type`, vì `TranslateHandler._record_call` đọc
+`getattr(engine, "model_ref")` và nhận **bound method**. `tests/test_mt_engine_contract.py` (+9
+ca, gồm tham số hoá theo từng adapter) ghim HÌNH DẠNG: `engine_id`/`model_ref`/`prompt_version`
+là `@property`, `supports_glossary` là method, **và** một ca đi đúng đường đã chết
+(`getattr` → bind vào `llm_calls` của sqlite). Mutation đã chạy: bỏ `@property` ở `model_ref` ⇒
+hai ca ĐỎ. Kèm theo: hàng `deepseek-web` được KHAI trong `registry.json` sau khi đo trên endpoint
+thật, và ba bài ghim registry (`test_registry`, `test_mt_wiring`, `test_worker_phases`) được cập
+nhật theo (9 → 10 engine; harness của `test_mt_wiring` vá thêm `OpenAiChatMt` +
+`openai_models_available` để test không chạm mạng và không đọc môi trường của máy chạy).
+
+Lần bump trước, `1298/15` → `1300/15` (**+2 bài**), do **worker chết vì một lỗi ở đường GHI SỔ**:
 một lượt dọn DB tay xoá hàng `jobs` trong lúc worker đang chạy nó ⇒ đường **báo lỗi** của
 `_run_one` gọi `append_job_log` và nhận `NotFound` ⇒ exception thoát khỏi `tick()` và thoát khỏi
 `run_forever`, tức **luồng worker chết**; hàng đợi đứng im vĩnh viễn (`/api/status` vẫn
@@ -672,16 +685,29 @@ gọi**, 0 chữ Hán, thuật ngữ 7/7 (`docs/superpowers/reports/2026-10-25-s
 Lô 15 là điểm làm việc của hợp đồng `lines`: lô 30 làm 3/4 lô hỏng alignment rồi phải hạ
 cấp, đắt hơn — nên đặt `capabilities.max_items_per_call: 15`.
 
-**Ví dụ trên KHÔNG có trong `registry.json` đã ship**, và đó là chủ ý: engine chưa đo trên
-endpoint thật thì chưa khai. Ba điều phải nói trước khi bật nó:
+**Hàng `deepseek-web` NAY CÓ trong `registry.json` đã ship** — vì nó đã được đo trên endpoint
+thật (`whalegate serve` ở `http://127.0.0.1:8790/v1`, model `deepseek-web`): hợp đồng `lines` lô
+30 ⇒ **115/115 `done`, 4 lời gọi, 13,21 s, 0 lỗi alignment, 0 chữ Hán, 0 echo, thuật ngữ 7/7**;
+`lines` lô 15 ⇒ 115/115, 8 lời gọi, 33,64 s; và `json` + `response_format` lô 15 ⇒ 115/115, 8
+lời gọi, 19,41 s (`data/experiments/accuracy-pipelines/20261026-spike-deepseek-web/`; đính chính
+"`response_format` không tồn tại" trong báo cáo spike). Chọn `lines` vì hỏng thì ỒN, và lô 30 đo
+được **không một lần thử lại**. Ví dụ `api-dich` ở trên thì **KHÔNG** có trong registry: chưa ai
+đo nó — luật "engine chưa đo thì chưa khai" vẫn nguyên.
+
+Ba điều phải nói trước khi bật nó:
 
 1. **`default_mt` phải tiếp tục là `opus-mt`.** Đổi engine mặc định là đổi tiền đề offline
    của cả pipeline, và mọi số trong tài liệu này đo trên đường local.
 2. **Văn bản phụ đề rời khỏi máy.** Đây là thay đổi về quyền riêng tư, không phải một tối
-   ưu — với engine `runtime: "http"` thì nội dung clip của người dùng đi tới bên thứ ba.
+   ưu — với engine `runtime: "http"` thì nội dung clip của người dùng đi tới bên thứ ba (ở đây
+   là phiên web của một tài khoản, kèm ToS của dịch vụ đó).
 3. **Số đo của nó không tái lập được.** Không đặt được sampling, hành vi của dịch vụ đổi
    ngoài tầm kiểm soát. Một con số của engine `http` phải được dán nhãn như vậy, không được
    trộn vào bảng so sánh local.
+
+`available` của hàng đó là câu trả lời THẬT: không chạy `whalegate` thì nó là `false` và giao
+diện không cho chọn (không có gì khác phải sửa). Muốn đổi endpoint/khoá, hoặc không muốn hàng
+này trong registry, thì trỏ `PHUDE_REGISTRY` vào một bản `registry.json` của riêng bạn.
 
 ### Giới hạn — đọc trước khi tin bất cứ con số nào ở trên
 

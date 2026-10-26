@@ -101,12 +101,29 @@ class OpenAiChatMt:
         self.last_stats: CallStats | None = None
 
     # -- hợp đồng `MtEngine` ----------------------------------------------------
+    # ⚠️ BA thuộc tính dưới đây là `@property`, KHÔNG phải method — và đây là một
+    # lỗi đã ĐO ĐƯỢC chứ không phải chuyện hình thức: `TranslateHandler._record_call`
+    # đọc `getattr(engine, "model_ref", None)` rồi ghi vào cột `llm_calls.model_ref`
+    # của sqlite. Khi bản đầu khai `def model_ref(self)` (thiếu `@property`) thì
+    # `getattr` trả về một BOUND METHOD, và mọi job `translate` bằng engine này chết
+    # ngay lô đầu:
+    #   sqlite3.InterfaceError: Error binding parameter 2 - probably unsupported type.
+    # `chimera.py` thì tệ hơn: nó `str(getattr(engine, "prompt_version", ...))` nên
+    # ghi "<bound method ...>" vào phiên Chimera mà KHÔNG hề báo lỗi.
+    # Vì sao 63 test của chính adapter này vẫn xanh: chúng gọi theo hình dạng SAI
+    # (`engine.model_ref()`), còn spike thì chạy trên repo GIẢ trong bộ nhớ nên bound
+    # method không bao giờ chạm sqlite. Hình dạng đúng là hình dạng `OpusMtEngine` và
+    # `OllamaMtEngine` đang dùng, và nay được ghim bởi
+    # `tests/test_mt_engine_contract.py`.
+    @property
     def engine_id(self) -> str:
         return self._engine_id
 
+    @property
     def model_ref(self) -> str:
         return self._model
 
+    @property
     def prompt_version(self) -> str:
         """Không tra `PROMPT_VERSION` được: prompt của hợp đồng `lines` KHÔNG đi
         qua `experiment_prompt_style` và không thuộc bộ `V0..V3` đã đo. Trả tên

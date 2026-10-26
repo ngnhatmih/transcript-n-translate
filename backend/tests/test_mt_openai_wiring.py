@@ -163,16 +163,16 @@ def test_engine_is_built_from_the_registry_row(monkeypatch):
     engines = main._build_mt_engines([spec])
     engine = engines["api-dich"]
     assert isinstance(engine, OpenAiChatMt)
-    assert engine.engine_id() == "api-dich"
-    assert engine.model_ref() == "deepseek-chat"
-    assert engine.prompt_version() == "openai-lines-p1"
+    assert engine.engine_id == "api-dich"
+    assert engine.model_ref == "deepseek-chat"
+    assert engine.prompt_version == "openai-lines-p1"
     assert engine.supports_glossary() is True       # từ `capabilities.glossary_prompt`
 
 
 def test_contract_defaults_to_json_when_the_row_does_not_say(monkeypatch):
     spec = _available(http_spec(opts={"base_url": "https://api.example.test/v1"}))
     engine = main._build_mt_engines([spec])["api-dich"]
-    assert engine.prompt_version() == "openai-json-p1"
+    assert engine.prompt_version == "openai-json-p1"
 
 
 def test_missing_base_url_is_loud_when_building(monkeypatch):

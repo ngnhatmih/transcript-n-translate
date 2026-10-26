@@ -128,7 +128,7 @@ def run(transcript: pathlib.Path, glossary: pathlib.Path, out_dir: pathlib.Path,
                            reasoning_effort=reasoning_effort)
     engine = _Recorder(adapter)
     repos = smoke._InMemoryRepos(segments, terms, engine=ENGINE_ID,
-                                 prompt_version=adapter.prompt_version())
+                                 prompt_version=adapter.prompt_version)
     handler = TranslateHandler(
         repos, {ENGINE_ID: engine},
         # Engine nay KHONG khai capability nao: chua do thi chua khai. Doi lai,

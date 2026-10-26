@@ -4024,3 +4024,59 @@ nút ⇒ bài đỏ; bỏ lớp `is-chon` khỏi TSX ⇒ bài DOM đỏ.
 ⚠️ Luật đo rút ra: **một trạng thái đổi HÌNH THỨC CỦA CẢ HÀNG thì lớp/key phải nằm ở HÀNG.** Khai
 nó trên một flex item bên trong là tự giới hạn bề rộng của hình thức đó bằng bề rộng của item — và
 item đó đã có lý do riêng để co lại.
+
+---
+
+## ⚠️ ERRATA #52 — Hàng `runtime: "http"` ĐẦU TIÊN: **63 bài test của adapter đều XANH trong khi mọi job `translate` chết ở lô đầu**
+
+Bối cảnh: `whalegate` (`deepseek-web`) đã chạy trên máy này, nên engine `http` — thứ nhánh codex
+để trống vì *"engine chưa đo trên endpoint thật thì chưa khai"* — nay đo được. Chạy lại spike
+trên endpoint thật: cả ba cấu hình đều 115/115 `done` (xem phụ lục trong
+`docs/superpowers/reports/2026-10-25-spike-openai-mt.md`). Nên khai hàng vào `registry.json` và
+bấm một job THẬT qua API. Job đó **failed ngay lô đầu**:
+
+```
+LỖI: Error binding parameter 2 - probably unsupported type.
+```
+
+### 1. 🔴 Nguyên nhân: ba thành viên của cổng `MtEngine` được khai là METHOD thay vì `@property`
+
+`TranslateHandler._record_call` đọc `getattr(engine, "model_ref", None)` rồi ghi vào cột
+`llm_calls.model_ref` của sqlite. `OpenAiChatMt` khai `def model_ref(self)` (và `engine_id`,
+`prompt_version`) là **method** ⇒ `getattr` trả **bound method** ⇒ sqlite không bind được ⇒
+
+```
+sqlite3.InterfaceError: Error binding parameter 2 - probably unsupported type.
+```
+
+`OpusMtEngine` và `OllamaMtEngine` khai cả ba là `@property`; `chimera.py` thì tệ hơn — nó
+`str(getattr(engine, "prompt_version", ...))` nên sẽ ghi `"<bound method …>"` vào phiên Chimera
+mà **không báo lỗi gì**.
+
+### 2. 🔴 Vì sao 63 bài test của chính adapter đó VẪN XANH — hai lớp che
+
+* các bài đó gọi theo **đúng hình dạng sai** (`eng.model_ref()`, `eng.prompt_version()`), nên
+  chúng đồng ý với lỗi;
+* spike đo trên **repo giả trong bộ nhớ** (`smoke._InMemoryRepos`), nơi `add_llm_call` chỉ nhận
+  một dict — bound method không bao giờ chạm sqlite, nên đường chết không tồn tại trong phép đo.
+
+Tức "test xanh" ở đây **chỉ nói rằng test đồng ý với lỗi**, đúng lớp ERRATA #34 mục 1.
+
+### 3. Ghim mới — HÌNH DẠNG, không phải hành vi của một engine
+
+`backend/tests/test_mt_engine_contract.py` (+9 ca, có tham số hoá theo từng adapter): ba thành
+viên `engine_id`/`model_ref`/`prompt_version` phải là `@property` trên MỌI adapter,
+`supports_glossary` phải là METHOD (mọi chỗ gọi đều gọi nó), và một ca đi ĐÚNG đường đã chết
+(`getattr(engine, "model_ref")` → `repos.add_llm_call` → đọc lại `llm_calls`). Mutation đã chạy:
+bỏ `@property` ở `model_ref` ⇒ **hai ca ĐỎ**, khôi phục ⇒ xanh.
+
+⚠️ Luật rút ra: **một cổng có cả thuộc tính và method thì hình dạng của nó phải được ghim bằng
+`inspect`**, vì một bài gọi sai hình dạng sẽ xanh vĩnh viễn. Và khi đo một adapter trên repo giả,
+phải tự hỏi repo giả đó **bỏ qua** loại lỗi nào.
+
+### 4. Đo lại sau khi sửa (đường SẢN PHẨM, không phải spike)
+
+Job `translate` thật qua `POST /api/translations` với engine `deepseek-web`, transcript 60 đoạn
+gieo vào DB scratch: **`done`**, 60/60 đoạn, 2 lời gọi, **7,4 s** (gồm cả dựng tiến trình), và
+`llm_calls` có `model_ref = 'deepseek-web'` (chuỗi thật), tokens 507/378 + 513/478. Bản dịch đầu
+tiên: 作为一个搞艺术的 → *"Là một người làm nghệ thuật"*.
