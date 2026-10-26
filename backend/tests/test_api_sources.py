@@ -992,7 +992,7 @@ def test_build_components_defaults_auto_forward_on_now_that_mt_exists(built):
     main, repos, specs, worker, engine, broker, mt_engines = built
 
     assert repos.get_setting("auto_forward") == "1"
-    assert set(worker.handlers) == {"ingest", "asr", "translate", "export"}
+    assert set(worker.handlers) == {"ingest", "asr", "translate", "export", "dub"}
 
 
 def test_build_components_does_not_overwrite_an_auto_forward_choice(built):

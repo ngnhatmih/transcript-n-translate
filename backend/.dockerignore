@@ -1,5 +1,11 @@
-# Không đưa môi trường phát triển vào image: `.venv` nặng vài GB và chỉ đúng trên Windows.
+# Không đưa môi trường phát triển vào image: venv nặng vài GB và chỉ đúng trên Windows.
 .venv/
+# ⚠️ `.venv-tts` là venv RIÊNG của TTS (`vieneu`), và nó là venv WINDOWS: `pyvenv.cfg` ghi
+# `home = C:\Users\...`, python nằm ở `Scripts/python.exe`. ĐO ĐƯỢC: thiếu dòng này thì
+# `COPY . .` mang 751 MB / 24 116 tệp vào image Linux, nơi không một dòng nào chạy được —
+# và tệ hơn, đường dẫn đó TỒN TẠI nên một phép dò "có python chưa" sẽ trả lời SAI.
+# TTS trong container là việc riêng (`pip install vieneu` bằng pip Linux), không phải chép venv.
+.venv-tts/
 __pycache__/
 *.pyc
 .pytest_cache/

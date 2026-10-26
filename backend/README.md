@@ -63,32 +63,32 @@ GPU. Nó tự ép UTF-8 cho stdout (console Windows mặc định cp1252, còn s
 tiếng Trung/Việt) và tự đặt cache model trước khi nạp `faster_whisper`.
 
 Con số nền của lần chạy mặc định, đo sau khi xoá `__pycache__` (lệnh ở mục
-"Kiểm thử" trên, chạy từ trong `backend\`). Thứ có nghĩa là **1331 / 15**, không
+"Kiểm thử" trên, chạy từ trong `backend\`). Thứ có nghĩa là **1343 / 15**, không
 phải số giây — thời gian trôi giữa các lần chạy (đã thấy 24,00–30,94 s) còn con
 số bài thì không:
 
 ```
-1331 passed, 15 deselected, 1 warning
+1343 passed, 15 deselected, 1 warning
 ```
 
 Hai con số đó là SỐ BÀI ĐƯỢC CHỌN, và chúng khớp với số mà `--collect-only` báo
-(`1331/1346`, 15 bài `live` bị bỏ;
+(`1343/1358`, 15 bài `live` bị bỏ;
 `tests/test_backend_readme.py::test_readme_baseline_matches_the_tests_actually_
 collected` đối chiếu mỗi lần chạy).
 
 
-Máy này **CÓ** `ffmpeg 8.1.1` + `ffprobe` trên PATH (đã đo), nên `1331/15` ở trên
+Máy này **CÓ** `ffmpeg 8.1.1` + `ffprobe` trên PATH (đã đo), nên `1343/15` ở trên
 là số THẬT của nó. Máy **không có** `ffmpeg`/`ffprobe` cho một kết quả KHÁC: cả
 `tests/test_ingest.py` bị `skipif` ở cấp module — **9** bài cùng skip một lượt —
-nên dòng tổng kết của máy đó là **`1322 passed, 9 skipped, 15 deselected`** (=
-`1331 − 9`; con số này TỪNG ghi `978`, tức một baseline rất cũ, và nó lệch phép
+nên dòng tổng kết của máy đó là **`1334 passed, 9 skipped, 15 deselected`** (=
+`1343 − 9`; con số này TỪNG ghi `978`, tức một baseline rất cũ, và nó lệch phép
 trừ của chính khối nền ngay trên nó). Đó là
 con số của máy thiếu ffmpeg, **không phải** con số máy này từng in ra; đừng chép
 nó vào khối nền ở trên, và đừng "sửa" số nền xuống chỉ vì thiếu ffmpeg.
 
 ⚠️ Con số `856` ở đây TỪNG không khớp phép trừ của chính nó: `865 − 9 = 856`, tức
 nó là số của lượt TRƯỚC `V1` (+3 bài) còn sót lại. Phép trừ của khối nền hiện tại
-là `1331 − 9` = `1322`.
+là `1343 − 9` = `1334`.
 
 
 (Con số này từng bị ghi là `798`: bài `test_a_failed_translation_leaves_the_
@@ -97,7 +97,41 @@ số nền không được bump. Nó tồn tại để phát hiện TRÔI, nên 
 chạy báo dương tính giả.
 
 
-Lần bump này, `1300/15` → `1331/15` (**+31 bài**), gồm hai cụm:
+Lần bump này, `1336/15` → `1343/15` (**+7 bài**), do **LỒNG TIẾNG (TTS)** —
+`POST /api/dubs` xếp một job `dub` cho một bản dịch, `DubHandler` chạy TTS
+(VieNeu-TTS v3 Turbo, 48 kHz, venv riêng `backend/.venv-tts`), ép tốc độ từng dòng
+để `take ≤ slot` rồi ghi **một** file master ra `data/output/dubs/dub-<translation_id>.<fmt>`;
+`GET /api/dubs/{translation_id}/download?format=` trả file theo whitelist
+`wav|mp3|aac|m4a|flac`. Bảy bài mới: năm định dạng đều ghi được, dòng đặt ĐÚNG `start`
+của nó, tiến độ báo `1.0` khi xong, từ chối một bản dịch không có dòng nào, và ba bài
+của hai lỗi đo được ngay dưới đây. Phần THUẦN (`ke_hoach_toc_do`, `rap`,
+`xuat_dinh_dang`) đã có 5 bài từ commit trước (`tests/test_dub.py`).
+
+⚠️ **`handles()` là một phần của hợp đồng handler, không phải trang trí.** Bản đầu
+của `DubHandler` thiếu nó, và hậu quả KHÔNG nằm ở đường lồng tiếng: `routes_jobs.
+_registered_job_types` gọi `handler.handles()` trên **mọi** handler để biết loại job
+nào có đường chạy thật, nên `POST /api/jobs` nổ `AttributeError: 'DubHandler' object
+has no attribute 'handles'` — đo được **8 bài `test_api_export_by_translation.py`
+ĐỎ** dù đường xuất file không có gì sai. Đó là lý do bài ghim tập handler ở
+`test_api_sources.py` nay đòi `{"ingest","asr","translate","export","dub"}`: tập đó
+là thứ `_registered_job_types` đọc, nên nó phải phản ánh số handler THẬT.
+
+Hai lỗi nữa của bản đầu, **cả hai chỉ lộ ra khi chạy trên máy thật** — xem mục
+"Lồng tiếng (TTS)" bên dưới:
+
+* `chay_tts_batch` tự dựng `TemporaryDirectory` rồi trả ĐƯỜNG DẪN tới các wav trong đó;
+  thư mục bị xoá ngay khi hàm trả về nên `run()` đọc một tệp đã biến mất ⇒ mọi job chết
+  ở 40% với `LibsndfileError: … System error`. Nay thư mục tạm do **handler** sở hữu và
+  `tts_runner` nhận `out_dir` làm tham số. Bốn bài cũ vẫn xanh vì runner giả tự dựng thư
+  mục riêng bên ngoài — fixture vô tình thoả hợp đồng mà sản phẩm vi phạm.
+* Đường mặc định của TTS là `…/.venv-tts/Scripts/python.exe`, một đường **Windows**;
+  trong image Linux nó không tồn tại nên job được nhận rồi `failed` ở 5%. Nay
+  `TTS_PYTHON` chọn theo `os.name`, và `POST /api/dubs` **từ chối sớm bằng 409** qua
+  `DubHandler.san_sang()` (đo được trong container: `queue_depth` **0 → 0**, không để
+  lại hàng `jobs` nào). Kèm theo `.venv-tts` (751 MB) bị `COPY . .` mang vào image;
+  thêm vào `backend/.dockerignore` ⇒ image **10,8 GB → 9,64 GB**.
+
+Lần bump trước, `1300/15` → `1336/15` (**+36 bài**), gồm hai cụm:
 
 **(a) Mười bài của `tests/test_asr_progress.py` — job `asr` phải NHÍCH và lần đầu tải model phải
 NÓI RA.** Sự cố đo được trên stack thật: một job `asr` với `fw-large-v3` đứng ở `15%` suốt **sáu
@@ -780,6 +814,80 @@ tham chiếu, và hai trong năm câu nguồn đã rác sẵn từ ASR. Điều 
 ở prompt p2 vẫn chép nguồn; `opus-mt` (engine MẶC ĐỊNH) rơi nội dung; và `hy-mt` có kiểu hỏng
 riêng là **bịa thêm thông tin** — nguy hiểm hơn rơi chữ, vì bản dịch vẫn đọc trôi.
 
+### Lồng tiếng (TTS) — job `dub`, hai route, và CLI
+
+Ba đường vào, MỘT đường chạy: `DubHandler` (`app/pipeline/dub.py`). `POST /api/dubs` xếp một
+job `dub`, worker chạy nó, `GET /api/dubs/{translation_id}/download?format=` trả file;
+`scripts/make_dub.py` là CLI trên cùng dữ liệu (dùng khi không muốn bật API).
+
+```powershell
+# venv RIÊNG cho TTS: vieneu kéo huggingface_hub 2.x + starlette 1.x, xung đột với transformers 4.46
+.\.venv\Scripts\python.exe -m venv .venv-tts
+.\.venv-tts\Scripts\python.exe -m pip install vieneu
+
+# qua API (khuyến nghị — cùng đường với giao diện)
+curl -X POST http://127.0.0.1:8620/api/dubs -H 'Content-Type: application/json' -d '{"translation_id":1,"so_dong":8,"voice":"Minh Quân"}'
+
+# hoặc CLI
+.\.venv\Scripts\python.exe -B scripts\make_dub.py --so-dong 8 --voice "Minh Quân"
+```
+
+Đo được: nạp model **62,6 s** (lần đầu, kèm tải), `infer` **1,2 s** cho một câu, ra **48 kHz**;
+8 dòng → master **33,78 s** (dòng 7 đặt ở 32,46 s đúng `start`) và **5 file**
+wav 3167 kB · flac 462 · mp3 793 · aac 314 · m4a 310.
+
+Tốc độ KHÔNG phải mỗi dòng một số: `ke_hoach_toc_do` gom về thang bậc 0,05 (tối đa 1,35),
+vì đo trên 14 dòng thật `take/chỗ` rải 1,00–1,62× — mỗi dòng một tốc độ thì giọng đổi nhịp liên
+tục, còn một tốc độ chung thì phải lấy mức lớn nhất. 8 dòng trên dùng 5 mốc: 1,00/1,10/1,15/
+1,20/1,25. Dòng nào `need > 1,35` thì handler GHI RA là "phải sửa chữ" và không tự nén quá trần.
+
+#### Đo end-to-end qua HTTP (bản dịch #1, 4 dòng, máy Windows)
+
+`POST /api/dubs {"translation_id":1,"so_dong":4}` → job **`done` sau 6,1 s** (model đã cache từ
+lượt trước; lần đầu phải cộng 62,6 s nạp). Năm file ra `data/output/dubs/`, `ffprobe` đọc lại:
+
+| file | dài | mẫu | kênh | codec | byte |
+|---|---|---|---|---|---|
+| `dub-1.wav` | 5,800 s | 48000 Hz | 1 | pcm_s16le | 556 844 |
+| `dub-1.flac` | 5,800 s | 48000 Hz | 1 | flac | 174 712 |
+| `dub-1.mp3` | 5,800 s | 48000 Hz | 1 | mp3 | 140 589 |
+| `dub-1.m4a` | 5,800 s | 48000 Hz | 1 | aac | 107 277 |
+| `dub-1.aac` | 5,242 s | 48000 Hz | 1 | aac | 107 289 |
+
+Canvas 5,800 s = `end` của dòng CUỐI (bốn dòng: 0,00–1,08 / 1,08–2,52 / 2,52–3,44 / 3,44–5,80).
+Đo biên tiếng trên wav (năng lượng cửa sổ 20 ms, ngưỡng 0,02, gộp khoảng lặng < 150 ms) ra
+**3 khối**: `0,080 → 2,140` · `2,520 → 3,040` · `3,440 → 5,300`. Hai khối sau khớp `start` của
+dòng 2 và dòng 3 **tới mili giây** (2,520 / 3,440); khối đầu là dòng 0+1 dính nhau vì chúng liền
+mạch, và nó **trễ 80 ms** — phần đệm còn lại sau `trong_im_lang`, không phải sai `start`.
+
+⚠️ `.aac` ngắn hơn 0,558 s: đó là **ADTS** (`-f adts`), mỗi frame tự mô tả nên `ffprobe` báo
+theo frame đã đọc; `m4a` cùng codec aac giữ đủ 5,800 s. Đừng đọc chênh lệch đó thành mất tiếng.
+
+#### Hai lỗi ĐO ĐƯỢC của bản đầu, và vì sao test cũ không bắt
+
+1. **Đường dẫn tệp take chết trước khi handler đọc.** `chay_tts_batch` tự dựng
+   `TemporaryDirectory`, ghi wav vào đó, trả ĐƯỜNG DẪN về, rồi thư mục bị xoá ngay khi hàm trả
+   về ⇒ mọi job `dub` chết ở 40% với
+   `LibsndfileError: Error opening '…\Temp\tts-5cs2do_f\wav\00000.wav': System error`
+   (Linux: `No such file`). Đo cô lập đúng khuôn `with TemporaryDirectory(...)`:
+   `trong with: ton tai = True` / `sau with: ton tai = False`. Nay thư mục tạm do **handler**
+   sở hữu và `tts_runner` nhận `out_dir` làm tham số; ghim bằng
+   `test_handler_doc_duoc_take_vi_thu_muc_con_song`. **Vì sao 4 bài cũ vẫn xanh:** runner giả
+   tự dựng thư mục riêng bên ngoài, nên đường dẫn của nó luôn sống — fixture vô tình thoả hợp
+   đồng mà sản phẩm vi phạm.
+2. **Đường mặc định của TTS là đường Windows, trong image Linux.**
+   `…/.venv-tts/Scripts/python.exe` không tồn tại trên Linux, nên job được nhận rồi `failed` ở
+   5% sau khi người dùng đã chờ. Nay `TTS_PYTHON` chọn theo `os.name`, và `POST /api/dubs`
+   **từ chối sớm bằng 409** qua `DubHandler.san_sang()` thay vì để job chết — đo được trong
+   container: `{"detail":"máy này chưa có TTS: không thấy /app/.venv-tts/bin/python — …"}` với
+   `queue_depth` **0 → 0**. Kèm theo: `.venv-tts` (751 MB, 24 116 tệp, `pyvenv.cfg` ghi
+   `home = C:\Users\…`) bị `COPY . .` mang vào image; thêm nó vào `backend/.dockerignore` ⇒
+   image **10,8 GB → 9,64 GB**. ⚠️ `.dockerignore` ở GỐC repo KHÔNG có tác dụng: build context
+   của `api` là `./backend`.
+
+`ponytail:` chưa có — trộn với tiếng gốc (ducking, người dùng đã loại), gọi lại engine dịch để
+rút chữ, TTS trong container (cần image riêng có `vieneu`, không phải chép venv Windows), và GPU
+cho TTS (đang chạy CPU).
 ### Giới hạn — đọc trước khi tin bất cứ con số nào ở trên
 
 1. **`DEFAULT_MAX_CHARS = 1200` NAY ĐÃ ĐƯỢC ÉP — và nó có tác dụng thật.**

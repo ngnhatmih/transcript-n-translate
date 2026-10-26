@@ -55,3 +55,7 @@ desktop.ini
 # Lockfile của bộ skill đã cài trên máy: không thuộc app. Muốn ghim bộ skill vào lịch sử
 # thì bỏ dòng dưới và commit nó như một quyết định có chủ.
 skills-lock.json
+# Venv RIENG cho TTS (VieNeu kéo huggingface_hub 2.x + starlette 1.x, xung đột với app)
+backend/.venv-tts/
+# Ban long tieng xuat ra (dub-<id>-<n>dong.{wav,flac,mp3,aac,m4a})
+backend/data/dubs/

@@ -112,7 +112,7 @@ export interface Segment {
 }
 
 /** Thứ tự dài của một hàng `jobs` (`routes_jobs._job_json`). */
-export type JobType = "ingest" | "asr" | "translate" | "export";
+export type JobType = "ingest" | "asr" | "translate" | "export" | "dub";
 export type JobState = "queued" | "running" | "done" | "failed" | "interrupted" | "cancelled";
 
 export interface Job {

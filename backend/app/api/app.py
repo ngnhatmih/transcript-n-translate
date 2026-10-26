@@ -62,7 +62,7 @@ def create_app(*, repos, specs: list[EngineSpec], media_dir, out_dir,
         allow_headers=["*"],
     )
 
-    from app.api import (routes_export, routes_glossary, routes_jobs,
+    from app.api import (routes_dubs, routes_export, routes_glossary, routes_jobs,
                          routes_media, routes_registry, routes_sources,
                          routes_stats, routes_transcripts, routes_translations)
     app.include_router(routes_translations.chimera_router)
@@ -71,6 +71,8 @@ def create_app(*, repos, specs: list[EngineSpec], media_dir, out_dir,
     # Thống kê token/thời lượng theo engine (đọc `llm_calls`). Tách khỏi `/api/registry` vì
     # nó là dữ liệu VẬN HÀNH (tích luỹ qua mọi job), không phải cấu hình engine.
     app.include_router(routes_stats.router)
+    # Lồng tiếng: xếp job `dub` + tải file. Tách khỏi routes_jobs vì tải file không phải job.
+    app.include_router(routes_dubs.router)
     app.include_router(routes_sources.router)
     app.include_router(routes_media.router)
     app.include_router(routes_transcripts.router)

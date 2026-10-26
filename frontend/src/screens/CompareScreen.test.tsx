@@ -37,7 +37,7 @@ import { after, afterEach, before, beforeEach, describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
-import type { EngineSpec, Segment, Transcript, TranslationDetail } from "../api/types.ts";
+import type { EngineSpec, Job, Segment, Transcript, TranslationDetail } from "../api/types.ts";
 import { ApiError } from "../api/client.ts";
 import { setupDom, teardownDom } from "../../test/dom.ts";
 
@@ -163,6 +163,38 @@ function banDich(
         over: r.over,
       })),
     },
+  };
+}
+
+/**
+ * Một job `dub` theo ĐÚNG hình dạng `Job` (`types.ts`).
+ *
+ * Khối lồng tiếng chỉ đọc BỐN khoá — `state`, `progress`, `error`, và (qua `App`, không qua
+ * đây) `payload.translation_id` — nên phần còn lại là hình dạng tối thiểu mà máy chủ LUÔN
+ * gửi. Đừng rút gọn thành `{ state }`: một fixture thiếu khoá là một hình dạng KHÔNG có thật,
+ * và bài test sẽ xanh trên một dữ liệu mà backend không bao giờ sinh ra.
+ */
+function jobDub(
+  id: number,
+  state: Job["state"],
+  opts: { progress?: number; error?: string | null; translationId?: number } = {},
+): Job {
+  return {
+    id,
+    workspace: 2,
+    type: "dub",
+    engine: "vieneu-v3-turbo",
+    phase: "dub:vieneu-v3-turbo",
+    state,
+    cancel_requested: false,
+    attempts: 1,
+    progress: opts.progress ?? 0,
+    log_tail: "",
+    error: opts.error ?? null,
+    payload: { translation_id: opts.translationId ?? 31, voice: null, so_dong: 1 },
+    created_at: "2026-01-01T00:00:00Z",
+    started_at: null,
+    finished_at: null,
   };
 }
 
@@ -967,20 +999,24 @@ describe("CompareScreen: §4.3 hai cot + cot CPS + segmented control + ghim ban 
     const appCss = readFileSync(new URL("../styles/app.css", import.meta.url), "utf8");
     const cssTran = appCss.replace(/\/\*[\s\S]*?\*\//g, "");
 
-    /** Tap lop `.cmp*` ma `app.css` tao kieu — theo TUNG selector, khong theo ca danh sach. */
+    /** Tap lop `.cmp*` va `.dub*` ma `app.css` tao kieu — theo TUNG selector, khong theo ca danh sach. */
     function lopTrongCss(): Set<string> {
       const ra = new Set<string>();
-      // Chi nhan selector TOAN cuc bat dau bang `.cmp`: `[^{}]*` de khong dinh luat long nhau,
+      // Chi nhan selector TOAN cuc bat dau bang `.cmp`/`.dub`: `[^{}]*` de khong dinh luat long nhau,
       // va `(^|})` de khong nhan selector nam trong mot danh sach cua luat khac (vi du
       // `.cmp__chon[aria-checked="true"]` van la cua `.cmp` — no PHAI duoc tinh).
+      // ⚠️ Char class co CA CHU HOA (`A-Z`): DO DUOC bang mutant `.dub__loi {` -> `.dub__loiX {` —
+      // ban dau thieu `A-Z` nen regex cat ten tai `dub__loi` va mutant SONG (ten moi bi doc thanh
+      // ten cu, tuc luat doi ten van "khop" DOM). Lop trong repo deu viet thuong, nhung mot phep
+      // ghim chi dung voi MOT kieu go sai cu the la mot phep ghim se IM LANG khi ai do go khac.
       for (const m of cssTran.matchAll(/(?:^|\})\s*([^{}]*?)\{/g)) {
-        for (const lop of (m[1] ?? "").matchAll(/\.(cmp[a-z0-9_-]*)/g)) ra.add(lop[1] ?? "");
+        for (const lop of (m[1] ?? "").matchAll(/\.(cmp[a-zA-Z0-9_-]*|dub[a-zA-Z0-9_-]*)/g)) ra.add(lop[1] ?? "");
       }
       ra.delete("");
       return ra;
     }
 
-    /** Tap lop `cmp*` co trong DOM that cua tat ca cac trang thai tuan tu. */
+    /** Tap lop `cmp*`/`dub*` co trong DOM that cua tat ca cac trang thai tuan tu. */
     const lopTrongDom = new Set<string>();
     for (const props of [
       { transcript: null, translations: [], specs: SPECS },
@@ -1033,6 +1069,27 @@ describe("CompareScreen: §4.3 hai cot + cot CPS + segmented control + ghim ban 
           estimate_basis: "do tu ban dich #7", estimate_hint: null,
         },
       },
+      // ⚠️ BA TRANG THAI JOB `dub` — moi trang thai sinh ra mot tap lop KHAC, va thieu mot
+      // trang thai la bai (A) bao "luat mo coi" cho mot luat CO THAT:
+      //   running ⇒ `.dub__tin` (cau `đang lồng tiếng… N%`);
+      //   done    ⇒ `.dub__tai` + `.dub__nut-tai` (nam duong tai);
+      //   failed  ⇒ `.dub__loi` (NGUYEN VAN `job.error`).
+      // `.dub`/`.dub__giong`/`.dub__nut` da co mat tu `onLongTieng` o props chung ben duoi.
+      {
+        transcript: banGhi([doan(1, "你好")]),
+        translations: [banDich(31, ["Xin chao"], [{ i: 1, cps: 4, over: false }])],
+        dubJob: jobDub(41, "running", { progress: 0.42 }),
+      },
+      {
+        transcript: banGhi([doan(1, "你好")]),
+        translations: [banDich(31, ["Xin chao"], [{ i: 1, cps: 4, over: false }])],
+        dubJob: jobDub(42, "done"),
+      },
+      {
+        transcript: banGhi([doan(1, "你好")]),
+        translations: [banDich(31, ["Xin chao"], [{ i: 1, cps: 4, over: false }])],
+        dubJob: jobDub(43, "failed", { error: "409: chưa có worker" }),
+      },
     ] as (Record<string, unknown> & { bamGhim?: boolean })[]) {
       const { container } = render(taoPhanTu(CompareScreen, {
         onTaoBanDich: () => {},
@@ -1040,17 +1097,22 @@ describe("CompareScreen: §4.3 hai cot + cot CPS + segmented control + ghim ban 
         // thì ba luật `.cmp__ban`/`.cmp__xoa`/`.cmp__xoa-loi` (và `.cmp__bans`) thành LUẬT
         // MỒ CÔI oan — đúng phép đo SAI mà khối chú thích đầu bài này cảnh báo.
         onXoa: async () => {},
+        // ⚠️ `onLongTieng` cũng vậy: khối lồng tiếng là màn CHỈ-ĐỌC khi thiếu prop này, nên
+        // thiếu nó thì bảy luật `.dub*` thành mồ côi oan.
+        onLongTieng: () => {},
         ...props,
       }));
       if (props.bamGhim === true) fireEvent.click(phanTuTu(container, '[data-testid="ghim"]'));
       for (const el of container.querySelectorAll("*")) {
-        for (const lop of el.classList) if (lop.startsWith("cmp")) lopTrongDom.add(lop);
+        for (const lop of el.classList) {
+          if (lop.startsWith("cmp") || lop.startsWith("dub")) lopTrongDom.add(lop);
+        }
       }
     }
 
     const trongCss = lopTrongCss();
-    assert.ok(trongCss.size >= 15, `phai doc duoc cac lop .cmp* tu app.css; do duoc ${trongCss.size}`);
-    assert.ok(lopTrongDom.size >= 15, `phai thu duoc cac lop .cmp* tu DOM; do duoc ${lopTrongDom.size}`);
+    assert.ok(trongCss.size >= 15, `phai doc duoc cac lop .cmp*/.dub* tu app.css; do duoc ${trongCss.size}`);
+    assert.ok(lopTrongDom.size >= 15, `phai thu duoc cac lop .cmp*/.dub* tu DOM; do duoc ${lopTrongDom.size}`);
 
     // (A) LUAT ⇒ LOP: luat mo coi (khong lop nao mang ten do) lam bai DO.
     const moCoi = [...trongCss].filter((lop) => !lopTrongDom.has(lop)).sort();
@@ -1350,5 +1412,88 @@ describe("CompareScreen: §4.3 hai cot + cot CPS + segmented control + ghim ban 
       "không đo được gì thì nhãn phải Y NGUYÊN hình dạng cũ");
     assert.equal(cuaChiMotNua.includes("token"), false,
       `nửa số token là hình dạng người đọc phải tự diễn giải ⇒ im lặng, đo được ${JSON.stringify(cuaChiMotNua)}`);
+  });
+
+  // -------------------------------------------------------------------------
+  // LỒNG TIẾNG (TTS) — BỐN trạng thái của job `dub`, mỗi trạng thái NÓI BẰNG CHỮ
+  // -------------------------------------------------------------------------
+  //
+  // Vì sao bốn trạng thái phải có bài riêng: khối này là chỗ DUY NHẤT người dùng biết được
+  // một lượt lồng tiếng đã xong chưa và file nằm ở đâu, mà nó chỉ có ~10 dòng nên rất dễ
+  // "trông vẫn ổn" trong khi trạng thái sai. Bốn nhánh TSX ⇒ bốn phép đo, cộng hai phép đo
+  // biên (màn chỉ-đọc KHÔNG có khối; lỗi xếp job KHÔNG xoá nút).
+  it("LỒNG TIẾNG: bốn trạng thái nói bằng chữ, và xong thì đủ NĂM định dạng tải", () => {
+    const t = banGhi([doan(1, "你好")]);
+    const bans = [banDich(31, ["Xin chao"], [{ i: 1, cps: 4, over: false }])];
+    const dung = (props: Record<string, unknown>): HTMLElement =>
+      render(taoPhanTu(CompareScreen, { transcript: t, translations: bans, specs: SPECS, ...props }))
+        .container;
+
+    // (0) MÀN CHỈ-ĐỌC: thiếu `onLongTieng` thì khối này phải VẮNG. Một màn không có quyền
+    //     xếp job mà vẫn mời bấm là một lời mời vào ngõ cụt.
+    assert.equal(dung({}).querySelectorAll('[data-testid="dub-khoi"]').length, 0,
+      "thiếu `onLongTieng` thì khối lồng tiếng phải không render");
+
+    // (1) CHƯA LỒNG: ô giọng + ĐÚNG MỘT nút. Bỏ trống ô giọng ⇒ gửi `null` (GIỌNG MẶC ĐỊNH
+    //     của engine) — chuỗi rỗng không phải một mã giọng và không được đi qua HTTP.
+    const daGoi: (string | null)[] = [];
+    const chua = dung({ dubJob: null, onLongTieng: (v: string | null) => { daGoi.push(v); } });
+    assert.equal(chua.querySelectorAll('[data-testid="dub-nut"]').length, 1,
+      "trạng thái chưa lồng phải có ĐÚNG MỘT nút xếp job");
+    assert.equal(chua.querySelectorAll("input.dub__giong").length, 1, "phải có ô giọng đọc");
+    assert.equal(chua.querySelectorAll('[data-testid="dub-dang-chay"]').length, 0,
+      "chưa xếp thì không được hiện câu tiến trình");
+    fireEvent.click(phanTuTu(chua, '[data-testid="dub-nut"]'));
+    fireEvent.change(phanTuTu(chua, "input.dub__giong"), { target: { value: "  Bình  " } });
+    // ⚠️ Đọc PROPERTY `value`, không đọc thuộc tính `value`: React ghi giá trị ô nhập vào
+    // PROPERTY của node, nên `getAttribute("value")` vẫn là chuỗi rỗng dù ô đã có chữ.
+    assert.equal((phanTuTu(chua, "input.dub__giong") as HTMLInputElement).value, "  Bình  ",
+      "ô giọng phải nhận chữ người dùng gõ (state cục bộ)");
+    fireEvent.click(phanTuTu(chua, '[data-testid="dub-nut"]'));
+    assert.deepEqual(daGoi, [null, "Bình"],
+      "lần đầu (ô trống) phải gửi `null`; lần sau phải CẮT khoảng trắng rồi gửi mã giọng");
+
+    // (2) ĐANG CHẠY: `queued` và `running` là hai câu KHÁC nhau, và số phần trăm là con số
+    //     THẬT của job (`progress`), không phải một thanh tiến trình thứ hai.
+    const dangChay = dung({ onLongTieng: () => {}, dubJob: jobDub(41, "running", { progress: 0.42 }) });
+    assert.equal(chu(dangChay, '[data-testid="dub-dang-chay"]'), "đang lồng tiếng… 42%");
+    assert.equal(dangChay.querySelectorAll('[data-testid="dub-nut"]').length, 0,
+      "đang chạy thì không được mời xếp thêm một job nữa");
+    assert.equal(chu(dung({ onLongTieng: () => {}, dubJob: jobDub(44, "queued", { progress: 0 }) }),
+      '[data-testid="dub-dang-chay"]'), "chờ tới lượt 0%",
+      "`queued` phải nói 'chờ tới lượt', không được giả làm 'đang lồng tiếng'");
+
+    // (3) XONG: NĂM đường tải, dựng TỪ ID bản dịch đang chọn (không phải một URL máy chủ trả
+    //     về — route tải là một hàm của `translation_id`), và mỗi đường là một `<a download>`.
+    const xong = dung({ onLongTieng: () => {}, dubJob: jobDub(42, "done") });
+    const tai = [...xong.querySelectorAll('[data-testid="dub-tai"] a')];
+    assert.deepEqual(tai.map((a) => a.getAttribute("href")), [
+      "/api/dubs/31/download?format=wav",
+      "/api/dubs/31/download?format=mp3",
+      "/api/dubs/31/download?format=aac",
+      "/api/dubs/31/download?format=m4a",
+      "/api/dubs/31/download?format=flac",
+    ], "mỗi định dạng một đường, trỏ đúng route và đúng id bản dịch đang chọn");
+    assert.equal(tai.every((a) => a.hasAttribute("download")), true,
+      "mỗi đường tải phải là `<a download>` (tải file), không phải một lời gọi JS");
+
+    // (4) LỖI JOB: NGUYÊN VĂN `job.error`. Backend đã viết câu tiếng Việt và chỉ đúng việc
+    //     phải làm (409 "chưa có worker"…), nên UI không được dịch lại hay rút gọn.
+    const hong = dung({ onLongTieng: () => {}, dubJob: jobDub(43, "failed", { error: "409: chưa có worker — chạy `phude worker`" }) });
+    assert.equal(chu(hong, '[data-testid="dub-loi"]'), "409: chưa có worker — chạy `phude worker`");
+    assert.equal(hong.querySelectorAll('[data-testid="dub-tai"]').length, 0,
+      "job lỗi thì không được có đường tải nào");
+
+    // (5) LỖI XẾP JOB (HTTP, khác lỗi job): câu `ApiError.message` hiện NGUYÊN VĂN ở chỗ
+    //     riêng, và nó KHÔNG xoá nút — người dùng phải bấm lại được.
+    const loiTaoDub = dung({
+      dubJob: null, onLongTieng: () => {}, loiLongTieng: "404: không có bản dịch #99",
+    });
+    assert.equal(chu(loiTaoDub, '[data-testid="dub-loi-tao"]'), "404: không có bản dịch #99");
+    assert.equal(loiTaoDub.querySelectorAll('[data-testid="dub-nut"]').length, 1,
+      "lỗi xếp job không được xoá nút: người dùng phải bấm lại được");
+    assert.equal(dung({ dubJob: null, onLongTieng: () => {} })
+      .querySelectorAll('[data-testid="dub-loi-tao"]').length, 0,
+      "`loiLongTieng = null` thì không được hiện một ô lỗi rỗng");
   });
 });

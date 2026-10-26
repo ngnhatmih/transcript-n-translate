@@ -13,7 +13,7 @@
 import { useEffect, useReducer, useRef, useState } from "react";
 
 import { endpoints } from "../api/endpoints.ts";
-import type { JobState, Segment, SourceLang, Transcript } from "../api/types.ts";
+import type { Job, JobState, Segment, SourceLang, Transcript } from "../api/types.ts";
 import { BangPhim } from "../keys/BangPhim.tsx";
 import type { KeyAction } from "../keys/shortcuts.ts";
 import { useShortcuts } from "../keys/useShortcuts.ts";
@@ -397,6 +397,29 @@ export function App() {
    * mới nhất. Viết thêm một nhánh dọn nữa là nguồn sự thật thứ hai cho cùng câu
    * hỏi "bản nào đang xem" — và nó sẽ trôi khỏi `banDangXemId` ngay lần đổi quy ước.
    */
+  /** Job `dub` MỚI NHẤT của bản dịch đang xem — `null` = chưa lồng lần nào. */
+  function dubJobCuaBan(id: number | null): Job | null {
+    if (id === null) return null;
+    const cuaBan = [...jobs.values()].filter((j) => j.type === "dub" && j.payload?.translation_id === id);
+    return cuaBan.length === 0 ? null : cuaBan[cuaBan.length - 1];
+  }
+
+  /**
+   * Xếp job lồng tiếng cho MỘT bản dịch. Job đi vào `jobs` như mọi job khác, nên khối lồng tiếng
+   * thấy trạng thái mà KHÔNG cần thêm hook đọc riêng; lỗi của route (404/409, câu tiếng Việt)
+   * hiện NGUYÊN VĂN.
+   */
+  const [loiLongTieng, datLoiLongTieng] = useState<string | null>(null);
+
+  async function longTieng(id: number, voice: string | null): Promise<void> {
+    datLoiLongTieng(null);
+    try {
+      await endpoints.makeDub(id, voice);
+    } catch (loi: unknown) {
+      datLoiLongTieng(loi instanceof Error ? loi.message : String(loi));
+    }
+  }
+
   async function xoaBanDich(id: number): Promise<void> {
     await endpoints.deleteTranslation(id);
     translations.reload();
@@ -1443,6 +1466,9 @@ export function App() {
                  control. Cùng khuôn với `onXoa` của vùng KÊNH — `App` giữ đường gọi API và
                  việc đọc lại; màn chỉ có cú bấm. */
               onXoa={xoaBanDich}
+              dubJob={dubJobCuaBan(banDangXemId)}
+              loiLongTieng={loiLongTieng}
+              onLongTieng={(voice) => { if (banDangXemId !== null) void longTieng(banDangXemId, voice); }}
             />
           ) : ui.mode === "glossary" ? (
             /* §4.4 tab THUẬT NGỮ (Task 9). Màn này KHÔNG nhận prop: nó độc lập với
