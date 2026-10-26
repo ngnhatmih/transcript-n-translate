@@ -245,6 +245,21 @@ describe("ChannelZone: chon duoc KENH (Task W1)", () => {
     assert.equal(dauCua(chon), "▸", "muc dang chon phai co DAU nhin thay duoc");
     assert.equal(dauCua(khongChon), "", "muc khong chon KHONG duoc co dau do");
 
+    // NEN cua muc dang chon nam tren HANG (`li`), khong tren nut chon: nut co lai de nhuong cho
+    // nut xoa, nen nen khai tren no hut dung phan do — do duoc o Chrome that: hang 213 px (nen
+    // trong suot) vs nut 182 px, va chi con 145 px khi hien `xoa?`+`huy` ⇒ hut 68 px o goc phai.
+    // `is-chon` la dau MAY doc duoc cua CUNG trang thai ma `aria-pressed` o nut ben trong noi.
+    assert.equal(
+      chon.closest("li")?.classList.contains("is-chon"),
+      true,
+      "hang cua kenh dang chon phai mang lop `is-chon` (nen thuoc ve HANG)",
+    );
+    assert.equal(
+      khongChon.closest("li")?.classList.contains("is-chon"),
+      false,
+      "hang cua kenh KHONG chon khong duoc mang `is-chon`",
+    );
+
     assert.deepEqual(tiengOn, [], "hien muc dang chon khong duoc sinh tieng on console");
     unmount();
   });
@@ -397,6 +412,27 @@ describe("ChannelZone: chon duoc KENH (Task W1)", () => {
     // (4) DAU NHIN THAY duoc (khong chi doi MAU): glyph phai duoc DINH VI trong o.
     assert.match(appCss, /\.ch__dau \{[^}]*position: absolute[^}]*left: var\(--sp-2\)/,
       "glyph `▸` phai duoc dinh vi tuyet doi o le trai muc kenh");
+  });
+
+  it("HINH THUC: NEN cua muc dang chon nam tren HANG, khong tren nut chon (`app.css`)", () => {
+    const appCss = readFileSync(new URL("../styles/app.css", import.meta.url), "utf8");
+
+    // (1) NGUON SU THAT cua nen: hang. Do duoc o Chrome that (anh nguoi dung chup: "vung xam
+    //     bi mat mot mang do nut xoa"): `li.ch__dong` rong 213 px nen TRONG SUOT, con nut chon
+    //     co nen `--panel-2` rong 182 px — va chi con 145 px khi hien `xoa?`+`huy`, tuc nen hut
+    //     31/68 px o goc phai. Nen phai khai tren HANG thi no moi phu het be ngang.
+    assert.match(appCss, /\.ch__dong\.is-chon \{[^}]*background: var\(--panel-2\)/,
+      "hang dang chon phai co LUAT nen tren `li.ch__dong.is-chon`");
+
+    // (2) Va nut chon KHONG duoc khai lai nen: khai lai la "mang bi mat" quay ve (no rong dung
+    //     bang nut, ma nut co lai khi xoa hien hai nut). Day la BAI HOC cua chinh lo hong nay.
+    assert.doesNotMatch(appCss, /\.ch__item\[aria-pressed="true"\] \{[^}]*background/,
+      '`[aria-pressed="true"]` KHONG duoc khai `background`: nen cua muc dang chon la cua HANG');
+
+    // (3) Chip xoa phai DAO nen tren hang dang chon, neu khong no cung mau voi hang va chi con
+    //     duong vien 1 px — he qua cua (1), khong phai mot lua chon mau moi.
+    assert.match(appCss, /\.ch__dong\.is-chon \.ch__xoa \{[^}]*background: var\(--panel-1\)/,
+      "chip xoa phai dao xuong `--panel-1` tren hang dang chon");
   });
 
   it("W2 M4: `<ul class=\"ch__danh-sach\">` phai co LUAT RESET trong `app.css` (nợ Task 4/W1 đóng kèm)", () => {

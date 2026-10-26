@@ -236,8 +236,13 @@ export function ChannelZone({
       <ul className="ch__danh-sach">
         {sources.map((source) => {
           const dangChon = source.id === selectedId;
+          // `is-chon` nằm trên `<li>` — HÀNG — chứ không phải trên nút chọn: nền của mục đang
+          // chọn thuộc về HÀNG, vì nút chọn chỉ rộng bằng phần chữ (đo được trong Chrome thật:
+          // `li` 213 px, `button.ch__item` 182 px, và chỉ còn 145 px khi hiện `xóa?`+`hủy` ⇒ nền
+          // xám hụt 31/68 px ở góc phải, đúng "mảng bị mất" người dùng thấy). Xem
+          // `.ch__dong.is-chon` trong `app.css`.
           return (
-            <li key={source.id} className="ch__dong">
+            <li key={source.id} className={dangChon ? "ch__dong is-chon" : "ch__dong"}>
               {/* HAI NÚT ANH EM — KHÔNG lồng nút trong nút.
                   ⚠️ Trước tính năng xoá, cả dòng là MỘT `<button class="ch__item">`. Đặt
                   nút xoá BÊN TRONG nút đó là HTML không hợp lệ (`<button>` không được chứa
