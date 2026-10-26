@@ -529,23 +529,12 @@ export function CompareScreen({
         {onLongTieng === undefined || chon === null ? null : (
           <div className="dub" data-testid="dub-khoi">
             <span className="nhan">Lồng tiếng</span>
-            {dub === null ? (
-              <>
-                <input className="dub__giong" type="text" value={giong}
-                  placeholder="giọng (bỏ trống = mặc định)"
-                  aria-label="giọng đọc cho lượt lồng tiếng"
-                  onChange={(e) => datGiong(e.target.value)} />
-                <button type="button" className="dub__nut" data-testid="dub-nut"
-                  onClick={() => onLongTieng(giong.trim() === "" ? null : giong.trim())}>
-                  lồng tiếng
-                </button>
-              </>
-            ) : dub.state === "queued" || dub.state === "running" ? (
+            {dub !== null && (dub.state === "queued" || dub.state === "running") ? (
               <span className="dub__tin" data-testid="dub-dang-chay">
                 {dub.state === "queued" ? "chờ tới lượt" : "đang lồng tiếng…"}{" "}
                 {Math.round(dub.progress * 100)}%
               </span>
-            ) : dub.state === "done" ? (
+            ) : dub !== null && dub.state === "done" ? (
               <span className="dub__tai" data-testid="dub-tai">
                 đã có · tải:
                 {["wav", "mp3", "aac", "m4a", "flac"].map((dinhDang) => (
@@ -557,7 +546,33 @@ export function CompareScreen({
                 ))}
               </span>
             ) : (
-              <span className="dub__loi" data-testid="dub-loi">{dub.error ?? dub.state}</span>
+              // Ô giọng + nút LUÔN có mặt ở đây — kể cả khi lượt TRƯỚC đã hỏng. Đo được trên
+              // app thật: bản đầu đặt hai thứ này trong nhánh `dub === null`, nên một job
+              // `failed` khoá luôn đường thử lại (`co_o_giong: false`, `co_nut: false`).
+              <>
+                <input className="dub__giong" type="text" value={giong}
+                  placeholder="giọng (bỏ trống = mặc định)"
+                  aria-label="giọng đọc cho lượt lồng tiếng"
+                  onChange={(e) => datGiong(e.target.value)} />
+                <button type="button" className="dub__nut" data-testid="dub-nut"
+                  onClick={() => onLongTieng(giong.trim() === "" ? null : giong.trim())}>
+                  lồng tiếng
+                </button>
+              </>
+            )}
+            {dub === null || dub.state === "queued" || dub.state === "running"
+              || dub.state === "done" ? null : (
+              // Job ĐÃ HỎNG: câu của backend là thứ người dùng cần, nhưng nó có thể là cả một
+              // vết lỗi ~900 ký tự. `<summary>` nói trạng thái bằng chữ; mở ra thì NGUYÊN VĂN.
+              // Đo được: để nguyên câu đó trên một dòng làm khối rộng 2004 px và tràn ngang.
+              <details className="dub__loi-hop" data-testid="dub-loi-hop">
+                <summary className="dub__loi" data-testid="dub-loi">
+                  lỗi lồng tiếng — mở để xem
+                </summary>
+                <pre className="dub__loi-nguyen-van" data-testid="dub-loi-nguyen-van">
+                  {dub.error ?? dub.state}
+                </pre>
+              </details>
             )}
             {loiLongTieng === null ? null : (
               <span className="dub__loi" data-testid="dub-loi-tao">{loiLongTieng}</span>

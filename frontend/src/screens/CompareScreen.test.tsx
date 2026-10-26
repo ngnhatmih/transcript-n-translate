@@ -1477,12 +1477,25 @@ describe("CompareScreen: §4.3 hai cot + cot CPS + segmented control + ghim ban 
     assert.equal(tai.every((a) => a.hasAttribute("download")), true,
       "mỗi đường tải phải là `<a download>` (tải file), không phải một lời gọi JS");
 
-    // (4) LỖI JOB: NGUYÊN VĂN `job.error`. Backend đã viết câu tiếng Việt và chỉ đúng việc
-    //     phải làm (409 "chưa có worker"…), nên UI không được dịch lại hay rút gọn.
-    const hong = dung({ onLongTieng: () => {}, dubJob: jobDub(43, "failed", { error: "409: chưa có worker — chạy `phude worker`" }) });
-    assert.equal(chu(hong, '[data-testid="dub-loi"]'), "409: chưa có worker — chạy `phude worker`");
+    // (4) LỖI JOB: câu của backend là thứ người dùng cần, nhưng nó có thể là cả một VẾT LỖI
+    //     ~900 ký tự. Đo được trên app thật: để nguyên câu đó trên một dòng làm khối rộng
+    //     2004 px và tràn ngang. Nên <summary> nói trạng thái bằng chữ, mở ra thì NGUYÊN VĂN —
+    //     và quan trọng hơn: NÚT VẪN CÒN, vì bản đầu đặt nút trong nhánh `dub === null` nên một
+    //     job hỏng KHOÁ LUÔN đường thử lại (`co_nut: false`).
+    const cauLoi = "409: chưa có worker — chạy `phude worker`";
+    const hong = dung({ onLongTieng: () => {}, dubJob: jobDub(43, "failed", { error: cauLoi }) });
+    assert.equal(hong.querySelectorAll('[data-testid="dub-loi-hop"]').length, 1,
+      "job lỗi phải có hộp lỗi (details), không phải một dòng chữ tràn ngang");
+    assert.equal(chu(hong, '[data-testid="dub-loi"]'), "lỗi lồng tiếng — mở để xem",
+      "`summary` nói trạng thái bằng CHỮ, không phải bằng một vết lỗi dài");
+    assert.equal(chu(hong, '[data-testid="dub-loi-nguyen-van"]'), cauLoi,
+      "mở ra thì phải là NGUYÊN VĂN `job.error` — không cắt, không dịch lại");
     assert.equal(hong.querySelectorAll('[data-testid="dub-tai"]').length, 0,
       "job lỗi thì không được có đường tải nào");
+    assert.equal(hong.querySelectorAll('[data-testid="dub-nut"]').length, 1,
+      "job lỗi KHÔNG được khoá nút: người dùng phải bấm lại được");
+    assert.equal(hong.querySelectorAll("input.dub__giong").length, 1,
+      "job lỗi KHÔNG được làm mất ô giọng");
 
     // (5) LỖI XẾP JOB (HTTP, khác lỗi job): câu `ApiError.message` hiện NGUYÊN VĂN ở chỗ
     //     riêng, và nó KHÔNG xoá nút — người dùng phải bấm lại được.

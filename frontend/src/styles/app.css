@@ -2607,3 +2607,33 @@ body {
   font-size: var(--fs-label);
   color: var(--fault);
 }
+
+/* Hộp lỗi job: `<details>` để khối KHÔNG tràn ngang khi câu lỗi là cả một vết lỗi ~900 ký tự
+   (đo được: khối rộng 2004 px, chữ chạy ra ngoài khung). `<summary>` giữ đúng lớp `.dub__loi`
+   nên câu "lỗi lồng tiếng — mở để xem" vẫn là chữ mono màu lỗi như mọi câu lỗi khác. */
+.dub__loi-hop {
+  flex-basis: 100%;
+  max-width: 100%;
+}
+
+.dub__loi-hop > summary {
+  cursor: pointer;
+}
+
+/* Nguyên văn `job.error`: XUỐNG DÒNG được (`pre-wrap`) và cắt được (`overflow-wrap`), nếu không
+   một dòng dài là một khối rộng vô hạn — đúng lỗi đã đo. */
+.dub__loi-nguyen-van {
+  margin: var(--sp-1) 0 0;
+  padding: var(--sp-2);
+  max-width: 100%;
+  max-height: 180px;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-family: var(--font-mono);
+  font-size: var(--fs-label);
+  color: var(--fault);
+  background: var(--panel-0);
+  border: var(--rule-w) solid var(--rule);
+  border-radius: var(--radius);
+}
