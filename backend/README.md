@@ -734,6 +734,36 @@ Ba điều phải nói trước khi bật nó:
 diện không cho chọn (không có gì khác phải sửa). Muốn đổi endpoint/khoá, hoặc không muốn hàng
 này trong registry, thì trỏ `PHUDE_REGISTRY` vào một bản `registry.json` của riêng bạn.
 
+### So sánh CHẤT LƯỢNG giữa các engine — `scripts/compare_mt_engines.py`
+
+```powershell
+.\.venv\Scripts\python.exe -B scripts\compare_mt_engines.py --so-doan 5 --out-dir ..\data\experiments\accuracy-pipelines\20261026-mt-quality
+```
+
+Nó đi qua **`TranslateHandler` của sản phẩm** (prompt p2, `echo_retry`/`echo_guard`/
+`term_placeholder`, trần `max_items_per_call`), trên một repo TRONG BỘ NHỚ nên không chạm DB.
+Gọi thẳng `engine.translate(...)` thì rơi về prompt mặc định **p1** — bản đã đo là chép nguyên
+chữ nguồn 43/44 đoạn trên `qwen2.5-3b` — nên phép đo sẽ nói về prompt, không về engine.
+
+**Nó KHÔNG cho BLEU/MQM**: cần bản tham chiếu của người (non-goal của repo). Nó in bản dịch để
+người đọc chấm, kèm tín hiệu máy đo được (echo, chữ Hán còn, rỗng, issue QA). Và một đoạn ngắn
+chỉ nói về đoạn đó — nguồn là chữ ASR thật nên có câu rác sẵn.
+
+Lượt đo 2026-10-26, **5 đoạn đầu** của clip 20:49 (`20261026-mt-quality`, batch theo từng engine):
+
+| engine | giây | lời gọi | echo | chữ Hán | issue QA | nhận xét đọc được |
+|---|---|---|---|---|---|---|
+| `deepseek-web` | **2,73** | 1 | 0 | 0 | 4 | đọc như tiếng Việt, giữ được số ("ba ngàn"), 烤冷面 → "mì nướng lạnh" |
+| `hy-mt-1.5-7b` | 9,11 | 5 | 0 | 0 | 8 | trôi chảy nhất, nhưng **bịa đơn vị**: "3.000 ngày" cho 三千 |
+| `opus-mt` (mặc định) | 6,71 | 1 | 0 | 0 | 3 | **rơi mất nội dung**: mất "Đông Bắc", 烤冷面 → "món thịt nướng", câu 4 rác |
+| `qwen2.5-3b` | 3,74 | 1 | 0 | **1** | 4 | còn chữ Hán, bỏ sót ("ăn 11 bữa ở 吉林 khi ở 吉林") |
+| `qwen2.5-7b` | 6,71 | 1 | **5/5** | **5** | 5 | chép nguyên chữ nguồn cả 5 đoạn (handler chỉ *cảnh báo*, hàng này không khai `echo_guard`) |
+
+⚠️ Đây là **kiểm tra nhanh**, không phải phán quyết chất lượng: 5 đoạn, một clip, không có bản
+tham chiếu, và hai trong năm câu nguồn đã rác sẵn từ ASR. Điều đọc được chắc chắn: `qwen2.5-7b`
+ở prompt p2 vẫn chép nguồn; `opus-mt` (engine MẶC ĐỊNH) rơi nội dung; và `hy-mt` có kiểu hỏng
+riêng là **bịa thêm thông tin** — nguy hiểm hơn rơi chữ, vì bản dịch vẫn đọc trôi.
+
 ### Giới hạn — đọc trước khi tin bất cứ con số nào ở trên
 
 1. **`DEFAULT_MAX_CHARS = 1200` NAY ĐÃ ĐƯỢC ÉP — và nó có tác dụng thật.**
