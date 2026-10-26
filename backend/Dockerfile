@@ -15,7 +15,14 @@ WORKDIR /app
 
 # Cài phụ thuộc TRƯỚC khi COPY mã nguồn: sửa một dòng Python không phải cài lại pip.
 COPY requirements-docker.txt ./
-RUN pip install --no-cache-dir -r requirements-docker.txt
+# `torch` cài RIÊNG, với index riêng: `MarianMTModel` (OPUS-MT) cần nó, và bản CUDA
+# mang theo `libcublas.so.12`/`cudnn` mà CTranslate2 cần cho GPU. Để index này trong
+# `requirements-docker.txt` thì pip hỏi host đó cho MỌI gói và build FAILED (đo được:
+# ReadTimeout khi resolve starlette) — nên nó chỉ áp cho đúng một gói ở đây.
+# Máy không GPU: đổi `cu121` → `cpu` và `torch==2.5.1` → `torch==2.5.1+cpu`.
+RUN pip install --no-cache-dir --timeout 120 \
+        --extra-index-url https://download.pytorch.org/whl/cu121 torch==2.5.1 \
+ && pip install --no-cache-dir --timeout 120 -r requirements-docker.txt
 
 COPY . .
 
@@ -23,15 +30,18 @@ COPY . .
 # trong container thì chỉ nghe loopback ⇒ map cổng ra ngoài không tới được.
 # `HF_HOME=/models` vì mặc định trong `config.py` là đường Windows (`D:\models\hf`).
 # `/models` là volume để model 1,6 GB không tải lại mỗi lần dựng lại image.
-# `PHUDE_ASR_DEVICE=cpu` là mệnh đề sống-còn thứ hai: mặc định adapter là `cuda`, và
-# trong container không có driver GPU ⇒ job `asr` chết với "CUDA driver version is
-# insufficient". Đo được: thiếu dòng này thì upload đầu tiên FAILED.
+# `LD_LIBRARY_PATH` trỏ vào `torch/lib`: trên Linux, CTranslate2 `dlopen`
+# `libcublas.so.12` theo ĐƯỜNG NẠP của loader; `ensure_cuda_runtime()` của repo chỉ
+# chèn vào `PATH` (đúng cho Windows). Thiếu dòng này thì GPU ASR chết với
+# "Library cublas64_12.so is not found" — đúng lỗi R72 nhưng ở biến thể Linux.
+# `PHUDE_ASR_DEVICE` KHÔNG đặt ở đây mà ở `docker-compose.yml`: image giữ trung lập,
+# chỗ chọn máy có GPU hay không là chỗ triển khai.
 ENV HF_HOME=/models \
     PHUDE_HOST=0.0.0.0 \
     PHUDE_PORT=8620 \
     PHUDE_DATA=/data \
     PHUDE_DB=/data/app.db \
-    PHUDE_ASR_DEVICE=cpu \
+    LD_LIBRARY_PATH=/usr/local/lib/python3.10/site-packages/torch/lib \
     PYTHONUNBUFFERED=1
 
 VOLUME ["/data", "/models"]

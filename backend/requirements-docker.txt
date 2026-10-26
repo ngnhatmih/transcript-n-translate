@@ -23,10 +23,12 @@ requests==2.32.3
 # --- MT: OPUS-MT (Marian) in-process ---
 # `torch` KHÔNG phải tuỳ chọn: `MarianMTModel` của transformers cần PyTorch. Đo được:
 # thiếu nó thì job `translate` FAILED với "MarianMTModel requires the PyTorch library
-# but it was not found" — sau khi ASR đã chạy xong. Bản CPU (không kéo theo gói
-# `nvidia-*` ~2,5 GB) là bản duy nhất có nghĩa trong image không GPU.
---extra-index-url https://download.pytorch.org/whl/cpu
-torch==2.5.1+cpu
+# but it was not found" — sau khi ASR đã chạy xong.
+#
+# `torch` KHÔNG nằm trong tệp này: nó được cài RIÊNG ở `Dockerfile` với index
+# `whl/cu121` (hoặc `whl/cpu`). Đo được: để index đó trong tệp này thì pip hỏi
+# `download.pytorch.org` cho CẢ starlette/uvicorn… và build FAILED vì ReadTimeout
+# của host đó — chỉ torch mới cần đi qua index ấy.
 
 transformers==4.46.3
 sentencepiece==0.2.0

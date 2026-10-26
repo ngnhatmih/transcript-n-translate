@@ -11,6 +11,18 @@ services:
     build: ./backend
     ports:
       - "8620:8620"
+    # GPU cho CẢ hai việc: OPUS-MT (torch) và faster-whisper (CTranslate2 + cuBLAS).
+    # Máy KHÔNG có GPU: bỏ dòng `gpus` + `PHUDE_ASR_DEVICE` dưới đây, và đổi torch
+    # trong `backend/requirements-docker.txt` sang bản `cpu` (xem README).
+    gpus: all
+    environment:
+      # Thiết bị ASR: `cuda` khi container thấy GPU; `cpu` khi không.
+      PHUDE_ASR_DEVICE: cuda
+      # Ollama KHÔNG chạy trong compose: dùng Ollama của MÁY CHỦ (model 5 GB đã có,
+      # và nó đang dùng GPU của máy). `host-gateway` là địa chỉ máy chủ từ container.
+      OLLAMA_HOST: http://host.docker.internal:11434
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       # `/data`: DB + media + log + output. `/models`: cache model HF (~1,6 GB tải lần đầu).
       - phude-data:/data
