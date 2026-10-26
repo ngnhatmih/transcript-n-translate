@@ -3918,3 +3918,76 @@ một trình duyệt thật; jsdom không có layout/CSS/audio.* Nếu implement
 
 
 
+
+---
+
+## ⚠️ ERRATA #50 — Lượt dùng THẬT bác hai lời khai của tôi: **`min-width: 0` KHÔNG làm chữ dài tự xuống dòng**, và **`web /api/status` 200 KHÔNG chứng minh đường web dùng được**
+
+Bối cảnh: Docker hoá xong, tôi báo "`web /` **200**, `web /api/status` **200**" như bằng chứng "đường web
+chạy". Người dùng mở `http://127.0.0.1:3100`, nạp **một tệp `.mp3` của chính họ** và nhận
+`413: Request Entity Too Large`; ảnh họ chụp còn cho thấy hàng kênh ở **trạng thái xác nhận xoá** bị
+**chữ chồng lên nút**. Cả hai đều là lỗi của tôi, và cả hai đều nằm ĐÚNG trên đường tôi chưa từng đi.
+
+### 1. 🔴 `413` KHÔNG phải của backend — nó là trần **1 MB** mặc định của nginx, và mọi tệp thật đều vượt
+
+Chuỗi `413: Request Entity Too Large` là `ApiError.message` = `"<status>: <detail>"`, mà `detail` ở đây
+là **`statusText`** — `client.ts` chỉ rơi về `statusText` khi body **không** phải JSON. Body của nginx là
+**trang HTML**, nên ngay chính câu lỗi đã tố cáo thủ phạm. `grep -r '413'` trong `backend/` và
+`frontend/src/` = **0** ⇒ không có dòng nào của tôi sinh ra mã đó.
+
+`client_max_body_size` mặc định của nginx là **1 MB**. Tệp thử trong repo (`8f4b5304daf42569.wav`) là
+**8 913 568 B** ⇒ **mọi** tệp thật bị chặn Ở PROXY. Vì sao tôi không thấy: mọi lượt đo của tôi gọi
+**thẳng `:8620`** (FastAPI), nên proxy — đúng cái cổng người dùng dùng — **chưa từng** nhận một byte tải
+lên nào.
+
+**Sửa** (`frontend/nginx.conf`): `client_max_body_size 2048m` + `error_page 413` trả **JSON đúng khuôn
+FastAPI** `{"detail": "tệp quá lớn — …"}` (câu tiếng Việt nói phải làm gì, không để người dùng đọc câu
+tiếng Anh của nginx). **Đo lại:**
+
+```
+A. curl -F file=@…8f4b5304daf42569.wav  http://127.0.0.1:3100/api/sources/upload
+   HTTP 201 — 8913893 B gui len                        (trước khi sửa: 413)
+B. khai Content-Length: 5000000000 (vượt trần), không gửi thân
+   HTTP/1.1 413 · Content-Type: application/json
+   {"detail":"tệp quá lớn — máy chủ nhận tối đa 2048 MB (client_max_body_size trong frontend/nginx.conf)"}
+```
+
+### 2. 🔴 "Phần chữ dài tự xuống dòng bên trong nút chọn" — lời khai đó trong `app.css` SAI, đo được
+
+Chú thích cũ của `.ch__dong > .ch__item` khẳng định `flex: 1 1 0` + `min-width: 0` khiến "phần chữ dài
+tự xuống dòng bên trong nút chọn". Đo trong **Chrome thật** trên app đang chạy (ảnh người dùng chụp),
+ở trạng thái xác nhận (hai nút `xóa?` + `hủy`):
+
+| phép đo | trước | sau |
+|---|---|---|
+| `.ch__item` `scrollW / clientW` | **151 / 141** (tràn 10 px) | **141 / 141** |
+| `.ch__ten` `scrollW / clientW` | **127 / 105** (tràn **22 px**, vẽ đè nút ở `l: 145`) | **105 / 105** |
+| `getComputedStyle(.ch__ten).overflowWrap` | `normal` | `anywhere` |
+
+Nguyên nhân **không** phải "chữ dài quá": `8f4b5304daf42569.wav` là **một token không có chỗ ngắt**, và
+`min-width: 0` chỉ cho phép **HỘP** co nhỏ hơn nội dung — nó **không** làm nội dung thôi tràn
+(`overflow: visible` ⇒ chữ vẽ ra ngoài hộp, đè lên phần tử anh em). **Sửa:** một khai báo
+`overflow-wrap: anywhere` cho `.ch__ten`. `anywhere` chứ **không** `break-word`: chỉ `anywhere` hạ
+`min-content` xuống một ký tự, nên hộp co được **và** chữ nằm trong hộp.
+
+⚠️ Bài học dạng: một luật CSS **bề ngoài đúng** ("flex item co lại được") vẫn có thể sai **kết luận**
+("nội dung sẽ tự ngắt dòng"). jsdom **không có layout** ⇒ không bài `npm test` nào chạm được lớp lỗi
+này; chỉ phép đo trong Chrome thật mới bác được lời khai.
+
+### 3. 🔴 Ảnh chụp hình thức có thể đang chụp **BẢN CŨ** — và suýt làm tôi báo "đã sửa" SAI
+
+Sau khi build lại ảnh `web` có `overflow-wrap: anywhere` (kiểm **trong ảnh**: `grep anywhere` = 2), lượt
+đo lại vẫn ra `overflow-wrap: normal` và hàng kênh **vẫn đè chữ**. Nguyên nhân: Rollup xuất tên **cố
+định** (`index.css`, `index.js`) và nginx **không** gửi `Cache-Control` ⇒ Chrome dùng lại bản cũ, tức
+một **lượt kiểm SAI** — đúng lớp "bản cũ trả lời cho bản mới" (ERRATA #46 mục 10b). **Sửa:** `add_header
+Cache-Control "no-cache"` cho `/assets/` và `/` (vẫn `304` khi tệp không đổi), **và** probe CDP bật
+`Network.setCacheDisabled` trước khi nạp.
+
+### Luật mới (hai điều, cả hai đều đo được ở trên)
+
+1. **Một 200 trên `/api/status` chỉ chứng minh PROXY ĐỊNH TUYẾN được — không chứng minh proxy NHẬN
+   được nội dung.** Đường nào người dùng đi thì phép đo phải đi đúng đường đó: tải lên phải đo qua
+   `:3100`, không qua `:8620`.
+2. **`getComputedStyle` trong Chrome thật là nguồn của mọi lời khai về CSS**, và nó phải được đọc với
+   **cache đã tắt**. Một ảnh chụp không kèm con số `scrollW`/`clientW` không phân biệt được "chữ vừa
+   khít" với "chữ tràn 22 px".

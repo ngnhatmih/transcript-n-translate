@@ -1738,9 +1738,20 @@ body {
   display: block;
 }
 
+/* Tên tệp phải NGẮT ĐƯỢC giữa một token. ĐO ĐƯỢC trong Chrome thật (ảnh chụp của người
+   dùng: hàng kênh ở trạng thái xác nhận xoá): `.ch__item` co còn 141 px, ô tên còn
+   `clientWidth: 105` trong khi `scrollWidth: 127` ⇒ 22 px chữ VẼ RA NGOÀI hộp, và vì
+   `overflow` là `visible` nên nó đè lên nút `xóa?` (nút ở `l: 145`). Nguyên nhân không
+   phải "chữ dài quá" mà là `8f4b5304daf42569.wav` là MỘT token không có chỗ ngắt: trình
+   duyệt không được phép bẻ, nên nó tràn — và `min-width: 0` của flex item chỉ cho phép
+   HỘP co nhỏ hơn nội dung, không làm nội dung thôi tràn.
+   `anywhere` (KHÔNG phải `break-word`) là bản đúng ở đây: nó ĐỒNG THỜI hạ `min-content`
+   xuống một ký tự, nên hộp co được mà chữ vẫn nằm trong hộp; `break-word` chỉ bẻ lúc vẽ
+   còn `min-content` vẫn là cả token. */
 .ch__ten {
   font-family: var(--font-ui);
   font-size: var(--fs-ui);
+  overflow-wrap: anywhere;
 }
 
 .ch__meta,

@@ -133,14 +133,20 @@ Dòng thứ hai là đúng cái bẫy mà mục này đang cảnh báo, chỉ đ
 nền thật trong khi thực ra **không bài nào trong khối đó chạy**. Luật "`fail 0` mà `EXIT ≠ 0` là
 lượt bẩn" (dưới) bắt được nó; đừng đọc `pass/fail` mà bỏ `cancelled`.
 
-Lượt đo của tài liệu này (8620/8621 trống; `PHUDE_DB`/`PHUDE_DATA` trỏ thư mục rỗng ngoài repo):
+Lượt đo của tài liệu này (8620/8621 trống — kiểm bằng `Get-NetTCPConnection -LocalPort 8620`;
+`PHUDE_DB`/`PHUDE_DATA` trỏ thư mục rỗng ngoài repo):
 
 ```
-ℹ tests 317   ℹ suites 31   ℹ pass 315   ℹ fail 2   ℹ cancelled 0
-ℹ skipped 0   ℹ todo 0      ℹ duration_ms 34253.3797
+ℹ tests 357   ℹ suites 34   ℹ pass 355   ℹ fail 2   ℹ cancelled 0
+ℹ skipped 0   ℹ todo 0      ℹ duration_ms 35171.8699
 EXIT=1
 0 dòng "asynchronous activity" ; [guard thoat] 10/10 global da ve nguyen trang
 ```
+
+Số **357** gồm **5 bài mới** của `src/styles/hinh-thuc.test.ts`, ghim hai luật mà một lượt dùng
+THẬT đã bác (ERRATA #50): `.ch__ten` phải `overflow-wrap: anywhere`, và `nginx.conf` phải nâng
+`client_max_body_size` + trả JSON cho `413` + `no-cache` cho bản tĩnh. Đã kiểm **mutation**: đổi
+`anywhere` → `break-word` và `2048m` → `1m` thì **đúng hai bài đó đỏ**, `pass 3 / fail 2`.
 
 🔴 **Trước mọi lượt `npm test`, 8620 và 8621 phải TRỐNG.** Nếu ai đang giữ 8620, khối hợp đồng
 nhận một server LẠ đã gieo dữ liệu là "backend dùng được": hai guard DB-rỗng thành **XANH** và
@@ -162,15 +168,6 @@ bài **không đo được gì**, và "xanh vì rỗng là im lặng" — đúng
 hai khi 8620 bị chiếm). Ai áp `fail − 2` sẽ ra số ÂM hoặc thiếu. Và theo ERRATA #47 mục 1:
 **một lượt có `fail 0` mà `EXIT ≠ 0` là LƯỢT BẨN** — phải kiểm `EXIT` + `uncaughtException`,
 không chỉ `pass/fail`.
-
-Lượt đo của tài liệu này (8620/8621 trống; `PHUDE_DB`/`PHUDE_DATA` trỏ thư mục rỗng ngoài repo):
-
-```
-ℹ tests 317   ℹ suites 31   ℹ pass 315   ℹ fail 2   ℹ cancelled 0
-ℹ skipped 0   ℹ todo 0      ℹ duration_ms 34253.3797
-EXIT=1
-0 dòng "asynchronous activity" ; [guard thoat] 10/10 global da ve nguyen trang
-```
 
 ### Tầng CHROME THẬT (`frontend/e2e/`)
 
@@ -262,6 +259,14 @@ Bốn chỗ **phải** sửa để image chạy được — mỗi chỗ là m�
 | `asr` FAILED: *Library cublas… is not found* dù có GPU | CTranslate2 `dlopen` cuBLAS theo đường NẠP; `ensure_cuda_runtime()` chỉ chèn `PATH` (đúng cho Windows) | `LD_LIBRARY_PATH=…/torch/lib` trong `Dockerfile` |
 | `translate` FAILED: *MarianMTModel requires the PyTorch library* | `opus-mt` cần torch | cài `torch==2.5.1` **riêng** với index `whl/cu121` (để index đó trong `requirements` thì pip hỏi host đó cho mọi gói và build FAILED vì ReadTimeout) |
 
+Hai chỗ **nữa** — không làm image hỏng, mà làm **đường web** sai (đúng đường người dùng đi), cả hai
+đều là lượt dùng THẬT chứ không phải suy luận:
+
+| triệu chứng | nguyên nhân | cách sửa (đã có trong repo) |
+|---|---|---|
+| nạp một tệp thật ⇒ `413: Request Entity Too Large`, câu **tiếng Anh**, và **không** có dòng nào trong log `api` | `client_max_body_size` mặc định của nginx là **1 MB** — tệp thử trong repo đã **8,5 MB** nên MỌI tệp thật bị chặn Ở PROXY, trước khi tới FastAPI; body lỗi là HTML nên `client.ts` rơi về `statusText` | `client_max_body_size 2048m` + `error_page 413` trả JSON `{"detail": …}` **tiếng Việt** |
+| build lại ảnh xong, trình duyệt vẫn chạy **bản CŨ** (đo được: CSS trong ảnh có `overflow-wrap: anywhere`, Chrome vẫn báo `normal`) | Rollup xuất tên **cố định** `index.js`/`index.css` ⇒ URL không đổi khi nội dung đổi, và nginx không gửi `Cache-Control` nào | `add_header Cache-Control "no-cache"` cho `/assets/` và `/` (vẫn `304` khi tệp không đổi) |
+
 Lượt xác nhận (Docker 29.4.2 + Compose v5.1.3, RTX 3070):
 
 | phép đo | kết quả |
@@ -272,13 +277,15 @@ Lượt xác nhận (Docker 29.4.2 + Compose v5.1.3, RTX 3070):
 | ASR trong container (GPU) | **12,3 s** cho clip 278 s (CPU phải vài phút) |
 | dịch qua Ollama của máy chủ (`qwen2.5-3b`) | `done` sau **139,5 s**, export SRT **200 · 6 816 byte** |
 | `web /` và `web /api/status` (proxy nginx) | **200** / **200** |
+| nạp **8,5 MB** qua **nginx** (`:3100`) | **201** — trước khi sửa: **413** |
+| khai `Content-Length` 5 GB (vượt trần) | **413** + `{"detail": "tệp quá lớn — … 2048 MB"}` |
 
 ⚠️ Bản dịch của `qwen2.5-3b` trong lượt đó **chép nguyên chữ nguồn** — đó là hành vi **đã ghi
 trong tài liệu** của model này với chữ ASR thật (mục "CHƯA BIẾT" bên dưới), **không** phải lỗi
 Docker. Máy không GPU: đổi `torch` sang bản `cpu` và bỏ `gpus: all` + `PHUDE_ASR_DEVICE`.
 Ảnh: `api` **9,64 GB** (torch CUDA), `web` **97 MB**.
 
-## CHƯA làm / CHƯA biết## CHƯA làm / CHƯA biết
+## CHƯA làm / CHƯA biết
 
 Mục này **không tô hồng**. Câu nào chưa đo thì ghi **CHƯA ĐO**.
 
