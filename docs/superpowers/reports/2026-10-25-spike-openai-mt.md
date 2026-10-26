@@ -119,3 +119,31 @@ biến quyết định, không phải hợp đồng**.
 ⚠️ Khi nối hàng đó vào SẢN PHẨM (không phải qua script này) thì một lỗi hình dạng của adapter lộ
 ra mà spike không thấy được — xem ERRATA #52: cả 63 bài test của adapter vẫn XANH trong khi mọi
 job `translate` chết ở lô đầu. Bài học nằm ở đó, không ở đây.
+
+### ⚠️ ĐÍNH CHÍNH thứ hai (2026-10-26, đọc mã nguồn whalegate) — `response_format` KHÔNG được tôn trọng
+
+Phụ lục trên viết "`response_format` CÓ tồn tại ở cổng này" vì đo được HTTP 200 + body JSON hợp lệ.
+Đọc README của chính whalegate (mục **Limitations**) thì câu đúng là:
+
+> Sampling controls (`temperature`, `top_p`, `max_tokens`, `stop`, `response_format`) **have no web
+> equivalent**.
+
+Tức 200 đó nghĩa là "**nhận vào rồi bỏ qua**", không phải "được tôn trọng": JSON hợp lệ đến từ
+năng lực của model, không từ một grammar bị ghim như `format: "json"` của Ollama. Kết luận KHÔNG
+đổi (vẫn chọn `lines`, vì hỏng thì ỒN), nhưng lý do mạnh hơn: không có cơ chế nào của endpoint bảo
+đảm cú pháp, nên một hợp đồng dựa vào cú pháp là hợp đồng dựa vào may mắn.
+
+### 🔴 `reasoning_effort` mặc định BẬT DeepThink ⇒ 30× token, 7× chậm, chất lượng không hơn
+
+Cũng từ README: `reasoning_effort` map `none` / `auto` / `max`, và lý luận được stream riêng. Hàng
+registry của tôi không khai khoá này, tức chạy `auto` — và đó là lý do 18 lời gọi `deepseek-web`
+trong DB có **8 332 token ra**. Đo trên CHÍNH lô 5 mục của phép so sánh chất lượng:
+
+| `reasoning_effort` | giây | token vào | token ra | bản dịch câu 4 (`在吉林三千连吃11顿才发现`) |
+|---|---|---|---|---|
+| `none` | **1,77** | 121 | **107** | "Ở Cát Lâm **ba ngàn** ăn liền 11 bữa mới phát hiện" |
+| `auto` (mặc định) | 12,55 | 143 | **3 203** | "Ở Cát Lâm **ba ngày** ăn liền 11 bữa mới phát hiện ra" (bịa) |
+
+⇒ Hàng `deepseek-web` nay khai `opts.reasoning_effort: "none"`. Chạy lại phép so sánh chất lượng
+sau khi đổi: **1,55 s**, 1 lời gọi, `done`, 0 echo, 0 chữ Hán, 4 issue QA — tức nhanh hơn 1,8 lần
+mà không mất gì. Dịch phụ đề không cần suy luận dài.

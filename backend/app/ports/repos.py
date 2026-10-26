@@ -137,3 +137,12 @@ class Repos(Protocol):
                      tokens_out: int | None, duration_ms: int | None,
                      ok: bool, error: str | None) -> int: ...
     def list_llm_calls(self, job_id: int | None = None) -> list[dict]: ...
+    def token_stats(self) -> list[dict]:
+        """Thống kê token của MỌI lời gọi engine, gộp theo `(engine, model_ref)`.
+
+        Mỗi hàng: `engine`, `model_ref`, `calls`, `ok_calls`, `tokens_in`, `tokens_out`,
+        `duration_ms`. Tổng nào chưa đo được thì là `None` — engine in-process (`opus-mt`)
+        không có token, và "không đo được" KHÔNG được thay bằng `0` (một số 0 đọc như "đã đo
+        và bằng không", trong khi sự thật là engine đó không báo gì).
+        """
+        ...

@@ -33,6 +33,8 @@ Ba tham số KHÔNG được gửi trừ khi có yêu cầu rõ ràng
 
 from __future__ import annotations
 
+import time
+
 import httpx
 
 from app.adapters.mt.prompts import (parse_batch_response, parse_lines_response,
@@ -159,6 +161,7 @@ class OpenAiChatMt:
             body["response_format"] = {"type": "json_object"}
         if self._reasoning_effort:
             body["reasoning_effort"] = self._reasoning_effort
+        bat_dau = time.perf_counter()
         headers = {"Content-Type": "application/json"}
         if self._api_key:
             headers["Authorization"] = f"Bearer {self._api_key}"
@@ -166,6 +169,7 @@ class OpenAiChatMt:
         response = self._client.post(f"{self._base_url}/chat/completions",
                                      json=body, headers=headers,
                                      timeout=self._timeout_s)
+        giay = time.perf_counter() - bat_dau
         # `raise_for_status` TRƯỚC khi đọc `json()`: một 500 kèm HTML hay kèm
         # `{"error": ...}` sẽ ném ở đây với nội dung phản hồi, thay vì ném
         # `JSONDecodeError` — hai loại lỗi đó phải phân biệt được khi đọc log.
@@ -178,7 +182,11 @@ class OpenAiChatMt:
         self.last_stats = CallStats(
             tokens_in=usage.get("prompt_tokens"),
             tokens_out=usage.get("completion_tokens"),
-            duration_ms=None,     # endpoint không trả thời lượng như Ollama
+            # Endpoint OpenAI-compatible KHÔNG trả `total_duration` như Ollama, nên thời lượng
+            # phải do CHÍNH adapter đo — nếu không thì cột `llm_calls.duration_ms` (và tổng
+            # `translations.duration_ms` suy từ nó) LUÔN NULL cho mọi job `http`: đo được trên
+            # DB thật, 18 lời gọi `deepseek-web` có token đủ mà `ms` rỗng hết.
+            duration_ms=int(giay * 1000),
         )
         if not isinstance(content, str) or not content.strip():
             raise ValueError(f"engine trả `content` rỗng: {str(data)[:300]}")
