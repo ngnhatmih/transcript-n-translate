@@ -245,6 +245,23 @@ function token(n: number | null | undefined): string {
 }
 
 /**
+ * Số token của một bản dịch, nối vào nhãn — chuỗi RỖNG khi không ĐO ĐƯỢC.
+ *
+ * Chỉ hiện khi CÓ CẢ HAI số: `engine in-process` (OPUS-MT) không báo token nào, và một nửa
+ * (`1956→—`) là hình dạng mà người đọc phải tự diễn giải. Hai số đều thiếu thì im lặng, y như
+ * nhãn cũ — không `0`, không `—`.
+ *
+ * Dạng `vào→ra` là dạng ĐÃ có trong khối chi phí Chimera (§4.5: `256→110 token`), nên người
+ * đọc gặp cùng một thứ tự ở cả hai chỗ.
+ */
+function soToken(tr: Pick<TranslationDetail, "tokens_in" | "tokens_out">): string {
+  const vao = tr.tokens_in;
+  const ra = tr.tokens_out;
+  if (typeof vao !== "number" || typeof ra !== "number") return "";
+  return ` · ${token(vao)}→${token(ra)} token`;
+}
+
+/**
  * Chi phí ƯỚC LƯỢNG của một bản dịch — `null` = KHÔNG TÍNH ĐƯỢC, và khi đó trả chuỗi RỖNG.
  *
  * Rỗng chứ không phải `$0,000`: engine chạy trên máy này (OPUS-MT, Ollama) không có giá dịch
@@ -469,7 +486,7 @@ export function CompareScreen({
                   CHI PHÍ nối vào CUỐI nhãn và để RỖNG khi không tính được: đây là câu trả lời cho
                   "engine này tốn bao nhiêu" — thứ người dùng cần để chọn engine — và nó phải đứng
                   cạnh tên engine, không phải trong một khối riêng phải bấm mới thấy. */}
-              {`bản dịch #${tr.id} · ${tr.engine} · ${tr.status}${tr.stale ? " · lỗi thời" : ""}${chiPhiUsd(tr.cost_usd)}`}
+              {`bản dịch #${tr.id} · ${tr.engine} · ${tr.status}${tr.stale ? " · lỗi thời" : ""}${soToken(tr)}${chiPhiUsd(tr.cost_usd)}`}
             </button>
             {onXoa === undefined ? null : (
               <NutXoa
