@@ -82,3 +82,40 @@ mà cả báo cáo echo đang nói tới.
   `response_format` không tồn tại. Nếu cần chất lượng cloud thì API chính thức, cùng script
   này, một dòng `--base-url/--api-key-env`.
 * Spike này **không** đo gì về DeepSeek web, và không được trích dẫn như thể đã đo.
+
+---
+
+## Phụ lục 2026-10-26 — ĐO TRÊN ENDPOINT THẬT (`whalegate`, model `deepseek-web`)
+
+Endpoint thật giờ đã có trên máy này: `whalegate serve` ở `http://127.0.0.1:8790/v1` (model
+`deepseek-web`, tài khoản đã đăng nhập). Chạy lại CHÍNH script này — cùng clip 115 đoạn, cùng 5
+thuật ngữ, cùng `TranslateHandler` của sản phẩm:
+
+| hợp đồng | lô | giây | lời gọi | lỗi alignment | nhận được | chữ Hán | echo | thuật ngữ |
+|---|---|---|---|---|---|---|---|---|
+| `lines` | 30 | **13,21** | **4** | 0 | **115/115** `done` | 0 | 0 | 7/7 |
+| `lines` | 15 | 33,64 | 8 | 0 | 115/115 `done` | 0 | 0 | 7/7 |
+| `json` + `response_format: {"type":"json_object"}` | 15 | 19,41 | 8 | 0 | 115/115 `done` | 0 | 0 | 7/7 |
+
+Artifact: `data/experiments/accuracy-pipelines/20261026-spike-deepseek-web/`.
+
+### 🔴 ĐÍNH CHÍNH mục 1: `response_format` CÓ tồn tại ở cổng này
+
+Mục 1 ở trên viết `response_format` "không có tương đương" ở cổng web (theo README của
+`whalegate` lúc viết). **Đo lại thì sai**: gửi `response_format: {"type": "json_object"}` ⇒
+**HTTP 200** và body là JSON hợp lệ; cả một lượt `json` 115 đoạn / 8 lời gọi **không một lỗi cú
+pháp nào**. Nhưng kết luận "chọn hợp đồng theo endpoint" **không đổi**: thứ bảo đảm JSON ở đây
+không phải một grammar bị ghim như `format: "json"` của Ollama, mà là hành vi của một model lớn
+hơn; **một lượt xanh không phải một bảo đảm**, và kiểu hỏng của `json` vẫn là kiểu IM (chép
+nguyên chữ nguồn với số mục vẫn khớp).
+
+### Hệ quả — hợp đồng được chọn cho hàng registry, và cái giá
+
+`deepseek-web` được khai với `opts.contract: "lines"`: hỏng thì ỒN (`AlignmentProblem`), và lô
+30 đo được **4 lời gọi cho 115 đoạn**, tức **không một lần thử lại**. `json` nhanh hơn ở lô 15
+(19,41 s so với 33,64 s) nhưng chậm hơn `lines` ở lô 30 (13,21 s) ⇒ trên endpoint này **cỡ lô là
+biến quyết định, không phải hợp đồng**.
+
+⚠️ Khi nối hàng đó vào SẢN PHẨM (không phải qua script này) thì một lỗi hình dạng của adapter lộ
+ra mà spike không thấy được — xem ERRATA #52: cả 63 bài test của adapter vẫn XANH trong khi mọi
+job `translate` chết ở lô đầu. Bài học nằm ở đó, không ở đây.

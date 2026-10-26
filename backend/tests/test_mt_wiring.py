@@ -54,10 +54,17 @@ class _RecordingMtEngine:
 
     def __init__(self, model_ref: str, *, base_url: str | None = None,
                  supports_glossary: bool = False,
-                 engine_id: str | None = None) -> None:
+                 engine_id: str | None = None,
+                 **kwargs) -> None:
         self.model_ref = model_ref
         self._supports_glossary = supports_glossary
         self.releases = 0
+        #: Hàng `runtime: "http"` được dựng với `api_key=` (và có thể cả `contract=`/
+        #: `json_mode=`/`max_tokens=`/`reasoning_effort=`/`timeout_s=`). Bản giả này nhận
+        #: **kwargs** chứ không khai từng cái: thứ được ghim ở đây là "main.py dựng engine
+        #: `http` từ ĐÚNG hàng registry", còn tham số nào được truyền thì do
+        #: `test_mt_openai_wiring.py` ghim trên adapter THẬT.
+        self.received_kwargs = dict(kwargs)
         self.batches: list[list[int]] = []
         self.last_stats = None
         #: Fix round 1 (I-2): ghi lại ĐÚNG thứ `_build_mt_engines` truyền vào.
@@ -181,6 +188,18 @@ class _Harness:
         # `SingleGpuGovernor` ở các suite khác): logic ráp dây vẫn là production.
         monkeypatch.setattr(main, "OllamaMtEngine", mt_factory)
         monkeypatch.setattr(main, "OpusMtEngine", mt_factory)
+        # Engine `runtime: "http"` (hàng `deepseek-web`) đi qua CÙNG factory, và phép dò
+        # `GET /models` của nó phải bị VÁ: test không được chạm mạng và không được phụ thuộc
+        # việc máy đang chạy `whalegate` hay không. Đo được: để nguyên thì
+        # `test_ollama_availability_is_probed_here_and_now_not_hardcoded` ĐỎ vì bộ engine
+        # dựng ra có thêm `deepseek-web` — tức bài test đọc môi trường của người chạy.
+        monkeypatch.setattr(main, "OpenAiChatMt", mt_factory)
+        self.http_alive = True
+        self.http_models = {s.model_ref for s in load_registry() if s.runtime == "http"}
+        monkeypatch.setattr(
+            main, "openai_models_available",
+            lambda *a, **k: set(self.http_models) if self.http_alive else set(),
+        )
         self.asr = _FakeAsrEngine()
         monkeypatch.setattr(main, "_engine_factory", lambda spec: self.asr)
 
@@ -281,14 +300,27 @@ def test_ollama_availability_is_probed_here_and_now_not_hardcoded(harness):
     này chỉ có nửa thứ nhất, nên nó xanh với một phép dò chỉ hỏi "Ollama có sống".
     """
     harness.ollama_alive = False
+    # Ollama tắt ⇒ chỉ engine `inprocess` còn dựng được, NHƯNG điều đó chỉ đúng khi endpoint
+    # `runtime: "http"` cũng chết: `deepseek-web` không nằm dưới Ollama. Tắt cả hai nguồn dò
+    # ở đây để câu khẳng định nói về ĐÚNG thứ nó muốn nói (Ollama), không phải về cái máy
+    # đang chạy test. Nửa "http sống thì dựng" nằm ngay dưới.
+    harness.http_alive = False
     _repos, specs_down, _worker, _broker, engines_down = harness.build()
     assert set(engines_down) == {"opus-mt"}, (
-        f"Ollama tắt thì chỉ engine in-process được dựng: {sorted(engines_down)}"
+        f"Ollama tắt (và endpoint http tắt) thì chỉ engine in-process được dựng: "
+        f"{sorted(engines_down)}"
     )
     for spec in of_kind(specs_down, "mt"):
         assert spec.capabilities.get("available") is (spec.runtime == "inprocess"), (
             f"{spec.id} ({spec.runtime}) khai available sai khi Ollama tắt"
         )
+
+    harness.http_alive = True
+    _repos, specs_http, _worker, _broker, engines_http = harness.build()
+    assert set(engines_http) == {"opus-mt", "deepseek-web"}, (
+        "endpoint http sống thì engine `http` phải được dựng CẠNH engine in-process: "
+        f"{sorted(engines_http)}"
+    )
 
     harness.ollama_alive = True
     _repos, specs_up, _worker, _broker, engines_up = harness.build()
@@ -753,11 +785,17 @@ def test_shipped_registry_already_declares_every_mt_engine_this_wiring_needs():
     assert "engines" not in raw, "registry.json không có khoá `engines` (correction C)"
     assert raw["default_mt"] == "opus-mt"
     ids = [entry["id"] for entry in raw["mt"]]
-    assert ids == ["opus-mt", "qwen2.5-3b", "qwen2.5-7b", "hy-mt-1.5-7b"], ids
+    # `deepseek-web` là hàng `runtime: "http"` ĐẦU TIÊN được khai, và chỉ được khai SAU KHI
+    # đo trên endpoint thật (`data/experiments/accuracy-pipelines/20261026-spike-deepseek-web`:
+    # hợp đồng `lines` lô 30 ⇒ 115/115 done, 4 lời gọi, 13,21 s, 0 lỗi alignment, 0 echo).
+    # Luật cũ "engine chưa đo thì chưa khai" không đổi; đây là engine ĐÃ đo.
+    assert ids == ["opus-mt", "qwen2.5-3b", "qwen2.5-7b", "hy-mt-1.5-7b", "deepseek-web"], ids
     for entry in raw["mt"]:
         assert "available" not in entry, (
             "`available` là thứ DÒ LÚC DỰNG (correction B), không phải hằng số "
             "viết tay trong registry.json"
         )
-        assert entry["runtime"] in ("inprocess", "ollama")
+        # `http` = endpoint OpenAI-compatible bên ngoài. `available` của nó là câu trả lời
+        # THẬT của phép dò `GET /models`: endpoint không chạy ⇒ `False`, không phải lỗi.
+        assert entry["runtime"] in ("inprocess", "ollama", "http")
         assert entry["model_ref"]

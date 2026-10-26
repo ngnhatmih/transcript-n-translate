@@ -197,9 +197,9 @@ def test_release_is_a_noop_that_sends_nothing():
 # -- hợp đồng `MtEngine` ----------------------------------------------------
 def test_engine_identity_comes_from_the_constructor():
     eng = engine(_FakeClient([]))
-    assert eng.engine_id() == "openai-compat-spike"
-    assert eng.model_ref() == MODEL
-    assert eng.prompt_version() == "openai-json-p1"
+    assert eng.engine_id == "openai-compat-spike"
+    assert eng.model_ref == MODEL
+    assert eng.prompt_version == "openai-json-p1"
     assert eng.supports_glossary() is True
 
 
@@ -207,7 +207,7 @@ def test_lines_contract_has_its_own_prompt_version():
     """Prompt của hợp đồng `lines` không thuộc bộ `V0..V3` đã đo, nên nó không được
     mang nhãn của bộ đó."""
     eng = engine(_FakeClient([]), contract="lines")
-    assert eng.prompt_version() == "openai-lines-p1"
+    assert eng.prompt_version == "openai-lines-p1"
 
 
 def test_glossary_can_be_switched_off_per_engine():

@@ -638,14 +638,22 @@ def test_build_components_exposes_prompt_version_next_to_available(wired):
     `available` — nếu không thì route chỉ còn cách import adapter (bị cấm).
     """
     _c, _repos, specs, _worker, _broker, _mt = wired
+    from app.adapters.mt.openai_chat_mt import prompt_version_for
     from app.adapters.mt.prompts import PROMPT_VERSION
 
     mt_specs = of_kind(specs, "mt")
     assert mt_specs, "registry.json phải có engine mt"
     for spec in mt_specs:
         assert "available" in spec.capabilities, spec.id
-        assert spec.capabilities.get("prompt_version") == PROMPT_VERSION.get(
-            spec.id, "unknown"), (
+        # Engine `runtime: "http"` không có mặt trong bảng `PROMPT_VERSION` (bảng đó là các
+        # phiên bản prompt ĐÃ ĐO trên đường Ollama); phiên bản của nó suy từ HỢP ĐỒNG của
+        # hàng registry (`opts.contract`) — cùng hàm mà adapter dùng, nên kỳ vọng ở đây vẫn
+        # là "dữ liệu dẫn xuất tính ở composition root", không phải một hằng mới.
+        if spec.runtime == "http":
+            expected = prompt_version_for(spec.opts.get("contract", "json"))
+        else:
+            expected = PROMPT_VERSION.get(spec.id, "unknown")
+        assert spec.capabilities.get("prompt_version") == expected, (
             f"{spec.id}: prompt_version phải tính ở build_components(); "
             f"nhận được {spec.capabilities.get('prompt_version')!r}"
         )
