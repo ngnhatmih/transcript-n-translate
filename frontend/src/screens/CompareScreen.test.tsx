@@ -132,6 +132,9 @@ function banDich(
     chimera?: TranslationDetail["chimera"];
     /** Chi phí ước lượng (USD) do MÁY CHỦ tính; vắng ⇒ không có khoá. */
     costUsd?: number | null;
+    /** Số token của lượt dịch (máy chủ ghi); vắng ⇒ không có khoá. */
+    tokensIn?: number | null;
+    tokensOut?: number | null;
   } = {},
 ): TranslationDetail {
   return {
@@ -146,6 +149,8 @@ function banDich(
     created_at: "2026-01-01T00:00:00Z",
     chimera: opts.chimera ?? null,
     cost_usd: opts.costUsd,
+    tokens_in: opts.tokensIn,
+    tokens_out: opts.tokensOut,
     segments: texts.map((t, k) => doan(k + 1, t)),
     cps: {
       max_cps: opts.maxCps ?? 21,
@@ -1305,32 +1310,45 @@ describe("CompareScreen: §4.3 hai cot + cot CPS + segmented control + ghim ban 
       "thanh công cụ KHÔNG được mọc thêm phần tử theo số bản dịch");
   });
 
-  // Chi phí ƯỚC LƯỢNG của một bản dịch, do MÁY CHỦ tính (`tokens × giá` của hàng registry).
+  // SỐ TOKEN + CHI PHÍ ƯỚC LƯỢNG của một bản dịch, do MÁY CHỦ tính (`tokens × giá` của hàng
+  // registry). Ba vế, và hai vế sau quan trọng ngang vế đầu:
   //
-  // Hai vế, và vế thứ hai quan trọng ngang vế thứ nhất: một bản dịch KHÔNG có `cost_usd`
-  // (engine in-process: không giá, không token) phải hiện nhãn Y NHƯ TRƯỚC — không `$0,000`,
-  // không `—`. "Đo được và bằng không" và "không đo được" là hai câu khác nhau.
-  it("CHI PHÍ: nhãn bản dịch nối `~$` khi máy chủ tính được, và KHÔNG hiện gì khi không", () => {
+  //   · có cả hai số token  ⇒ nhãn nối `1956→1702 token`;
+  //   · không đo được token ⇒ KHÔNG có chữ `token` (engine in-process: OPUS-MT không báo);
+  //   · không tính được chi phí ⇒ KHÔNG có `$` và cũng không `$0,000`.
+  //
+  // "Đo được và bằng không" và "không đo được" là hai câu khác nhau; nhãn của trường hợp không
+  // đo được phải Y NGUYÊN hình dạng cũ.
+  it("SỐ ĐO: nhãn nối `token` + `~$` khi máy chủ đo được, và im lặng khi không", () => {
     const t = banGhi([doan(1, "你好")]);
 
-    const coGia = banDich(21, ["Xin chao"], [{ i: 1, cps: 4, over: false }],
-      { engine: "deepseek-web", costUsd: 0.0139564 });
-    const khongGia = banDich(22, ["Tam biet"], [{ i: 1, cps: 4, over: false }],
-      { engine: "opus-mt", costUsd: null });
+    const coSo = banDich(21, ["Xin chao"], [{ i: 1, cps: 4, over: false }],
+      { engine: "deepseek-web", costUsd: 0.0139564, tokensIn: 1956, tokensOut: 1702 });
+    const khongSo = banDich(22, ["Tam biet"], [{ i: 1, cps: 4, over: false }],
+      { engine: "opus-mt", costUsd: null, tokensIn: null, tokensOut: null });
+    const chiMotNua = banDich(23, ["Mot chiec"], [{ i: 1, cps: 4, over: false }],
+      { engine: "hy-mt-1.5-7b", costUsd: null, tokensIn: 900, tokensOut: null });
 
     const { container } = render(taoPhanTu(CompareScreen, {
-      transcript: t, translations: [coGia, khongGia], specs: SPECS,
+      transcript: t, translations: [coSo, khongSo, chiMotNua], specs: SPECS,
     }));
     const nhan = [...container.querySelectorAll(".cmp__bans button")]
       .map((el) => el.textContent ?? "");
 
-    const cuaCoGia = nhan.find((s) => s.includes("#21")) ?? "";
-    const cuaKhongGia = nhan.find((s) => s.includes("#22")) ?? "";
-    assert.ok(cuaCoGia.includes("~$0,014"),
-      `nhãn phải nối chi phí ước lượng (3 chữ số khi >= 1 xu), đo được ${JSON.stringify(cuaCoGia)}`);
-    assert.equal(cuaKhongGia.includes("$"), false,
-      `không tính được chi phí thì nhãn KHÔNG được có ký hiệu tiền, đo được ${JSON.stringify(cuaKhongGia)}`);
-    assert.equal(cuaKhongGia, "bản dịch #22 · opus-mt · done",
-      "nhãn của bản dịch không có giá phải Y NGUYÊN hình dạng cũ");
+    const cuaCoSo = nhan.find((s) => s.includes("#21")) ?? "";
+    const cuaKhongSo = nhan.find((s) => s.includes("#22")) ?? "";
+    const cuaChiMotNua = nhan.find((s) => s.includes("#23")) ?? "";
+
+    assert.ok(cuaCoSo.includes("1956→1702 token"),
+      `nhãn phải nối số token dạng vào→ra, đo được ${JSON.stringify(cuaCoSo)}`);
+    assert.ok(cuaCoSo.includes("~$0,014"),
+      `nhãn phải nối chi phí ước lượng (3 chữ số khi >= 1 xu), đo được ${JSON.stringify(cuaCoSo)}`);
+    assert.equal(cuaCoSo, "bản dịch #21 · deepseek-web · done · 1956→1702 token · ~$0,014",
+      "thứ tự phải là: token TRƯỚC, tiền SAU (cùng thứ tự với khối chi phí Chimera)");
+
+    assert.equal(cuaKhongSo, "bản dịch #22 · opus-mt · done",
+      "không đo được gì thì nhãn phải Y NGUYÊN hình dạng cũ");
+    assert.equal(cuaChiMotNua.includes("token"), false,
+      `nửa số token là hình dạng người đọc phải tự diễn giải ⇒ im lặng, đo được ${JSON.stringify(cuaChiMotNua)}`);
   });
 });
