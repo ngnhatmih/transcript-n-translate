@@ -63,32 +63,32 @@ GPU. Nó tự ép UTF-8 cho stdout (console Windows mặc định cp1252, còn s
 tiếng Trung/Việt) và tự đặt cache model trước khi nạp `faster_whisper`.
 
 Con số nền của lần chạy mặc định, đo sau khi xoá `__pycache__` (lệnh ở mục
-"Kiểm thử" trên, chạy từ trong `backend\`). Thứ có nghĩa là **1298 / 15**, không
+"Kiểm thử" trên, chạy từ trong `backend\`). Thứ có nghĩa là **1300 / 15**, không
 phải số giây — thời gian trôi giữa các lần chạy (đã thấy 24,00–30,94 s) còn con
 số bài thì không:
 
 ```
-1298 passed, 15 deselected, 1 warning
+1300 passed, 15 deselected, 1 warning
 ```
 
 Hai con số đó là SỐ BÀI ĐƯỢC CHỌN, và chúng khớp với số mà `--collect-only` báo
-(`1298/1313`, 15 bài `live` bị bỏ;
+(`1300/1315`, 15 bài `live` bị bỏ;
 `tests/test_backend_readme.py::test_readme_baseline_matches_the_tests_actually_
 collected` đối chiếu mỗi lần chạy).
 
 
-Máy này **CÓ** `ffmpeg 8.1.1` + `ffprobe` trên PATH (đã đo), nên `1298/15` ở trên
+Máy này **CÓ** `ffmpeg 8.1.1` + `ffprobe` trên PATH (đã đo), nên `1300/15` ở trên
 là số THẬT của nó. Máy **không có** `ffmpeg`/`ffprobe` cho một kết quả KHÁC: cả
 `tests/test_ingest.py` bị `skipif` ở cấp module — **9** bài cùng skip một lượt —
-nên dòng tổng kết của máy đó là **`1289 passed, 9 skipped, 15 deselected`** (=
-`1298 − 9`; con số này TỪNG ghi `978`, tức một baseline rất cũ, và nó lệch phép
+nên dòng tổng kết của máy đó là **`1291 passed, 9 skipped, 15 deselected`** (=
+`1300 − 9`; con số này TỪNG ghi `978`, tức một baseline rất cũ, và nó lệch phép
 trừ của chính khối nền ngay trên nó). Đó là
 con số của máy thiếu ffmpeg, **không phải** con số máy này từng in ra; đừng chép
 nó vào khối nền ở trên, và đừng "sửa" số nền xuống chỉ vì thiếu ffmpeg.
 
 ⚠️ Con số `856` ở đây TỪNG không khớp phép trừ của chính nó: `865 − 9 = 856`, tức
 nó là số của lượt TRƯỚC `V1` (+3 bài) còn sót lại. Phép trừ của khối nền hiện tại
-là `1298 − 9` = `1289`.
+là `1300 − 9` = `1291`.
 
 
 (Con số này từng bị ghi là `798`: bài `test_a_failed_translation_leaves_the_
@@ -97,7 +97,19 @@ số nền không được bump. Nó tồn tại để phát hiện TRÔI, nên 
 chạy báo dương tính giả.
 
 
-Lần bump này, `1291/15` → `1298/15` (**+7 bài**), do **`PHUDE_ASR_DEVICE`** — biến chọn
+Lần bump này, `1298/15` → `1300/15` (**+2 bài**), do **worker chết vì một lỗi ở đường GHI SỔ**:
+một lượt dọn DB tay xoá hàng `jobs` trong lúc worker đang chạy nó ⇒ đường **báo lỗi** của
+`_run_one` gọi `append_job_log` và nhận `NotFound` ⇒ exception thoát khỏi `tick()` và thoát khỏi
+`run_forever`, tức **luồng worker chết**; hàng đợi đứng im vĩnh viễn (`/api/status` vẫn
+`queue_depth: 1`, giao diện vẫn "chờ gom lô · 0%", không lỗi nào hiện ra). Nay `run_forever` bọc
+`tick()`: in vết lỗi ra stderr (đọc bằng `docker compose logs`) rồi tiếp nhịp sau — **worker SỐNG
+là bất biến**, còn `tick()` gọi trực tiếp vẫn NÉM (khuôn `while worker.tick(): pass` của test
+không đổi). `tests/test_worker_survives.py` (+2) ghim: job một làm hỏng `append_job_log` thì job
+hai vẫn chạy `done` và stderr có `Traceback` kèm nguyên nhân; và đối chứng "vòng lặp vẫn dừng
+được theo `stop_event`". Mutation đã chạy: đổi `except Exception` thành một exception hẹp hơn ⇒
+bài đầu ĐỎ với đúng `NotFound: job 1 không tồn tại`.
+
+Lần bump trước, `1291/15` → `1298/15` (**+7 bài**), do **`PHUDE_ASR_DEVICE`** — biến chọn
 thiết bị ASR, thêm vì image Docker không có driver GPU nên job `asr` chết; kéo theo
 `compute_type` (`int8_float16` vô nghĩa trên CPU). `tests/test_asr_device.py` (+7) ghim
 cặp (thiết bị, kiểu số) và các ca: mặc định `cuda`, env `cpu` ⇒ hạ `int8`, `float32`
