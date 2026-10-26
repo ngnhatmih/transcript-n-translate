@@ -48,7 +48,8 @@ body {
   grid-row: 1;
   display: flex;
   align-items: center;
-  gap: var(--sp-3);
+  /* 16px (không 12) để cụm chế độ tách khỏi tên app — bố cục header của demo `Lồng tiếng`. */
+  gap: var(--sp-4);
   padding-inline: var(--sp-3);
   border-bottom: var(--rule-w) solid var(--rule);
 }
@@ -1476,16 +1477,22 @@ body {
    `unknown` là CHƯA ĐO ĐƯỢC (--ink-2 — không tô đỏ như một lỗi đã xác nhận), `up` bình thường. */
 
 /* Tên bàn làm việc: header nay là một HÀNG FLEX (tên + dải trạng thái), nên `h1` phải bỏ
-   lề mặc định của trình duyệt — nếu không nó đội hàng 48px ra ngoài. */
+   lề mặc định của trình duyệt — nếu không nó đội hàng 48px ra ngoài.
+   Cỡ/độ đậm/giãn chữ lấy theo header của demo `Lồng tiếng` (13px, 700, .10em): đây là chỗ DUY
+   NHẤT của app dùng chữ Expanded đậm như một khắc tên, nên nó phải nặng hơn phần còn lại —
+   trước bản này nó 12,5px/600, tức ngang cỡ một nhãn thường. */
 .head__ten {
   margin: 0;
   font-family: var(--font-label);
-  font-size: var(--fs-ui);
-  letter-spacing: var(--track-label);
-  font-weight: 600;
+  font-size: 13px;
+  letter-spacing: 0.10em;
+  font-weight: 700;
+  color: var(--ink-0);
 }
 
-/* Dải trạng thái ở header (spec UI §3: `[● Ollama] [▮▮▮▯▯ 3.2/8GB] [GĐ: ASR·turbo]`). */
+/* Dải trạng thái ở header (spec UI §3: `[● Ollama] [▮▮▮▯▯ 3.2/8GB] [GĐ: ASR·turbo]`).
+   `margin-left: auto` nằm Ở ĐÂY (không phải ở `.cd`) để cụm trạng thái luôn bám mép phải và
+   nhóm chế độ đứng cạnh tên app — đúng bố cục của demo. */
 .stt {
   display: flex;
   align-items: center;
@@ -1652,42 +1659,67 @@ body {
    `className` trong TSX không vẽ gì cả, và một bài test chỉ khẳng định `className` vẫn
    XANH khi luật CSS bị xoá (đo được HAI CHIỀU ở Task 6 — ERRATA #15 mục 3). */
 
-/* Nhóm chọn chế độ: BA lựa chọn cùng một trục, đẩy về cuối hàng flex của header. */
+/* Nhóm chọn chế độ: BA lựa chọn cùng một trục, nằm NGAY CẠNH tên app (bố cục của demo
+   `Lồng tiếng`), và trạng thái đang chọn là một ĐƯỜNG KẺ DƯỚI — không phải chấm radio: một
+   dấu chấm phải đọc bằng ký hiệu, còn đường kẻ dưới thì không cần học.
+   `margin-left: auto` đã CHUYỂN sang `.stt` (dải trạng thái): trước đây nó đẩy cả nhóm chế độ
+   sang phải, nên header có một khoảng trống lớn giữa tên app và ba lựa chọn. */
 .cd {
   display: flex;
   align-items: center;
-  gap: var(--sp-3);
-  margin-left: auto;
+  gap: 2px;
 }
 
-/* Một lựa chọn = input + nhãn. `inline-flex` để chữ nằm CẠNH ô radio, không xuống dòng. */
+/* Một lựa chọn = input + nhãn. `inline-flex` để chữ và ô radio cùng một hàng. */
 .cd__o {
   display: inline-flex;
   align-items: center;
-  gap: var(--sp-1);
+  position: relative;
 }
 
-/* Ô radio: màu nhấn của trình duyệt lấy token, KHÔNG hard-code màu hệ thống. */
+/* Ô radio: ẨN KHỎI MẮT nhưng GIỮ NGUYÊN trong DOM và bàn phím. Đây là `<input type="radio">`
+   THẬT (nhóm `name` cho mũi tên di chuyển) — ẩn bằng `opacity:0` + `position:absolute` chứ
+   KHÔNG `display:none`, để Tab/Arrow vẫn tới được và `:focus-visible` vẫn vẽ vòng focus lên
+   NHÃN bên cạnh (`+ .cd__nhan`, xem dưới). */
 .cd__radio {
-  accent-color: var(--signal);
+  position: absolute;
+  inset: 0 auto auto 0;
+  width: 1px;
+  height: 1px;
   margin: 0;
+  opacity: 0;
+  pointer-events: none;
 }
 
-/* Nhãn là NHÃN KHẮC (§2.1: mono in hoa, cỡ nhỏ nhất được phép) — nó là tên chế độ. */
+/* Nhãn là một TAB: chữ thường cỡ giao diện (không phải nhãn khắc in hoa — tab cần đọc nhanh),
+   viền dưới 2px trong suốt để bề rộng không nhảy khi đổi chế độ. */
 .cd__nhan {
-  font-family: var(--font-label);
-  font-size: var(--fs-label);
-  letter-spacing: var(--track-label);
-  text-transform: uppercase;
-  color: var(--ink-1);
+  font-family: var(--font-ui);
+  font-size: var(--fs-note);
+  letter-spacing: 0.04em;
+  color: var(--ink-2);
   cursor: pointer;
-  transition: color var(--dur-1) var(--ease-1);
+  padding: var(--sp-1) var(--sp-2);
+  border-bottom: 2px solid transparent;
+  transition: color var(--dur-1) var(--ease-1),
+              border-color var(--dur-1) var(--ease-1);
 }
 
-/* Chế độ ĐANG CHỌN: chữ sáng lên. Đây là tín hiệu THỨ HAI, không phải tín hiệu duy nhất:
-   ô radio đã được đánh dấu, và trạng thái máy đọc được là `checked` của `input`. */
+.cd__nhan:hover {
+  color: var(--ink-0);
+}
+
+/* Bàn phím: vòng focus phải HIỆN, và nó hiện trên nhãn vì ô radio đã ẩn. */
+.cd__radio:focus-visible + .cd__nhan {
+  outline: 2px solid var(--signal);
+  outline-offset: 1px;
+}
+
+/* Chế độ ĐANG CHỌN: chữ sáng + ĐƯỜNG KẺ DƯỚI màu nhấn. Đây là tín hiệu THỨ HAI, không phải
+   duy nhất: trạng thái máy đọc được vẫn là `checked` của `input`. */
 .cd__radio:checked + .cd__nhan {
   color: var(--ink-0);
+  border-bottom-color: var(--signal);
 }
 
 /* Mục KÊNH: mỗi mục là một NÚT (Task W1), nên phải bỏ kiểu nút mặc định của trình duyệt
