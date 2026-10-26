@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import threading
 import time
+import traceback
 from typing import Callable, Protocol
 
 from app.domain import job_state as js
@@ -98,10 +99,30 @@ class PhaseQueueWorker:
 
         Truyền `stop_event` thì dùng nó; bỏ trống thì dùng cờ nội bộ mà `stop()`
         bật. Nhận cả hai dạng để không khoá cứng người gọi.
+
+        SỰ CỐ THẬT ĐÃ ĐO ĐƯỢC (stack Docker, lượt dùng của người dùng): một lượt dọn DB tay
+        xoá các hàng `jobs` trong lúc worker đang chạy job trong số đó. Handler hỏng vì hàng
+        của nó đã biến mất, rồi đường **báo lỗi** của `_run_one` gọi `append_job_log` và nhận
+        `NotFound`; exception đó thoát khỏi `tick()` và thoát khỏi chính vòng lặp này, tức
+        **luồng worker chết**. Hệ quả không ồn ào mà tệ hơn: `/api/status` vẫn `queue_depth: 1`,
+        giao diện vẫn hiện `chờ gom lô · 0%`, và job nằm chờ một worker không còn tồn tại.
+
+        Nên: **worker SỐNG là bất biến**. Lỗi ở đường ghi sổ phải nổi lên (stderr, đọc bằng
+        `docker compose logs`) và nhịp sau phải chạy tiếp — một cuốn sổ hỏng không được phép
+        làm im cả hàng đợi. `tick()` vẫn NÉM khi gọi trực tiếp (khuôn `while worker.tick(): pass`
+        của test phải tiếp tục thấy lỗi), chỉ vòng THƯỜNG TRÚ được bọc.
         """
         stop = stop_event if stop_event is not None else self._stop
         while not stop.is_set():
-            if not self.tick():
+            try:
+                ran = self.tick()
+            except Exception:  # noqa: BLE001 - lý do ở docstring: vòng thường trú phải sống
+                traceback.print_exc()
+                # Nghỉ một nhịp trước khi thử lại: lỗi dai dẳng (DB hỏng) vẫn phải hiện ra
+                # liên tục chứ không thành vòng quay nóng.
+                self._sleep(self.poll_interval)
+                continue
+            if not ran:
                 self._sleep(self.poll_interval)
 
     # ---------- một nhịp ----------
