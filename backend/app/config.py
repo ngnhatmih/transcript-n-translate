@@ -74,6 +74,29 @@ def resolve_ollama_base_url(host: str | None = None) -> str:
     return raw.rstrip("/")
 
 
+def resolve_openai_base_url(declared: str | None = None) -> str | None:
+    """Địa chỉ endpoint OpenAI-compatible — ĐỌC ENV LÚC GỌI, env THẮNG `registry.json`.
+
+    Vì sao cần một biến môi trường khi `base_url` đã là DỮ LIỆU trong hàng registry: **cùng
+    một hàng phải chạy được ở hai chỗ với hai địa chỉ KHÁC nhau**. Chạy thẳng trên máy thì
+    gateway ở `http://127.0.0.1:8790/v1`; chạy trong container thì `127.0.0.1` là **chính
+    container**, còn gateway nằm ở máy chủ (`http://host.docker.internal:8790/v1`). Đo được:
+    hàng `deepseek-web` trong container trả `available: false` với `base_url` của registry.
+
+    Đây đúng lớp lỗi **M-10** của Ollama (`OLLAMA_HOST` + `resolve_ollama_base_url`), nên
+    dùng cùng khuôn: một hàm, đọc env lúc GỌI (để `monkeypatch.setenv` ghim được), và được
+    dùng bởi **cả** phép dò `available` lẫn lúc dựng adapter — hai chỗ đọc hai địa chỉ khác
+    nhau là giao diện hứa một engine rồi job gửi văn bản tới chỗ khác.
+
+    `None`/chuỗi rỗng ở env ⇒ giữ nguyên giá trị khai trong registry (không có mặc định:
+    một endpoint mặc định là một lời hứa về dịch vụ bên ngoài mà ta không kiểm soát).
+    """
+    env = os.environ.get("PHUDE_OPENAI_BASE_URL")
+    if isinstance(env, str) and env.strip():
+        return env.strip().rstrip("/")
+    return declared
+
+
 def ensure_dirs() -> None:
     for d in (DATA_DIR, MEDIA_DIR, LOG_DIR, OUTPUT_DIR):
         d.mkdir(parents=True, exist_ok=True)
