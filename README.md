@@ -137,20 +137,31 @@ Lượt đo của tài liệu này (8620/8621 trống — kiểm bằng `Get-Net
 `PHUDE_DB`/`PHUDE_DATA` trỏ thư mục rỗng ngoài repo):
 
 ```
-ℹ tests 369   ℹ suites 35   ℹ pass 367   ℹ fail 2   ℹ cancelled 0
+ℹ tests 370   ℹ suites 35   ℹ pass 368   ℹ fail 2   ℹ cancelled 0
 ℹ skipped 0   ℹ todo 0      ℹ duration_ms 35486.345
 EXIT=1
 0 dòng "asynchronous activity" ; [guard thoat] 10/10 global da ve nguyen trang
 ```
 
-Số **369** = **361** của lượt trước + **8 bài MÀN LỒNG TIẾNG** (tab thứ tư), và mỗi bài ghim một
+Số **370** = **361** của lượt trước + **9 bài MÀN LỒNG TIẾNG** (tab thứ tư), và mỗi bài ghim một
 lỗi ĐO ĐƯỢC trên app thật chứ không phải một quy ước:
 
-* `src/screens/LongTiengScreen.test.tsx` (**8**): màn riêng thay cho khối nhét trong Đối chiếu —
+* `src/screens/LongTiengScreen.test.tsx` (**9**): màn riêng thay cho khối nhét trong Đối chiếu —
   ba tầng của demo (cột kênh, dải thời gian, bảng dòng); ba trạng thái `vừa chỗ`/`nén`/`phải sửa`
   nói bằng CHỮ; `plan === null` KHÔNG được vẽ một dải rỗng trông như đã đo; bốn trạng thái của job
   (đang chạy có nút HUỶ, hỏng thì lỗi gọn trong `<details>` mà cửa vào VẪN mở); đổi kênh thì lựa
-  chọn bản dịch cũ không được đi theo; và phép ghim hai chiều `.lt*` ↔ `app.css`.
+  chọn bản dịch cũ không được đi theo; cột `#` đếm từ 1 trong khi `take?i=` vẫn 0-based; và phép
+  ghim hai chiều `.lt*` ↔ `app.css`.
+
+⚠️ **Ba lỗi nữa chỉ ẢNH CHỤP mới bắt được, và cả ba đều đã sửa:**
+1. `getDubPlan` gọi `/api/dubs/...` trong khi `api.get` đã ghép `BASE = "/api"` ⇒ URL thật là
+   `/api/api/dubs/10/plan` ⇒ 404. Đo được trên app thật: gọi từ trong trang thì đường ĐÚNG trả
+   200 (`null`), còn màn vẫn hiện "không đọc được số đo: 404: Not Found". Mutation: trả lại đường
+   lặp ⇒ `pass 2 / fail 6`, thông điệp in đúng `/api/api/dubs/11/plan`.
+2. Ba câu "chưa đo" khác nhau cho ba nguyên nhân khác nhau — bản đầu nói "chọn một bản dịch" cả
+   khi CHƯA CHỌN KÊNH, tức chỉ sai việc phải làm.
+3. Cột `#` in thẳng `s.i` (0-based) nên hiện `00, 01, 02…`; ảnh chụp cho thấy nó lệch một so với
+   cột `GIỜ`. Sửa ở chỗ HIỂN THỊ, còn `data-testid` và `take?i=` giữ chỉ số gốc.
 
 ⚠️ **Hai lần bài test này XANH GIẢ, và cả hai đều bị bắt bằng mutation:**
 

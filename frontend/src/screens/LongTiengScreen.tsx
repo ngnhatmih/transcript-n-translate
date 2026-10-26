@@ -302,7 +302,10 @@ export function LongTiengScreen({
                       <tr className={mo ? "lt__dong is-mo" : "lt__dong"}
                         data-testid={`lt-dong-${s.i}`}
                         onClick={() => datMoDong(mo ? null : s.i)}>
-                        <td className="lt__so">{String(s.i).padStart(2, "0")}</td>
+                        {/* ⚠️ `s.i` là chỉ số 0-BASED (nó là khoá của `Segment`), nhưng NGƯỜI ĐỌC đếm dòng từ 1 —
+                đo được trên ảnh chụp app thật: cột `#` hiện `00, 01, 02…`, tức lệch một so với cột
+                `GIỜ` bên cạnh và với chính lời của người dùng. `i` chỉ đổi ở ĐÂY, không ở dữ liệu. */}
+              <td className="lt__so">{String(s.i + 1).padStart(2, "0")}</td>
                         <td className="lt__gio">{s.start.toFixed(2)}</td>
                         <td className="lt__chu">{s.text}</td>
                         <td className="lt__take-so">{kh === undefined ? "—" : giay(kh.take)}</td>
@@ -328,7 +331,7 @@ export function LongTiengScreen({
                           <td />
                           <td colSpan={5}>
                             <div className="lt__sua">
-                              <span className="nhan">Dòng {String(s.i).padStart(2, "0")}</span>
+                              <span className="nhan">Dòng {String(s.i + 1).padStart(2, "0")}</span>
                               {kh === undefined ? (
                                 <span className="lt__sua-ghi">chưa có take — lồng tiếng rồi mở lại</span>
                               ) : (

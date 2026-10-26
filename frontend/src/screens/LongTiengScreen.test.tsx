@@ -182,7 +182,10 @@ describe("LongTiengScreen", () => {
     fetchGoc = globalThis.fetch;
     globalThis.fetch = (async (dau: unknown) => {
       const url = String(dau);
-      if (url.includes("/plan")) {
+      // SO DUNG CHUOI, khong dung `includes("/plan")`: ban dau cua `getDubPlan` viet
+      // `/api/dubs/...` trong khi `api.get` da ghep `BASE = "/api"` ⇒ URL that la
+      // `/api/api/dubs/11/plan` ⇒ 404 "Not Found". DO DUOC tren app that.
+      if (url === "/api/dubs/11/plan") {
         return new Response(JSON.stringify(PLAN), {
           status: 200, headers: { "content-type": "application/json" },
         });
@@ -268,7 +271,10 @@ describe("LongTiengScreen", () => {
     const truoc = globalThis.fetch;
     globalThis.fetch = (async (dau: unknown) => {
       const url = String(dau);
-      if (url.includes("/plan")) {
+      // SO DUNG CHUOI, khong dung `includes("/plan")`: ban dau cua `getDubPlan` viet
+      // `/api/dubs/...` trong khi `api.get` da ghep `BASE = "/api"` ⇒ URL that la
+      // `/api/api/dubs/11/plan` ⇒ 404 "Not Found". DO DUOC tren app that.
+      if (url === "/api/dubs/11/plan") {
         return new Response("null", { status: 200, headers: { "content-type": "application/json" } });
       }
       throw new Error(`khong cho request khac: ${url}`);
@@ -444,6 +450,38 @@ describe("LongTiengScreen", () => {
     unmount();
   });
 
+  it("SỐ DÒNG: người đọc đếm từ 1, còn `take?i=` vẫn là chỉ số 0-based của `Segment`", async () => {
+    // ⚠️ ĐO ĐƯỢC trên ảnh chụp app thật: cột `#` hiện `00, 01, 02…` vì nó in thẳng `s.i`, vốn
+    // 0-based. Người dùng đếm dòng từ 1, và cột `GIỜ` ngay cạnh cũng đọc theo cách đó. Sửa chỉ ở
+    // chỗ HIỂN THỊ, không ở dữ liệu: `data-testid` và `take?i=` phải giữ chỉ số gốc, nếu không
+    // route cắt nhầm đoạn.
+    const { container, unmount } = render(taoPhanTu(LongTiengScreen, props()));
+    await choKeHoach(container);
+
+    const so = [...container.querySelectorAll(".lt__so")].map((e) => e.textContent);
+    assert.deepEqual(so, ["01", "02", "03"],
+      `cột # phải đếm từ 1; đo được ${JSON.stringify(so)}`);
+
+    // Nhưng khoá của dòng VẪN là chỉ số gốc — mở dòng 2 (chỉ số 1) rồi đọc href.
+    fireEvent.click(container.querySelector('[data-testid="lt-dong-1"]') as Element);
+    await waitFor(
+      () => {
+        assert.ok(container.querySelector('[data-testid="lt-nghe-1"]') !== null,
+          "chưa mở được dòng chỉ số 1");
+      },
+      { timeout: 3000, interval: 20 },
+    );
+    assert.equal(
+      container.querySelector('[data-testid="lt-nghe-1"]')?.getAttribute("href"),
+      "/api/dubs/11/take?i=1",
+      "href phải dùng chỉ số 0-BASED (1), không phải số hiển thị (2)",
+    );
+    assert.match(chu(container, ".lt__sua-ghi, .lt__sua"), /Dòng 02/,
+      "nhãn trong ô sửa cũng phải đếm từ 1");
+
+    unmount();
+  });
+
   it("NGHE THỬ: mở một dòng thì có đường tải take trỏ đúng route", async () => {
     const truoc = tiengOn.length;
     const { container, unmount } = render(taoPhanTu(LongTiengScreen, props()));
@@ -547,7 +585,7 @@ describe("LongTiengScreen", () => {
     // (5) chưa đo: `lt__chua-do`.
     const truocFetch = globalThis.fetch;
     globalThis.fetch = (async (dau: unknown) => {
-      if (String(dau).includes("/plan")) {
+      if (String(dau) === "/api/dubs/11/plan") {
         return new Response("null", { status: 200, headers: { "content-type": "application/json" } });
       }
       throw new Error(`khong cho request khac: ${String(dau)}`);

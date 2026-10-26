@@ -381,7 +381,7 @@ export const makeDub = (translationId: number, voice: string | null) =>
  * "chưa có số đo" (`null`), "không có bản dịch" (lỗi HTTP), và "có số đo" (object).
  */
 export const getDubPlan = (translationId: number): Promise<DubPlan | null> =>
-  api.get<DubPlan | null>(`/api/dubs/${translationId}/plan`);
+  api.get<DubPlan | null>(`/dubs/${translationId}/plan`);
 
 /** Đường NGHE THỬ một dòng: wav của take đã ép tốc độ, cắt từ master (route không chạy TTS). */
 export const dubTakeUrl = (translationId: number, i: number): string =>
