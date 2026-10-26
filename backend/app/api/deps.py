@@ -18,6 +18,18 @@ def get_specs(request: Request):
     return request.app.state.specs
 
 
+def get_prices(request: Request):
+    """Bảng giá của mọi engine có khai giá, suy từ `specs` — MỘT chỗ duy nhất.
+
+    Route nào đọc một hàng bản dịch cũng cần nó để trả `cost_usd`; tự gọi
+    `prices_from_specs(app.state.specs)` ở từng route là ba bản sao của cùng một phép suy, và
+    bản sao thứ ba sẽ quên `opts` (giá nằm ở `opts`, không ở `capabilities`).
+    """
+    from app.domain.pricing import prices_from_specs
+
+    return prices_from_specs(request.app.state.specs)
+
+
 def get_worker(request: Request):
     return getattr(request.app.state, "worker", None)
 

@@ -5,13 +5,16 @@ Timestamp trùng nhau được (hai lần sửa trong cùng một giây) và kh�
 """
 from __future__ import annotations
 
+from app.domain.pricing import Price, cost_usd
+
 
 def is_stale(transcript_version: int, translated_from_version: int) -> bool:
     return translated_from_version < transcript_version
 
 
 def translation_summary_json(row, current_version: int | None = None, *,
-                             stale: bool | None = None) -> dict:
+                             stale: bool | None = None,
+                             prices: dict[str, Price] | None = None) -> dict:
     """Hình dạng JSON DUY NHẤT của một hàng bản dịch tóm tắt (Task 13/15).
 
     MỘT builder cho mọi endpoint, không phải mỗi route tự ghép khoá: trước bản
@@ -76,6 +79,12 @@ def translation_summary_json(row, current_version: int | None = None, *,
         "tokens_in": getattr(row, "tokens_in", None),
         "tokens_out": getattr(row, "tokens_out", None),
         "duration_ms": getattr(row, "duration_ms", None),
+        # CHI PHÍ ƯỚC LƯỢNG của bản dịch này (USD) = token ĐÃ ĐO × giá ĐÃ KHAI của engine.
+        # `None` khi không tính được (engine in-process không có giá/không báo token) — xem
+        # `app/domain/pricing.py`; ở đó có ghi vì sao `None` không được thay bằng `0`.
+        "cost_usd": cost_usd(getattr(row, "engine", None),
+                             getattr(row, "tokens_in", None),
+                             getattr(row, "tokens_out", None), prices),
     }
 
 
