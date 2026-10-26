@@ -364,7 +364,17 @@ export function exportUrl(
  * Task 9, Task 10) và `import { getTranscript }` (Task 8). Hai lối vào cùng một
  * tập hàm — không có bản sao logic nào ở đây, chỉ có tên.
  */
+/**
+ * Xếp MỘT job lồng tiếng cho một bản dịch. Trạng thái và file tải KHÔNG cần hàm riêng: job nằm
+ * trong `GET /api/jobs` như mọi job khác, còn file là một `<a href>` tới
+ * `/api/dubs/{id}/download?format=…` (tải file không phải một lời gọi `fetch`).
+ */
+export const makeDub = (translationId: number, voice: string | null) =>
+  api.post<{ job: { id: number; type: string; state: string; translation_id: number } }>(
+    "/api/dubs", { translation_id: translationId, voice });
+
 export const endpoints = {
+  makeDub,
   listSources,
   getSource,
   uploadSource,

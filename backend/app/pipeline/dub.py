@@ -26,6 +26,8 @@ import subprocess
 
 import numpy as np
 
+from app.worker import JobCancelled
+
 TOC_DO_TRAN = 1.35
 BAC_TOC_DO = 0.05
 NGUONG_IM_LANG = 0.01
@@ -117,3 +119,191 @@ def xuat_dinh_dang(master: pathlib.Path, out_dir: pathlib.Path,
                            check=True, capture_output=True)
         ra[ten] = dich
     return ra
+
+# ───────────────────────── Handler của worker ─────────────────────────
+
+class DubHandler:
+    """Job `dub`: TTS một bản dịch → ép timeline → xuất file theo định dạng yêu cầu.
+
+    `tts_runner(dong, voice, out_dir) -> {i: {"path":..., "seconds":...}}` là một THAM SỐ,
+    không phải import: TTS nằm ở venv riêng (xem `scripts/tts_batch.py`) và test phải chạy
+    được mà không cần cài VieNeu.
+
+    ⚠️ `out_dir` do HANDLER cấp, không do runner tự tạo — và đây là một lỗi ĐÃ ĐO ĐƯỢC, không
+    phải kiểu cách. Bản đầu để runner tự dựng `TemporaryDirectory` bên trong nó rồi trả về
+    đường dẫn tới các wav trong đó. Thư mục ấy bị xoá NGAY khi runner trả về, nên `run()` đọc
+    `lay[s.i]["path"]` sau đó là đọc một tệp đã biến mất. Đo được trên máy Windows thật:
+    `LibsndfileError: Error opening '…\\Temp\\tts-5cs2do_f\\wav\\00000.wav': System error`; và
+    đo cô lập đúng khuôn `with TemporaryDirectory(...)` cho `trong with: ton tai = True`,
+    `sau with: ton tai = False`. Trên Linux lỗi sẽ là `No such file`.
+    Hợp đồng nay là: **đường dẫn runner trả về phải còn sống khi `run()` đọc nó**, và cách duy
+    nhất để bảo đảm điều đó là thư mục do chính `run()` sở hữu.
+    """
+
+    def __init__(self, repos, out_dir: pathlib.Path, tts_runner, *,
+                 tran: float = TOC_DO_TRAN, dinh_dangs=None,
+                 python: str = "", script: str = "") -> None:
+        self._repos = repos
+        self._out_dir = pathlib.Path(out_dir)
+        self._tts = tts_runner
+        self._tran = tran
+        self._dinh_dangs = dinh_dangs or DINH_DANG
+        # Đường của tiến trình TTS — CHỈ để `san_sang()` trả lời được "máy này có TTS chưa".
+        # Vắng (`""`) thì `san_sang()` trả `True`: một handler tự dựng trong test (với runner
+        # giả) là một handler KHÔNG có ý kiến gì về môi trường, và đoán hộ nó là bịa.
+        self._python = python
+        self._script = script
+
+    def san_sang(self) -> tuple[bool, str]:
+        """Đường TTS có chạy được trong TIẾN TRÌNH NÀY không — và nếu không thì vì sao.
+
+        Trả `(True, "")` khi dùng được. Trả `(False, câu_tiếng_Việt)` khi không, và câu đó
+        phải nêu ĐÚNG thứ đang thiếu, vì nó là câu người dùng đọc được ở `409` của route.
+
+        Vì sao cần phép dò này chứ không để handler nổ lúc chạy: TTS sống ở một venv RIÊNG
+        (`.venv-tts`, `vieneu` không cài được vào venv của app — xem README), nên "máy này có
+        TTS" là một sự thật của MÔI TRƯỜNG, không phải của mã. Đo được: trong image Linux
+        `docker compose up`, đường dẫn mặc định là `…/Scripts/python.exe` — một đường WINDOWS —
+        nên job `dub` được nhận, chạy tới 5%, rồi `failed`; người dùng chỉ biết sau khi chờ.
+        Từ chối NGAY LÚC XẾP JOB là cùng khuôn với `409 "engine chưa sẵn sàng"` của đường dịch.
+
+        ⚠️ Phép dò KHÔNG chạy thử TTS (một lượt nạp model 63 s trong một route HTTP là không
+        được): nó chỉ hỏi tệp thực thi có tồn tại, và `tts_batch.py` có đi kèm không.
+
+        ⚠️ KHÔNG khai đường dẫn ⇒ `(True, "")`. Một handler tự dựng trong test (runner GIẢ) là
+        một handler KHÔNG có ý kiến gì về môi trường; phán hộ nó là bịa, và phán SAI thì mọi bài
+        route ở `tests/test_dub_handler.py` đỏ vì một lý do không liên quan tới chúng. Đo được
+        đúng ca này: bản đầu dùng `pathlib.Path("").is_file()` — luôn `False` — nên handler
+        không khai gì cũng bị coi là "máy chưa có TTS".
+        """
+        if not self._python:
+            return True, ""
+        python = pathlib.Path(self._python)
+        if not python.is_file():
+            return False, (
+                f"máy này chưa có TTS: không thấy {python} — "
+                f"tạo venv riêng rồi cài `pip install vieneu` vào đó "
+                f"(xem backend/README.md mục Lồng tiếng), hoặc đặt PHUDE_TTS_PYTHON "
+                f"trỏ tới python của venv đó"
+            )
+        script = pathlib.Path(self._script)
+        if not script.is_file():
+            return False, f"máy này chưa có TTS: không thấy script {script}"
+        return True, ""
+
+    def handles(self) -> str:
+        """Loại job mà handler này nhận.
+
+        ⚠️ KHÔNG phải trang trí: `routes_jobs._registered_job_types` hỏi `handles()` trên MỌI
+        handler để biết loại job nào có đường chạy THẬT trong tiến trình này. Thiếu nó thì
+        `POST /api/jobs` nổ `AttributeError: 'DubHandler' object has no attribute 'handles'`
+        — đo được: 8 bài `test_api_export_by_translation.py` ĐỎ vì chúng đi qua chính route đó,
+        không phải vì route xuất file có lỗi.
+        """
+        return "dub"
+
+    def run(self, job, report) -> None:
+        import soundfile as sf
+
+        payload = job.payload or {}
+        tid = int(payload["translation_id"])
+        voice = payload.get("voice") or None
+        gioi_han = payload.get("so_dong") or None
+
+        ban = self._repos.get_translation(tid)
+        dong = [s for s in ban.segments if (s.text or "").strip()]
+        if gioi_han:
+            dong = dong[: int(gioi_han)]
+        if not dong:
+            raise RuntimeError(f"bản dịch {tid} không có dòng nào để lồng tiếng")
+        report(0.05, f"lồng tiếng bản dịch #{tid}: {len(dong)} dòng"
+                     + (f" (giới hạn {gioi_han} dòng)" if gioi_han else ""))
+
+        # THƯ MỤC TẠM DO HANDLER SỞ HỮU, không phải do runner: runner trả về ĐƯỜNG DẪN, và
+        # đường dẫn chỉ dùng được khi thư mục còn sống. Bản đầu để runner tự dựng
+        # `TemporaryDirectory` — nó xoá thư mục ngay khi trả về, nên mọi lần đọc take sau đó
+        # đều trỏ vào hư không (đo được: `LibsndfileError: … System error`).
+        import tempfile
+
+        with tempfile.TemporaryDirectory(prefix="dub-") as tam:
+            tam = pathlib.Path(tam)
+            lay = self._tts([{"i": s.i, "text": s.text} for s in dong], voice, tam)
+            if not lay:
+                raise RuntimeError("TTS không trả về take nào")
+            report(0.40, f"TTS xong {len(lay)}/{len(dong)} take")
+
+            dung = [s for s in dong if s.i in lay]
+            takes = [lay[s.i]["seconds"] for s in dung]
+            slots = [max(0.01, s.end - s.start) for s in dung]
+            avails = [(dung[k + 1].start if k + 1 < len(dung) else dung[k].end) - dung[k].start
+                      for k in range(len(dung))]
+            toc_do, need, qua_tran = ke_hoach_toc_do(takes, slots, avails, tran=self._tran)
+
+            sr = 48_000
+            dat: list[tuple[float, np.ndarray]] = []
+            for k, s in enumerate(dung):
+                if self._bi_huy(job):
+                    raise JobCancelled(f"job {job.id} đã được yêu cầu huỷ")
+                mau, sr = sf.read(lay[s.i]["path"], dtype="float32", always_2d=False)
+                if mau.ndim > 1:
+                    mau = mau.mean(axis=1)
+                mau = trong_im_lang(mau)
+                if abs(toc_do[k] - 1.0) > 1e-6:
+                    sped = tam / f"{s.i:05d}-x.wav"
+                    doi_toc_do(pathlib.Path(lay[s.i]["path"]), sped, toc_do[k])
+                    mau, sr = sf.read(str(sped), dtype="float32", always_2d=False)
+                    if mau.ndim > 1:
+                        mau = mau.mean(axis=1)
+                dat.append((s.start, mau.astype(np.float32)))
+                report(0.40 + 0.50 * (k + 1) / len(dung),
+                       f"đặt dòng {k + 1}/{len(dung)} · {toc_do[k]:.2f}×")
+
+        master = rap(dat, max(s.end for s in dung), sr=sr)
+        self._out_dir.mkdir(parents=True, exist_ok=True)
+        master_path = self._out_dir / f"dub-{tid}.wav"
+        sf.write(str(master_path), master, sr, subtype="PCM_16")
+        report(0.92, f"xuất {len(self._dinh_dangs)} định dạng")
+        xuat_dinh_dang(master_path, self._out_dir, self._dinh_dangs)
+        if qua_tran:
+            report(1.0, f"xong · {len(qua_tran)} dòng vượt trần {self._tran}× (nén tới trần, vẫn đè "
+                        f"dòng sau): " + ", ".join(str(dung[k].i) for k in qua_tran))
+        else:
+            report(1.0, "xong")
+
+    def _bi_huy(self, job) -> bool:
+        try:
+            return bool(self._repos.get_job(job.id).cancel_requested)
+        except LookupError:
+            return False
+
+
+def chay_tts_batch(tts_python: str, tts_script: pathlib.Path):
+    """`tts_runner` thật: MỘT tiến trình cho cả lượt, JSON vào/ra qua TỆP (encoding console).
+
+    `out_dir` do BÊN GỌI cấp (xem `DubHandler.run`) và KHÔNG bị hàm này xoá: đường dẫn trả về
+    phải còn sống khi handler đọc nó. Chỉ hai tệp JSON (`viec`/`kq`) nằm trong thư mục tạm, và
+    chúng bị xoá ngay — hợp đồng là các WAV, không phải các tệp điều khiển.
+    """
+    import json as _json
+    import tempfile as _tempfile
+
+    def chay(items: list[dict], voice: str | None, out_dir) -> dict[int, dict]:
+        out_dir = pathlib.Path(out_dir)
+        out_dir.mkdir(parents=True, exist_ok=True)
+        with _tempfile.TemporaryDirectory(prefix="tts-json-") as tam:
+            tam = pathlib.Path(tam)
+            viec, kq = tam / "viec.json", tam / "kq.json"
+            viec.write_text(_json.dumps({"items": items, "voice": voice,
+                                         "out_dir": str(out_dir), "result": str(kq)},
+                                        ensure_ascii=False), encoding="utf-8")
+            r = subprocess.run([tts_python, "-B", str(tts_script), str(viec)],
+                               capture_output=True, text=True, encoding="utf-8", errors="replace")
+            if not kq.exists():
+                raise RuntimeError(f"TTS không chạy được ({tts_python}): "
+                                   f"{(r.stderr or r.stdout or '')[-800:]}")
+            data = _json.loads(kq.read_text(encoding="utf-8"))
+        if data.get("loi"):
+            raise RuntimeError("TTS lỗi: " + "; ".join(
+                f"dòng {x['i']}: {x['error']}" for x in data["loi"][:3]))
+        return {x["i"]: x for x in data["ok"]}
+    return chay

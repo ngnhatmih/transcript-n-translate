@@ -1,0 +1,19 @@
+# Ngữ cảnh build KHÔNG được mang theo thứ chỉ có nghĩa trên máy Windows.
+#
+# `backend/.venv-tts` là venv WINDOWS (751 MB, 24 116 tệp, `pyvenv.cfg` ghi
+# `home = C:\Users\...`): trong image Linux nó không chạy được một dòng nào, chỉ làm
+# image phình thêm gần 3/4 GB và làm mỗi lần `COPY . .` chậm. Đường TTS trong container
+# là một việc RIÊNG (cài `vieneu` bằng pip Linux), không phải chép venv từ đây sang.
+**/.venv-tts
+**/.venv
+**/__pycache__
+**/*.pyc
+**/.pytest_cache
+**/node_modules
+**/dist
+
+# Dữ liệu và model là VOLUME, không phải nội dung image: chép vào đây là chép hàng trăm MB
+# dữ liệu người dùng vào một lớp image chỉ đọc.
+backend/data
+frontend/dist
+data

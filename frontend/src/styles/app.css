@@ -2516,3 +2516,94 @@ body {
   font-size: var(--fs-num);
   color: var(--ink-2);
 }
+
+/* ── KHỐI LỒNG TIẾNG (trong danh sách bản dịch của màn Đối chiếu) ────────────────────────
+   Nó nằm TRONG `.cmp__bans` (một con của `.cmp`), không phải một hàng thứ tám của lưới: lưới
+   `.cmp` khai `grid-row` tường minh cho mọi con (ERRATA #31 mục 1), nên thêm một con vào lưới là
+   thêm một track — và track thì phải sửa cả `grid-template-rows`. */
+.dub {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  border-top: var(--rule-w) solid var(--rule);
+  background: var(--panel-1);
+  flex-wrap: wrap;
+}
+
+/* Ô giọng đọc: cùng khuôn ô nhập của màn (viền `--rule`, focus ring token) — nó là một ô nhập
+   tuỳ chọn, không phải điều khiển chính, nên không có nền `--panel-2` nổi. */
+.dub__giong {
+  appearance: none;
+  background: var(--panel-0);
+  color: var(--ink-0);
+  border: var(--rule-w) solid var(--rule);
+  border-radius: var(--radius);
+  font: inherit;
+  font-size: var(--fs-note);
+  padding: 2px var(--sp-2);
+  min-width: 168px;
+}
+
+.dub__giong:focus-visible {
+  outline: 2px solid var(--signal);
+  outline-offset: 1px;
+}
+
+/* Nút xếp job: cùng hình dạng nút phụ của màn. */
+.dub__nut {
+  appearance: none;
+  font: inherit;
+  font-size: var(--fs-note);
+  color: var(--ink-0);
+  background: var(--panel-2);
+  border: var(--rule-w) solid var(--rule);
+  border-radius: var(--radius);
+  padding: var(--sp-1) var(--sp-3);
+  cursor: pointer;
+}
+
+.dub__nut:hover {
+  border-color: var(--ink-2);
+}
+
+.dub__nut:active {
+  transform: translateY(1px);
+}
+
+/* Câu trạng thái: mono như mọi giá trị của máy (%, giây). */
+.dub__tin {
+  font-family: var(--font-mono);
+  font-size: var(--fs-num);
+  color: var(--ink-0);
+}
+
+/* Năm đường tải: chữ mono in hoa nhỏ, mỗi định dạng một liên kết — tải file là `<a download>`,
+   không phải một lời gọi `fetch` trong JS. */
+.dub__tai {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-family: var(--font-mono);
+  font-size: var(--fs-num);
+  color: var(--ink-2);
+}
+
+.dub__nut-tai {
+  color: var(--ink-0);
+  text-decoration: none;
+  border-bottom: var(--rule-w) solid var(--rule);
+  padding: 0 1px;
+}
+
+.dub__nut-tai:hover {
+  border-bottom-color: var(--signal);
+  color: var(--signal);
+}
+
+/* Lỗi: NGUYÊN VĂN câu của backend, màu lỗi — cùng lớp với `.cmp__xoa-loi`. */
+.dub__loi {
+  font-family: var(--font-mono);
+  font-size: var(--fs-label);
+  color: var(--fault);
+}

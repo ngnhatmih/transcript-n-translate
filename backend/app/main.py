@@ -25,10 +25,11 @@ from app.adapters.registry_file import (load_chimera, load_default_asr,
                                         load_default_mt, load_registry)
 from app.api.app import create_app
 from app.api.sse import JobEventBroker
-from app.config import (API_HOST, API_PORT, DB_PATH, HF_HOME, LOG_DIR, MEDIA_DIR,
+from app.config import (API_HOST, API_PORT, BACKEND_DIR, DB_PATH, HF_HOME, LOG_DIR, MEDIA_DIR,
                         OUTPUT_DIR, OLLAMA_MODELS, ensure_dirs,
                         resolve_ollama_base_url, resolve_openai_base_url)
 from app.domain.chimera import ChimeraPlan, mark_availability, plan_from_raw
+from app.pipeline.dub import DubHandler, chay_tts_batch
 from app.pipeline.export import ExportHandler
 from app.pipeline.ingest import IngestHandler
 from app.pipeline.transcribe import AUTO_FORWARD_SETTING, TranscribeHandler
@@ -37,6 +38,16 @@ from app.registry import (ASR_DEFAULT_SETTING, DEFAULT_MT_KEY, MT_DEFAULT_SETTIN
                           by_id, default_asr_engine, default_mt_engine,
                           ollama_available, openai_models_available)
 from app.worker import PhaseQueueWorker
+
+#: Python của venv TTS (venv RIÊNG: `vieneu` kéo `huggingface_hub` 2.x, xung đột với
+#: `transformers 4.46` của app — xem `backend/README.md` mục "Lồng tiếng").
+#:
+#: Đường mặc định phải chọn theo HỆ ĐIỀU HÀNH: venv Windows đặt python ở `Scripts/python.exe`,
+#: venv Linux/POSIX ở `bin/python`. Đo được: một hằng số Windows duy nhất làm MỌI job `dub`
+#: trong image Linux nhận rồi `failed` ở 5% — người dùng chỉ biết sau khi đã chờ, và câu lỗi
+#: chỉ vào một đường dẫn không tồn tại. `PHUDE_TTS_PYTHON` thắng cả hai.
+TTS_PYTHON = os.environ.get("PHUDE_TTS_PYTHON") or str(
+    BACKEND_DIR / ".venv-tts" / ("Scripts/python.exe" if os.name == "nt" else "bin/python"))
 
 #: `auto_forward` nay mặc định BẬT: từ Task 12 đã có handler `translate` thật,
 #: nên bóc băng xong đẩy một job dịch là đường đi ĐÚNG, không còn là đường đẻ ra
@@ -413,6 +424,21 @@ def build_components():
             chimera_merge=chimera_merge,
             engine_capabilities={spec.id: dict(spec.capabilities)
                                  for spec in specs if spec.kind == "mt"}),
+        # Lồng tiếng: TTS ở venv RIÊNG (vieneu kéo huggingface_hub 2.x, xung đột với
+        # transformers 4.46 của app), nên handler gọi MỘT tiến trình con cho cả lượt.
+        # Đường dẫn lấy từ env để máy/Docker tự chỉnh mà không sửa mã.
+        #
+        # ⚠️ Đường MẶC ĐỊNH phải chọn theo HỆ ĐIỀU HÀNH, không phải hằng số Windows: đo được
+        # trong image Linux, `…/.venv-tts/Scripts/python.exe` (một đường Windows) làm mọi job
+        # `dub` nhận rồi `failed` ở 5%, sau khi người dùng đã chờ. Trên Linux venv đặt python ở
+        # `bin/python`; và dù đường đúng thì image cũng KHÔNG có `vieneu` — nên route từ chối
+        # sớm bằng `san_sang()` thay vì để job chết.
+        "dub": DubHandler(
+            repos, OUTPUT_DIR / "dubs",
+            chay_tts_batch(
+                TTS_PYTHON, BACKEND_DIR / "scripts" / "tts_batch.py"),
+            python=TTS_PYTHON,
+            script=str(BACKEND_DIR / "scripts" / "tts_batch.py")),
         "export": ExportHandler(repos, out_dir=OUTPUT_DIR),
     }
     broker = JobEventBroker()

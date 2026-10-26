@@ -36,6 +36,19 @@ class AsrPayload(BaseModel):
     lang: str | None = None
 
 
+class DubPayload(BaseModel):
+    """`DubHandler.run` đọc `payload["translation_id"]` (pipeline/dub.py).
+
+    `voice` là tên giọng dựng sẵn của engine TTS; bỏ trống = giọng mặc định của engine.
+    `so_dong` là GIỚI HẠN số dòng — có mặt để đo/thử nhanh trên một bản dịch dài, không phải
+    một tính năng sản phẩm (UI không gửi nó).
+    """
+
+    translation_id: int = Field(ge=1)
+    voice: str | None = None
+    so_dong: int | None = Field(default=None, ge=1)
+
+
 class ExportPayload(BaseModel):
     """`ExportHandler.run` đọc `payload["transcript_id"]` (export.py)."""
 
@@ -52,6 +65,7 @@ class ExportPayload(BaseModel):
 PAYLOAD_SCHEMA: dict[str, type[BaseModel]] = {
     "ingest": IngestPayload,
     "asr": AsrPayload,
+    "dub": DubPayload,
     "export": ExportPayload,
 }
 

@@ -87,6 +87,7 @@ import type {
   ChimeraCost,
   ChimeraRun,
   EngineSpec,
+  Job,
   JobState,
   TranslationDetail,
   Transcript,
@@ -140,6 +141,20 @@ interface Props {
    * tuyên bố SAI: có hai điểm, một ở `App` và một ở đây.
    */
   onChonBanDich?: (id: number) => void;
+  /**
+   * Job `dub` GẦN NHẤT của bản dịch đang chọn, hoặc `null` nếu chưa lồng lần nào.
+   *
+   * Vì sao là PROP chứ không tự fetch: `App` đã có `jobs` (một lần đọc `/api/jobs` + SSE) —
+   * màn này đọc thêm một lần nữa là hai nguồn cho cùng câu "job lồng tiếng tới đâu rồi".
+   */
+  dubJob?: Job | null;
+  /**
+   * Xếp một job lồng tiếng cho bản dịch đang chọn. `voice = null` = giọng mặc định của engine.
+   * KHÔNG truyền prop này ⇒ khối lồng tiếng không render (màn chỉ-đọc).
+   */
+  onLongTieng?: (voice: string | null) => void;
+  /** Lỗi của lần xếp job lồng tiếng — **NGUYÊN VĂN `ApiError.message`** (404/409 tiếng Việt). */
+  loiLongTieng?: string | null;
   /** Lời gọi tạo bản dịch đang bay ⇒ nút không cho bấm lần thứ hai. */
   dangTao?: boolean;
   /**
@@ -313,6 +328,9 @@ export function CompareScreen({
   specs = [],
   onTaoBanDich,
   onChonBanDich,
+  dubJob = null,
+  onLongTieng,
+  loiLongTieng = null,
   dangTao = false,
   loiTao = null,
   trangThaiJob = null,
@@ -324,6 +342,8 @@ export function CompareScreen({
   onXoa,
 }: Props) {
   const [chonId, datChonId] = useState<number | null>(null);
+  // Giong doc cho luot long tieng: chuoi RONG = de engine dung giong mac dinh.
+  const [giong, datGiong] = useState("");
   const [ghim, datGhim] = useState(false);
   // ENGINE ĐANG CHỌN là state CỤC BỘ của màn này: `App` không cần biết nó cho tới lúc bấm
   // "dịch" (khi đó `onTaoBanDich(engine)` mang nó lên). Giữ nó ở đây là một chỗ, không hai.
@@ -381,6 +401,7 @@ export function CompareScreen({
   // Bản B: bản KHÁC bản A. Ghim chính bản đang chọn là so một hàng với chính nó
   // (`reducer.pinB` từ chối đúng ca đó) — ở đây đơn giản là không có gì để ghim.
   const ghimBan = ghim ? translations.find((tr) => tr.id !== chon?.id) ?? null : null;
+  const dub = dubJob ?? null;
 
   // DẤU VẾT CHIMERA của bản đang xem (§4.5). `null` = bản dịch thường ⇒ KHÔNG có
   // ngăn ứng viên nào, và đó là một trạng thái KHÁC hẳn "có chạy mà chưa có dữ liệu".
@@ -500,6 +521,49 @@ export function CompareScreen({
           </div>
         ))}
       </div>
+        {/* LỒNG TIẾNG — nằm TRONG danh sách bản dịch nên KHÔNG thêm con cho lưới `.cmp`
+            (mỗi con của lưới có `grid-row` tường minh — xem test hình thức). Bốn trạng thái,
+            mỗi trạng thái NÓI BẰNG CHỮ: chưa lồng → nút; đang chạy → `đang lồng tiếng… N%`;
+            xong → năm đường tải (dựng từ id, không cần thêm route trạng thái); lỗi → NGUYÊN VĂN
+            `job.error` của backend (409/422 của nó đã là tiếng Việt và nêu đúng việc phải làm). */}
+        {onLongTieng === undefined || chon === null ? null : (
+          <div className="dub" data-testid="dub-khoi">
+            <span className="nhan">Lồng tiếng</span>
+            {dub === null ? (
+              <>
+                <input className="dub__giong" type="text" value={giong}
+                  placeholder="giọng (bỏ trống = mặc định)"
+                  aria-label="giọng đọc cho lượt lồng tiếng"
+                  onChange={(e) => datGiong(e.target.value)} />
+                <button type="button" className="dub__nut" data-testid="dub-nut"
+                  onClick={() => onLongTieng(giong.trim() === "" ? null : giong.trim())}>
+                  lồng tiếng
+                </button>
+              </>
+            ) : dub.state === "queued" || dub.state === "running" ? (
+              <span className="dub__tin" data-testid="dub-dang-chay">
+                {dub.state === "queued" ? "chờ tới lượt" : "đang lồng tiếng…"}{" "}
+                {Math.round(dub.progress * 100)}%
+              </span>
+            ) : dub.state === "done" ? (
+              <span className="dub__tai" data-testid="dub-tai">
+                đã có · tải:
+                {["wav", "mp3", "aac", "m4a", "flac"].map((dinhDang) => (
+                  <a key={dinhDang} className="dub__nut-tai"
+                    data-testid={`dub-tai-${dinhDang}`}
+                    href={`/api/dubs/${chon.id}/download?format=${dinhDang}`} download>
+                    {dinhDang}
+                  </a>
+                ))}
+              </span>
+            ) : (
+              <span className="dub__loi" data-testid="dub-loi">{dub.error ?? dub.state}</span>
+            )}
+            {loiLongTieng === null ? null : (
+              <span className="dub__loi" data-testid="dub-loi-tao">{loiLongTieng}</span>
+            )}
+          </div>
+        )}
 
       {/* §4.5 NGUYÊN VĂN: *"Dải cảnh báo chéo chạy ngang"*, và `app.css` khai **BẢY**
           track cho `.cmp` (`auto auto auto auto auto auto 1fr`) với `grid-row` tường minh
