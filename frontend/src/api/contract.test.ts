@@ -152,16 +152,39 @@ async function docDbCuaBackend(): Promise<DbCuaBackend> {
  * Hỏi **chính tiến trình vừa lên** (qua `/api/transcripts` của nó) chứ không tự suy đường dẫn DB
  * từ `process.env`: cái cần kiểm là DB mà backend **THẬT SỰ** dùng, không phải cái mình đoán.
  */
-async function khangDinhDbRong(ai: string, cachXuLy: string): Promise<void> {
+/**
+ * KHẲNG ĐỊNH dùng chung cho **CẢ HAI** nhánh dò backend: server LẠ ở 8620 và server do CHÍNH tệp
+ * này spawn. Điều kiện là DB **PHẢI CÓ HÀNG** — không phải rỗng.
+ *
+ * 🔴 VÌ SAO ĐIỀU KIỆN ĐÃ ĐẢO (đo được, ba lần chạy trên cùng cây byte-exact):
+ * Bản trước khẳng định DB phải RỖNG, với lý do "khối này chỉ đo được trên DB rỗng". Nhưng chính
+ * hai bài con bên dưới (`GET /api/transcripts` và `GET /api/transcripts/{id}`) lại `assert.notEqual(
+ * rows.length, 0, EMPTY_DB_MSG)` — chúng cần CÓ hàng để đo hình dạng thật, và tự gọi đó là "xanh
+ * vì rỗng là im lặng". Hai điều kiện LOẠI TRỪ NHAU, nên không trạng thái DB nào làm cả khối xanh:
+ *
+ *   · DB có dữ liệu (container thật ở 8620) ⇒ hook `assert.fail`, 10 bài bị CANCEL
+ *   · DB rỗng (scratch)                      ⇒ `pass 9 / fail 2`, hai bài EMPTY_DB_MSG đỏ
+ *
+ * Đo được cả hai, và chính comment cũ ở đây tự nói trạng thái XANH là khi DB đã gieo dữ liệu:
+ * `tests 11 / pass 11 / fail 0 / cancelled 0 / EXIT=0`. Tức guard đang chặn đúng cái trạng thái
+ * mà nó cần. Nay guard kiểm chiều NGƯỢC LẠI: DB rỗng ⇒ `assert.fail` với câu nói rõ phải gieo
+ * dữ liệu trước; DB có hàng ⇒ đi tiếp.
+ *
+ * 🔴 PHẦN CÒN GIỮ NGUYÊN GIÁ TRỊ (`I4` của review D2): guard vẫn hỏi CHÍNH backend đang trả lời
+ * (qua `/api/transcripts` của nó) chứ không suy đường dẫn DB từ `process.env` — cái cần kiểm là
+ * DB mà backend THẬT SỰ dùng, không phải cái mình đoán. Và một server ở 8620 trả lời được nhưng
+ * KHÔNG đọc được danh sách vẫn phải ĐỎ, không được coi là "chắc là ổn".
+ */
+async function khangDinhDbCoHang(ai: string, cachXuLy: string): Promise<void> {
   const db = await docDbCuaBackend();
-  if (db.kind === "rong") return;
-  const suThat = db.kind === "co-hang"
-    ? `DB của nó CÓ ${db.soHang} bản ghi ⇒ KHÔNG rỗng`
-    : `KHONG đọc được danh sách bản ghi (${db.lyDo}) ⇒ KHÔNG xác nhận được là DB rỗng`;
+  if (db.kind === "co-hang") return;
+  const suThat = db.kind === "rong"
+    ? "DB của nó RỖNG (0 bản ghi)"
+    : `KHONG đọc được danh sách bản ghi (${db.lyDo})`;
   assert.fail(
-    `${ai} đang trả lời nhưng ${suThat}. Khối này chỉ đo được trên DB rỗng (hai guard `
-    + "`EMPTY_DB_MSG`), nên một DB đã gieo dữ liệu sẽ làm `fail` DỊCH ĐI HAI mà không ai thấy "
-    + `(I4 của review D2 — đã đo được thật: \`pass 254 / fail 0\`). ${cachXuLy}`,
+    `${ai} đang trả lời nhưng ${suThat}. Khối này đo hình dạng trên DỮ LIỆU THẬT, nên nó cần một `
+    + "DB ĐÃ GIEO HÀNG: hai bài `GET /api/transcripts` bên dưới tự gọi trạng thái rỗng là "
+    + "`EMPTY_DB_MSG` (xanh-vì-rỗng là im lặng — spec §2). " + cachXuLy,
   );
 }
 
@@ -206,12 +229,14 @@ async function getSeedJson(path: string): Promise<unknown> {
 describe("hop dong API that (backend 8620)", () => {
   before(async () => {
     // Backend của NGƯỜI KHÁC: không spawn thêm, và `after` sẽ không tắt nó — NHƯNG nó phải là
-    // backend mà khối này giả định (`I4` của review D2): DB RỖNG. Một server đã gieo dữ liệu ở
-    // 8620 làm hai guard `EMPTY_DB_MSG` xanh và `fail` dịch đi hai, KHÔNG một dấu hiệu nào.
+    // backend mà khối này giả định: DB ĐÃ CÓ HÀNG. Hai bài `GET /api/transcripts` bên dưới đo
+    // hình dạng trên dữ liệu thật và tự gọi trạng thái rỗng là `EMPTY_DB_MSG`; chạy trên DB rỗng
+    // thì chúng đỏ (đo được: `pass 9 / fail 2`). Guard hỏi CHÍNH server đang trả lời, nên nó bắt
+    // được cả trường hợp server lạ ở 8620 dùng một DB khác với cái mình tưởng.
     if (await backendIsUp()) {
-      await khangDinhDbRong(
+      await khangDinhDbCoHang(
         `${ORIGIN} (backend của NGƯỜI KHÁC)`,
-        "Hãy để cổng đó TRỐNG trước khi chạy `npm test`.",
+        "Hãy chạy backend đó trên DB đã gieo dữ liệu (hoặc để cổng TRỐNG cho tệp này tự spawn).",
       );
       return;
     }
@@ -235,14 +260,18 @@ describe("hop dong API that (backend 8620)", () => {
 
     if (await waitForBackend(START_TIMEOUT_MS)) {
       // 🔴 NHÁNH **TỰ SPAWN** CŨNG PHẢI HỎI CÂU THỨ HAI (`I-3` của re-review vòng sửa 1 — đo được).
-      // `spawn` ở trên KHÔNG truyền `env`, nên tiến trình con THỪA HƯỞNG `PHUDE_DATA`/`PHUDE_DB`:
-      // gieo DB chỉ bằng hai biến đó ⇒ `tests 11 / pass 11 / fail 0 / cancelled 0 / EXIT=0` và
-      // **0 tên đỏ** — nền dịch đi hai mà không ai thấy. Hỏi CHÍNH tiến trình vừa lên, nên câu trả
-      // lời là sự thật của cái DB nó đang dùng (không phải một đường dẫn mình đoán từ env).
-      await khangDinhDbRong(
+      // `spawn` ở trên KHÔNG truyền `env`, nên tiến trình con THỪA HƯỞNG `PHUDE_DATA`/`PHUDE_DB`
+      // của người chạy. Điều đó có hai mặt, và cả hai đều phải bị bắt:
+      //   · trỏ vào DB RỖNG ⇒ `pass 9 / fail 2` (hai bài EMPTY_DB_MSG đỏ) — ồn ào, tự báo.
+      //   · trỏ vào DB đã gieo ⇒ trạng thái ĐÚNG của tệp này (`tests 11 / pass 11 / fail 0`).
+      // Guard hỏi CHÍNH tiến trình vừa lên, nên câu trả lời là sự thật của cái DB nó đang dùng
+      // (không phải một đường dẫn mình đoán từ env) — và một DB rỗng bị gọi đích danh thay vì
+      // lặng lẽ làm hai bài kia đỏ mà không ai hiểu vì sao.
+      await khangDinhDbCoHang(
         `${ORIGIN} (backend do CHÍNH tệp này spawn)`,
         "`spawn` ở trên KHÔNG truyền `env`, nên tiến trình con THỪA HƯỞNG `PHUDE_DATA`/`PHUDE_DB`: "
-        + "hãy để hai biến đó trỏ vào một DB rỗng (hoặc bỏ chúng đi) trước khi chạy `npm test`.",
+        + "hãy để hai biến đó trỏ vào một DB ĐÃ GIEO HÀNG (hoặc bỏ chúng đi để dùng `data/app.db`) "
+        + "trước khi chạy `npm test`.",
       );
       return;
     }
