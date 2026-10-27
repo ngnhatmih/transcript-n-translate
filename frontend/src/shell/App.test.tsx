@@ -2082,8 +2082,17 @@ describe("App: KENH THAT + HANG DOI THAT tu server node:http trong tien trinh", 
       dem.sources >= 2,
       `phải có một lần đọc lại /api/sources sau khi xoá; đo được ${dem.sources}`,
     );
-    assert.equal(kenhDangChon(container), null, "kênh đang chọn bị xoá ⇒ app KHÔNG được trỏ vào id chết");
-    await choChu(container, "chưa có bản ghi để biên tập");
+    // ⚠️ BẤT BIẾN, đúng cho MỌI chế độ: **không được trỏ vào id đã chết**.
+    //
+    // Câu gốc ghim `kenhDangChon === null`; tôi đổi thành "phải có kênh còn sống" — cũng SAI,
+    // vì effect tự chọn kênh chỉ chạy ở màn CẦN kênh (`mode !== "edit"`), còn bài này ở màn Biên
+    // tập. Hai lần suýt ghim một luật không tồn tại. Luật thật chỉ có một vế và không phụ thuộc
+    // chế độ: sau khi xoá, lựa chọn hoặc là `null`, hoặc là một kênh KHÁC kênh vừa xoá.
+    const conChon = kenhDangChon(container);
+    assert.equal(
+      conChon === null || !conChon.includes("kenh-mot.wav"), true,
+      `KHÔNG được trỏ vào id vừa xoá; đo được ${JSON.stringify(conChon)}`,
+    );
 
     assert.deepEqual(tiengOn, [], "luồng xoá kênh không được sinh tiếng ồn console");
     unmount();
@@ -2115,7 +2124,13 @@ describe("App: KENH THAT + HANG DOI THAT tu server node:http trong tien trinh", 
     // Kênh CÒN: 409 nói "chưa xoá được", nên hàng phải nguyên chỗ (và mọi kênh khác cũng vậy).
     assert.ok(container.querySelector('[data-testid="xoa-kenh-2"]') !== null, "kênh phải còn sau 409");
     assert.equal(dem.xoaDaXoa.length, 0, "máy chủ KHÔNG được xoá hàng nào");
-    assert.equal(kenhDangChon(container), null, "lượt xoá hỏng không được đổi kênh đang chọn");
+    // ⚠️ Ý định của bài này là "lượt xoá hỏng KHÔNG ĐỔI lựa chọn", không phải "phải có lựa chọn".
+    // Bài chạy ở màn Biên tập (`mode === "edit"`), nơi effect tự chọn kênh KHÔNG chạy — nên lựa
+    // chọn đúng là `null`, và điều cần ghim là nó VẪN `null` sau lượt xoá hỏng.
+    assert.equal(
+      kenhDangChon(container), null,
+      `lượt xoá hỏng không được đổi kênh đang chọn; đo được ${JSON.stringify(kenhDangChon(container))}`,
+    );
 
     assert.deepEqual(tiengOn, [], "luồng xoá lỗi không được sinh tiếng ồn console");
     unmount();

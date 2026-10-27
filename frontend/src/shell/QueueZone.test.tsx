@@ -387,4 +387,37 @@ describe("QueueZone: huy job + chay lai job (Task D2)", () => {
 
     assert.deepEqual(tiengOn, [], "hinh thuc `.q*` cua vung HANG DOI khong duoc sinh tieng on console");
   });
+  it("THỨ TỰ: job XONG đứng TRƯỚC job HỎNG — lỗi cũ không được chiếm chỗ của thành công mới", () => {
+    // ⚠️ ĐO ĐƯỢC TRÊN APP THẬT (`_shots/tab-long-tieng-5.png`): panel hiện job `dub` #21
+    // (`failed`, lỗi `TTS không chạy được (/app/.venv-tts/Scripts/python.exe)`, kèm dãy số rác
+    // đọc từ `/proc/1/stat`) NẰM NGAY TRÊN job `dub` #22 (`done`, 100%) — vì `thuTu` cũ chỉ có
+    // BA nhóm nên `failed` và `done` cùng nhóm, rồi sắp theo `id` TĂNG dần, tức job cũ lên
+    // trước. Người dùng đọc lỗi cũ trước khi thấy thành công mới và tưởng tính năng vẫn hỏng.
+    //
+    // Bài này ghim THỨ TỰ THẬT trong DOM, không ghim hàm `thuTu` (nó không export): một bản
+    // sửa chỉ đổi hàm mà không đổi thứ tự render là bản sửa không có tác dụng.
+    const jobs = new Map<number, Job>([
+      [21, makeJob(21, "dub", "failed", 0.05)],
+      [22, makeJob(22, "dub", "done", 1)],
+    ]);
+    const { container, unmount } = renderQueue(jobs);
+
+    const hang = [...container.querySelectorAll('[data-testid^="job-"]')].map(
+      (el) => el.getAttribute("data-testid") ?? "",
+    );
+    assert.deepEqual(
+      hang,
+      ["job-22", "job-21"],
+      `job XONG phải đứng TRƯỚC job HỎNG; đo được ${JSON.stringify(hang)}`,
+    );
+
+    // Và điều này KHÔNG được giấu lỗi: job hỏng vẫn có mặt, vẫn có nút chạy lại.
+    assert.notEqual(
+      container.querySelector('[data-testid="lai-job-21"]'), null,
+      "job hỏng phải CÒN trong panel (chỉ đổi thứ tự, không ẩn đi) và vẫn có nút chạy lại",
+    );
+
+    assert.deepEqual(tiengOn, [], "thứ tự panel không được sinh tiếng ồn console");
+    unmount();
+  });
 });

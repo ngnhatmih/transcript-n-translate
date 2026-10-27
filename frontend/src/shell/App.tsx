@@ -1402,6 +1402,47 @@ function dubJobCuaBan(id: number | null): Job | null {
   // THỜI LƯỢNG: lấy từ `Source.duration` của kênh đang chọn — KHÔNG tự đo lại (client đo
   // lại là nguồn sự thật thứ hai, và `duration` của phần tử media là `NaN` cho tới khi tải
   // xong metadata).
+  /**
+   * KÊNH ĐẦU TIÊN tự được chọn khi danh sách về mà chưa có kênh nào mở.
+   *
+   * ⚠️ ĐO ĐƯỢC trên ảnh chụp app thật: mở app với BA kênh đã có sẵn thì `ui.channelId` là
+   * `null`, và `selectChannel` chỉ được dispatch ở ĐÚNG MỘT chỗ — sau khi `napTep` thành công.
+   * Nghĩa là mở app rồi vào màn Đối chiếu hay Lồng tiếng đều thấy trạng thái rỗng, và câu chỉ
+   * dẫn "chọn một kênh ở cột bên trái" trỏ vào một việc KHÔNG bấm được: vùng kênh chỉ có nút
+   * chọn cho kênh ĐANG mở, không có nút "mở kênh này".
+   *
+   * Vế `ui.channelId === null` là thứ giữ effect này KHÔNG cướp lựa chọn của người dùng: một
+   * khi đã có kênh mở, effect không chạy lại việc gì. Và `kenhDau` chỉ được chọn khi nó CÒN
+   * trong danh sách — kênh vừa bị xoá thì `clearChannel` đã đưa về `null` và effect chọn kênh
+   * đầu tiÊn còn lại, đúng luật "máy chủ là nguồn sự thật".
+   */
+  /**
+   * Cờ MỘT LẦN: effect tự chọn kênh đầu chỉ được chạy ĐÚNG MỘT lần trong đời app.
+   *
+   * ⚠️ ĐO ĐƯỢC: bản đầu của effect không có cờ này, nên mỗi lần `sources.data` đổi (sau khi
+   * XOÁ một kênh, sau khi `napTep` đọc lại danh sách) nó thấy `channelId === null` trong một
+   * nhịp và giành lại quyền chọn — cướp lựa chọn vừa rồi của người dùng. Bốn bài của
+   * `App.test.tsx` đỏ vì đúng lý do đó, và chúng đúng: một effect "cho chắc" không được phép
+   * ghi đè một cú bấm.
+   */
+  const daTuChon = useRef(false);
+
+  useEffect(() => {
+    if (daTuChon.current) return;
+    // ⚠️ CHỈ ở màn CẦN kênh. Màn Biên tập ở trạng thái rỗng LÀ khung nạp tệp (`IntakeFrame`,
+    // `EditScreen.tsx:440` chỉ render nó khi `transcript === null`); tự chọn kênh ở đó làm khung
+    // nạp tệp BIẾN MẤT, tức lấy đi đường nạp duy nhất của màn. Đo được: hai bài W2 của
+    // `App.test.tsx` đỏ vì `[data-testid="nap-o-tep"]` không còn trong DOM.
+    // Đối chiếu và Lồng tiếng thì NGƯỢC LẠI: chúng chỉ đọc, nên chưa chọn kênh = một trang trắng
+    // trỏ vào việc không bấm được.
+    if (ui.mode === "edit") return;
+    if (ui.channelId !== null) { daTuChon.current = true; return; }
+    const kenhDau = sources.data?.[0];
+    if (kenhDau === undefined) return;
+    daTuChon.current = true;
+    dispatch({ type: "selectChannel", id: kenhDau.id });
+  }, [ui.mode, ui.channelId, sources.data]);
+
   const kenhDangChon = sources.data?.find((source) => source.id === ui.channelId) ?? null;
 
   return (
@@ -1522,10 +1563,12 @@ function dubJobCuaBan(id: number | null): Job | null {
                của chính bản dịch. Mỗi màn một việc. */
             <LongTiengScreen
               sourceId={ui.channelId}
-              sources={sources.data ?? []}
+              /* ⚠️ KHÔNG truyền `sources`/`onChonNguon`: cột kênh là của SHELL, và màn này không
+                 được vẽ bản sao thứ hai. Kênh chỉ đi xuống qua `sourceId` — thêm lại hai prop đó
+                 là lại có hai trạng thái chọn cho cùng một câu "kênh nào đang mở". */
               translations={translations.data ?? []}
+              dangDocBanDich={translations.loading}
               macDinhId={banDangXemId}
-              onChonNguon={(id) => dispatch({ type: "selectChannel", id })}
               onChonBanDich={chonBanDich}
               dubJob={dubJobCuaBan(banDangXemId)}
               onLongTieng={(voice) => { if (banDangXemId !== null) void longTieng(banDangXemId, voice); }}

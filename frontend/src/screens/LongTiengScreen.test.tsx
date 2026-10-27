@@ -123,10 +123,8 @@ function jobDub(id: number, state: Job["state"], opts: {
 function props(thayDoi: Record<string, unknown> = {}): Record<string, unknown> {
   return {
     sourceId: 1,
-    sources: [nguon(1, "kenh-mot.wav")],
     translations: [banDich(11, DOAN)],
     macDinhId: 11,
-    onChonNguon: () => {},
     onChonBanDich: () => {},
     dubJob: null,
     onLongTieng: () => {},
@@ -205,16 +203,21 @@ describe("LongTiengScreen", () => {
   });
 
   // -------------------------------------------------------------------------
-  // TẦNG 1 — HÌNH DẠNG CƠ BẢN: ba tầng của demo phải có mặt
+  // HÌNH DẠNG CƠ BẢN: HAI tầng — dải chọn bản dịch, rồi bảng dòng
   // -------------------------------------------------------------------------
 
-  it("BA TẦNG: cột kênh, dải chọn bản dịch, và bảng dòng — câu của BẢN DỊCH, không phải bản gốc", async () => {
+  it("HAI TẦNG: dải chọn bản dịch + bảng dòng, và KHÔNG có cột kênh thứ hai", async () => {
     const { container, unmount } = render(taoPhanTu(LongTiengScreen, props()));
 
     assert.ok(co(container, '[data-testid="lt-man"]'), "màn phải có gốc `lt-man`");
-    assert.ok(co(container, '[data-testid="lt-nguon-1"]'), "cột kênh phải có nguồn của fixture");
-    assert.equal(chu(container, '[data-testid="lt-nguon-1"]').includes("kenh-mot.wav"), true,
-      "nút kênh phải nói TÊN nguồn");
+    // ⚠️ ĐO ĐƯỢC trên ảnh chụp app thật: bản đầu vẽ lại danh sách kênh NGAY TRONG màn này trong
+    // khi shell đã có cột kênh bên trái — mỗi tệp hiện hai lần, và hai bản sao có hai trạng thái
+    // chọn riêng. Kênh do shell chọn và chỉ đi xuống qua `sourceId`, nên bài này ghim sự VẮNG
+    // MẶT đó, không chỉ sự có mặt của hai tầng còn lại.
+    assert.equal(co(container, ".lt__kenh"), false,
+      "KHÔNG được có cột kênh trong màn: shell đã có, và hai bản sao là hai trạng thái chọn");
+    assert.equal(co(container, ".lt__nguon"), false,
+      "KHÔNG được có nút kênh trong màn: kênh do shell chọn");
 
     assert.ok(co(container, '[data-testid="lt-bans"]'), "phải có dải chọn bản dịch");
     assert.equal(chu(container, '[data-testid="lt-ban-11"]').includes("bản dịch #11"), true,
@@ -295,8 +298,8 @@ describe("LongTiengScreen", () => {
       // "chọn một bản dịch để lồng tiếng" cả khi CHƯA CHỌN KÊNH — sai việc phải làm, vì việc
       // đầu tiên là chọn KÊNH ở cột trái. Ba nguyên nhân ⇒ ba câu.
       const { container: chuaKenh, unmount: go2 } = render(taoPhanTu(LongTiengScreen, {
-        sourceId: null, sources: [nguon(1, "kenh-mot.wav")], translations: [],
-        macDinhId: null, onChonNguon: () => {}, dubJob: null,
+        sourceId: null, translations: [],
+        macDinhId: null, dubJob: null,
         onLongTieng: () => {}, onHuy: () => {}, loiLongTieng: null,
       }));
       await waitFor(
@@ -321,6 +324,28 @@ describe("LongTiengScreen", () => {
   // -------------------------------------------------------------------------
   // TẦNG 3 — BỐN TRẠNG THÁI CỦA JOB, và đường HUỶ
   // -------------------------------------------------------------------------
+
+  it("ĐANG ĐỌC: `translations` chưa về KHÔNG được nói thành `không có bản dịch`", async () => {
+    // ⚠️ ĐO ĐƯỢC trên ảnh chụp app thật: trang vừa tải lại thì `translations` CHƯA VỀ, và màn
+    // nói "kênh này chưa có bản dịch" — trong khi chính kênh đó có bản dịch #10 với 434 dòng.
+    // "Chưa đọc xong" và "đọc xong, không có" là hai sự thật khác nhau. Đây là `null ≠ 0` áp
+    // cho quyền sở hữu: chưa biết KHÔNG được nói thành không có.
+    const { container, unmount } = render(taoPhanTu(LongTiengScreen, {
+      sourceId: 1, translations: [], dangDocBanDich: true, macDinhId: null,
+      onChonBanDich: () => {}, dubJob: null, onLongTieng: () => {}, onHuy: () => {},
+      loiLongTieng: null,
+    }));
+    await waitFor(
+      () => { assert.ok(co(container, '[data-testid="lt-chua-do"]'), "phải nói ra một trạng thái"); },
+      { timeout: 4000, interval: 20 },
+    );
+    const cau = chu(container, '[data-testid="lt-chua-do"]');
+    assert.match(cau, /đang đọc bản dịch/,
+      `đang tải ⇒ câu phải nói ĐANG ĐỌC; đo được ${JSON.stringify(cau)}`);
+    assert.doesNotMatch(cau, /chưa có bản dịch/,
+      `đang tải KHÔNG được khẳng định "chưa có"; đo được ${JSON.stringify(cau)}`);
+    unmount();
+  });
 
   it("JOB: bốn trạng thái nói bằng chữ, đang chạy có nút HUỶ, và lỗi nằm gọn trong `<details>`", async () => {
     // (1) CHƯA LỒNG: ô giọng + nút có mặt.
@@ -412,8 +437,8 @@ describe("LongTiengScreen", () => {
     const banA = banDich(11, DOAN);
     const banB = banDich(77, [doan(0, 0, 1.0, "câu của kênh B")]);
     const gocProps = {
-      sourceId: 1, sources: [nguon(1, "a.wav"), nguon(2, "b.wav")],
-      onChonNguon: () => {}, dubJob: null, onLongTieng: () => {}, onHuy: () => {},
+      sourceId: 1,
+      dubJob: null, onLongTieng: () => {}, onHuy: () => {},
       loiLongTieng: null,
     };
 
@@ -607,8 +632,8 @@ describe("LongTiengScreen", () => {
 
     // (6) chưa chọn kênh: `lt__rong`, `lt__rong--giua`.
     const rong = render(taoPhanTu(LongTiengScreen, {
-      sourceId: null, sources: [], translations: [], macDinhId: null,
-      onChonNguon: () => {}, dubJob: null, onLongTieng: () => {}, onHuy: () => {},
+      sourceId: null, translations: [], macDinhId: null,
+      dubJob: null, onLongTieng: () => {}, onHuy: () => {},
       loiLongTieng: null,
     }));
     gomLop(rong.container);

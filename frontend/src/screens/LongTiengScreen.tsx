@@ -28,18 +28,31 @@
 import { Fragment, useEffect, useState } from "react";
 
 import { dubTakeUrl, endpoints } from "../api/endpoints.ts";
-import type { DubPlan, DubPlanRow, Job, Source, TranslationDetail } from "../api/types.ts";
+import type { DubPlan, DubPlanRow, Job, TranslationDetail } from "../api/types.ts";
 
 interface Props {
   /** Kênh đang chọn; `null` = chưa chọn (trạng thái THẬT khi mới mở app). */
   sourceId: number | null;
-  /** Mọi nguồn — cột KÊNH. Chỉ hiện nguồn ĐÃ có bản dịch (xem `coBanDich`). */
-  sources: Source[];
-  /** Bản dịch của bản ghi đang mở, ĐÃ kèm `segments`. */
+  /**
+   * Mọi bản dịch của bản ghi đang mở, ĐÃ kèm `segments`.
+   *
+   * ⚠️ KHÔNG có `sources`/`onChonNguon` ở đây. Bản đầu nhận cả hai để tự vẽ một cột KÊNH — nhưng
+   * shell đã có cột đó, nên mỗi tệp hiện hai lần với hai trạng thái chọn riêng. Kênh do shell
+   * chọn và chỉ đi xuống qua `sourceId`; `sources` đã bị XOÁ khỏi props thay vì để nguyên một
+   * tham số không ai đọc.
+   */
   translations: TranslationDetail[];
+  /**
+   * `translations` còn ĐANG TẢI (`useApi(...).loading`).
+   *
+   * ⚠️ Phải phân biệt "chưa đọc xong" với "đọc xong và không có gì": ĐO ĐƯỢC trên ảnh chụp app
+   * thật — trang vừa tải lại, `translations` chưa về, và màn nói "chưa có bản dịch nào cho kênh
+   * này" trong khi kênh đó có bản dịch #10 với 434 dòng. Đó là `null ≠ 0` áp cho quyền sở hữu:
+   * chưa biết KHÔNG được nói thành không có.
+   */
+  dangDocBanDich?: boolean;
   /** Bản dịch đang xem — quyết định của `App` (một chỗ trả lời), như màn Đối chiếu. */
   macDinhId?: number | null;
-  onChonNguon: (id: number) => void;
   onChonBanDich?: (id: number) => void;
   /** Job `dub` đang SỐNG của bản dịch đang chọn (`queued`/`running`/`done`), `null` = chưa lồng. */
   dubJob?: Job | null;
@@ -68,8 +81,8 @@ const NHAN_TRANG_THAI: Record<DubPlanRow["trang_thai"], string> = {
 };
 
 export function LongTiengScreen({
-  sourceId, sources, translations, macDinhId = null,
-  onChonNguon, onChonBanDich, dubJob = null, onLongTieng, onHuy, loiLongTieng = null,
+  sourceId, translations, dangDocBanDich = false, macDinhId = null,
+  onChonBanDich, dubJob = null, onLongTieng, onHuy, loiLongTieng = null,
 }: Props) {
   // Bản dịch đang xem: lựa chọn của NGƯỜI DÙNG trước, rồi `macDinhId` của App, rồi hàng đầu.
   /**
@@ -127,30 +140,15 @@ export function LongTiengScreen({
 
   return (
     <div className="lt" data-testid="lt-man">
-      {/* ── TẦNG 1: cột KÊNH ─────────────────────────────────────────────────────── */}
-      <section className="lt__kenh" aria-label="kênh đã dịch">
-        <div className="lt__dau">
-          <span className="nhan">Kênh</span>
-          <span className="lt__dem">{sources.length}</span>
-        </div>
-        {sources.length === 0 ? (
-          <p className="lt__rong">chưa có kênh nào — nạp một tệp ở màn Biên tập</p>
-        ) : (
-          sources.map((s) => (
-            <button key={s.id} type="button"
-              className={s.id === sourceId ? "lt__nguon is-chon" : "lt__nguon"}
-              aria-pressed={s.id === sourceId}
-              data-testid={`lt-nguon-${s.id}`}
-              onClick={() => onChonNguon(s.id)}>
-              <span className="lt__nguon-ten">{s.origin}</span>
-              <span className="lt__nguon-meta">
-                {s.kind} · {s.lang ?? "chưa rõ ngôn ngữ"} · {s.duration === null ? "chưa đo" : `${Math.round(s.duration)}s`}
-              </span>
-            </button>
-          ))
-        )}
-      </section>
+      {/* ⚠️ KHÔNG có cột KÊNH ở đây. Bản đầu chép nguyên ba tầng của demo và vẽ lại danh sách
+          kênh NGAY TRONG màn này — nhưng shell ĐÃ có cột kênh bên trái, nên mỗi tệp hiện HAI lần
+          cách nhau một đường kẻ, và hai bản sao có hai trạng thái chọn riêng (`is-chon` của shell
+          và `is-chon` của `.lt__nguon`) — nguồn sự thật thứ hai, đúng lớp lỗi `I2`. Đo được trên
+          ảnh chụp app thật: `BV1BfBFB4Ebh_audio-Vocal.mp3` nằm ở cả hai cột.
+          Demo tự vẽ cột kênh vì nó là một trang đứng một mình; app này thì không. Kênh do shell
+          chọn và truyền xuống qua `sourceId` — MỘT câu trả lời. */}
 
+      {/* ── HAI tầng còn lại: dải thời gian, rồi bảng dòng ────────────────────────── */}
       {/* ── TẦNG 2 + 3: dải thời gian, rồi bảng dòng ─────────────────────────────── */}
       <section className="lt__giua" aria-label="kế hoạch lồng tiếng">
         <div className="lt__thanh">
@@ -236,13 +234,14 @@ export function LongTiengScreen({
           <p className="lt__chua-do" data-testid="lt-chua-do">
             {dangDocPlan ? "đang đọc số đo…"
               : loiPlan !== null ? `không đọc được số đo: ${loiPlan}`
-                // ⚠️ BA câu KHÁC NHAU, vì ba nguyên nhân khác nhau. Đo được trên app thật: bản
-                // đầu nói "chọn một bản dịch để lồng tiếng" cả khi CHƯA CHỌN KÊNH — câu đó chỉ
-                // đúng khi đã có kênh mà kênh chưa có bản dịch. Chưa chọn kênh thì việc phải
-                // làm là chọn KÊNH, ở cột bên trái.
+                // ⚠️ BỐN câu, không phải ba. ĐO ĐƯỢC trên ảnh chụp app thật: trang vừa tải lại
+                // thì `translations` CHƯA VỀ, và màn nói "kênh này chưa có bản dịch" trong khi
+                // kênh đó có bản dịch #10 với 434 dòng. "Chưa đọc xong" và "đọc xong, không có"
+                // là hai sự thật khác nhau — `null ≠ 0` áp cho quyền sở hữu, không chỉ cho số.
                 : sourceId === null ? "chọn một kênh ở cột bên trái"
-                  : chon === null ? "kênh này chưa có bản dịch — tạo một bản ở màn Đối chiếu"
-                    : "chưa lồng lần nào — bấm “lồng tiếng” để có số đo từng dòng"}
+                  : dangDocBanDich ? "đang đọc bản dịch…"
+                    : chon === null ? "kênh này chưa có bản dịch — tạo một bản ở màn Đối chiếu"
+                      : "chưa lồng lần nào — bấm “lồng tiếng” để có số đo từng dòng"}
           </p>
         ) : (
           <>

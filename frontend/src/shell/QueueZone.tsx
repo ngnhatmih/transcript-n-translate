@@ -92,11 +92,25 @@ export function lyDoCho(job: Job): string {
   }
 }
 
-/** Job đang chạy lên trước, rồi tới job chờ, rồi tới phần còn lại — trong nhóm thì theo id. */
+/**
+ * Thứ tự trong panel: đang chạy → đang chờ → XONG → hỏng.
+ *
+ * ⚠️ ĐO ĐƯỢC trên app thật (`_shots/tab-long-tieng-5.png`): bản trước chỉ có BA nhóm
+ * (`running` 0, `queued` 1, còn lại 2), nên `failed` và `done` rơi CÙNG nhóm và sắp theo
+ * `a.id - b.id` TĂNG dần — job cũ hơn lên trước. Kết quả: job `dub` #21 đã chết từ hôm trước
+ * (lỗi `TTS không chạy được (/app/.venv-tts/Scripts/python.exe)`, kèm dãy số rác đọc từ
+ * `/proc/1/stat`) nằm NGAY TRÊN job #22 vừa `xong 100%`. Người dùng đọc lỗi cũ trước khi thấy
+ * thành công mới, và tưởng tính năng vẫn hỏng.
+ *
+ * Nay `done` đứng TRƯỚC `failed`/`interrupted`/`cancelled`: việc đã xong là thứ người dùng
+ * cần thấy. Việc hỏng KHÔNG bị giấu — chỉ nằm dưới. Trong cùng nhóm vẫn theo `id` TĂNG dần,
+ * nên thứ tự cũ trong nhóm không đổi.
+ */
 function thuTu(job: Job): number {
   if (job.state === "running") return 0;
   if (job.state === "queued") return 1;
-  return 2;
+  if (job.state === "done") return 2;
+  return 3;
 }
 
 /** Job này có được phép HUỶ không — `queued` bị huỷ ngay, `running` chỉ được đặt cờ (hợp đồng §2). */

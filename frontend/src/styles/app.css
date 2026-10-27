@@ -2645,82 +2645,19 @@ body {
    (amber) chỉ có MỘT nghĩa ở đây — "take dài hơn chỗ", tức dòng phải sửa. Mọi con số dùng
    `--font-mono`. */
 .lt {
-  display: grid;
-  grid-template-columns: var(--col-channels) 1fr;
+  display: flex;
+  flex-direction: column;
   height: 100%;
   min-height: 0;
   background: var(--panel-0);
 }
 
-/* ── TẦNG 1: cột KÊNH ──────────────────────────────────────────────────────────────── */
-.lt__kenh {
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-1);
-  min-height: 0;
-  overflow-y: auto;
-  padding: var(--sp-2);
-  border-right: var(--rule-w) solid var(--rule);
-  background: var(--panel-1);
-}
-
-.lt__dau {
-  display: flex;
-  align-items: baseline;
-  gap: var(--sp-2);
-  padding: 0 var(--sp-1) var(--sp-1);
-  border-bottom: var(--rule-w) solid var(--rule);
-}
-
-.lt__dem {
-  margin-left: auto;
-  font-family: var(--font-mono);
-  font-size: var(--fs-num);
-  color: var(--ink-2);
-}
-
-/* Một kênh = một nút. `is-chon` đổi NỀN CẢ HÀNG, không chỉ đổi màu chữ: chỉ-màu là tín hiệu
-   không đọc được bằng mắt kém, và spec UI §7 đòi thông tin không nằm riêng ở màu. */
-.lt__nguon {
-  appearance: none;
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-  width: 100%;
-  text-align: left;
-  padding: var(--sp-2);
-  background: transparent;
-  color: var(--ink-1);
-  border: var(--rule-w) solid transparent;
-  border-radius: var(--radius);
-  cursor: pointer;
-  font: inherit;
-  transition: background var(--dur-1) var(--ease-1), border-color var(--dur-1) var(--ease-1);
-}
-
-.lt__nguon:hover {
-  background: var(--panel-2);
-  border-color: var(--rule);
-}
-
-.lt__nguon.is-chon {
-  background: var(--panel-2);
-  border-color: var(--rule);
-  color: var(--ink-0);
-}
-
-.lt__nguon-ten {
-  font-size: var(--fs-ui);
-  color: var(--ink-0);
-  overflow-wrap: anywhere;
-}
-
-.lt__nguon-meta {
-  font-family: var(--font-mono);
-  font-size: var(--fs-label);
-  color: var(--ink-2);
-}
-
+/* ── MỘT CỘT ─────────────────────────────────────────────────────────────────────────
+   ⚠️ Bản đầu là `grid-template-columns: var(--col-channels) 1fr` với một cột KÊNH riêng —
+   nhưng shell ĐÃ có cột kênh bên trái, nên mỗi tệp hiện hai lần và hai bản sao có hai trạng
+   thái chọn riêng (`is-chon` của shell và của nút kênh trong màn). Đo được trên ảnh chụp thật:
+   `BV1BfBFB4Ebh_audio-Vocal.mp3` nằm ở cả hai cột. Kênh do shell chọn; màn này chỉ còn phần
+   việc RIÊNG của nó. Xem `LongTiengScreen.tsx` chỗ khối `sources` từng nằm. */
 /* ── VÙNG GIỮA ─────────────────────────────────────────────────────────────────────── */
 .lt__giua {
   display: flex;
@@ -3130,23 +3067,10 @@ body {
   color: var(--signal);
 }
 
-/* Hẹp: cột kênh về 0 và danh sách kênh thành một hàng ngang — luật `md` của skill taste
-   (`w-full`, không tràn ngang) áp cho bố cục hai cột này. */
+/* Hẹp: màn này vốn đã MỘT cột (xem khối `.lt` ở trên), nên hẹp không phải bẻ lại bố cục —
+   chỉ cần cho bảng cuộn ngang thay vì bóp chữ thành cột dọc. */
 @media (max-width: 900px) {
-  .lt {
-    grid-template-columns: 1fr;
-    grid-template-rows: auto 1fr;
-  }
-
-  .lt__kenh {
-    flex-direction: row;
-    overflow-x: auto;
-    overflow-y: hidden;
-    border-right: 0;
-    border-bottom: var(--rule-w) solid var(--rule);
-  }
-
-  .lt__nguon {
-    min-width: 160px;
+  .lt__bang {
+    min-width: 520px;
   }
 }
