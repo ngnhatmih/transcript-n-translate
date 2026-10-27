@@ -48,12 +48,37 @@ RUN pip install --no-cache-dir --timeout 120 \
 # `RuntimeError: TTS không chạy được (/app/.venv-tts/Scripts/python.exe)`.
 # Nay venv được DỰNG TRONG IMAGE bằng pip Linux, và `PHUDE_TTS_PYTHON` (ở `ENV` dưới) chỉ vào nó.
 #
-# `--extra-index-url` KHÔNG dùng ở đây: `vieneu` mặc định chỉ cần `onnxruntime`, KHÔNG cần
-# torch (các extra `legacy`/`cuda` mới cần). Giữ đường mặc định để image không phình thêm ~2 GB.
+# ⚠️ VÌ SAO KHÔNG CÒN `--extra-index-url` Ở ĐÂY NỮA — và đây là một lần ĐỔI Ý có đo:
+# Bản trước cố ý cài `vieneu` KHÔNG kèm torch (extra `cuda` kéo `torch==2.8.0` + bộ CUDA 12.8
+# ~3,5 GB) để image gọn. Nhưng đo được rằng `v3turbo.py:161-169` chọn đường bằng
+# `torch.cuda.is_available()`: KHÔNG có torch trong venv này ⇒ rơi vào ONNX/CPU. Hệ quả đo trên
+# chính máy này: 6 dòng mất 64 giây, cả file 434 dòng (803,8 giây audio) ước ~12 phút.
+#
+# Số của tác giả (README §4, RTX 3060): CPU fp32 RTF 0,55–0,62 · GPU batched RTF 0,011–0,02
+# ⇒ nhanh 25–50×. Với 434 dòng: ~12 phút → ~20 giây.
+#
+# ⚠️ VÌ SAO `2.5.1+cu121` CHỨ KHÔNG PHẢI `2.8.0` NHƯ EXTRA `cuda` PIN:
+# (a) `2.5.1+cu121` ĐÃ có trong image cho venv app (dòng `torch==2.5.1` ở trên), cùng bộ
+#     `nvidia-* 12.1` (2,7 GB) — cài bản 12.8 sẽ kéo THÊM bộ CUDA thứ hai song song.
+# (b) Đọc mã `_v3_turbo_engine/`, nó chỉ dùng API có từ torch 2.0: `as_tensor`,
+#     `from_numpy`, `full`, `stack`, `no_grad`, `scaled_dot_product_attention`. Không có
+#     `torch.compile`, không `GradScaler` — nên `2.5.1` là đủ, và điều đó ĐO ĐƯỢC bằng cách
+#     chạy thật, không phải suy từ số phiên bản.
+# (c) `--index-url` (không phải `--extra-index-url`) cho đúng lượt cài này: chỉ hỏi host đó.
+#
+# ⚠️ VẪN LÀ VENV RIÊNG: `vieneu` kéo `huggingface_hub 2.x` + `tokenizers 0.23`, còn
+# `transformers 4.46` của app đòi `huggingface_hub <1.0` + `tokenizers <0.21`. ĐO ĐƯỢC:
+# bật `include-system-site-packages = true` cho venv này thì `import vieneu` ném
+# `ImportError: tokenizers>=0.20,<0.21 is required ... found tokenizers==0.23.3`. Nên hai venv
+# phải CÔ LẬP, và torch phải cài RIÊNG vào đây dù bản sao đã có bên venv app.
 RUN python -m venv /opt/venv-tts \
  && /opt/venv-tts/bin/pip install --no-cache-dir --timeout 180 --upgrade pip \
+ && /opt/venv-tts/bin/pip install --no-cache-dir --timeout 300 \
+        --index-url https://download.pytorch.org/whl/cu121 \
+        torch==2.5.1+cu121 torchaudio==2.5.1+cu121 \
  && /opt/venv-tts/bin/pip install --no-cache-dir --timeout 180 \
-        vieneu==3.8.3 soundfile
+        vieneu==3.8.3 soundfile \
+        'transformers>=4.46,<5' safetensors
 
 COPY . .
 

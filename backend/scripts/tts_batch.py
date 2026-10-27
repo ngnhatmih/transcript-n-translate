@@ -27,17 +27,49 @@ def main(viec: pathlib.Path) -> int:
     tts = Vieneu()
     giong = yeu_cau.get("voice")
     ok, loi = [], []
-    for item in yeu_cau["items"]:
-        dich = out_dir / f"{item['i']:05d}.wav"
-        try:
-            audio = tts.infer(item["text"], voice=giong) if giong else tts.infer(item["text"])
-            tts.save(audio, str(dich))
-            import soundfile as sf
+    # ── BATCH, KHÔNG TỪNG CÂU ───────────────────────────────────────────────────────────────
+    # ⚠️ ĐO ĐƯỢC trên RTX 3070 với chính model này (100 câu, 475,0 giây tiếng):
+    #   `infer_batch(batch_size=16)` → 9,36 s  ⇒ RTF **0,020**
+    #   `infer` từng câu (30 câu)    → 18,2 s  ⇒ RTF **0,132**
+    # Tức gọi từng câu CHẬM HƠN 6,7 LẦN so với batch, vì mỗi lượt `infer` trả giá khởi động
+    # graph/kernel riêng. Với cả file 434 dòng (803,8 s audio): batch ≈ 0,26 phút, từng câu
+    # ≈ 1,77 phút. Vòng lặp từng câu cũ bỏ phí đúng khoản đó.
+    #
+    # ⚠️ VÌ SAO VẪN PHẢI GIỮ CÁCH LY LỖI TỪNG DÒNG: hợp đồng với `dub.py` là mỗi dòng hỏng
+    # được báo riêng trong `loi`, không làm hỏng cả lượt. `infer_batch` ném cho CẢ LÔ, nên khi
+    # một lô ném ta quay lại gọi từng câu trong lô đó — chậm cho lô hỏng, nhưng đúng hợp đồng
+    # và không mất dòng nào.
+    import soundfile as sf
 
-            du_lieu, sr = sf.read(str(dich))
-            ok.append({"i": item["i"], "seconds": len(du_lieu) / sr, "path": str(dich)})
-        except Exception as exc:  # noqa: BLE001 - một dòng hỏng không làm hỏng cả lượt
-            loi.append({"i": item["i"], "error": f"{type(exc).__name__}: {exc}"[:300]})
+    LO = 16
+
+    def _luu(i: int, audio) -> dict:
+        dich = out_dir / f"{i:05d}.wav"
+        tts.save(audio, str(dich))
+        du_lieu, sr = sf.read(str(dich))
+        return {"i": i, "seconds": len(du_lieu) / sr, "path": str(dich)}
+
+    items = yeu_cau["items"]
+    for dau in range(0, len(items), LO):
+        lo = items[dau:dau + LO]
+        try:
+            am = tts.infer_batch([x["text"] for x in lo], voice=giong, batch_size=LO)
+        except Exception:  # noqa: BLE001
+            # Lô hỏng ⇒ rơi về từng câu để biết CHÍNH XÁC dòng nào hỏng và vì sao.
+            am = None
+        if am is not None and len(am) == len(lo):
+            for item, audio in zip(lo, am):
+                try:
+                    ok.append(_luu(item["i"], audio))
+                except Exception as exc:  # noqa: BLE001
+                    loi.append({"i": item["i"], "error": f"{type(exc).__name__}: {exc}"[:300]})
+            continue
+        for item in lo:
+            try:
+                audio = tts.infer(item["text"], voice=giong) if giong else tts.infer(item["text"])
+                ok.append(_luu(item["i"], audio))
+            except Exception as exc:  # noqa: BLE001 - một dòng hỏng không làm hỏng cả lượt
+                loi.append({"i": item["i"], "error": f"{type(exc).__name__}: {exc}"[:300]})
 
     ra = pathlib.Path(yeu_cau["result"])
     ra.write_text(json.dumps({"ok": ok, "loi": loi}, ensure_ascii=False), encoding="utf-8")
