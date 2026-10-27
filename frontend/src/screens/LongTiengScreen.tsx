@@ -25,7 +25,7 @@
  * ⚠️ `plan === null` KHÁC "không có bản dịch" (lỗi HTTP) và KHÁC một kế hoạch rỗng: màn này nói
  * ba câu khác nhau, và câu "chưa có số đo" KHÔNG được kèm một con số bịa.
  */
-import { Fragment, useEffect, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 
 import { dubTakeUrl, endpoints } from "../api/endpoints.ts";
 import type { DubPlan, DubPlanRow, Job, TranslationDetail } from "../api/types.ts";
@@ -108,7 +108,128 @@ export function LongTiengScreen({
   const [dangDocPlan, datDangDocPlan] = useState(false);
   const [loiPlan, datLoiPlan] = useState<string | null>(null);
   const [moDong, datMoDong] = useState<number | null>(null);
-  const [dangNghe, datDangNghe] = useState<number | null>(null);
+  /**
+   * DÒNG ĐANG PHÁT (`null` = không phát), và câu lỗi phát của dòng đã sinh ra nó.
+   *
+   * ⚠️ BA LỖI ĐO ĐƯỢC, ghi lại vì mỗi lỗi đã từng là một bản sai:
+   *
+   * (1) Nút cũ là `<a href=… download>`, nên bấm vào là trình duyệt TẢI tệp wav — không có âm
+   *     thanh nào phát ra trên trang. Đó không phải "nghe thử".
+   *
+   * (2) Bản kế tiếp dùng `<audio src=…>` + `play()`. Trên app thật nó KHÔNG BAO GIỜ phát:
+   *     `readyState: 0`, `networkState: 2` (LOADING), `duration: null`, `currentTime: 0`, và
+   *     Resource Timing RỖNG — chưa từng có request. Nguyên nhân thật là route trả
+   *     `Content-Disposition: attachment` (sửa ở backend) VÀ, sau khi sửa header, phần tử
+   *     `<audio>` của chính Chrome trong phiên này vẫn treo: WAV dựng trong bộ nhớ (blob URL,
+   *     không mạng, không server) cũng `loadstart → stalled`. `canPlayType('audio/wav')` trả
+   *     `"maybe"`, và `decodeAudioData` trên ĐÚNG tệp đó trả `ok · 48000 Hz · 2.56 s · 1 kênh`
+   *     — nên tệp và bộ giải mã đều tốt, chỉ phần tử media là không khởi tạo được.
+   *
+   * (3) Vì (2), đường phát dùng **WebAudio**: `fetch` lấy byte → `decodeAudioData` →
+   *     `AudioBufferSourceNode.start()`. Đây là API đã đo được `ok: 1` trên chính tệp này, và
+   *     nó không phụ thuộc phần tử media. `AudioContext` đo được `state: "running"`, 48 kHz.
+   */
+  const [dangPhat, datDangPhat] = useState<number | null>(null);
+  const [loiNghe, datLoiNghe] = useState<string | null>(null);
+  /** Dòng đã sinh ra lỗi phát gần nhất — để câu lỗi không hiện ở MỌI dòng cùng lúc. */
+  const loiNgheTheoDong = useRef<number | null>(null);
+  /** Nguồn đang kêu. `stop()` nó là cách DUY NHẤT dừng một `AudioBufferSourceNode`. */
+  const nguonDangKeu = useRef<AudioBufferSourceNode | null>(null);
+  /** `AudioContext` tạo một lần cho cả màn; tạo mỗi lần bấm là rò rỉ tài nguyên âm thanh. */
+  const ctxAm = useRef<AudioContext | null>(null);
+
+  /** Dừng tiếng đang kêu (nếu có) và quên nó đi. An toàn khi gọi nhiều lần. */
+  function dungTieng() {
+    const n = nguonDangKeu.current;
+    nguonDangKeu.current = null;
+    if (n === null) return;
+    try {
+      n.onended = null;
+      n.stop();
+    } catch {
+      // `stop()` trên nguồn đã dừng ném `InvalidStateError`; nuốt nó là ĐÚNG — mục đích là
+      // "không còn kêu", và nó đã không còn kêu.
+    }
+  }
+
+  /**
+   * Phát / dừng take của MỘT dòng, ngay trên trang.
+   *
+   * Ba điều hàm này phải làm đúng:
+   *   1. Bấm cùng một dòng lần hai ⇒ DỪNG, không tải lại tệp.
+   *   2. Bấm dòng KHÁC ⇒ dòng cũ dừng hẳn TRƯỚC khi dòng mới bắt đầu.
+   *   3. Lỗi (404, wav hỏng, trình duyệt chặn) phải HIỆN RA ở đúng dòng, không im lặng.
+   */
+  function ngheThu(i: number) {
+    datLoiNghe(null);
+    if (dangPhat === i) {
+      dungTieng();
+      datDangPhat(null);
+      return;
+    }
+    // KHÔNG gọi `dungTieng()` ở đây: `phatDong` đã gọi nó NGAY TRƯỚC `start()`, và đo được rằng
+    // bỏ dòng này không đổi hành vi nào (mutant SỐNG, `pass 10 / fail 0`) — nó chỉ là một khai
+    // báo chết. Chỗ thật sự bảo vệ "không phát chồng" là `dungTieng()` trong `phatDong`, và
+    // mutant xoá ĐÚNG chỗ đó thì chết (xem bài NGHE THỬ vế 4).
+    loiNgheTheoDong.current = i;
+    datDangPhat(i);
+    void phatDong(i);
+  }
+
+  /** Nạp và phát take của dòng `i`. Tách khỏi `ngheThu` để phần đồng bộ chỉ còn trạng thái. */
+  async function phatDong(i: number) {
+    const baoLoi = (cau: string) => {
+      loiNgheTheoDong.current = i;
+      datLoiNghe(cau);
+      datDangPhat(null);
+    };
+    try {
+      const Ctx = window.AudioContext
+        ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+      if (Ctx === undefined) {
+        baoLoi("trình duyệt này không có WebAudio — không phát tại chỗ được");
+        return;
+      }
+      const ctx = (ctxAm.current ??= new Ctx());
+      // Trình duyệt có thể để `context` ở trạng thái `suspended` cho tới một cú bấm; cú bấm
+      // CHÍNH LÀ hành động người dùng cần, nên `resume()` ở đây hợp lệ và cần thiết.
+      if (ctx.state === "suspended") await ctx.resume();
+
+      const resp = await fetch(dubTakeUrl(chon!.id, i));
+      if (!resp.ok) {
+        baoLoi(`không tải được take của dòng ${i + 1} (HTTP ${resp.status})`);
+        return;
+      }
+      const byte = await resp.arrayBuffer();
+      const buffer = await ctx.decodeAudioData(byte);
+      // Đổi dòng trong lúc đang nạp: cú bấm sau đã thắng, đừng phát chồng.
+      if (loiNgheTheoDong.current !== i) return;
+      dungTieng();
+      const nguon = ctx.createBufferSource();
+      nguon.buffer = buffer;
+      nguon.connect(ctx.destination);
+      nguon.onended = () => {
+        // `onended` bắn cả khi ta chủ động `stop()`; chỉ hạ trạng thái nếu ĐÚNG nguồn này còn
+        // là nguồn đang kêu, nếu không ta sẽ xoá trạng thái của một lượt phát mới hơn.
+        if (nguonDangKeu.current === nguon) {
+          nguonDangKeu.current = null;
+          datDangPhat(null);
+        }
+      };
+      nguonDangKeu.current = nguon;
+      nguon.start();
+    } catch (e) {
+      baoLoi(`không phát được take này (${e instanceof Error ? e.name : "lỗi lạ"})`);
+    }
+  }
+
+  // Rời màn thì dừng tiếng và đóng context — không để âm thanh sống ngoài vòng đời component.
+  useEffect(() => () => {
+    dungTieng();
+    const ctx = ctxAm.current;
+    ctxAm.current = null;
+    if (ctx !== null) void ctx.close();
+  }, []);
 
   // Kế hoạch đọc lại khi ĐỔI BẢN DỊCH và khi job vừa XONG (đó là lúc tệp kế hoạch mới ra đời).
   // `dubJob?.state` nằm trong deps vì một job `done` là tín hiệu DUY NHẤT cho biết có số mới.
@@ -341,13 +462,15 @@ export function LongTiengScreen({
                                       ? ` · nén tới trần vẫn thiếu ${giay(kh.take / kh.speed - kh.avail)}`
                                       : ""}
                                   </span>
-                                  <a className="lt__nut-nho" data-testid={`lt-nghe-${s.i}`}
-                                    href={dubTakeUrl(chon.id, s.i)} download
-                                    onClick={() => datDangNghe(s.i)}>
-                                    nghe take
-                                  </a>
-                                  {dangNghe === s.i ? (
-                                    <span className="lt__dang-nghe">đang tải take…</span>
+                                  <button type="button"
+                                    className="lt__nut-nho"
+                                    data-testid={`lt-nghe-${s.i}`}
+                                    data-dang-phat={dangPhat === s.i ? "1" : "0"}
+                                    onClick={() => ngheThu(s.i)}>
+                                    {dangPhat === s.i ? "dừng" : "nghe take"}
+                                  </button>
+                                  {loiNghe !== null && dangPhat === null && loiNgheTheoDong.current === s.i ? (
+                                    <span className="lt__dang-nghe lt__dang-nghe--loi">{loiNghe}</span>
                                   ) : null}
                                 </>
                               )}

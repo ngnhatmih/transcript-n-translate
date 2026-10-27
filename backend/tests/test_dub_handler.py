@@ -277,6 +277,15 @@ def test_take_cat_dung_doan_cua_dong(repos, tmp_path):
         resp = c.get(f"/api/dubs/{tid}/take", params={"i": 0})
         assert resp.status_code == 200, resp.text
         assert resp.headers["content-type"].startswith("audio/wav")
+        # ⚠️ HEADER NÀY LÀ ĐIỀU KIỆN ĐỂ NGHE ĐƯỢC, không phải chi tiết phụ. ĐO ĐƯỢC trên app
+        # thật: `FileResponse(..., filename=...)` khiến Starlette trả
+        # `Content-Disposition: attachment`, và Chrome coi URL là một lượt TẢI XUỐNG nên thẻ
+        # `<audio>` treo ở `readyState: 0` / `networkState: 2` mà KHÔNG gửi request nào
+        # (Resource Timing rỗng) và `play()` trả Promise không bao giờ resolve. `fetch` cùng URL
+        # vẫn trả đủ 245804 byte, nên chỉ header này phân biệt được hai hành vi.
+        assert resp.headers["content-disposition"].startswith("inline"), (
+            "route NGHE phải là `inline`; `attachment` khiến trình duyệt tải tệp thay vì phát, "
+            f"đo được {resp.headers['content-disposition']!r}")
         tam = tmp_path / "take.wav"
         tam.write_bytes(resp.content)
         mau, sr = sf.read(str(tam))

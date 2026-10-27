@@ -3061,10 +3061,25 @@ body {
   color: var(--signal);
 }
 
+/* MỘT LUẬT ĐÃ BỊ XOÁ Ở ĐÂY, và lý do là điều đáng giữ: nó chỉ tồn tại để ẩn thẻ `<audio>` mà màn
+   từng render, nhưng đường phát giờ là WebAudio (`fetch` → `decodeAudioData` →
+   `AudioBufferSourceNode`) nên KHÔNG còn phần tử media nào trong DOM. Luật mồ côi là một khai
+   báo chết, và bài `HÌNH THỨC` của màn Lồng tiếng so HAI TẬP (lớp trong DOM ↔ luật trong tệp
+   này) nên nó đỏ khi luật còn mà lớp không còn.
+   ⚠️ Chú thích này CỐ Ý không viết tên lớp đó: phép quét của bài test chạy trên TOÀN tệp, kể cả
+   chú thích, nên một cái tên trong comment sẽ bị đếm là "luật có mà không ai dùng". */
+
+
 .lt__dang-nghe {
   font-family: var(--font-mono);
   font-size: var(--fs-label);
   color: var(--signal);
+}
+/* CÂU LỖI PHÁT dùng `--fault`, KHÔNG dùng `--signal`: amber là đèn báo "có việc để làm" (dòng
+   phải sửa), còn "không phát được take này" là một HỎNG — hai nghĩa khác nhau, hai màu khác
+   nhau. Cùng token với `.ed__ghi--loi`, nên toàn app chỉ có MỘT màu lỗi. */
+.lt__dang-nghe--loi {
+  color: var(--fault);
 }
 
 /* Hẹp: màn này vốn đã MỘT cột (xem khối `.lt` ở trên), nên hẹp không phải bẻ lại bố cục —

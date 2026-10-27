@@ -128,7 +128,18 @@ def take(translation_id: int, i: int, dirs=Depends(get_dirs)):
 
     tam = pathlib.Path(tempfile.mkdtemp(prefix="take-")) / f"take-{translation_id}-{i}.wav"
     sf.write(str(tam), doan, sr, subtype="PCM_16")
-    return FileResponse(tam, media_type="audio/wav", filename=tam.name)
+    # ⚠️ KHÔNG truyền `filename=` ở đây. ĐO ĐƯỢC: `FileResponse(..., filename=...)` khiến
+    # Starlette thêm `Content-Disposition: attachment`, và Chrome coi URL đó là một lượt TẢI
+    # XUỐNG chứ không phải nguồn phát. Triệu chứng đo trên app thật: thẻ `<audio>` có `src`
+    # đúng, `play()` trả Promise nhưng KHÔNG BAO GIỜ resolve, `readyState: 0`,
+    # `networkState: 2` (LOADING), `duration: null`, và Resource Timing RỖNG — chưa từng có
+    # request nào. Cùng URL đó qua `fetch` trả đủ `200 · audio/wav · 245804` byte, và thẻ
+    # `<audio>` dựng tay cũng treo y hệt, nên lỗi ở HEADER chứ không ở React.
+    #
+    # Route `download` bên dưới VẪN truyền `filename=`: ở đó `attachment` là đúng ý (bấm là
+    # lưu tệp). Chỉ route NGHE mới cần `inline`.
+    return FileResponse(tam, media_type="audio/wav",
+                        headers={"Content-Disposition": f'inline; filename="{tam.name}"'})
 
 
 @router.get("/{translation_id}/download")

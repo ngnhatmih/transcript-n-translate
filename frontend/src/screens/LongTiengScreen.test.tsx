@@ -35,6 +35,7 @@ const tiengOn: string[] = [];
 let render: (ui: unknown) => { container: HTMLElement; unmount: () => void };
 let fireEvent: { click: (el: Element) => void; change: (el: Element, init: unknown) => void };
 let cleanup: () => void;
+let act: (cb: () => void) => void;
 let waitFor: (cb: () => void, options?: { timeout?: number; interval?: number }) => Promise<void>;
 let taoPhanTu: (type: unknown, props?: unknown) => unknown;
 let LongTiengScreen: (props: unknown) => unknown;
@@ -147,8 +148,71 @@ async function choKeHoach(container: HTMLElement): Promise<void> {
   );
 }
 
+/**
+ * ⚠️ WEBAUDIO GIẢ, và vì sao phải giả: màn này phát take bằng `fetch` → `decodeAudioData` →
+ * `AudioBufferSourceNode.start()`, KHÔNG bằng thẻ `<audio>`. Lý do đo được: trên app thật, phần
+ * tử media của Chrome trong phiên kiểm treo ở `readyState: 0` / `networkState: 2` ngay cả với
+ * WAV dựng trong bộ nhớ (blob URL, không mạng), trong khi `decodeAudioData` trên ĐÚNG tệp đó
+ * trả `ok · 48000 Hz · 2.56 s`. Nên đường phát đi qua WebAudio.
+ *
+ * JSDOM không có WebAudio, nên bộ giả này ghi lại MỌI lượt nạp và phát — đó là căn cứ để bài
+ * test ghim đúng route, đúng chỉ số dòng, và ghim rằng bấm lần hai thì DỪNG.
+ */
+interface NhatKyAm {
+  /** URL đã `fetch` để phát, theo thứ tự. */
+  daNap: string[];
+  /** Số lần một nguồn được `start()`. */
+  soLanPhat: number;
+  /** Số lần `stop()` được gọi trên nguồn đang kêu. */
+  soLanDung: number;
+}
+
+/** Lắp WebAudio giả vào `window`; trả về nhật ký để bài test đọc. */
+function lapWebAudioGia(): NhatKyAm {
+  const nk: NhatKyAm = { daNap: [], soLanPhat: 0, soLanDung: 0 };
+  class NguonGia {
+    buffer: unknown = null;
+    onended: (() => void) | null = null;
+    connect(): void {}
+    start(): void { nk.soLanPhat += 1; }
+    stop(): void {
+      nk.soLanDung += 1;
+      // Trình duyệt thật bắn `ended` sau `stop()`; gọi đồng bộ ở đây để trạng thái UI kịp hạ.
+      const f = this.onended;
+      this.onended = null;
+      if (f !== null) f();
+    }
+  }
+  class CtxGia {
+    state = "running";
+    sampleRate = 48_000;
+    destination = {};
+    async resume(): Promise<void> {}
+    async close(): Promise<void> {}
+    createBufferSource(): NguonGia { return new NguonGia(); }
+    async decodeAudioData(byte: ArrayBuffer): Promise<unknown> {
+      // Đòi byte THẬT: một lần nạp rỗng nghĩa là `fetch` không trả gì, và bài test phải đỏ.
+      if (byte.byteLength === 0) throw new Error("decodeAudioData nhận 0 byte");
+      return { duration: 1, sampleRate: 48_000, numberOfChannels: 1 };
+    }
+  }
+  // ⚠️ LẮP VÀO CẢ `window` LẪN `globalThis`, và đây là một lỗi đo được: `setupDom` dựng một
+  // `window` RIÊNG của jsdom rồi gán vào `globalThis.window`, nên `window` KHÔNG phải
+  // `globalThis`. Code màn đọc `window.AudioContext` (đúng với trình duyệt thật), vì thế lắp
+  // mỗi `globalThis` thì nó không thấy gì và ba bài đỏ với "phải nạp byte qua WebAudio" —
+  // trong khi `decodeAudioData` chưa từng được gọi.
+  const w = globalThis as unknown as {
+    AudioContext?: unknown; window?: { AudioContext?: unknown };
+  };
+  w.AudioContext = CtxGia;
+  if (w.window !== undefined) w.window.AudioContext = CtxGia;
+  return nk;
+}
+
 describe("LongTiengScreen", () => {
   let fetchGoc: typeof globalThis.fetch;
+  /** Nhật ký WebAudio giả của bài ĐANG chạy — `lapWebAudioGia()` trả về nó trong `before`. */
+  let nkAm: NhatKyAm;
 
   before(async () => {
     console.error = (...a: unknown[]) => { tiengOn.push(a.map(String).join(" ")); };
@@ -161,10 +225,19 @@ describe("LongTiengScreen", () => {
     // `/plan`, mà `fetch` bị chặn ngay dưới đây.
     setupDom("http://127.0.0.1:9");
 
+    // ⚠️ LẮP WEBAUDIO GIẢ **SAU** `setupDom`, và đây là một lỗi đo được: bản trước gọi nó ở
+    // ĐẦU `before`, lúc `window` CHƯA TỒN TẠI (nó do `setupDom` dựng), nên dòng dò in ra
+    // `{"window":"khong co window"}` và bộ giả chỉ nằm trên `globalThis`. Code màn đọc
+    // `window.AudioContext` — đúng với trình duyệt thật — nên nó không thấy gì, `decodeAudioData`
+    // chưa từng chạy, và ba bài đỏ với "phải nạp byte qua WebAudio" trong khi nguyên nhân là
+    // THỨ TỰ LẮP.
+    nkAm = lapWebAudioGia();
+
     const rtl = await import("@testing-library/react");
     render = rtl.render as unknown as typeof render;
     fireEvent = rtl.fireEvent as unknown as typeof fireEvent;
     cleanup = rtl.cleanup;
+    act = rtl.act as unknown as typeof act;
     waitFor = rtl.waitFor as unknown as typeof waitFor;
 
     const React = await import("react");
@@ -186,6 +259,14 @@ describe("LongTiengScreen", () => {
       if (url === "/api/dubs/11/plan") {
         return new Response(JSON.stringify(PLAN), {
           status: 200, headers: { "content-type": "application/json" },
+        });
+      }
+      // NGHE THỬ đi qua `fetch` (WebAudio cần byte), nên route `/take` phải trả nội dung THẬT.
+      // Ghi URL lại để bài test ghim đúng chỉ số 0-BASED mà route nhận.
+      if (url.startsWith("/api/dubs/") && url.includes("/take?i=")) {
+        nkAm.daNap.push(url);
+        return new Response(new Uint8Array([82, 73, 70, 70, 0, 0, 0, 0]), {
+          status: 200, headers: { "content-type": "audio/wav" },
         });
       }
       throw new Error(`bai test khong cho mot request nao khac: ${url}`);
@@ -496,19 +577,38 @@ describe("LongTiengScreen", () => {
       },
       { timeout: 3000, interval: 20 },
     );
-    assert.equal(
-      container.querySelector('[data-testid="lt-nghe-1"]')?.getAttribute("href"),
-      "/api/dubs/11/take?i=1",
-      "href phải dùng chỉ số 0-BASED (1), không phải số hiển thị (2)",
+    // Nút nghe là `<button>` phát TẠI CHỖ qua WebAudio, nên không có `href` lẫn thẻ `<audio>`:
+    // căn cứ để ghim là URL mà WebAudio đã `fetch`, và nó CHỈ xuất hiện sau khi bấm. Đó cũng là
+    // điều cần ghim: đường take dùng chỉ số 0-BASED (1), không phải số hiển thị (2).
+    fireEvent.click(container.querySelector('[data-testid="lt-nghe-1"]') as Element);
+    await waitFor(
+      () => {
+        assert.ok(nkAm.daNap.length > 0, "bấm 'nghe take' phải nạp byte qua WebAudio");
+      },
+      { timeout: 3000, interval: 20 },
     );
+    assert.deepEqual(nkAm.daNap, ["/api/dubs/11/take?i=1"],
+      "route take phải dùng chỉ số 0-BASED (1), không phải số hiển thị (2)");
     assert.match(chu(container, ".lt__sua-ghi, .lt__sua"), /Dòng 02/,
       "nhãn trong ô sửa cũng phải đếm từ 1");
 
     unmount();
   });
 
-  it("NGHE THỬ: mở một dòng thì có đường tải take trỏ đúng route", async () => {
+  it("NGHE THỬ: bấm là PHÁT tại chỗ, bấm lại là DỪNG, đổi dòng thì dòng cũ dừng", async () => {
+    // ⚠️ BỐN ĐIỀU BÀI NÀY GHIM, mỗi điều ứng với một lỗi ĐO ĐƯỢC:
+    //   1. Nút là `<button>` KHÔNG có `href` — bản đầu là `<a href=… download>`, nên bấm vào là
+    //      trình duyệt TẢI tệp wav và không có âm thanh nào phát ra trên trang.
+    //   2. Bấm phát ⇒ WebAudio NẠP byte của ĐÚNG route `take?i=<chỉ số 0-based>` và `start()`
+    //      một nguồn. Không dùng `<audio>`: đo trên app thật, phần tử media của Chrome treo ở
+    //      `readyState: 0` ngay cả với WAV dựng trong bộ nhớ, trong khi `decodeAudioData` trên
+    //      đúng tệp đó trả `ok`. Nên đường phát là WebAudio, và căn cứ để ghim là NHẬT KÝ của nó.
+    //   3. Bấm LẦN HAI ⇒ `stop()` nguồn đang kêu và chữ về `nghe take` — KHÔNG nạp lại tệp.
+    //   4. Bấm dòng KHÁC ⇒ nguồn cũ bị `stop()` TRƯỚC, chỉ một nguồn kêu tại một thời điểm.
     const truoc = tiengOn.length;
+    const truocNap = nkAm.daNap.length;
+    const truocPhat = nkAm.soLanPhat;
+    const truocDung = nkAm.soLanDung;
     const { container, unmount } = render(taoPhanTu(LongTiengScreen, props()));
     await choKeHoach(container);
 
@@ -517,17 +617,79 @@ describe("LongTiengScreen", () => {
       () => {
         assert.ok(
           container.querySelector('[data-testid="lt-nghe-1"]') !== null,
-          "mở dòng phải hiện đường NGHE THỬ",
+          "mở dòng phải hiện nút NGHE THỬ",
         );
       },
       { timeout: 3000, interval: 20 },
     );
 
-    const nghe = container.querySelector('[data-testid="lt-nghe-1"]');
-    assert.equal(nghe?.getAttribute("href"), "/api/dubs/11/take?i=1",
-      "đường nghe thử phải trỏ đúng route take, đúng id và đúng chỉ số dòng");
+    // (1) Nút phải là `<button>`, không phải `<a download>`.
+    const nut = container.querySelector('[data-testid="lt-nghe-1"]');
+    assert.equal(nut?.tagName, "BUTTON",
+      `nút nghe phải là <button> (phát tại chỗ), không phải ${nut?.tagName} (tải tệp)`);
+    assert.equal(nut?.getAttribute("href"), null, "nút nghe KHÔNG được có href — href là để tải");
 
-    assert.deepEqual(tiengOn.slice(truoc), [], "nghe thử không được sinh tiếng ồn console");
+    // (2) PHÁT: WebAudio nạp đúng route và `start()` đúng một nguồn.
+    fireEvent.click(nut as Element);
+    await waitFor(
+      () => {
+        assert.equal(nkAm.soLanPhat - truocPhat, 1, "bấm 'nghe take' phải PHÁT một nguồn");
+      },
+      { timeout: 3000, interval: 20 },
+    );
+    assert.deepEqual(nkAm.daNap.slice(truocNap), ["/api/dubs/11/take?i=1"],
+      "đường phát phải trỏ đúng route take, đúng id và đúng chỉ số 0-based của dòng");
+    assert.equal(
+      container.querySelector('[data-testid="lt-nghe-1"]')?.textContent?.trim(), "dừng",
+      "khi đang phát, nút phải đổi chữ thành 'dừng' — chữ là thứ duy nhất nói trạng thái",
+    );
+
+    // (3) DỪNG: bấm lại ⇒ `stop()` đúng nguồn, chữ về `nghe take`, KHÔNG nạp lại tệp.
+    fireEvent.click(container.querySelector('[data-testid="lt-nghe-1"]') as Element);
+    await waitFor(
+      () => {
+        assert.equal(nkAm.soLanDung - truocDung, 1, "bấm lần hai phải DỪNG nguồn đang kêu");
+      },
+      { timeout: 3000, interval: 20 },
+    );
+    assert.equal(
+      container.querySelector('[data-testid="lt-nghe-1"]')?.textContent?.trim(), "nghe take",
+      "dừng xong nút phải về chữ 'nghe take'",
+    );
+    assert.equal(nkAm.daNap.length - truocNap, 1,
+      "bấm DỪNG không được nạp lại tệp — dừng là dừng, không phải phát lại");
+
+    // (4) ĐỔI DÒNG: dòng cũ dừng TRƯỚC, dòng mới phát, chỉ một nguồn kêu tại một thời điểm.
+    const truocDoi = { phat: nkAm.soLanPhat, dung: nkAm.soLanDung, nap: nkAm.daNap.length };
+    fireEvent.click(container.querySelector('[data-testid="lt-nghe-1"]') as Element);
+    await waitFor(
+      () => {
+        assert.equal(nkAm.soLanPhat - truocDoi.phat, 1, "dòng 1 phải phát lại được");
+      },
+      { timeout: 3000, interval: 20 },
+    );
+    fireEvent.click(container.querySelector('[data-testid="lt-dong-2"]') as Element);
+    await waitFor(
+      () => {
+        assert.ok(container.querySelector('[data-testid="lt-nghe-2"]') !== null,
+          "chưa mở được dòng chỉ số 2");
+      },
+      { timeout: 3000, interval: 20 },
+    );
+    fireEvent.click(container.querySelector('[data-testid="lt-nghe-2"]') as Element);
+    await waitFor(
+      () => {
+        assert.equal(nkAm.soLanPhat - truocDoi.phat, 2, "dòng 2 phải phát được");
+      },
+      { timeout: 3000, interval: 20 },
+    );
+    assert.equal(nkAm.daNap[nkAm.daNap.length - 1], "/api/dubs/11/take?i=2",
+      "phát dòng khác phải nạp take của dòng đó (chỉ số 0-based)");
+    assert.equal(nkAm.soLanDung - truocDoi.dung, 1,
+      "phát dòng khác phải DỪNG dòng cũ trước — hai nguồn cùng kêu là hai dòng chồng tiếng");
+
+    assert.deepEqual(tiengOn.slice(truoc), [],
+      `nghe thử không được sinh tiếng ồn console; đo được ${JSON.stringify(tiengOn.slice(truoc))}`);
     unmount();
   });
 
@@ -565,16 +727,14 @@ describe("LongTiengScreen", () => {
       },
       { timeout: 3000, interval: 20 },
     );
-    // Bấm "nghe take" để `.lt__dang-nghe` xuất hiện — nó chỉ có sau khi người dùng BẤM.
-    // ⚠️ Nút đó là `<a download>`, nên cú bấm làm JSDOM thử ĐIỀU HƯỚNG và nó in
-    // "Not implemented: navigation to another Document" — giới hạn của JSDOM (nó không tải
-    // tệp), KHÔNG phải lỗi sản phẩm. Vì vậy mốc tiếng ồn của bài này được chốt NGAY TRƯỚC cú
-    // bấm đó, và mọi thứ sinh ra sau nó không thuộc phạm vi bài đo.
+    // (1b) Bấm "nghe take" ⇒ WebAudio PHÁT. Không còn thẻ `<audio>` (lý do ở bài NGHE THỬ):
+    // màn phát qua `decodeAudioData` + `AudioBufferSourceNode`, nên căn cứ là nhật ký WebAudio.
+    const truocPhatHT = nkAm.soLanPhat;
     fireEvent.click(mot.container.querySelector('[data-testid="lt-nghe-1"]') as Element);
     await waitFor(
       () => {
-        assert.ok(mot.container.querySelector(".lt__dang-nghe") !== null,
-          "chưa tới được trạng thái 'đang tải take'");
+        assert.equal(nkAm.soLanPhat - truocPhatHT, 1,
+          "chưa tới trạng thái ĐANG PHÁT (WebAudio phải `start()` một nguồn sau cú bấm)");
       },
       { timeout: 3000, interval: 20 },
     );
@@ -647,6 +807,50 @@ describe("LongTiengScreen", () => {
     const trongCss = new Set<string>();
     for (const m of css.matchAll(/\.(lt[A-Za-z0-9_-]*)/g)) trongCss.add(m[1]);
 
+    // (2b) LỖI PHÁT: `fetch` của route take trả 404 ⇒ màn phải hiện `.lt__dang-nghe--loi` ở ĐÚNG
+    // dòng. Phải kích hoạt TƯỜNG MINH: nếu bỏ bước này, luật `--loi` bị coi là "mồ côi" và bài
+    // test ĐỎ dù luật đó có dùng thật. Bản trước bắn `dispatchEvent("error")` trên thẻ `<audio>`;
+    // đường phát giờ là WebAudio nên lỗi phải đến từ chỗ THẬT của nó là phản hồi HTTP.
+    const loiPhat = render(taoPhanTu(LongTiengScreen, props()));
+    await choKeHoach(loiPhat.container);
+    fireEvent.click(loiPhat.container.querySelector('[data-testid="lt-dong-1"]') as Element);
+    await waitFor(
+      () => {
+        assert.ok(loiPhat.container.querySelector('[data-testid="lt-nghe-1"]') !== null,
+          "chưa mở được ô sửa để thử lỗi phát");
+      },
+      { timeout: 3000, interval: 20 },
+    );
+    const truocFetchLoi = globalThis.fetch;
+    globalThis.fetch = (async (dau: unknown) => {
+      const url = String(dau);
+      if (url === "/api/dubs/11/plan") {
+        return new Response(JSON.stringify(PLAN), {
+          status: 200, headers: { "content-type": "application/json" },
+        });
+      }
+      if (url.includes("/take?i=")) return new Response("hỏng", { status: 404 });
+      throw new Error(`khong cho request khac: ${url}`);
+    }) as typeof globalThis.fetch;
+    try {
+      fireEvent.click(loiPhat.container.querySelector('[data-testid="lt-nghe-1"]') as Element);
+      await waitFor(
+        () => {
+          assert.ok(loiPhat.container.querySelector(".lt__dang-nghe--loi") !== null,
+            "take trả 404 phải hiện câu lỗi ở đúng dòng");
+        },
+        { timeout: 3000, interval: 20 },
+      );
+      assert.match(chu(loiPhat.container, ".lt__dang-nghe--loi"), /dòng 2/,
+        "câu lỗi phải nói DÒNG nào — số người đọc đếm, tức 1-based");
+    } finally {
+      globalThis.fetch = truocFetchLoi;
+    }
+    // Gom lớp của nhánh LỖI PHÁT — thiếu dòng này thì `.lt__dang-nghe--loi` có trong DOM mà
+    // `trongDom` không biết, và phép so hai tập báo nó là "luật mồ côi" (đo được đúng như vậy).
+    gomLop(loiPhat.container);
+    loiPhat.unmount();
+
     const thieuLuat = [...trongDom].filter((l) => !trongCss.has(l)).sort();
     assert.deepEqual(thieuLuat, [],
       `lớp có trong DOM nhưng KHÔNG có luật trong app.css: ${JSON.stringify(thieuLuat)}`);
@@ -659,7 +863,14 @@ describe("LongTiengScreen", () => {
     // thứ bảy là so với tiếng ồn của SÁU BÀI TRƯỚC — đo được: đúng cái bẫy này làm bài xanh giả
     // ở lượt đầu. Mốc phải chốt ngay đầu bài, và nó bỏ qua cú bấm `<a download>` ở trên (lý do
     // ghi tại chỗ bấm).
-    assert.deepEqual(tiengOn.slice(mocSauKhiNghe), [],
+    // ⚠️ Nhiễu của JSDOM, lọc ĐÚNG một dạng: `HTMLMediaElement.play()` không được cài đặt nên
+    // jsdom in `Not implemented: HTMLMediaElement's play() method`. Trình duyệt thật có cài đặt,
+    // nên đây là giới hạn môi trường test, không phải lỗi màn này. Mọi tiếng ồn khác vẫn ĐỎ.
+    const laNhieuMedia = (d: string): boolean =>
+      /^Not implemented: HTMLMediaElement's (play|pause)\(\) method$/.test(
+        d.replace(/^error: /, "").trim(),
+      );
+    assert.deepEqual(tiengOn.slice(mocSauKhiNghe).filter((d) => !laNhieuMedia(d)), [],
       `bài hình thức không được sinh tiếng ồn console: ${JSON.stringify(tiengOn.slice(mocSauKhiNghe).slice(0, 2))}`);
   });
 });
