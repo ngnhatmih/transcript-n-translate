@@ -287,3 +287,85 @@ def test_take_cat_dung_doan_cua_dong(repos, tmp_path):
         khong = c.get(f"/api/dubs/{tid}/take", params={"i": 99})
         assert khong.status_code == 404
         assert "không có dòng 99" in khong.json()["detail"]
+
+def test_cau_loi_TTS_bo_rac_WSL_va_giu_cau_chan_doan():
+    """`_dong_loi_dau_tien`: câu lỗi trên panel phải là CHẨN ĐOÁN, không phải rác của WSL.
+
+    ⚠️ ĐO ĐƯỢC (job `dub` #21 trong container): `error` dài **472 ký tự**; 400 ký tự sau là
+    `UtilGetPpid:1359: Failed to parse: /proc/1/stat, content: 1 (python) S 0 1 1 0 -1 4194560 …`
+    — cảnh báo của WSL, không phải lỗi TTS. Bản trước lấy `stderr[-800:]` (ĐUÔI), nên giữ đúng
+    khối rác và có thể cắt mất câu chẩn đoán ở ĐẦU. Trên panel phải khối rác đó chiếm 8 dòng,
+    đẩy job vừa thành công ra khỏi tầm mắt người đọc.
+
+    Bốn vế, và vế (1) là vế đã hỏng thật:
+      (1) rác đứng TRƯỚC ⇒ vẫn phải trả câu chẩn đoán đứng SAU;
+      (2) `stderr` rỗng ⇒ dùng `stdout` (một số chương trình in lỗi ra đó);
+      (3) cả hai rỗng ⇒ nói RA là rỗng, không trả chuỗi trắng;
+      (4) dòng dài ⇒ cắt, vì một dòng 5 000 ký tự cũng không đọc được trên panel.
+    """
+    from app.pipeline.dub import _dong_loi_dau_tien
+
+    # (1) ĐÚNG hình dạng đo được của job #21: rác WSL trước, chẩn đoán sau.
+    rac = (
+        "WSL (36 - ) ERROR: UtilGetPpid:1359: Failed to parse: /proc/1/stat, "
+        "content: 1 (python) S 0 1 1 0 -1 4194560 17042 6671 23 16 73 89 0 2\n"
+        "RuntimeError: TTS không chạy được (/app/.venv-tts/Scripts/python.exe): "
+        "ModuleNotFoundError: No module named 'vieneu'\n"
+    )
+    duoc = _dong_loi_dau_tien(rac, None)
+    assert duoc.startswith("RuntimeError: TTS không chạy được"), (
+        f"phải trả câu CHẨN ĐOÁN, không phải rác WSL; đo được {duoc!r}"
+    )
+    assert "UtilGetPpid" not in duoc, f"rác WSL không được lọt vào câu lỗi; đo được {duoc!r}"
+    assert "/proc/1/stat" not in duoc, f"rác `/proc/1/stat` không được lọt vào; đo được {duoc!r}"
+
+    # (2) `stderr` rỗng ⇒ `stdout`.
+    assert _dong_loi_dau_tien("", "loi tren stdout\n") == "loi tren stdout"
+
+    # (3) Cả hai rỗng ⇒ NÓI RA, không trả chuỗi trắng.
+    assert _dong_loi_dau_tien(None, None) == "(không có đầu ra)"
+    assert _dong_loi_dau_tien("\n\n  \n", "") == "(không có đầu ra)", (
+        "toàn dòng trắng cũng là 'không có đầu ra', không phải một câu lỗi rỗng"
+    )
+
+    # (4) Cắt độ dài.
+    dai = "x" * 5000
+    assert len(_dong_loi_dau_tien(dai, None)) == 300, (
+        "dòng lỗi phải bị cắt ở 300 ký tự; đo được "
+        f"{len(_dong_loi_dau_tien(dai, None))}"
+    )
+
+
+def test_chay_tts_batch_dung_cau_chan_doan_khi_khong_co_ket_qua(tmp_path):
+    """`chay_tts_batch` khi tiến trình TTS chết: câu `RuntimeError` là DÒNG CHẨN ĐOÁN.
+
+    Bài này chạy ĐÚNG hàm thật với một `tts_python` giả là **script Python** in rác WSL ra
+    stderr rồi thoát — nên phép đo đi qua `subprocess` thật, không phải một mock. Đó là điều
+    kiện để tin rằng panel sẽ không còn dãy số rác.
+    """
+    import sys as _sys
+
+    from app.pipeline.dub import chay_tts_batch
+
+    gia = tmp_path / "tts_gia.py"
+    gia.write_text(
+        "import sys\n"
+        "print('WSL (36 - ) ERROR: UtilGetPpid:1359: Failed to parse: /proc/1/stat', file=sys.stderr)\n"
+        "print(\"RuntimeError: TTS không chạy được: No module named 'vieneu'\", file=sys.stderr)\n"
+        "sys.exit(1)\n",
+        encoding="utf-8",
+    )
+    chay = chay_tts_batch(_sys.executable, gia)
+    try:
+        chay([{"i": 0, "text": "xin chào"}], None, tmp_path / "ra")
+    except RuntimeError as exc:
+        cau = str(exc)
+    else:  # pragma: no cover - chỉ chạy nếu tiến trình giả lại "thành công"
+        raise AssertionError("tiến trình TTS chết mà không có RuntimeError")
+
+    assert "TTS không chạy được" in cau, f"câu lỗi phải nêu việc TTS không chạy; đo được {cau!r}"
+    assert "No module named 'vieneu'" in cau, (
+        f"câu lỗi phải giữ CHẨN ĐOÁN của tiến trình con; đo được {cau!r}"
+    )
+    assert "UtilGetPpid" not in cau, f"rác WSL không được lọt vào; đo được {cau!r}"
+    assert "/proc/1/stat" not in cau, f"rác `/proc/1/stat` không được lọt vào; đo được {cau!r}"

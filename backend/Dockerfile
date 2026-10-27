@@ -7,8 +7,16 @@ FROM python:3.10-slim
 
 # `ffmpeg` là BẮT BUỘC, không phải tiện ích: job `ingest` bóc âm thanh khỏi media bằng
 # ffmpeg, thiếu nó thì mọi upload chết ở job đầu tiên.
+#
+# `libsndfile1` cũng BẮT BUỘC, và lý do hẹp hơn: `soundfile` (phụ thuộc của `vieneu` và của
+# chính `DubHandler`) là một ctypes wrapper quanh thư viện C đó — wheel manylinux của nó CÓ
+# kèm bản `.so`, nhưng đường TTS chạy trong venv riêng nên không chắc wheel nào được chọn;
+# cài gói hệ thống là cách rẻ nhất để cả hai đường đều đọc/ghi được wav.
+#
+# `python3-venv` cần cho venv TTS bên dưới (`python:3.10-slim` không kèm `ensurepip` đầy đủ
+# cho `-m venv` ở mọi biến thể).
 RUN apt-get update \
- && apt-get install -y --no-install-recommends ffmpeg \
+ && apt-get install -y --no-install-recommends ffmpeg libsndfile1 python3-venv \
  && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -23,6 +31,29 @@ COPY requirements-docker.txt ./
 RUN pip install --no-cache-dir --timeout 120 \
         --extra-index-url https://download.pytorch.org/whl/cu121 torch==2.5.1 \
  && pip install --no-cache-dir --timeout 120 -r requirements-docker.txt
+
+# ── VENV RIÊNG CHO TTS (`vieneu`) ─────────────────────────────────────────────────────────
+#
+# ⚠️ VÌ SAO VẪN LÀ VENV RIÊNG, KHÔNG PHẢI `pip install vieneu` VÀO VENV CỦA APP:
+# `vieneu 3.8.3` khai `huggingface_hub` KHÔNG kèm trần phiên bản, nên pip resolve lên `2.x`;
+# còn `transformers 4.46` của app đòi `huggingface_hub <1.0` + `tokenizers <0.21`. Hai bộ đó
+# không ở chung một venv được — đo được trên Windows: cài xong thì `import transformers` ném
+# ImportError. Đường TTS vì thế ở `/opt/venv-tts`, và `main.py` trỏ tới nó qua
+# `PHUDE_TTS_PYTHON`.
+#
+# ⚠️ VÌ SAO TRƯỚC ĐÂY HỎNG: `TTS_PYTHON` chọn theo `os.name`, nên trong container Linux nó
+# trỏ `/app/.venv-tts/bin/python` — một đường KHÔNG TỒN TẠI, vì `backend/.dockerignore` loại
+# `.venv-tts/` (nó là venv Windows, 751 MB, không dòng nào chạy được trên Linux). Đo được:
+# mọi job `dub` trong container `failed` ở 5% với
+# `RuntimeError: TTS không chạy được (/app/.venv-tts/Scripts/python.exe)`.
+# Nay venv được DỰNG TRONG IMAGE bằng pip Linux, và `PHUDE_TTS_PYTHON` (ở `ENV` dưới) chỉ vào nó.
+#
+# `--extra-index-url` KHÔNG dùng ở đây: `vieneu` mặc định chỉ cần `onnxruntime`, KHÔNG cần
+# torch (các extra `legacy`/`cuda` mới cần). Giữ đường mặc định để image không phình thêm ~2 GB.
+RUN python -m venv /opt/venv-tts \
+ && /opt/venv-tts/bin/pip install --no-cache-dir --timeout 180 --upgrade pip \
+ && /opt/venv-tts/bin/pip install --no-cache-dir --timeout 180 \
+        vieneu==3.8.3 soundfile
 
 COPY . .
 
@@ -41,6 +72,7 @@ ENV HF_HOME=/models \
     PHUDE_PORT=8620 \
     PHUDE_DATA=/data \
     PHUDE_DB=/data/app.db \
+    PHUDE_TTS_PYTHON=/opt/venv-tts/bin/python \
     LD_LIBRARY_PATH=/usr/local/lib/python3.10/site-packages/torch/lib \
     PYTHONUNBUFFERED=1
 

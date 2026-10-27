@@ -42,12 +42,38 @@ from app.worker import PhaseQueueWorker
 #: Python của venv TTS (venv RIÊNG: `vieneu` kéo `huggingface_hub` 2.x, xung đột với
 #: `transformers 4.46` của app — xem `backend/README.md` mục "Lồng tiếng").
 #:
-#: Đường mặc định phải chọn theo HỆ ĐIỀU HÀNH: venv Windows đặt python ở `Scripts/python.exe`,
-#: venv Linux/POSIX ở `bin/python`. Đo được: một hằng số Windows duy nhất làm MỌI job `dub`
-#: trong image Linux nhận rồi `failed` ở 5% — người dùng chỉ biết sau khi đã chờ, và câu lỗi
-#: chỉ vào một đường dẫn không tồn tại. `PHUDE_TTS_PYTHON` thắng cả hai.
+#: BA đường, theo thứ tự thắng:
+#:   1. `PHUDE_TTS_PYTHON` — đặt tường minh (image Docker đặt `/opt/venv-tts/bin/python`).
+#:   2. `.venv-tts` CẠNH mã nguồn — đường phát triển trên máy, chọn theo HỆ ĐIỀU HÀNH vì venv
+#:      Windows đặt python ở `Scripts/python.exe` còn venv POSIX ở `bin/python`.
+#:   3. `/opt/venv-tts/bin/python` — venv dựng TRONG image (`backend/Dockerfile`), dùng khi
+#:      biến môi trường không được đặt (ví dụ ai đó chạy `docker run` trần, không qua compose).
+#:
+#: ⚠️ ĐO ĐƯỢC, và đây là lý do đường (3) phải tồn tại: bản trước chỉ có (1)+(2), nên trong
+#: container Linux đường (2) trỏ `/app/.venv-tts/bin/python` — KHÔNG TỒN TẠI, vì
+#: `backend/.dockerignore` loại `.venv-tts/` (venv Windows, 751 MB, không dòng nào chạy được
+#: trên Linux). Mọi job `dub` trong container `failed` ở 5% với
+#: `RuntimeError: TTS không chạy được (/app/.venv-tts/Scripts/python.exe)`.
 TTS_PYTHON = os.environ.get("PHUDE_TTS_PYTHON") or str(
     BACKEND_DIR / ".venv-tts" / ("Scripts/python.exe" if os.name == "nt" else "bin/python"))
+
+#: Đường dự phòng CUỐI — venv dựng TRONG image (`backend/Dockerfile`), chỉ dùng khi đường (2)
+#: không có mặt.
+#:
+#: ⚠️ VÌ SAO NÓ ĐỌC ĐƯỢC TỪ MÔI TRƯỜNG (`PHUDE_TTS_PYTHON_TRONG_IMAGE`) chứ không phải một hằng
+#: số `/opt/venv-tts/bin/python`: một hằng số cứng thì KHÔNG TEST ĐƯỢC trên Windows (không có
+#: `/opt`), nên nhánh của nó không bao giờ chạy trong lượt test — ĐO ĐƯỢC: bỏ hẳn ba dòng dưới
+#: đi mà `tests/test_tts_python_duong_dan.py` vẫn `EXIT=0`, tức phép ghim là giả. Có biến thì
+#: bài test dựng một tệp giả ở TEMP, đặt biến, và đo đúng nhánh.
+#:
+#: Giá trị mặc định vẫn là đường trong image, nên hành vi sản phẩm không đổi.
+_TTS_PYTHON_TRONG_IMAGE = os.environ.get(
+    "PHUDE_TTS_PYTHON_TRONG_IMAGE", "/opt/venv-tts/bin/python")
+
+#: `os.path.exists` chứ không phải một phép gán vô điều kiện: trên máy phát triển KHÔNG có
+#: `/opt/venv-tts`, nên nhánh này không được cướp đường `.venv-tts` của Windows.
+if not os.path.exists(TTS_PYTHON) and os.path.exists(_TTS_PYTHON_TRONG_IMAGE):
+    TTS_PYTHON = _TTS_PYTHON_TRONG_IMAGE
 
 #: `auto_forward` nay mặc định BẬT: từ Task 12 đã có handler `translate` thật,
 #: nên bóc băng xong đẩy một job dịch là đường đi ĐÚNG, không còn là đường đẻ ra

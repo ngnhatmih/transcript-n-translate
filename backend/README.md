@@ -63,32 +63,32 @@ GPU. Nó tự ép UTF-8 cho stdout (console Windows mặc định cp1252, còn s
 tiếng Trung/Việt) và tự đặt cache model trước khi nạp `faster_whisper`.
 
 Con số nền của lần chạy mặc định, đo sau khi xoá `__pycache__` (lệnh ở mục
-"Kiểm thử" trên, chạy từ trong `backend\`). Thứ có nghĩa là **1346 / 15**, không
+"Kiểm thử" trên, chạy từ trong `backend\`). Thứ có nghĩa là **1351 / 15**, không
 phải số giây — thời gian trôi giữa các lần chạy (đã thấy 24,00–30,94 s) còn con
 số bài thì không:
 
 ```
-1346 passed, 15 deselected, 1 warning
+1351 passed, 15 deselected, 1 warning
 ```
 
 Hai con số đó là SỐ BÀI ĐƯỢC CHỌN, và chúng khớp với số mà `--collect-only` báo
-(`1346/1361`, 15 bài `live` bị bỏ;
+(`1351/1366`, 15 bài `live` bị bỏ;
 `tests/test_backend_readme.py::test_readme_baseline_matches_the_tests_actually_
 collected` đối chiếu mỗi lần chạy).
 
 
-Máy này **CÓ** `ffmpeg 8.1.1` + `ffprobe` trên PATH (đã đo), nên `1346/15` ở trên
+Máy này **CÓ** `ffmpeg 8.1.1` + `ffprobe` trên PATH (đã đo), nên `1351/15` ở trên
 là số THẬT của nó. Máy **không có** `ffmpeg`/`ffprobe` cho một kết quả KHÁC: cả
 `tests/test_ingest.py` bị `skipif` ở cấp module — **9** bài cùng skip một lượt —
-nên dòng tổng kết của máy đó là **`1334 passed, 9 skipped, 15 deselected`** (=
-`1346 − 9`; con số này TỪNG ghi `978`, tức một baseline rất cũ, và nó lệch phép
+nên dòng tổng kết của máy đó là **`1339 passed, 9 skipped, 15 deselected`** (=
+`1351 − 9`; con số này TỪNG ghi `978`, tức một baseline rất cũ, và nó lệch phép
 trừ của chính khối nền ngay trên nó). Đó là
 con số của máy thiếu ffmpeg, **không phải** con số máy này từng in ra; đừng chép
 nó vào khối nền ở trên, và đừng "sửa" số nền xuống chỉ vì thiếu ffmpeg.
 
 ⚠️ Con số `856` ở đây TỪNG không khớp phép trừ của chính nó: `865 − 9 = 856`, tức
 nó là số của lượt TRƯỚC `V1` (+3 bài) còn sót lại. Phép trừ của khối nền hiện tại
-là `1346 − 9` = `1337`.
+là `1351 − 9` = `1342`.
 
 
 (Con số này từng bị ghi là `798`: bài `test_a_failed_translation_leaves_the_
@@ -97,7 +97,31 @@ số nền không được bump. Nó tồn tại để phát hiện TRÔI, nên 
 chạy báo dương tính giả.
 
 
-Lần bump này, `1343/15` → `1346/15` (**+3 bài**), do **BA ROUTE/PHÉP ĐO của LỒNG TIẾNG** —
+Lần bump này, `1346/15` → `1351/15` (**+5 bài**), do **TTS CHẠY ĐƯỢC TRONG IMAGE LINUX** — trước
+đó mọi job `dub` trong container `failed` ở 5% vì `TTS_PYTHON` trỏ một đường Windows không tồn
+tại (`/app/.venv-tts/Scripts/python.exe`; `backend/.dockerignore` loại `.venv-tts/`, và venv đó
+là venv Windows). Nay `backend/Dockerfile` dựng `/opt/venv-tts` bằng pip Linux
+(`vieneu==3.8.3` + `soundfile`), `ENV PHUDE_TTS_PYTHON` chỉ vào nó, và `app/main.py` có thêm
+đường dự phòng `/opt/venv-tts/bin/python` đọc được từ `PHUDE_TTS_PYTHON_TRONG_IMAGE`.
+
+Ba bài của `tests/test_tts_python_duong_dan.py` ghim BA nhánh của đường dẫn đó (biến môi trường
+thắng; đường `.venv-tts` cạnh mã nguồn thắng đường trong image; và khi đường cạnh mã nguồn KHÔNG
+có mặt thì rơi về đường trong image — nhánh container đi qua, và là nhánh đã hỏng). Hai bài của
+`tests/test_dub_handler.py` ghim câu lỗi của TTS: nó phải là **dòng chẩn đoán**, không phải khối
+rác WSL. Đo được trước khi sửa: `error` của job #21 dài **472 ký tự**, 400 ký tự sau là
+`UtilGetPpid:1359: Failed to parse: /proc/1/stat, content: 1 (python) S 0 1 1 0 -1 4194560 …` —
+và bản cũ lấy `stderr[-800:]`, tức lấy ĐUÔI, nên giữ đúng khối rác và có thể cắt mất câu chẩn
+đoán ở ĐẦU.
+
+⚠️ **Một phép ghim GIẢ đã bị bắt trong lúc làm, và nó đáng ghi lại.** Bản đầu của bài "rơi về
+đường trong image" dùng hằng số cứng `/opt/venv-tts/bin/python` — mà trên Windows KHÔNG có
+`/opt`, nên nhánh đó không bao giờ chạy: **mutation SỐNG** (bỏ hẳn ba dòng dự phòng trong
+`main.py` mà tệp test vẫn `EXIT=0`). Sửa bằng cách cho đường dự phòng đọc được từ
+`PHUDE_TTS_PYTHON_TRONG_IMAGE`, để bài test dựng một python giả trong `tmp_path` và đo ĐÚNG
+nhánh. Sau đó hai mutation đều CHẾT: bỏ nhánh dự phòng ⇒ đỏ với đường `.venv-tts`; bỏ
+`os.path.exists` ⇒ đỏ với đường không tồn tại.
+
+Bảy bài của lần bump TRƯỚC (`1343/15` → `1346/15`) vẫn còn nguyên, và lý do của chúng:
 `POST /api/dubs` xếp một job `dub` cho một bản dịch, `DubHandler` chạy TTS
 (VieNeu-TTS v3 Turbo, 48 kHz, venv riêng `backend/.venv-tts`), ép tốc độ từng dòng
 để `take ≤ slot` rồi ghi **một** file master ra `data/output/dubs/dub-<translation_id>.<fmt>`;

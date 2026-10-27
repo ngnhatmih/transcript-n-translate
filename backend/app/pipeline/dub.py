@@ -327,6 +327,43 @@ class DubHandler:
             return False
 
 
+#: Dòng stderr bị COI LÀ RÁC: cảnh báo của WSL khi nó không đọc được `/proc/1/stat` của tiến
+#: trình con. Chúng xuất hiện TRƯỚC thông điệp thật và chiếm hàng trăm ký tự.
+#:
+#: ⚠️ ĐO ĐƯỢC (job `dub` #21 trong container): `error` dài **472 ký tự**, và 400 ký tự sau là
+#: `UtilGetPpid:1359: Failed to parse: /proc/1/stat, content: 1 (python) S 0 1 1 0 -1 4194560
+#: 17042 6671 …` — rác WSL, không phải lỗi TTS. Bản trước lấy `stderr[-800:]`, tức lấy ĐUÔI:
+#: nó giữ đúng khối rác và có thể CẮT MẤT câu chẩn đoán ở đầu. Trên panel phải, khối rác đó
+#: chiếm 8 dòng và đẩy job thành công ra khỏi tầm mắt.
+_RAC_STDERR = ("/proc/1/stat", "UtilGetPpid", "WSL (")
+
+
+def _dong_loi_dau_tien(stderr: str | None, stdout: str | None, *,
+                       toi_da: int = 300) -> str:
+    """Chọn DÒNG ĐẦU TIÊN CÓ Ý NGHĨA của stderr, thay vì cả khối (hay đuôi khối).
+
+    Ba bậc, theo thứ tự:
+      1. Dòng đầu của `stderr` KHÔNG khớp `_RAC_STDERR` — đó là câu chẩn đoán thật.
+      2. Không có dòng nào như vậy ⇒ dòng đầu của `stdout` (một số chương trình in lỗi ra đó).
+      3. Cả hai rỗng ⇒ nói RA là rỗng, không trả chuỗi trắng để người đọc tưởng có lỗi mà
+         không thấy lý do.
+
+    `toi_da` cắt câu trả về: một dòng lỗi dài 5 000 ký tự cũng là thứ không đọc được trên panel.
+    Cắt ở ĐÂY (một chỗ) chứ không ở component — component không biết chuỗi nào là rác.
+    """
+    for nguon in (stderr, stdout):
+        if not nguon:
+            continue
+        for dong in nguon.splitlines():
+            dong = dong.strip()
+            if not dong:
+                continue
+            if any(rac in dong for rac in _RAC_STDERR):
+                continue
+            return dong[:toi_da]
+    return "(không có đầu ra)"
+
+
 def chay_tts_batch(tts_python: str, tts_script: pathlib.Path):
     """`tts_runner` thật: MỘT tiến trình cho cả lượt, JSON vào/ra qua TỆP (encoding console).
 
@@ -349,8 +386,9 @@ def chay_tts_batch(tts_python: str, tts_script: pathlib.Path):
             r = subprocess.run([tts_python, "-B", str(tts_script), str(viec)],
                                capture_output=True, text=True, encoding="utf-8", errors="replace")
             if not kq.exists():
-                raise RuntimeError(f"TTS không chạy được ({tts_python}): "
-                                   f"{(r.stderr or r.stdout or '')[-800:]}")
+                raise RuntimeError(
+                    f"TTS không chạy được ({tts_python}): "
+                    f"{_dong_loi_dau_tien(r.stderr, r.stdout)}")
             data = _json.loads(kq.read_text(encoding="utf-8"))
         if data.get("loi"):
             raise RuntimeError("TTS lỗi: " + "; ".join(
