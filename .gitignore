@@ -59,3 +59,8 @@ skills-lock.json
 backend/.venv-tts/
 # Ban long tieng xuat ra (dub-<id>-<n>dong.{wav,flac,mp3,aac,m4a})
 backend/data/dubs/
+
+# Output thu nghiem tach giong (nhanh `thu-nghiem-tach-giong`): stem WAV 48 kHz, video da ghep,
+# khung hinh trich ra. DO DUOC: 19 tep / 1,16 GB. Day la ket qua do, khong phai ma do an —
+# cung loai voi `data/output/` o tren. Spec cua no nam trong docs/superpowers/specs/.
+tach-giong/
