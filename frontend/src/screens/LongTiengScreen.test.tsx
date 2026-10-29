@@ -73,24 +73,26 @@ function banDich(id: number, segments: Segment[], status: "done" | "queued" = "d
 }
 
 /**
- * Kế hoạch có ĐỦ BA trạng thái — dựng từ số đo THẬT của một lượt chạy trên máy Windows
- * (take 1,06 / 1,02 / 0,52 / 1,86 s trên bốn chỗ 1,08 / 1,44 / 0,92 / 2,36 s) rồi ĐẨY dòng
- * đầu lên quá trần để có một dòng `phai-sua`.
+ * Kế hoạch có ĐỦ HAI trạng thái, và một dòng NÉN MẠNH (> 1,5×) — dựng từ số đo THẬT của một
+ * lượt chạy trên máy Windows (take 1,06 / 1,02 / 0,52 / 1,86 s trên bốn chỗ 1,08 / 1,44 /
+ * 0,92 / 2,36 s) rồi ĐẨY dòng đầu lên 1,86× để chạm nhánh amber.
  *
- * ⚠️ Vì sao phải đẩy: lượt chạy thật của bản dịch #1 cho CẢ BỐN dòng `vua` (tốc độ 1,00×,
- * `qua_tran` rỗng) — đo được. Một fixture toàn `vua` sẽ không bao giờ chạm nhánh amber, tức
- * bài test "ba trạng thái" sẽ XANH mà không đo gì.
+ * ⚠️ Vì sao phải đẩy: lượt chạy thật của bản dịch #1 cho CẢ BỐN dòng `vua` (tốc độ 1,00×) —
+ * đo được. Một fixture toàn `vua` sẽ không bao giờ chạm nhánh amber, tức bài test sẽ XANH mà
+ * không đo gì.
+ *
+ * 🔴 Trạng thái thứ ba `phai-sua` đã BỎ cùng trần nén 1,35 (spec 2026-10-29): tốc độ không
+ * còn bị kẹp nên không dòng nào "không cứu được bằng tốc độ". Nay amber nghĩa là NÉN MẠNH.
  */
 const PLAN: DubPlan = {
   translation_id: 11,
-  tran: 1.35,
   tong_giay: 5.8,
   so_dong: 3,
-  dem: { vua: 1, nen: 1, phai_sua: 1 },
+  dem: { vua: 1, nen: 1, nen_manh: 1 },
   trung_vi_toc_do: 1.2,
   dong: [
-    { i: 0, start: 0, end: 1.08, text: "Xin chào", take: 3.11, slot: 1.08, avail: 1.08,
-      speed: 1.35, need: 2.88, trang_thai: "phai-sua" },
+    { i: 0, start: 0, end: 1.08, text: "Xin chào", take: 2.0, slot: 1.08, avail: 1.08,
+      speed: 1.86, need: 1.86, trang_thai: "nen" },
     { i: 1, start: 1.08, end: 2.52, text: "Tạm biệt", take: 2.67, slot: 1.44, avail: 1.44,
       speed: 1.05, need: 1.03, trang_thai: "nen" },
     { i: 2, start: 2.52, end: 5.8, text: "Hẹn gặp lại", take: 1.5, slot: 3.28, avail: 3.28,
@@ -320,7 +322,7 @@ describe("LongTiengScreen", () => {
   // TẦNG 2 — KẾ HOẠCH: ba trạng thái, và `null` KHÔNG phải một dải rỗng
   // -------------------------------------------------------------------------
 
-  it("KẾ HOẠCH: ba trạng thái nói bằng CHỮ, và dải thời gian vẽ đủ ba cửa sổ", async () => {
+  it("KẾ HOẠCH: hai trạng thái + nén mạnh nói bằng CHỮ, dải thời gian vẽ đủ ba cửa sổ", async () => {
     const { container, unmount } = render(taoPhanTu(LongTiengScreen, props()));
     await choKeHoach(container);
 
@@ -328,20 +330,22 @@ describe("LongTiengScreen", () => {
       "dải thời gian phải có một cửa sổ cho MỖI dòng của kế hoạch");
     assert.equal(container.querySelectorAll(".lt__take").length, 3, "mỗi cửa sổ một thanh take");
 
-    assert.equal(container.querySelectorAll(".lt__take--phai-sua").length, 1,
-      "phải có ĐÚNG MỘT thanh amber (dòng vượt trần)");
-    assert.equal(container.querySelectorAll(".lt__take--nen").length, 1, "phải có ĐÚNG MỘT thanh nén");
+    assert.equal(container.querySelectorAll(".lt__take--nen-manh").length, 1,
+      "phải có ĐÚNG MỘT thanh amber (dòng nén mạnh > 1,5×)");
+    // HAI thanh nén: dòng 0 (nén mạnh 1,86×) và dòng 1 (nén nhẹ 1,05×). Trạng thái thứ ba
+    // `phai-sua` đã bỏ cùng trần 1,35, nên dòng 0 nay là `nen` + class `nen-manh`.
+    assert.equal(container.querySelectorAll(".lt__take--nen").length, 2,
+      "phải có ĐÚNG HAI thanh nén (một nén mạnh, một nén nhẹ)");
     assert.equal(container.querySelectorAll(".lt__take--vua").length, 1, "phải có ĐÚNG MỘT thanh vừa");
 
     const dauDai = chu(container, ".lt__dau-dai");
     assert.match(dauDai, /trung vị 1,20×/,
       `đầu dải phải nói trung vị của kế hoạch (dấu phẩy thập phân); đo được ${JSON.stringify(dauDai)}`);
-    assert.match(dauDai, /vừa chỗ 1 · nén 1 · phải sửa 1/,
+    assert.match(dauDai, /vừa chỗ 1 · nén 1 · nén mạnh 1/,
       `ba con số đếm phải là của KẾ HOẠCH; đo được ${JSON.stringify(dauDai)}`);
-    assert.match(dauDai, /trần 1,35×/, "phải nói trần nén");
 
-    assert.equal(chu(container, '[data-testid="lt-dong-0"]').includes("phải sửa"), true,
-      "dòng vượt trần phải nói 'phải sửa'");
+    assert.equal(chu(container, '[data-testid="lt-dong-0"]').includes("nén mạnh"), true,
+      "dòng nén trên 1,5× phải nói 'nén mạnh'");
     assert.equal(chu(container, '[data-testid="lt-dong-1"]').includes("nén"), true,
       "dòng bị nén phải nói 'nén'");
     assert.equal(chu(container, '[data-testid="lt-dong-2"]').includes("vừa chỗ"), true,

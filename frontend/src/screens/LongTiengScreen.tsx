@@ -73,11 +73,13 @@ function tocDo(x: number): string {
   return `${x.toFixed(2).replace(".", ",")}×`;
 }
 
-/** Câu của trạng thái — ba câu KHÁC NHAU, không phải ba mức của một thang. */
+/** Câu của trạng thái — HAI câu KHÁC NHAU, không phải hai mức của một thang.
+ *
+ *  `"phai-sua"` đã bỏ cùng trần nén 1,35: tốc độ không còn bị kẹp nên không có dòng nào
+ *  "không cứu được bằng tốc độ". Dòng nén mạnh vẫn là `nen` — đọc `speed` để biết mức. */
 const NHAN_TRANG_THAI: Record<DubPlanRow["trang_thai"], string> = {
   vua: "vừa chỗ",
   nen: "nén",
-  "phai-sua": "phải sửa",
 };
 
 export function LongTiengScreen({
@@ -368,7 +370,7 @@ export function LongTiengScreen({
           <>
             <div className="lt__dai" data-testid="lt-dai"
               role="img"
-              aria-label={`dải thời gian ${plan.tong_giay.toFixed(2)} giây: ${plan.dem.vua} dòng vừa chỗ, ${plan.dem.nen} dòng nén, ${plan.dem.phai_sua} dòng phải sửa`}>
+              aria-label={`dải thời gian ${plan.tong_giay.toFixed(2)} giây: ${plan.dem.vua} dòng vừa chỗ, ${plan.dem.nen} dòng nén, trong đó ${plan.dem.nen_manh} dòng nén trên 1,5 lần`}>
               {plan.dong.map((d) => {
                 const rongChỗ = (d.slot / plan.tong_giay) * 100;
                 const rongTake = (d.take / plan.tong_giay) * 100;
@@ -376,7 +378,7 @@ export function LongTiengScreen({
                   <span key={d.i} className="lt__cap"
                     style={{ left: `${(d.start / plan.tong_giay) * 100}%`, width: `${rongChỗ}%` }}>
                     <span className="lt__cho" />
-                    <span className={`lt__take lt__take--${d.trang_thai}`}
+                    <span className={`lt__take lt__take--${d.trang_thai}${d.speed > 1.5 ? " lt__take--nen-manh" : ""}`}
                       style={{ width: `${rongTake}%` }}
                       title={`#${d.i} · chỗ ${giay(d.slot)} · take ${giay(d.take)} · ${tocDo(d.speed)}`} />
                   </span>
@@ -386,10 +388,10 @@ export function LongTiengScreen({
             <div className="lt__dau-dai">
               <span className="lt__tv">trung vị {tocDo(plan.trung_vi_toc_do)}</span>
               <span className="lt__dem-dai">
-                vừa chỗ {plan.dem.vua} · nén {plan.dem.nen} · phải sửa {plan.dem.phai_sua}
+                vừa chỗ {plan.dem.vua} · nén {plan.dem.nen} · nén mạnh {plan.dem.nen_manh}
               </span>
               <span className="lt__canh-bao">thanh amber = take dài hơn chỗ, tràn sang dòng sau</span>
-              <span className="lt__tong">{giay(plan.tong_giay)} · trần {tocDo(plan.tran)}</span>
+              <span className="lt__tong">{giay(plan.tong_giay)}</span>
             </div>
           </>
         )}
@@ -435,7 +437,7 @@ export function LongTiengScreen({
                           ) : (
                             <>
                               <span className="lt__o-nen">
-                                <span className={`lt__o-take lt__o-take--${kh.trang_thai}`}
+                                <span className={`lt__o-take lt__o-take--${kh.trang_thai}${kh.speed > 1.5 ? " lt__o-take--nen-manh" : ""}`}
                                   style={{ width: `${Math.min(100, (kh.take / Math.max(kh.slot, 0.01)) * 100)}%` }} />
                               </span>
                               <span className="lt__ti-le">{tocDo(kh.speed)}</span>
@@ -443,7 +445,7 @@ export function LongTiengScreen({
                           )}
                         </td>
                         <td className="lt__trang-thai">
-                          {kh === undefined ? "chưa đo" : NHAN_TRANG_THAI[kh.trang_thai]}
+                          {kh === undefined ? "chưa đo" : (kh.speed > 1.5 ? "nén mạnh" : NHAN_TRANG_THAI[kh.trang_thai])}
                         </td>
                       </tr>
                       {mo ? (
@@ -458,9 +460,7 @@ export function LongTiengScreen({
                                 <>
                                   <span className="lt__sua-ghi">
                                     take {giay(kh.take)} / chỗ {giay(kh.slot)} — {tocDo(kh.speed)}
-                                    {kh.trang_thai === "phai-sua"
-                                      ? ` · nén tới trần vẫn thiếu ${giay(kh.take / kh.speed - kh.avail)}`
-                                      : ""}
+                                    {kh.speed > 1.5 ? " · nén mạnh, khó nghe" : ""}
                                   </span>
                                   <button type="button"
                                     className="lt__nut-nho"

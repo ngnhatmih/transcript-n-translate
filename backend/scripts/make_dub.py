@@ -40,7 +40,7 @@ def main(argv=None) -> int:
     p.add_argument("--voice", default=None, help="tên giọng dựng sẵn của VieNeu")
     p.add_argument("--tts-python", default=str(BACKEND / ".venv-tts" / "Scripts" / "python.exe"))
     p.add_argument("--out-dir", type=pathlib.Path, default=BACKEND / "data" / "dubs")
-    p.add_argument("--tran", type=float, default=1.35)
+    p.add_argument("--nguong-manh", type=float, default=1.5, help="nguong coi la nen MANH (chi de bao cao, khong chan)")
     a = p.parse_args(argv)
 
     ban = get(f"{a.api}/api/translations/{a.translation_id}")
@@ -76,11 +76,11 @@ def main(argv=None) -> int:
     slots = [s["end"] - s["start"] for s in dung]
     avails = [(dung[k + 1]["start"] if k + 1 < len(dung) else dung[k]["end"]) - dung[k]["start"]
               for k in range(len(dung))]
-    toc_do, need, qua_tran = ke_hoach_toc_do(takes, slots, avails, tran=a.tran)
+    toc_do, need = ke_hoach_toc_do(takes, slots, avails)
 
     print(f"\n{'i':>4} {'chỗ':>6} {'take':>6} {'cần':>6} {'tốc độ':>7}  trạng thái")
     for k, s in enumerate(dung):
-        nhan = "phải sửa chữ" if k in qua_tran else ("vừa chỗ" if need[k] <= 1.0 else "nén")
+        nhan = "vừa chỗ" if need[k] <= 1.0 else ("nén mạnh" if toc_do[k] > a.nguong_manh else "nén")
         print(f"{s['i']:>4} {slots[k]:>6.2f} {takes[k]:>6.2f} {need[k]:>6.2f} {toc_do[k]:>7.2f}  {nhan}")
 
     dat: list[tuple[float, np.ndarray]] = []
@@ -109,11 +109,14 @@ def main(argv=None) -> int:
     ra = xuat_dinh_dang(master_path, a.out_dir, DINH_DANG)
     for ten_dd, duong in ra.items():
         print(f"  {ten_dd:<5} {duong.stat().st_size / 1024:>8.0f} kB  {duong}")
-    if qua_tran:
-        print(f"\n⚠ {len(qua_tran)} dòng vượt trần {a.tran}× (đã nén tới trần, vẫn đè dòng sau): "
-              + ", ".join(str(dung[k]["i"]) for k in qua_tran))
+    manh = [k for k in range(len(dung)) if toc_do[k] > a.nguong_manh]
+    if manh:
+        print(f"\n⚠ {len(manh)} dòng phải nén trên {a.nguong_manh}× "
+              f"(đã nén ĐỦ để không chồng dòng sau): "
+              + ", ".join(str(dung[k]["i"]) for k in manh))
     return 0
 
 
 if __name__ == "__main__":
     raise SystemExit(main())
+

@@ -255,18 +255,23 @@ export interface DubPlanRow {
   speed: number;
   /** `take / avail` — mức nén CẦN để vừa chỗ; `> 1` nghĩa là phải nén. */
   need: number;
-  /** Ba câu KHÁC NHAU, không phải ba mức của một thang — xem `DubPlan.dem`. */
-  trang_thai: "vua" | "nen" | "phai-sua";
+  /**
+   * HAI câu khác nhau, không phải ba mức của một thang — xem `DubPlan.dem`.
+   *
+   * ⚠️ Trạng thái thứ ba `"phai-sua"` đã BIẾN MẤT cùng trần nén 1,35: từ nay tốc độ không bị
+   * kẹp, nên không còn dòng nào "không cứu được bằng tốc độ". Dòng bị nén mạnh vẫn là `"nen"`
+   * — muốn biết dòng nào khó nghe thì đọc `speed` (> 1,5), không phải `trang_thai`.
+   */
+  trang_thai: "vua" | "nen";
 }
 
 export interface DubPlan {
   translation_id: number;
-  /** Trần nén (`TOC_DO_TRAN`, mặc định 1.35). */
-  tran: number;
   /** Độ dài canvas master, giây — bằng `end` của dòng cuối. */
   tong_giay: number;
   so_dong: number;
-  dem: { vua: number; nen: number; phai_sua: number };
+  /** `nen_manh` = số dòng có `speed > 1,5` — CHẨN ĐOÁN, không phải trạng thái chặn. */
+  dem: { vua: number; nen: number; nen_manh: number };
   /** Trung vị tốc độ — con số ở đầu dải thời gian. */
   trung_vi_toc_do: number;
   dong: DubPlanRow[];

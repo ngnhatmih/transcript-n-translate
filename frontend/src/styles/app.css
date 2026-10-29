@@ -2879,8 +2879,10 @@ body {
   background: var(--ink-1);
 }
 
-/* Phải sửa: amber — nghĩa DUY NHẤT của `--signal` trong màn này. */
-.lt__take--phai-sua {
+/* Nén MẠNH (> 1,5×): amber — nghĩa DUY NHẤT của `--signal` trong màn này.
+   Trạng thái `phai-sua` đã bỏ cùng trần nén 1,35: tốc độ không còn bị kẹp, nên
+   "tràn sang dòng sau" không còn xảy ra — chỉ còn "nén tới mức khó nghe". */
+.lt__take--nen-manh {
   background: var(--signal);
 }
 
@@ -3005,7 +3007,7 @@ body {
   background: var(--ink-1);
 }
 
-.lt__o-take--phai-sua {
+.lt__o-take--nen-manh {
   background: var(--signal);
 }
 
