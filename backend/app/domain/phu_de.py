@@ -61,18 +61,26 @@ def tim_dai_phu_de(hops: list[Hop], chieu_cao: int) -> tuple[float, float]:
     ghim bằng `test_tim_dai_phu_de_tra_ti_le_khong_phai_pixel`.
 
     Chia khung thành 100 dải, đếm số hộp có ĐỈNH nằm trong mỗi dải, rồi lấy cụm dải liên
+    Chia khung thành 100 dải, đếm số hộp có ĐỈNH nằm trong mỗi dải, rồi lấy cụm dải liên
     tiếp DÀY NHẤT mà bề dày <= `DAY_DAI_TOI_DA`.
 
-    🔴 LUẬT PHÁ HOÀ — vì sao phải có (đo được, không phải phòng xa):
-    Fixture của `test_tim_dai_phu_de_tra_ti_le_khong_phai_pixel` đặt 20 hộp phụ đề ở dải 88
-    và 20 hộp watermark ở dải 1. Hai cụm DÀY BẰNG NHAU (20 = 20), nên `tong > tot_nhat`
-    nghiêm ngặt để dải THẤP NHẤT thắng và trả `(0.00, 0.02)` — watermark. Docstring cũ nói
-    "watermark mỏng hơn nên không thắng" là SAI với chính dữ liệu của bài test.
+    🔴 LUẬT PHÁ HOÀ — hai khoá, và một ràng buộc bắt buộc:
 
-    Luật: khi hoà số hộp, cụm **CAO HƠN** thắng. Lý do đo được, không phải khẩu vị: phụ đề
-    nhúng đáy khung (y ∈ [627, 682] của 720); watermark/logo ở đỉnh (y ≤ 70). Không có video
-    nào đặt phụ đề trên cao hơn logo. Nên `>=` cộng với việc duyệt `dau` TỪ CAO XUỐNG là
-    cùng một luật, viết một lần.
+    (1) NHIỀU HỘP NHẤT. Fixture của `test_tim_dai_phu_de_tra_ti_le_khong_phai_pixel` đặt
+    20 hộp phụ đề ở dải 87 và 20 hộp watermark ở dải 1 — hai cụm DÀY BẰNG NHAU, nên khoá
+    này một mình KHÔNG quyết được. Docstring cũ nói "watermark mỏng hơn nên không thắng"
+    là SAI với chính dữ liệu của bài test.
+
+    (2) CAO HƠN, khi (1) hoà. Lý do đo được, không phải khẩu vị: phụ đề nhúng đáy khung
+    (y ∈ [627, 682] của 720); watermark/logo ở đỉnh (y ≤ 70). Không video nào đặt phụ đề
+    trên cao hơn logo.
+
+    🔴 RÀNG BUỘC: cửa sổ phải BẮT ĐẦU ở một dải CÓ HỘP. Không có nó, cửa sổ rộng 15 dải
+    bắt đầu ở dải 0 (rỗng) phủ trọn cụm dải 1 nên tổng cũng bằng 20 và thắng ở lần lặp
+    cuối — trả `(0.00, 0.15)`, một dải rỗng. Đây là bản sửa của một bản sửa SAI: tôi từng
+    thêm khoá "HẸP NHẤT" để chặn đúng ca này, nhưng khoá đó phá khoá (1) — đo được, 30 hộp
+    phụ đề trải trên dải 87/88/91 thua 30 hộp logo dồn vào dải 1, trả `(0.02, 0.083)`.
+    Ràng buộc "bắt đầu ở dải có hộp" chặn cửa sổ rỗng mà KHÔNG đụng tới khoá (1).
     """
     if not hops or chieu_cao <= 0:
         return (0.0, 0.0)
@@ -84,22 +92,17 @@ def tim_dai_phu_de(hops: list[Hop], chieu_cao: int) -> tuple[float, float]:
 
     toi_da_dai = max(1, int(DAY_DAI_TOI_DA * SO_DAI))
     tot_nhat, tot_nhat_dau, tot_nhat_dai = -1, 0, 0
-    # LUẬT PHÁ HOÀ, ba khoá theo thứ tự: (1) nhiều hộp nhất; (2) HẸP NHẤT; (3) CAO NHẤT.
-    #
-    # Vì sao phải có khoá (2) — đo được, không phải phòng xa: cửa sổ rộng 15 dải bắt đầu ở
-    # dải 0 phủ trọn cụm watermark ở dải 1 nên tổng cũng bằng 20, và nếu chỉ so `>=` thì nó
-    # THẮNG ở lần lặp cuối, trả `(0.00, 0.15)` — một dải rỗng. Hẹp nhất buộc phải chọn đúng
-    # cụm 20 hộp thật (bề dày 1 dải) thay vì cửa sổ rộng nuốt nó.
-    # Khoá (3) chỉ dùng khi (1) và (2) đều hoà: phụ đề nhúng đáy khung, logo ở đỉnh.
+    # Hai khoá: (1) nhiều hộp nhất; (2) cao nhất khi hoà. Cộng ràng buộc `dem[dau] > 0`.
     for dau in range(SO_DAI):
+        if dem[dau] == 0:
+            continue          # cửa sổ phải bắt đầu ở dải CÓ hộp
         for dai in range(1, toi_da_dai + 1):
             if dau + dai > SO_DAI:
                 break
             tong = sum(dem[dau:dau + dai])
             tot_hon = (
                 tong > tot_nhat
-                or (tong == tot_nhat and dai < tot_nhat_dai)
-                or (tong == tot_nhat and dai == tot_nhat_dai and dau > tot_nhat_dau)
+                or (tong == tot_nhat and dau > tot_nhat_dau)
             )
             if tot_hon:
                 tot_nhat, tot_nhat_dau, tot_nhat_dai = tong, dau, dai

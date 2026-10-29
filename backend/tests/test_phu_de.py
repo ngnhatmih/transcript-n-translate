@@ -40,6 +40,26 @@ def test_tim_dai_phu_de_tra_ti_le_khong_phai_pixel():
     )
 
 
+def test_tim_dai_phu_de_thich_cum_nhieu_hop_hon_la_cum_don():
+    """Cụm phụ đề TRẢI trên nhiều dải phải thắng cụm logo DỒN vào một dải, khi số hộp bằng nhau.
+
+    🔴 Vì sao có bài này (đo được, không phải phòng xa): bản sửa đầu tiên của tôi thêm khoá
+    "HẸP NHẤT" để chặn cửa sổ rỗng, và khoá đó PHÁ khoá "nhiều hộp nhất" — 30 hộp phụ đề
+    trải trên dải 87/88/91 thua 30 hộp logo dồn vào dải 1, hàm trả `(0.02, 0.083)` và bộ lọc
+    `y0*cao <= h.y0 <= y1*cao` sau đó XOÁ SẠCH mọi phụ đề. Reviewer Task 2 bắt được.
+    Bài này ghim đúng ca đó, nên không bản sửa nào lặp lại lỗi ấy mà lọt.
+    """
+    hops = [_hop(y0=627.0, y1=680.0, t=float(k)) for k in range(10)]
+    hops += [_hop(y0=634.0, y1=680.0, t=float(k)) for k in range(10)]
+    hops += [_hop(y0=655.0, y1=680.0, t=float(k)) for k in range(10)]
+    hops += [_hop(y0=20.0, y1=60.0, t=float(k)) for k in range(30)]   # logo dồn một dải
+    y0, y1 = tim_dai_phu_de(hops, chieu_cao=CAO)
+    assert 0.85 <= y0 <= 0.90, (
+        f"phải chọn cụm phụ đề ở đáy khung, không phải logo ở đỉnh; đo được {y0}"
+    )
+    assert 0.93 <= y1 <= 0.97, f"đáy dải phải ~0,94; đo được {y1}"
+
+
 def test_loc_on_dinh_bo_chu_chay():
     """Chữ chạy (dải danh lam thắng cảnh đo được ở giây 1056) đổi vị trí x mỗi khung
     ⇒ loại. Phụ đề đứng yên ⇒ giữ."""
