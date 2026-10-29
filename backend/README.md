@@ -892,10 +892,30 @@ curl -X POST http://127.0.0.1:8620/api/dubs -H 'Content-Type: application/json' 
 8 dòng → master **33,78 s** (dòng 7 đặt ở 32,46 s đúng `start`) và **5 file**
 wav 3167 kB · flac 462 · mp3 793 · aac 314 · m4a 310.
 
-Tốc độ KHÔNG phải mỗi dòng một số: `ke_hoach_toc_do` gom về thang bậc 0,05 (tối đa 1,35),
-vì đo trên 14 dòng thật `take/chỗ` rải 1,00–1,62× — mỗi dòng một tốc độ thì giọng đổi nhịp liên
-tục, còn một tốc độ chung thì phải lấy mức lớn nhất. 8 dòng trên dùng 5 mốc: 1,00/1,10/1,15/
-1,20/1,25. Dòng nào `need > 1,35` thì handler GHI RA là "phải sửa chữ" và không tự nén quá trần.
+Tốc độ tính bằng CÔNG THỨC, không thang bậc và **không trần**:
+
+```
+cho_i   = max(slot_i, avail_i)      # avail_i = start dòng kế - start dòng này
+need_i  = take_i / cho_i            # tốc độ TỐI THIỂU để không đè dòng sau
+toc_do_i = max(1.0, need_i)         # không bao giờ làm CHẬM, chỉ nén
+```
+
+`slot` là chỗ dành cho dòng (end − start của bản dịch), `avail` là quãng thật từ `start`
+của dòng tới `start` của dòng kế. Lấy **`max`** chứ không `min`: take được TRẢI vào khoảng
+lặng phía sau, nên chỗ thật rộng hơn `slot` khi hai dòng cách xa nhau.
+
+🔴 Bản cũ kẹp `need` ở `TOC_DO_TRAN = 1.35` và gom về thang bậc 0,05. Cả hai đã BỊ XOÁ
+(xem dòng 128 ở trên). Đo được hệ quả của bản cũ: dòng vượt trần **vẫn chồng** sang dòng
+sau vì 1,35 không đủ, mà mã chỉ báo "phải sửa chữ" — tức nó biết mình phá ràng buộc cứng
+rồi ghi chú lại. Thang bậc cũng vậy: một bậc NHỎ hơn `need` là một dòng chồng lấn, tức đổi
+ràng buộc ĐÚNG/SAI lấy một mong muốn. Nay nén tới đúng mức cần, không cắt chữ.
+
+Đo trên dữ liệu thật (báo cáo `docs/superpowers/reports/2026-10-29-bon-con-so.md`, ba bản
+dịch trên `app.db` thật): **145–169 dòng phải nén (33–37 %)**, `need` max **11,6–20,0**,
+trung vị **0,77–0,80**. Nghĩa là phần lớn dòng nằm ở 1,0× (take ngắn hơn chỗ), nhưng một
+phần ba phải đọc nhanh hơn — và đuôi lên tới 20× khi hai dòng quá sát. Đó là DỮ LIỆU, không
+phải lỗi: `need` lớn nghĩa là bản dịch dài hơn hẳn chỗ có, và lựa chọn duy nhất không cắt
+chữ là đọc nhanh.
 
 #### Đo end-to-end qua HTTP (bản dịch #1, 4 dòng, máy Windows)
 

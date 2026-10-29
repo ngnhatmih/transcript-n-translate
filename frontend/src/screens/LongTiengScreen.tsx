@@ -3,8 +3,9 @@
  *
  * BA TẦNG, không phải một dải:
  *   1. cột KÊNH (chọn nguồn đã dịch),
- *   2. DẢI THỜI GIAN — hàng trên là `chỗ`, hàng dưới là `take`; thanh amber tràn sang phải nghĩa
- *      là take DÀI HƠN chỗ và đã nén tới trần mà vẫn đè dòng sau,
+ *   2. DẢI THỜI GIAN — hàng trên là `chỗ`, hàng dưới là `take`; thanh amber nghĩa là take
+ *      DÀI HƠN chỗ nên phải NÉN (đọc nhanh hơn) cho vừa. Nó KHÔNG có nghĩa là đè dòng sau:
+ *      chồng lấn bị cấm bởi chính công thức `toc_do = max(1.0, take / max(slot, avail))`.
  *   3. BẢNG DÒNG — `#` · giờ · nguồn · dịch · take · so với chỗ · trạng thái, mỗi dòng mở được ô
  *      sửa có NGHE THỬ.
  *
@@ -390,7 +391,7 @@ export function LongTiengScreen({
               <span className="lt__dem-dai">
                 vừa chỗ {plan.dem.vua} · nén {plan.dem.nen} · nén mạnh {plan.dem.nen_manh}
               </span>
-              <span className="lt__canh-bao">thanh amber = take dài hơn chỗ, tràn sang dòng sau</span>
+              <span className="lt__canh-bao">thanh amber = take dài hơn chỗ, đã nén cho vừa (không đè dòng sau)</span>
               <span className="lt__tong">{giay(plan.tong_giay)}</span>
             </div>
           </>
@@ -489,3 +490,4 @@ export function LongTiengScreen({
     </div>
   );
 }
+
