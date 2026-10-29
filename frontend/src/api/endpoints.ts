@@ -369,10 +369,21 @@ export function exportUrl(
  * Xếp MỘT job lồng tiếng cho một bản dịch. Trạng thái và file tải KHÔNG cần hàm riêng: job nằm
  * trong `GET /api/jobs` như mọi job khác, còn file là một `<a href>` tới
  * `/api/dubs/{id}/download?format=…` (tải file không phải một lời gọi `fetch`).
+ *
+ * 🔴 ĐƯỜNG DẪN Ở ĐÂY KHÔNG CÓ `/api` — `api.post` đã ghép `BASE = "/api"`. Viết `"/api/dubs"`
+ * thành URL THẬT là `/api/api/dubs`, FastAPI không có route đó nên trả
+ * `404 {"detail": "Not Found"}`, và màn Lồng tiếng hiện nguyên văn `404: Not Found` ngay dưới
+ * nút. ĐO ĐƯỢC: `POST http://127.0.0.1:3100/api/api/dubs` -> `404 · {"detail": "Not Found"}`,
+ * trong khi `POST /api/dubs` -> `201 · {"job": {...}}`.
+ *
+ * Vì sao lỗi này lọt qua 358 bài test: mọi bài của màn Lồng tiếng đều TIÊM `onLongTieng` giả,
+ * nên `makeDub` không bao giờ chạy; còn `contract.test.ts` gọi `api.get/api.post` với URL
+ * TUYỆT ĐỐI (`${API}/...`), đường mà `call` bỏ qua `BASE`. Không bài nào đi qua đúng tổ hợp
+ * "hàm endpoint + đường TƯƠNG ĐỐI". Bài ghim ở `endpoints.test.ts` bắt đúng tổ hợp đó.
  */
 export const makeDub = (translationId: number, voice: string | null) =>
   api.post<{ job: { id: number; type: string; state: string; translation_id: number } }>(
-    "/api/dubs", { translation_id: translationId, voice });
+    "/dubs", { translation_id: translationId, voice });
 
 /**
  * Kế hoạch tốc độ của lượt lồng GẦN NHẤT — số đo TỪNG dòng cho bảng ở màn Lồng tiếng.
