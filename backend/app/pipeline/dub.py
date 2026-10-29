@@ -143,11 +143,18 @@ class DubHandler:
 
     def __init__(self, repos, out_dir: pathlib.Path, tts_runner, *,
                  dinh_dangs=None,
-                 python: str = "", script: str = "") -> None:
+                 python: str = "", script: str = "",
+                 tron_nen: bool = False) -> None:
         self._repos = repos
         self._out_dir = pathlib.Path(out_dir)
         self._tts = tts_runner
         self._dinh_dangs = dinh_dangs or DINH_DANG
+        #: `True` thi TRỘN NỀN trước khi xuất: tách `htdemucs` lấy nhạc/tiếng động của
+        #: video gốc, cộng với bản lồng, rồi remux vào video. `False` (mặc định) giữ
+        #: nguyên hành vi cũ — xuất bản lồng SẠCH, không đụng tới video. Đây là cờ
+        #: MÔI TRƯỜNG: `demucs` chỉ có trong image có GPU, và một image thiếu nó vẫn
+        #: phải lồng tiếng được.
+        self._tron_nen = tron_nen
         # Đường của tiến trình TTS — CHỈ để `san_sang()` trả lời được "máy này có TTS chưa".
         # Vắng (`""`) thì `san_sang()` trả `True`: một handler tự dựng trong test (với runner
         # giả) là một handler KHÔNG có ý kiến gì về môi trường, và đoán hộ nó là bịa.
@@ -270,6 +277,9 @@ class DubHandler:
         # thì route trả `null` và giao diện nói "chưa có số đo", KHÔNG bịa số.
         self._ghi_ke_hoach(tid, dung, takes, slots, avails, toc_do, need)
 
+        if self._tron_nen:
+            self._tron_va_remux(tid, ban.transcript_id, master_path, report)
+
         report(0.92, f"xuất {len(self._dinh_dangs)} định dạng")
         xuat_dinh_dang(master_path, self._out_dir, self._dinh_dangs)
         manh = [k for k, s in enumerate(toc_do) if s > 1.5]
@@ -278,6 +288,80 @@ class DubHandler:
                         f"chồng, không cắt chữ): " + ", ".join(str(dung[k].i) for k in manh))
         else:
             report(1.0, "xong")
+
+    def _tron_va_remux(self, tid: int, transcript_id: int,
+                       master: pathlib.Path, report) -> None:
+        """Trộn nền của VIDEO GỐC với bản lồng, rồi remux vào video.
+
+        Chuỗi lấy video: `translation` -> `transcript` -> `source`. `transcript_id` được
+        TRUYỀN VÀO chứ không tra lại từ `tid`: người gọi đã có `ban.transcript_id` trong
+        tay, tra lại là một truy vấn thừa và một cơ hội để hai chỗ lệch nhau.
+
+        Nguồn nền là `source.media_path` — VIDEO GỐC, không phải `audio_path` (wav 16 kHz
+        mono của ASR). Đo được: nền tách từ audio gốc dày hơn 11 % RMS và giữ stereo;
+        xem docstring `tach_nen.py` cạm bẫy (2).
+
+        Không có video gốc (nguồn là audio thuần) thì BỎ QUA kèm một dòng log, không ném:
+        lồng tiếng cho một tệp audio là nhu cầu hợp lệ, và bản lồng sạch đã nằm trên đĩa.
+        """
+        from app.pipeline import tach_nen
+
+        transcript = self._repos.get_transcript(transcript_id)
+        source = self._repos.get_source(transcript.source_id)
+        video = pathlib.Path(source.media_path)
+        if not video.is_file():
+            report(0.90, f"bỏ qua trộn nền: không thấy video gốc ({video.name})")
+            return
+
+        import tempfile
+
+        with tempfile.TemporaryDirectory(prefix="nen-") as tam:
+            tam = pathlib.Path(tam)
+            report(0.90, "tách nền khỏi tiếng gốc (htdemucs)")
+            goc = tam / "goc.wav"
+            tach_nen.trich_audio_goc(video, goc)
+            nen = tach_nen.tach_nen(goc)
+            nen, he_so = tach_nen.chuan_hoa_nen(nen)
+            if he_so > 1.0:
+                report(0.93, f"nền vượt biên độ (peak {he_so:.3f}) — đã chuẩn hoá")
+
+            dub, _ = self._doc_master(master)
+            tron = tach_nen.tron(nen, dub)
+            tron_path = tam / "tron.wav"
+            import soundfile as sf
+            sf.write(str(tron_path), tron.T, tach_nen.SR_MODEL)
+
+            report(0.95, "remux vào video gốc")
+            ra = self._out_dir / f"dub-{tid}.mp4"
+            tach_nen.remux(video, tron_path, ra)
+            report(0.96, f"video lồng tiếng: {ra.name} ({ra.stat().st_size // 1024} kB)")
+
+    def _doc_master(self, master: pathlib.Path):
+        """Đọc master về `(2, N)` ở `SR_MODEL` — resample nếu cần, KHÔNG đoán sample rate.
+
+        `dub.py` ghi master ở 48 kHz (biến `sr` trong `run`), còn `htdemucs` trả 44,1 kHz,
+        nên phép cộng phải quy về MỘT sample rate trước. Đo được hệ quả của việc bỏ bước
+        này: cộng hai mảng khác sample rate KHÔNG báo lỗi, chỉ ra một tệp dài sai và nghe
+        lệch — xem ERRATA 5 ở `tach_nen.py`.
+        """
+        import soundfile as sf
+
+        mau, sr = sf.read(str(master), dtype="float32", always_2d=True)
+        if mau.shape[1] == 1:
+            mau = np.repeat(mau, 2, axis=1)
+        elif mau.shape[1] > 2:
+            mau = mau[:, :2]
+        if sr != tach_nen.SR_MODEL:
+            import subprocess as _sp
+            import tempfile
+
+            with tempfile.TemporaryDirectory(prefix="sr-") as tam:
+                ra = pathlib.Path(tam) / "ra.wav"
+                _sp.run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
+                         "-i", str(master), "-ac", "2", "-ar", str(tach_nen.SR_MODEL),
+                         "-acodec", "pcm_s16le", str(ra)], check=True, capture_output=True)
+                mau, sr = sf.read(str(ra), dtype="float32", always_2d=True)
+        return np.ascontiguousarray(mau.T, dtype=np.float32), sr
 
     def _ghi_ke_hoach(self, tid: int, dung, takes, slots, avails, toc_do, need) -> None:
         """Ghi `dub-<tid>.plan.json`: số đo của TỪNG dòng cho bảng ở màn Lồng tiếng.
