@@ -51,10 +51,9 @@ def _font_drawtext() -> str:
     ):
         if pathlib.Path(ung).is_file():
             return ung.replace(":", "\\\\:")
-    raise RuntimeError("không tìm được font cho drawtext — cài fonts-dejavu-core")
+    return None
 
 
-FONT = _font_drawtext()
 
 
 def _lam_video(ra: str, *, giay: float = 2.0, fps: int = 2) -> str:
@@ -68,10 +67,13 @@ def _lam_video(ra: str, *, giay: float = 2.0, fps: int = 2) -> str:
     `['hello world']` 1 segment; `'helloworld'` -> 0. Dấu `!` sống sót qua OCR và phá
     luật toàn-Latinh, nên đây là dạng chữ BỀN nhất cho fixture.
     """
+    font = _font_drawtext()
+    if font is None:
+        pytest.skip("khong co font DejaVu/Arial cho drawtext — bo qua, khong giet suite")
     subprocess.run(
         ["ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
          "-f", "lavfi", "-i", f"color=c=black:s=320x240:d={giay}:r={fps}",
-         "-vf", (f"drawtext=fontfile={FONT}:text='Hello!':fontcolor=white:"
+         "-vf", (f"drawtext=fontfile={font}:text='Hello!':fontcolor=white:"
                  "fontsize=32:x=40:y=190"),
          "-pix_fmt", "yuv420p", ra],
         check=True, capture_output=True,
@@ -116,6 +118,9 @@ def test_doc_duoc_chu_va_tra_segment(tmp_path):
 def test_video_khong_chu_tra_danh_sach_rong(tmp_path):
     """Nền đen trơn ⇒ KHÔNG có dòng nào. Không được bịa."""
     video = str(tmp_path / "trong.mp4")
+    font = _font_drawtext()
+    if font is None:
+        pytest.skip("khong co font DejaVu/Arial cho drawtext — bo qua, khong giet suite")
     subprocess.run(
         ["ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
          "-f", "lavfi", "-i", "color=c=black:s=320x240:d=1:r=2",
@@ -147,3 +152,4 @@ def test_khong_co_tep_thi_bao_loi_ro_rang(tmp_path):
             eng.doc_phu_de(str(tmp_path / "khong-co.mp4"), fps=2.0)
     finally:
         eng.release()
+

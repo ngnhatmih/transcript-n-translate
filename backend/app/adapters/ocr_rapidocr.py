@@ -33,6 +33,32 @@ def _kich_thuoc(video_path: str) -> tuple[int, int]:
     return int(rong), int(cao)
 
 
+def _diem_goc(box) -> list:
+    """Chuan hoa `box` cua rapidocr ve `[(x, y), ...]`, hoac `[]` neu khong doc duoc.
+
+    Hai dang da gap:
+      · `[[x, y], [x, y], [x, y], [x, y]]` — dang chuan cua rapidocr
+      · `[x1, y1, x2, y2, ...]` — list SO PHANG; do duoc `p[0]` tren float nem
+        `TypeError: float object is not subscriptable` va giet ca video
+
+    Dang la thi bo hop do, KHONG doan: mot hop hinh hoc sai con te hon khong co hop.
+    """
+    if not box:
+        return []
+    try:
+        dau = box[0]
+        if isinstance(dau, (list, tuple)):
+            if len(box) < 3:
+                return []
+            return [(float(p[0]), float(p[1])) for p in box]
+        so = [float(v) for v in box]
+    except (TypeError, ValueError, IndexError):
+        return []
+    if len(so) < 6 or len(so) % 2:
+        return []
+    return [(so[i], so[i + 1]) for i in range(0, len(so), 2)]
+
+
 class RapidOCREngine:
     """Đọc phụ đề cứng. Tạo engine MỘT lần, dùng cho nhiều video, `release()` khi xong."""
 
@@ -65,15 +91,40 @@ class RapidOCREngine:
         self._engine = None
 
     def _doc_khung(self, engine, anh: str, t: float) -> list[Hop]:
-        """Một khung → danh sách `Hop`. `rapidocr` trả `[[box, text, score], ...]`."""
+        """Một khung -> danh sách `Hop`. `rapidocr` trả `[[box, text, score], ...]`.
+
+        🔴 BA PHÒNG THỦ ĐO ĐƯỢC (review Task 3, finding 6/7/9):
+          · `diem` có thể là `None` -> `float(None)` ném `TypeError` và GIẾT CẢ VIDEO,
+            không chỉ một hộp. Điểm `None` nghĩa là "không chấm được", không phải 0,
+            nên quy về 0.0 và để tầng lọc sau xử lý như một hộp điểm thấp.
+          · `text` có thể là `None` -> `str(None)` thành CHUỖI "None" và lọt qua mọi
+            tầng lọc như một dòng phụ đề thật. Bỏ hộp đó.
+          · hộp có ít hơn 4 điểm -> `p[0]`/`p[1]` vẫn chạy nhưng hình chữ nhật sai;
+            bỏ hộp thiếu đỉnh thay vì đoán.
+        """
         ra, _ = engine(anh)
         hops: list[Hop] = []
         for muc in ra or []:
+            # `muc` phai la day du ba phan tu. Kiem HINH DANG truoc khi `len`:
+            # mot float/hop tho trong ket qua rapidocr lam `len(muc)` nem
+            # `TypeError: object of type float has no len()` va giet ca video (do duoc).
+            if not isinstance(muc, (list, tuple)) or len(muc) < 3:
+                continue
             box, text, diem = muc[0], muc[1], muc[2]
-            xs = [float(p[0]) for p in box]
-            ys = [float(p[1]) for p in box]
+            if text is None or not str(text).strip():
+                continue
+            # `rapidocr` tra `box` la list 4 diem `[[x,y], [x,y], ...]`. Nhung mot so
+            # ban/duong goi khac tra list SO PHANG `[x1,y1,x2,y2,...]` — do duoc:
+            # `p[0]` tren mot float nem `TypeError: 'float' object is not subscriptable`
+            # va giet CA VIDEO. Chap nhan CA HAI dang thay vi doan mot dang.
+            diem_anh = _diem_goc(box)
+            if not diem_anh:
+                continue
+            xs = [p[0] for p in diem_anh]
+            ys = [p[1] for p in diem_anh]
             hops.append(Hop(text=str(text).strip(), x0=min(xs), y0=min(ys),
-                            x1=max(xs), y1=max(ys), t=t, diem=float(diem)))
+                            x1=max(xs), y1=max(ys), t=t,
+                            diem=float(diem) if diem is not None else 0.0))
         return hops
 
     def doc_phu_de(self, video_path: str, *, fps: float = 2.0,
@@ -94,14 +145,27 @@ class RapidOCREngine:
 
         with tempfile.TemporaryDirectory(prefix="ocr-") as tam:
             tam_p = pathlib.Path(tam)
-            # ffmpeg xuar khung ở fps yêu cầu; tên tệp mang số thứ tự nên `t = k / fps`.
+            # `ffmpeg` xuat khung o fps yeu cau, ten tep `%06d.png` mang SO THU TU KHUNG.
+            #
+            # 🔴 `t` LAY TU TEN TEP, KHONG TU `enumerate` (review Task 3, finding 9).
+            # Ban dau dung `k / fps` voi `k` la thu tu trong danh sach da sap. Neu mot
+            # khung bi thieu (ffmpeg loi mot khung, hoac tep bi xoa), `k` KHONG con bang
+            # so thu tu that, va MOI moc thoi gian sau do lech di mot buoc khung — sai
+            # am tham, khong bao loi. Doc so tu TEN tep thi khung thieu chi lam thieu mot
+            # moc, khong keo theo ca doan sau.
             subprocess.run(
                 ["ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
                  "-i", video_path, "-vf", f"fps={fps}", str(tam_p / "%06d.png")],
                 check=True, capture_output=True)
             hops: list[Hop] = []
-            for k, anh in enumerate(sorted(tam_p.glob("*.png"))):
-                hops.extend(self._doc_khung(engine, str(anh), k / fps))
+            for anh in sorted(tam_p.glob("*.png")):
+                # Ten tep `000123.png` -> khung 123 -> `t = (123 - 1) / fps`, vi ffmpeg
+                # danh so tu 1. Ten hong thi bo qua khung do thay vi doan bua.
+                try:
+                    so_khung = int(anh.stem) - 1
+                except ValueError:
+                    continue
+                hops.extend(self._doc_khung(engine, str(anh), so_khung / fps))
 
         if not hops:
             return []

@@ -60,9 +60,21 @@ def tim_dai_phu_de(hops: list[Hop], chieu_cao: int) -> tuple[float, float]:
     Dùng tỉ lệ chứ không dùng pixel để cùng một video ở 720p/1080p/4K cho cùng kết quả —
     ghim bằng `test_tim_dai_phu_de_tra_ti_le_khong_phai_pixel`.
 
-    Chia khung thành 100 dải, đếm số hộp có ĐỈNH nằm trong mỗi dải, rồi lấy cụm dải liên
-    Chia khung thành 100 dải, đếm số hộp có ĐỈNH nằm trong mỗi dải, rồi lấy cụm dải liên
-    tiếp DÀY NHẤT mà bề dày <= `DAY_DAI_TOI_DA`.
+    Chia khung thành 100 dải, đếm số DÒNG KHÁC NHAU có ĐỈNH nằm trong mỗi dải, rồi
+    lấy cụm dải liên tiếp DÀY NHẤT mà bề dày <= `DAY_DAI_TOI_DA`.
+
+    🔴 ĐẾM DÒNG KHÁC NHAU, KHÔNG ĐẾM HỘP (bản đầu đếm hộp — SAI, đo được).
+    Logo/wartermark là HẰNG SỐ theo thời gian: nó xuất hiện ở MỌI khung với cùng một
+    chuỗi, nên đếm hộp thì nó luôn thắng phụ đề (phụ đề chỉ có ở ~40-60 % số khung).
+    Đo được, 6 ca:
+        logo 20/20 khung, phụ đề 10/20  -> đếm hộp: px(28,8) SAI | đếm dòng: px(626,4) ĐÚNG
+        logo 20/20 khung, phụ đề  1/20  -> đếm hộp: px(28,8) SAI | đếm dòng: px(626,4) ĐÚNG
+        watermark 30 hộp vs phụ đề 20  -> đếm hộp: px( 0,0) SAI | đếm dòng: px(626,4) ĐÚNG
+        logo 10/10, phụ đề 10/10       -> ĐÚNG cả hai
+        không logo                      -> ĐÚNG cả hai
+        hoà 20/20 cả hai                -> ĐÚNG cả hai (khoá "cao hơn" quyết)
+    Vì sao đúng: một logo lặp y nguyên ở 20 khung là MỘT dòng; 10 câu phụ đề khác nhau
+    là MƯỜI dòng. Đếm dòng đo ĐÚNG lượng thông tin, đếm hộp đo số lần lặp.
 
     🔴 LUẬT PHÁ HOÀ — hai khoá, và một ràng buộc bắt buộc:
 
@@ -85,14 +97,16 @@ def tim_dai_phu_de(hops: list[Hop], chieu_cao: int) -> tuple[float, float]:
     if not hops or chieu_cao <= 0:
         return (0.0, 0.0)
     SO_DAI = 100
-    dem = [0] * SO_DAI
+    # Mỗi dải giữ TẬP `text` khác nhau, không phải số hộp — xem vì sao ở docstring.
+    theo_dai: dict[int, set[str]] = {}
     for h in hops:
         i = int((h.y0 / chieu_cao) * SO_DAI)
-        dem[max(0, min(SO_DAI - 1, i))] += 1
+        theo_dai.setdefault(max(0, min(SO_DAI - 1, i)), set()).add(h.text)
+    dem = [len(theo_dai.get(i, ())) for i in range(SO_DAI)]
 
     toi_da_dai = max(1, int(DAY_DAI_TOI_DA * SO_DAI))
     tot_nhat, tot_nhat_dau, tot_nhat_dai = -1, 0, 0
-    # Hai khoá: (1) nhiều hộp nhất; (2) cao nhất khi hoà. Cộng ràng buộc `dem[dau] > 0`.
+    # Hai khoá: (1) nhiều DÒNG nhất; (2) cao nhất khi hoà. Cộng ràng buộc `dem[dau] > 0`.
     for dau in range(SO_DAI):
         if dem[dau] == 0:
             continue          # cửa sổ phải bắt đầu ở dải CÓ hộp

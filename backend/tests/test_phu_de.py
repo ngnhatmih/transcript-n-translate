@@ -60,6 +60,33 @@ def test_tim_dai_phu_de_thich_cum_nhieu_hop_hon_la_cum_don():
     assert 0.93 <= y1 <= 0.97, f"đáy dải phải ~0,94; đo được {y1}"
 
 
+def test_tim_dai_phu_de_dem_dong_khac_nhau_khong_dem_hop():
+    """Logo lặp ở MỌI khung với cùng một chuỗi KHÔNG được thắng phụ đề đổi câu.
+
+    🔴 Vì sao có bài này (đo được, không phải phòng xa): `tim_dai_phu_de` bản đầu đếm SỐ HỘP
+    mỗi dải. Logo/wartermark là HẰNG SỐ theo thời gian — nó có ở mọi khung với cùng một
+    chuỗi — nên nó luôn thắng phụ đề (chỉ có ở ~40–60 % số khung). Đo được, 6 ca:
+
+        logo 20/20 khung, phụ đề 10/20  -> đếm hộp: px(28,8) SAI | đếm dòng: px(626,4) ĐÚNG
+        logo 20/20 khung, phụ đề  1/20  -> đếm hộp: px(28,8) SAI | đếm dòng: px(626,4) ĐÚNG
+        watermark 30 hộp vs phụ đề 20   -> đếm hộp: px( 0,0) SAI | đếm dòng: px(626,4) ĐÚNG
+        logo 10/10, phụ đề 10/10        -> ĐÚNG cả hai
+        không logo                      -> ĐÚNG cả hai
+        hoà 20/20 cả hai                -> ĐÚNG cả hai
+
+    Bài này ghim ca SAI nặng nhất: logo 20 khung, phụ đề 10 câu KHÁC NHAU ở 10 khung. Đếm
+    hộp cho 20 > 10 nên chọn logo; đếm dòng cho 10 > 1 (logo chỉ MỘT dòng) nên chọn phụ đề.
+
+    Đột biến đã kiểm: trả `dem[i] += 1` (đếm hộp) thì bài này ĐỎ với "đo được 0.028".
+    """
+    hops = [_hop(text="bilibili", y0=28.0, y1=58.0, t=k * 0.5) for k in range(20)]
+    hops += [_hop(text=f"câu phụ đề {k}", y0=627.0, y1=682.0, t=k * 1.0) for k in range(10)]
+    y0, y1 = tim_dai_phu_de(hops, chieu_cao=CAO)
+    assert 0.85 <= y0 <= 0.90, (
+        f"phải chọn dải phụ đề ở đáy khung, không phải logo lặp 20 khung; đo được {y0}"
+    )
+    assert 0.93 <= y1 <= 0.97, f"đáy dải phải ~0,94; đo được {y1}"
+
 def test_loc_on_dinh_bo_chu_chay():
     """Chữ chạy (dải danh lam thắng cảnh đo được ở giây 1056) đổi vị trí x mỗi khung
     ⇒ loại. Phụ đề đứng yên ⇒ giữ."""
