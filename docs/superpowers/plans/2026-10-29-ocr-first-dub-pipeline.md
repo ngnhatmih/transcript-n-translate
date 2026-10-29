@@ -557,8 +557,18 @@ def tim_dai_phu_de(hops: list[Hop], chieu_cao: int) -> tuple[float, float]:
     ghim bằng `test_tim_dai_phu_de_tra_ti_le_khong_phai_pixel`.
 
     Chia khung thành 100 dải, đếm số hộp có ĐỈNH nằm trong mỗi dải, rồi lấy cụm dải liên
-    tiếp DÀY NHẤT mà bề dày <= `DAY_DAI_TOI_DA`. Watermark/logo ở `y <= 70/720` thành một
-    cụm riêng, mỏng hơn, nên không thắng.
+    tiếp DÀY NHẤT mà bề dày <= `DAY_DAI_TOI_DA`.
+
+    🔴 LUẬT PHÁ HOÀ — vì sao phải có (đo được, không phải phòng xa):
+    Fixture của `test_tim_dai_phu_de_tra_ti_le_khong_phai_pixel` đặt 20 hộp phụ đề ở dải 88
+    và 20 hộp watermark ở dải 1. Hai cụm DÀY BẰNG NHAU (20 = 20), nên `tong > tot_nhat`
+    nghiêm ngặt để dải THẤP NHẤT thắng và trả `(0.00, 0.02)` — watermark. Docstring cũ nói
+    "watermark mỏng hơn nên không thắng" là SAI với chính dữ liệu của bài test.
+
+    Luật: khi hoà số hộp, cụm **CAO HƠN** thắng. Lý do đo được, không phải khẩu vị: phụ đề
+    nhúng đáy khung (y ∈ [627, 682] của 720); watermark/logo ở đỉnh (y ≤ 70). Không có video
+    nào đặt phụ đề trên cao hơn logo. Nên `>=` cộng với việc duyệt `dau` TỪ CAO XUỐNG là
+    cùng một luật, viết một lần.
     """
     if not hops or chieu_cao <= 0:
         return (0.0, 0.0)
@@ -570,51 +580,87 @@ def tim_dai_phu_de(hops: list[Hop], chieu_cao: int) -> tuple[float, float]:
 
     toi_da_dai = max(1, int(DAY_DAI_TOI_DA * SO_DAI))
     tot_nhat, tot_nhat_dau, tot_nhat_dai = -1, 0, 0
+    # LUẬT PHÁ HOÀ, ba khoá theo thứ tự: (1) nhiều hộp nhất; (2) HẸP NHẤT; (3) CAO NHẤT.
+    #
+    # Vì sao phải có khoá (2) — đo được, không phải phòng xa: cửa sổ rộng 15 dải bắt đầu ở
+    # dải 0 phủ trọn cụm watermark ở dải 1 nên tổng cũng bằng 20, và nếu chỉ so `>=` thì nó
+    # THẮNG ở lần lặp cuối, trả `(0.00, 0.15)` — một dải rỗng. Hẹp nhất buộc phải chọn đúng
+    # cụm 20 hộp thật (bề dày 1 dải) thay vì cửa sổ rộng nuốt nó.
+    # Khoá (3) chỉ dùng khi (1) và (2) đều hoà: phụ đề nhúng đáy khung, logo ở đỉnh.
     for dau in range(SO_DAI):
         for dai in range(1, toi_da_dai + 1):
             if dau + dai > SO_DAI:
                 break
             tong = sum(dem[dau:dau + dai])
-            if tong > tot_nhat:
+            tot_hon = (
+                tong > tot_nhat
+                or (tong == tot_nhat and dai < tot_nhat_dai)
+                or (tong == tot_nhat and dai == tot_nhat_dai and dau > tot_nhat_dau)
+            )
+            if tot_hon:
                 tot_nhat, tot_nhat_dau, tot_nhat_dai = tong, dau, dai
     if tot_nhat <= 0:
         return (0.0, 0.0)
-    return (tot_nhat_dau / SO_DAI, (tot_nhat_dau + tot_nhat_dai) / SO_DAI)
+
+    # ĐÁY của dải lấy từ CHÍNH các hộp trong cụm, không phải từ chỉ số dải.
+    # 🔴 Vì sao (đo được): cụm chỉ được chọn theo ĐỈNH `y0`, nên nếu trả `(dau + dai)/SO_DAI`
+    # thì một cụm dày 1 dải cho `y1 = 0,88` trong khi đáy thật của hộp là `680/720 = 0,944` —
+    # bài test đòi `0.93 <= y1 <= 0.97` và ĐỎ. Đáy là dữ liệu, không suy ra được từ đỉnh.
+    cuoi_dai = tot_nhat_dau + tot_nhat_dai
+    trong_cum = [
+        h for h in hops
+        if tot_nhat_dau <= int((h.y0 / chieu_cao) * SO_DAI) < cuoi_dai
+    ]
+    y1 = max(h.y1 for h in trong_cum) / chieu_cao
+    return (tot_nhat_dau / SO_DAI, y1)
 
 
 def loc_on_dinh(hops: list[Hop], fps: float) -> list[Hop]:
     """Bỏ chữ CHẠY: cùng nội dung nhưng `x` đổi mỗi khung.
 
     Phụ đề đứng yên 0,5–2,5 s rồi đổi; chữ chạy (dải danh lam thắng cảnh đo được ở giây
-    1056) dịch `x` liên tục. Đo: nếu `|x0 - x0_khung_truoc| > DUNG_SAI_X` với cùng `text`
-    thì đó là chữ chạy.
+    1056) dịch `x` liên tục.
+
+    🔴 VÌ SAO PHẢI GOM NHÓM TRƯỚC KHI XÉT (bản đầu sai, đo được):
+    Bản đầu so `x` với hộp TRƯỚC CÙNG `text` và bỏ hộp nào lệch. Hộp ĐẦU của một chuỗi chạy
+    không có gì để so, nên nó LUÔN được giữ — fixture `[桂林山水@100, 桂林山水@180]` cho ra
+    `[A, A, 桂林山水]` trong khi bài test đòi `[A, A]`. Không có cách sửa cục bộ nào cứu được:
+    muốn biết hộp đầu là chữ chạy, phải nhìn hộp SAU nó.
+
+    Luật: gom theo `text`; nếu trong cùng một `text` có `max(x0) - min(x0) > DUNG_SAI_X` thì
+    CẢ NHÓM là chữ chạy ⇒ bỏ TẤT CẢ. Phụ đề thật lặp lại y nguyên một câu thì `x` không đổi.
 
     `fps` dùng để biết "khung trước" là gì khi `hops` không đều; hiện chỉ cần `> 0`.
     """
     if fps <= 0:
         return list(hops)
-    ra: list[Hop] = []
-    truoc: dict[str, float] = {}
+    theo_chu: dict[str, list[float]] = {}
     for h in hops:
-        x_truoc = truoc.get(h.text)
-        if x_truoc is not None and abs(h.x0 - x_truoc) > DUNG_SAI_X:
-            truoc[h.text] = h.x0
-            continue          # chữ chạy -> bỏ
-        truoc[h.text] = h.x0
-        ra.append(h)
-    return ra
+        theo_chu.setdefault(h.text, []).append(h.x0)
+    chay = {t for t, xs in theo_chu.items() if max(xs) - min(xs) > DUNG_SAI_X}
+    return [h for h in hops if h.text not in chay]
 
 
 def loc_hinh_dang(hops: list[Hop]) -> list[Hop]:
     """Bỏ dòng có hình dạng KHÔNG phải phụ đề, và gộp dòng lặp y nguyên.
 
-    Ba điều kiện, đều đo được từ dữ liệu thật:
+    Bốn điều kiện, đều đo được từ dữ liệu thật:
       · độ dài 3–40 ký tự (menu giá tiền: 200);
       · không quá `SO_CUM_SO_TOI_DA` cụm số (menu: '24元20元15元');
+      · không phải TOÀN chữ Latinh (logo 'ebilibili'/'Cilibili' đọc sai);
       · không lặp y nguyên liên tiếp (logo bị đọc nhiều khung thành '好好好').
 
-    Vì sao dài >= 3: `ebilibili`/`Cilibili` (logo đọc sai) ngắn, và phụ đề thật ngắn nhất
-    đo được là 3 ký tự.
+    Vì sao dài >= 3: phụ đề thật ngắn nhất đo được là 3 ký tự.
+
+    🔴 VÌ SAO PHẢI CÓ LUẬT LATINH (bản đầu thiếu, đo được):
+    `len('ebilibili') == 9` và `len('Cilibili') == 8`, cả hai đều nằm trong 3..40 và không có
+    cụm số nào — nên hai điều kiện đầu KHÔNG bắt được chúng, dù docstring cũ khẳng định
+    "quá ngắn". Fixture `test_loc_hinh_dang_bo_logo_doc_sai` đòi chúng bị bỏ.
+
+    Luật: bỏ hộp mà MỌI ký tự là chữ cái Latinh (a–z, A–Z). Cơ sở đo được: phụ đề nhúng của
+    video này là tiếng Trung; dòng nào toàn Latinh trong video tiếng Trung là logo/watermark
+    bị OCR đọc sai. `你怎么骑` có chữ Hán nên qua. Một dòng lai `OK好吃` cũng qua — luật chỉ
+    bắt dòng TOÀN Latinh, nên không bao giờ xoá nhầm phụ đề có chữ Hán.
     """
     ra: list[Hop] = []
     for h in hops:
@@ -623,12 +669,22 @@ def loc_hinh_dang(hops: list[Hop]) -> list[Hop]:
             continue
         if len([c for c in _cum_so(t)]) > SO_CUM_SO_TOI_DA:
             continue
+        if _toan_latinh(t):
+            continue
         # GỘP dòng lặp y nguyên LIÊN TIẾP: logo bị OCR đọc nhiều khung thành '好好好' sẽ
         # thành một dòng, không phải năm. Giữ hộp ĐẦU (mốc thời gian sớm nhất).
         if ra and ra[-1].text.strip() == t:
             continue
         ra.append(h)
     return ra
+
+
+def _toan_latinh(text: str) -> bool:
+    """True nếu MỌI ký tự là chữ cái Latinh — dấu hiệu logo/watermark đọc sai.
+
+    Tách khỏi `loc_hinh_dang` để test được riêng, cùng khuôn `_cum_so`.
+    """
+    return bool(text) and all(c.isascii() and c.isalpha() for c in text)
 
 
 def _cum_so(text: str) -> list[str]:

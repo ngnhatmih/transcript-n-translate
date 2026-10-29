@@ -63,32 +63,32 @@ GPU. Nó tự ép UTF-8 cho stdout (console Windows mặc định cp1252, còn s
 tiếng Trung/Việt) và tự đặt cache model trước khi nạp `faster_whisper`.
 
 Con số nền của lần chạy mặc định, đo sau khi xoá `__pycache__` (lệnh ở mục
-"Kiểm thử" trên, chạy từ trong `backend\`). Thứ có nghĩa là **1353 / 15**, không
+"Kiểm thử" trên, chạy từ trong `backend\`). Thứ có nghĩa là **1363 / 15**, không
 phải số giây — thời gian trôi giữa các lần chạy (đã thấy 24,00–30,94 s) còn con
 số bài thì không:
 
 ```
-1353 passed, 15 deselected, 1 warning
+1363 passed, 15 deselected, 1 warning
 ```
 
 Hai con số đó là SỐ BÀI ĐƯỢC CHỌN, và chúng khớp với số mà `--collect-only` báo
-(`1353/1368`, 15 bài `live` bị bỏ;
+(`1363/1378`, 15 bài `live` bị bỏ;
 `tests/test_backend_readme.py::test_readme_baseline_matches_the_tests_actually_
 collected` đối chiếu mỗi lần chạy).
 
 
-Máy này **CÓ** `ffmpeg 8.1.1` + `ffprobe` trên PATH (đã đo), nên `1353/15` ở trên
+Máy này **CÓ** `ffmpeg 8.1.1` + `ffprobe` trên PATH (đã đo), nên `1363/15` ở trên
 là số THẬT của nó. Máy **không có** `ffmpeg`/`ffprobe` cho một kết quả KHÁC: cả
 `tests/test_ingest.py` bị `skipif` ở cấp module — **9** bài cùng skip một lượt —
-nên dòng tổng kết của máy đó là **`1344 passed, 9 skipped, 15 deselected`** (=
-`1353 − 9`; con số này TỪNG ghi `978`, tức một baseline rất cũ, và nó lệch phép
+nên dòng tổng kết của máy đó là **`1354 passed, 9 skipped, 15 deselected`** (=
+`1363 − 9`; con số này TỪNG ghi `978`, tức một baseline rất cũ, và nó lệch phép
 trừ của chính khối nền ngay trên nó). Đó là
 con số của máy thiếu ffmpeg, **không phải** con số máy này từng in ra; đừng chép
 nó vào khối nền ở trên, và đừng "sửa" số nền xuống chỉ vì thiếu ffmpeg.
 
 ⚠️ Con số `856` ở đây TỪNG không khớp phép trừ của chính nó: `865 − 9 = 856`, tức
 nó là số của lượt TRƯỚC `V1` (+3 bài) còn sót lại. Phép trừ của khối nền hiện tại
-là `1353 − 9` = `1344`.
+là `1363 − 9` = `1354`.
 
 
 (Con số này từng bị ghi là `798`: bài `test_a_failed_translation_leaves_the_
@@ -97,10 +97,14 @@ số nền không được bump. Nó tồn tại để phát hiện TRÔI, nên 
 chạy báo dương tính giả.
 
 
-Lần bump này, `1351/15` → `1353/15` (**+2 bài**), do **BỎ TRẦN TỐC ĐỘ 1,35** trong
+Lần bump này, `1353/15` → `1363/15` (**+10 bài**), do **BỐN TẦNG LỌC PHỤ ĐỀ** trong
+`app/domain/phu_de.py`: `tests/test_phu_de.py` là tệp mới với 10 bài ghim hàm THUẦN
+`tim_dai_phu_de`, `loc_on_dinh`, `loc_hinh_dang`, `loc_theo_asr`, `gop_thanh_dong` — tầng lọc
+cho đường OCR-first, chưa nối vào pipeline (việc nối là task sau). Lần bump TRƯỚC,
+`1351/15` → `1353/15` (**+2 bài**), do **BỎ TRẦN TỐC ĐỘ 1,35** trong
 `ke_hoach_toc_do`: `tests/test_dub.py` viết lại thành 7 bài (bản cũ 5 bài), thêm bài ghim
 RÀNG BUỘC CỨNG "không cặp liền kề nào chồng lấn" và bài ghim "không cắt chữ". Lần bump
-TRƯỚC, `1346/15` → `1351/15` (**+5 bài**), do **TTS CHẠY ĐƯỢC TRONG IMAGE LINUX** — trước
+TRƯỚC NỮA, `1346/15` → `1351/15` (**+5 bài**), do **TTS CHẠY ĐƯỢC TRONG IMAGE LINUX** — trước
 đó mọi job `dub` trong container `failed` ở 5% vì `TTS_PYTHON` trỏ một đường Windows không tồn
 tại (`/app/.venv-tts/Scripts/python.exe`; `backend/.dockerignore` loại `.venv-tts/`, và venv đó
 là venv Windows). Nay `backend/Dockerfile` dựng `/opt/venv-tts` bằng pip Linux
@@ -1071,3 +1075,4 @@ là vô dụng.
 Audio **im lặng** làm job `asr` thành `FAILED`, **không** sinh transcript rỗng
 (xem `tests/test_silent_audio.py`). Một transcript rỗng trông y hệt một lần bóc
 băng thành công, nên nó giấu mất lỗi thật.
+
