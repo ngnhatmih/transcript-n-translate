@@ -62,15 +62,74 @@ def test_khong_cap_lien_ke_nao_chong_lan():
 
 
 def test_khong_co_hang_nao_bi_cat_chu():
-    """Chỉ tốc độ được đổi; hàm KHÔNG trả về danh sách dòng phải sửa chữ.
+    """Chỉ tốc độ được đổi; KHÔNG dòng nào bị cắt chữ, dù phải nén tới 9×.
 
-    Ghim lời người dùng: "ko cần phải cắt mà chỉnh tốc độ là được". Bản cũ trả `qua_tran`
-    để giao diện kêu người dùng sửa chữ — bỏ hẳn khái niệm đó.
+    Ghim lời người dùng: "ko cần phải cắt mà chỉnh tốc độ là được".
+
+    🔴 VÌ SAO BÀI NÀY ĐI QUA `DubHandler` CHỨ KHÔNG CHỈ GỌI `ke_hoach_toc_do`:
+    bản đầu của bài này chỉ khẳng định `ke_hoach_toc_do` trả đúng 2 phần tử — gần như
+    rỗng, vì hàm đó KHÔNG nhận và KHÔNG trả `text`, nên một bản vá cắt chữ trong `run()`
+    vẫn làm nó XANH. Đo được (review Task 1): một implementation cắt sạch mọi phụ đề
+    trong `run()` vẫn qua bài cũ. Nay bài này chặn ĐÚNG chỗ chữ đi vào TTS.
     """
-    ra = ke_hoach_toc_do([9.0], [1.0], [1.0])
-    assert isinstance(ra, tuple) and len(ra) == 2, (
-        f"phải trả đúng (toc_do, need), đo được {len(ra)} phần tử"
-    )
+    import pathlib
+    import tempfile
+
+    import soundfile as sf
+
+    from app.adapters.clock_system import SystemClock
+    from app.adapters.persist.sqlite_repos import SqliteRepos
+    from app.domain.models import Job, Segment
+    from app.pipeline.dub import DubHandler
+
+    # Take DÀI GẤP 9 LẦN chỗ: need = 9.0, nên đây đúng là dòng mà bản cũ sẽ kẹp ở trần.
+    CHU = "câu này rất dài và không được phép bị cắt bớt chữ nào cả"
+
+    with tempfile.TemporaryDirectory() as tam:
+        tam_p = pathlib.Path(tam)
+        r = SqliteRepos(tam_p / "t.db", clock=SystemClock())
+        r.init_schema()
+        sid = r.add_source(kind="file", origin="a", media_path="m", lang="zh")
+        tid = r.add_transcript(source_id=sid, engine="fw", lang="zh",
+                               segments=[Segment(i=0, start=0.0, end=1.0, text="你好")])
+        tid_ban = r.add_translation(
+            transcript_id=tid, transcript_version=1, engine="deepseek-web",
+            target_lang="vi", prompt_version="p1",
+            segments=[Segment(i=0, start=0.0, end=1.0, text=CHU)])
+
+        da_nhan: list[str] = []
+
+        def tts_gia(items, voice, out_dir):
+            out_dir = pathlib.Path(out_dir)
+            out_dir.mkdir(parents=True, exist_ok=True)
+            ra = {}
+            for it in items:
+                da_nhan.append(it["text"])
+                p = out_dir / f"{it['i']:05d}.wav"
+                # 9,0 s cho một chỗ 1,0 s ⇒ buộc phải nén 9×, không được cắt chữ.
+                sf.write(str(p), np.full(9 * 48_000, 0.5, dtype=np.float32), 48_000)
+                ra[it["i"]] = {"i": it["i"], "seconds": 9.0, "path": str(p)}
+            return ra
+
+        out = tam_p / "dubs"
+        h = DubHandler(r, out, tts_gia)
+        job = r.get_job(r.add_job(Job(
+            id=None, workspace=2, type="dub", engine="vieneu-v3-turbo",
+            phase="dub:vieneu-v3-turbo", payload={"translation_id": tid_ban})))
+        h.run(job, lambda p, line: None)
+
+        assert da_nhan == [CHU], (
+            f"chữ gửi TTS phải NGUYÊN VẸN; đo được {da_nhan!r}"
+        )
+
+        import json as _json
+        kh = _json.loads((out / f"dub-{tid_ban}.plan.json").read_text(encoding="utf-8"))
+        assert kh["dong"][0]["text"] == CHU, (
+            f"kế hoạch ghi cũng phải giữ nguyên chữ; đo được {kh['dong'][0]['text']!r}"
+        )
+        assert kh["dong"][0]["speed"] == 9.0, (
+            f"phải nén ĐÚNG 9× (take 9,0 / chỗ 1,0), đo được {kh['dong'][0]['speed']}"
+        )
 
 
 def test_trong_im_lang_bo_dau_cuoi_giu_giua():
