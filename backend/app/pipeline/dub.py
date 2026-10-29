@@ -341,7 +341,7 @@ class DubHandler:
             if he_so > 1.0:
                 report(0.93, f"nền vượt biên độ (peak {he_so:.3f}) — đã chuẩn hoá")
 
-            dub, _ = self._doc_master(master)
+            dub = tach_nen.doc_stereo(master, sr=tach_nen.SR_MODEL)
             tron = tach_nen.tron(nen, dub)
             tron_path = tam / "tron.wav"
             import soundfile as sf
@@ -351,33 +351,6 @@ class DubHandler:
             ra = self._out_dir / f"dub-{tid}.mp4"
             tach_nen.remux(video, tron_path, ra)
             report(0.96, f"video lồng tiếng: {ra.name} ({ra.stat().st_size // 1024} kB)")
-
-    def _doc_master(self, master: pathlib.Path):
-        """Đọc master về `(2, N)` ở `SR_MODEL` — resample nếu cần, KHÔNG đoán sample rate.
-
-        `dub.py` ghi master ở 48 kHz (biến `sr` trong `run`), còn `htdemucs` trả 44,1 kHz,
-        nên phép cộng phải quy về MỘT sample rate trước. Đo được hệ quả của việc bỏ bước
-        này: cộng hai mảng khác sample rate KHÔNG báo lỗi, chỉ ra một tệp dài sai và nghe
-        lệch — xem ERRATA 5 ở `tach_nen.py`.
-        """
-        import soundfile as sf
-
-        mau, sr = sf.read(str(master), dtype="float32", always_2d=True)
-        if mau.shape[1] == 1:
-            mau = np.repeat(mau, 2, axis=1)
-        elif mau.shape[1] > 2:
-            mau = mau[:, :2]
-        if sr != tach_nen.SR_MODEL:
-            import subprocess as _sp
-            import tempfile
-
-            with tempfile.TemporaryDirectory(prefix="sr-") as tam:
-                ra = pathlib.Path(tam) / "ra.wav"
-                _sp.run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
-                         "-i", str(master), "-ac", "2", "-ar", str(tach_nen.SR_MODEL),
-                         "-acodec", "pcm_s16le", str(ra)], check=True, capture_output=True)
-                mau, sr = sf.read(str(ra), dtype="float32", always_2d=True)
-        return np.ascontiguousarray(mau.T, dtype=np.float32), sr
 
     def _ghi_ke_hoach(self, tid: int, dung, takes, slots, avails, toc_do, need) -> None:
         """Ghi `dub-<tid>.plan.json`: số đo của TỪNG dòng cho bảng ở màn Lồng tiếng.

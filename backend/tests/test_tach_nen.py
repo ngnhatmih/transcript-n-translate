@@ -133,20 +133,29 @@ def test_doc_stereo_nhan_doi_kenh_mono(tmp_path):
     assert np.array_equal(ra[0], ra[1])
 
 
-def test_doc_stereo_tu_choi_sai_sample_rate(tmp_path):
-    """Sai sample rate phải NÉM kèm số đo, không im lặng đọc sai.
+def test_doc_stereo_resample_khi_sai_sample_rate(tmp_path):
+    """48 kHz phải được RESAMPLE về 44,1 kHz, không ném và không đọc sai.
 
-    Ghim bài học đắt nhất của §6: chia sai sample rate từng làm tôi tưởng mất 101,5 giây audio.
+    🔴 Bản đầu của bài này ghim `pytest.raises(ValueError)`. ĐÓ LÀ SAI, và đường
+    thật đã chứng minh: `dub.py` ghi master ở **48 kHz**, `htdemucs` chỉ làm việc ở
+    **44,1 kHz**, nên NÉM ở đây làm cả nhánh trộn nền chết ngay tại `dub-4.wav`.
+    Không có tệp 44,1 kHz nào để đưa vào — resample là việc BẮT BUỘC của hàm đọc.
+
+    ⚠️ `tach_nen()` thì VẪN phải ném khi sai sample rate: ở đó mảng là ĐẦU VÀO cho
+    model, và `separate_tensor(wav, sr=N)` không resample hộ (ERRATA 5). Hai hàm
+    nhau ở đúng điểm này, và đó là lý do cả hai bài cùng tồn tại.
     """
     import soundfile as sf
 
-    from app.pipeline.tach_nen import doc_stereo
+    from app.pipeline.tach_nen import SR_MODEL, doc_stereo
 
     p = tmp_path / "m.wav"
-    sf.write(str(p), np.zeros((1000, 2), dtype=np.float32), 48_000)
-    with pytest.raises(ValueError, match="44100"):
-        doc_stereo(p)
-
+    # 0,1 s ở 48 kHz -> 0,1 s ở 44,1 kHz, tức 4410 mau (dung bang 0,1*44100).
+    sf.write(str(p), np.zeros((4800, 2), dtype=np.float32), 48_000)
+    ra = doc_stereo(p)
+    assert ra.shape[0] == 2, ra.shape
+    assert abs(ra.shape[1] - 4410) <= 2, (
+        f"phai resample ve {SR_MODEL} Hz: 0,1 s = 4410 mau, do duoc {ra.shape[1]}")
 
 def test_doc_stereo_cat_bot_khi_nhieu_hon_hai_kenh(tmp_path):
     """5.1 cắt còn 2 kênh đầu, không ném — video thật có thể là 5.1."""

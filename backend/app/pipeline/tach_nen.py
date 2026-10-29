@@ -142,7 +142,20 @@ def tron(nen: np.ndarray, dub: np.ndarray) -> np.ndarray:
 
 
 def doc_stereo(path: pathlib.Path, *, sr: int = SR_MODEL) -> np.ndarray:
-    """Đọc một tệp audio thành `(2, N)` float32 ở `sr`, mono thì nhân đôi kênh."""
+    """Đọc một tệp audio thành `(2, N)` float32 ở `sr`. RESAMPLE nếu khác `sr`.
+
+    Vì sao resample chứ không NÉM: hai nguồn audio của dự án ở hai sample rate khác
+    nhau một cách CHÍNH ĐÁNG — master `dub.py` ghi 48 kHz (biến `sr` trong `run`), còn
+    `htdemucs` chỉ làm việc ở 44,1 kHz. Bắt người gọi tự resample trước là đẩy một
+    phép biến đổi BẮT BUỘC ra ngoài, và đo được hệ quả: bản đầu của hàm này NÉM, nên
+    đường thật chết ngay tại `dub-4.wav` 48 kHz. Ném ở đây không bảo vệ được gì —
+    không có tệp 44,1 kHz nào để đưa vào.
+
+    ⚠️ KHÁC `tach_nen()`: hàm đó nhận audio ĐẦU VÀO cho model và PHẢI đúng 44,1 kHz,
+    vì `separate_tensor(wav, sr=N)` không resample hộ — truyền sai thì model làm việc
+    trên dải thời gian sai và trả về mảng dài sai (đúng ERRATA 5). Ở đây ta chỉ ĐỌC
+    một tệp để cộng vào một mảng đã có, nên resample là việc của chính hàm đọc.
+    """
     import soundfile as sf
 
     mau, sr_goc = sf.read(str(path), dtype="float32", always_2d=True)
@@ -151,8 +164,33 @@ def doc_stereo(path: pathlib.Path, *, sr: int = SR_MODEL) -> np.ndarray:
     elif mau.shape[1] > 2:
         mau = mau[:, :2]
     if sr_goc != sr:
-        raise ValueError(f"{path} phải ở {sr} Hz, đo được {sr_goc}")
+        mau = _resample(mau, sr_goc, sr)
     return np.ascontiguousarray(mau.T, dtype=np.float32)
+
+
+def _resample(mau: np.ndarray, tu: int, den: int) -> np.ndarray:
+    """Resample `(N, kênh)` bằng ffmpeg — cùng công cụ pipeline dùng, không thêm phụ thuộc.
+
+    Vì sao KHÔNG `scipy.signal.resample` hay `librosa`: container có ffmpeg và nó là thứ
+    `remux`/`trich_audio_goc` đã dùng; thêm một đường resample thứ hai là thêm một chỗ
+    để hai đường cho kết quả lệch nhau. Đo được: `torchaudio` KHÔNG có trong image
+    (`ModuleNotFoundError: No module named 'torchaudio'`), nên nó không phải lựa chọn.
+    """
+    import tempfile
+
+    import soundfile as sf
+
+    with tempfile.TemporaryDirectory(prefix="sr-") as tam:
+        tam = pathlib.Path(tam)
+        vao = tam / "vao.wav"
+        ra = tam / "ra.wav"
+        sf.write(str(vao), mau, tu, subtype="FLOAT")
+        subprocess.run(
+            ["ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
+             "-i", str(vao), "-ar", str(den), "-acodec", "pcm_f32le", str(ra)],
+            check=True, capture_output=True)
+        lai, _ = sf.read(str(ra), dtype="float32", always_2d=True)
+    return np.ascontiguousarray(lai, dtype=np.float32)
 
 
 def remux(video: pathlib.Path, audio: pathlib.Path, ra: pathlib.Path) -> None:
