@@ -379,3 +379,28 @@ def test_chay_tts_batch_dung_cau_chan_doan_khi_khong_co_ket_qua(tmp_path):
     )
     assert "UtilGetPpid" not in cau, f"rác WSL không được lọt vào; đo được {cau!r}"
     assert "/proc/1/stat" not in cau, f"rác `/proc/1/stat` không được lọt vào; đo được {cau!r}"
+
+
+def test_route_chuyen_tron_nen_vao_payload_va_mac_dinh_la_null(repos, tmp_path):
+    """`tron_nen` phải đi từ request vào payload của job, và VẮNG thì là `None`.
+
+    🔴 Vì sao ghim cả hai chiều: `None` nghĩa là "theo mặc định của MÔI TRƯỜNG" (image có GPU
+    thì bật), khác hẳn `false` nghĩa là "chỉ bản lồng sạch". Nếu route lặng lẽ đổi vắng thành
+    `False` thì một image có GPU sẽ KHÔNG BAO GIỜ trộn nền dù người dùng không yêu cầu tắt —
+    và không ai thấy gì bất thường, chỉ là video ra mất nhạc.
+    """
+    r, tid = repos
+    app = create_app(repos=r, specs=[], media_dir=tmp_path / "m", out_dir=tmp_path / "o")
+    from app.api.deps import get_worker
+    app.dependency_overrides[get_worker] = lambda: object()
+    with TestClient(app) as c:
+        for gui, mong in (
+            ({}, None),
+            ({"tron_nen": True}, True),
+            ({"tron_nen": False}, False),
+        ):
+            body = {"translation_id": tid, **gui}
+            resp = c.post("/api/dubs", json=body)
+            assert resp.status_code == 201, resp.text
+            job = r.get_job(resp.json()["job"]["id"])
+            assert job.payload.get("tron_nen") == mong, (gui, job.payload)

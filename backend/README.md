@@ -63,32 +63,32 @@ GPU. Nó tự ép UTF-8 cho stdout (console Windows mặc định cp1252, còn s
 tiếng Trung/Việt) và tự đặt cache model trước khi nạp `faster_whisper`.
 
 Con số nền của lần chạy mặc định, đo sau khi xoá `__pycache__` (lệnh ở mục
-"Kiểm thử" trên, chạy từ trong `backend\`). Thứ có nghĩa là **1402 / 15**, không
+"Kiểm thử" trên, chạy từ trong `backend\`). Thứ có nghĩa là **1403 / 15**, không
 phải số giây — thời gian trôi giữa các lần chạy (đã thấy 24,00–30,94 s) còn con
 số bài thì không:
 
 ```
-1402 passed, 15 deselected, 1 warning
+1403 passed, 15 deselected, 1 warning
 ```
 
 Hai con số đó là SỐ BÀI ĐƯỢC CHỌN, và chúng khớp với số mà `--collect-only` báo
-(`1402/1417`, 15 bài `live` bị bỏ;
+(`1403/1418`, 15 bài `live` bị bỏ;
 `tests/test_backend_readme.py::test_readme_baseline_matches_the_tests_actually_
 collected` đối chiếu mỗi lần chạy).
 
 
-Máy này **CÓ** `ffmpeg 8.1.1` + `ffprobe` trên PATH (đã đo), nên `1402/15` ở trên
+Máy này **CÓ** `ffmpeg 8.1.1` + `ffprobe` trên PATH (đã đo), nên `1403/15` ở trên
 là số THẬT của nó. Máy **không có** `ffmpeg`/`ffprobe` cho một kết quả KHÁC: cả
 `tests/test_ingest.py` bị `skipif` ở cấp module — **9** bài cùng skip một lượt —
-nên dòng tổng kết của máy đó là **`1393 passed, 9 skipped, 15 deselected`** (=
-`1402 − 9`; con số này TỪNG ghi `978`, tức một baseline rất cũ, và nó lệch phép
+nên dòng tổng kết của máy đó là **`1394 passed, 9 skipped, 15 deselected`** (=
+`1403 − 9`; con số này TỪNG ghi `978`, tức một baseline rất cũ, và nó lệch phép
 trừ của chính khối nền ngay trên nó). Đó là
 con số của máy thiếu ffmpeg, **không phải** con số máy này từng in ra; đừng chép
 nó vào khối nền ở trên, và đừng "sửa" số nền xuống chỉ vì thiếu ffmpeg.
 
 ⚠️ Con số `856` ở đây TỪNG không khớp phép trừ của chính nó: `865 − 9 = 856`, tức
 nó là số của lượt TRƯỚC `V1` (+3 bài) còn sót lại. Phép trừ của khối nền hiện tại
-là `1402 − 9` = `1393`.
+là `1403 − 9` = `1394`.
 
 
 (Con số này từng bị ghi là `798`: bài `test_a_failed_translation_leaves_the_
@@ -97,7 +97,7 @@ số nền không được bump. Nó tồn tại để phát hiện TRÔI, nên 
 chạy báo dương tính giả.
 
 
-Lần bump này, `1353/15` → `1402/15` (**+36 bài**), do **BỐN TẦNG LỌC PHỤ ĐỀ** trong
+Lần bump này, `1353/15` → `1403/15` (**+36 bài**), do **BỐN TẦNG LỌC PHỤ ĐỀ** trong
 `app/domain/phu_de.py`: `tests/test_phu_de.py` là tệp mới với 12 bài ghim hàm THUẦN
 `tim_dai_phu_de`, `loc_on_dinh`, `loc_hinh_dang`, `loc_theo_asr`, `gop_thanh_dong` — tầng lọc
 cho đường OCR-first, chưa nối vào pipeline (việc nối là task sau). Bài thứ 11 ghim đúng lỗi
@@ -717,7 +717,7 @@ Hợp đồng: `vram` là số hoặc `null` (không đọc được ⇒ `null`,
 
 #### VRAM của lượt dịch (`--sample-vram`) — có artifact, trích dẫn được
 
-Lượt trước báo *peak 6830 MiB / headroom 1393 / steady ~6433 / model 100% GPU*
+Lượt trước báo *peak 6830 MiB / headroom 1394 / steady ~6433 / model 100% GPU*
 nhưng **không tệp nào trên đĩa** chứa những số đó. Lượt `20261019-vram-sample`
 (cùng clip 115 đoạn, 5 thuật ngữ, prompt v0, lô 30, `echo_guard` BẬT, RTX 3070
 8 GB) ghi từng mẫu `nvidia-smi --query-gpu=memory.used` (~1 Hz) vào khối `vram`
@@ -1119,6 +1119,7 @@ là vô dụng.
 Audio **im lặng** làm job `asr` thành `FAILED`, **không** sinh transcript rỗng
 (xem `tests/test_silent_audio.py`). Một transcript rỗng trông y hệt một lần bóc
 băng thành công, nên nó giấu mất lỗi thật.
+
 
 
 

@@ -216,6 +216,12 @@ class DubHandler:
         tid = int(payload["translation_id"])
         voice = payload.get("voice") or None
         gioi_han = payload.get("so_dong") or None
+        # Cờ THEO JOB, không phải theo handler: `self._tron_nen` chỉ là mặc định của MÔI
+        # TRƯỜNG (image có GPU hay không). Payload `null`/vắng = theo mặc định đó; `true` =
+        # bắt buộc trộn dù mặc định tắt; `false` = chỉ bản lồng sạch.
+        tron_nen = payload.get("tron_nen")
+        if tron_nen is None:
+            tron_nen = self._tron_nen
 
         ban = self._repos.get_translation(tid)
         dong = [s for s in ban.segments if (s.text or "").strip()]
@@ -277,7 +283,7 @@ class DubHandler:
         # thì route trả `null` và giao diện nói "chưa có số đo", KHÔNG bịa số.
         self._ghi_ke_hoach(tid, dung, takes, slots, avails, toc_do, need)
 
-        if self._tron_nen:
+        if tron_nen:
             self._tron_va_remux(tid, ban.transcript_id, master_path, report)
 
         report(0.92, f"xuất {len(self._dinh_dangs)} định dạng")
