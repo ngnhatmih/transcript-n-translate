@@ -17,7 +17,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from app.api.deps import get_dirs, get_repos, get_worker
-from app.pipeline.dub import DINH_DANG
+from app.pipeline.dub import DUOI_TAI_DUOC
 
 router = APIRouter(prefix="/api/dubs", tags=["dubs"])
 
@@ -151,9 +151,11 @@ def take(translation_id: int, i: int, dirs=Depends(get_dirs)):
 def download(translation_id: int, format: str = "wav", dirs=Depends(get_dirs)):
     """Tải một định dạng của bản lồng tiếng. 404 nói RÕ: chưa lồng hay sai định dạng."""
     dinh_dang = format.lower().lstrip(".")
-    if dinh_dang not in DINH_DANG:
+    # `DUOI_TAI_DUOC` chứ không `DINH_DANG`: `mp4` chỉ tồn tại khi job chạy với
+    # `tron_nen`, và nó KHÔNG sinh từ master audio — xem docstring hằng số đó.
+    if dinh_dang not in DUOI_TAI_DUOC:
         raise HTTPException(404, f"định dạng {format!r} không hỗ trợ "
-                                 f"(có: {', '.join(DINH_DANG)})")
+                                 "(có: " + ", ".join(DUOI_TAI_DUOC) + ")")
     tep = _thu_muc(dirs) / f"dub-{translation_id}.{dinh_dang}"
     if not tep.is_file():
         raise HTTPException(404, f"chưa có bản lồng tiếng cho bản dịch #{translation_id} "

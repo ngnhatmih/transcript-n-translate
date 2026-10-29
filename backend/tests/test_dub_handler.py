@@ -404,3 +404,33 @@ def test_route_chuyen_tron_nen_vao_payload_va_mac_dinh_la_null(repos, tmp_path):
             assert resp.status_code == 201, resp.text
             job = r.get_job(resp.json()["job"]["id"])
             assert job.payload.get("tron_nen") == mong, (gui, job.payload)
+
+
+def test_route_tai_duoc_mp4_va_van_tu_choi_duoi_la(repos, tmp_path):
+    """`mp4` (video trộn nền) phải TẢI được, và đuôi lạ vẫn 404 kèm danh sách ĐÚNG.
+
+    🔴 Vì sao ghim: `DINH_DANG` là dict tham số ffmpeg để chuyển MỘT master audio sang định
+    dạng khác; `mp4` KHÔNG sinh từ master (nó cần video gốc + `-c:v copy`) nên không được nằm
+    trong dict đó. Nhưng nếu route chỉ đọc `DINH_DANG` thì người dùng trộn nền xong KHÔNG tải
+    được thành phẩm — video đã ra đĩa mà không có đường nào lấy về. Bài này ghim cả hai chiều:
+    mở cho `mp4`, và KHÔNG mở cho đuôi bất kỳ.
+    """
+    r, tid = repos
+    out = tmp_path / "dubs"
+    out.mkdir(parents=True, exist_ok=True)
+    # Tạo tệp GIẢ cùng tên mà handler sẽ sinh — route chỉ kiểm tồn tại và trả tệp.
+    (out / f"dub-{tid}.mp4").write_bytes(b"video-gia")
+    (out / f"dub-{tid}.wav").write_bytes(b"audio-gia")
+
+    app = create_app(repos=r, specs=[], media_dir=tmp_path / "m", out_dir=tmp_path / "o")
+    from app.api.deps import get_dirs
+    app.dependency_overrides[get_dirs] = lambda: {"out": str(tmp_path), "media": str(tmp_path)}
+    with TestClient(app) as c:
+        ok = c.get(f"/api/dubs/{tid}/download", params={"format": "mp4"})
+        assert ok.status_code == 200, ok.text
+        assert ok.content == b"video-gia"
+
+        la = c.get(f"/api/dubs/{tid}/download", params={"format": "mkv"})
+        assert la.status_code == 404, la.text
+        assert "mp4" in la.json()["detail"], (
+            f"câu lỗi phải liệt kê được mp4; đo được {la.json()['detail']!r}")

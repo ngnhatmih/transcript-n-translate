@@ -104,6 +104,16 @@ DINH_DANG = {
     "m4a": ["-c:a", "aac", "-b:a", "192k"],
 }
 
+#: Đuôi tệp mà route tải được, KHÔNG phải đuôi `xuat_dinh_dang` sinh ra.
+#:
+#: 🔴 Vì sao là HAI tập khác nhau (đo được): `DINH_DANG` là dict tham số `ffmpeg` để
+#: chuyển MỘT master audio sang định dạng khác. `mp4` không thuộc loại đó — nó cần
+#: VIDEO GỐC (`-c:v copy`) và chỉ tồn tại khi job chạy với `tron_nen`. Nhét `mp4` vào
+#: `DINH_DANG` sẽ khiến `xuat_dinh_dang` gọi `ffmpeg -i master.wav -c:v copy dub-4.mp4`
+#: và chết vì đầu vào không có stream video. Nhưng route vẫn phải TẢI được nó, nên
+#: tập đuôi tải được là hợp của hai nguồn.
+DUOI_TAI_DUOC = tuple(DINH_DANG) + ("mp4",)
+
 
 def xuat_dinh_dang(master: pathlib.Path, out_dir: pathlib.Path,
                    dinh_dangs=DINH_DANG) -> dict[str, pathlib.Path]:
