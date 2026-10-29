@@ -20,6 +20,7 @@ from app.adapters.mt.ollama_mt import OllamaMtEngine
 from app.adapters.mt.openai_chat_mt import OpenAiChatMt, prompt_version_for
 from app.adapters.mt.opus_mt import OpusMtEngine
 from app.adapters.mt.prompts import MERGE_PROMPT_VERSION, PROMPT_VERSION
+from app.adapters.ocr_rapidocr import RapidOCREngine
 from app.adapters.persist.sqlite_repos import SqliteRepos
 from app.adapters.registry_file import (load_chimera, load_default_asr,
                                         load_default_mt, load_registry)
@@ -416,6 +417,23 @@ def build_components():
     chimera_plan = chimera_plan_for(specs)
     chimera_merge = chimera_merge_for(chimera_plan, mt_engines)
 
+    # OCR là TUỲ CHỌN của môi trường: thiếu `rapidocr-onnxruntime` thì `_tao_engine` ném
+    # câu rõ ràng, nhưng ở đây KHÔNG dựng nó khi thư viện vắng — để `transcribe` vẫn
+    # chạy được đường ASR thuần trên một image không có OCR. Một image thiếu OCR không
+    # được làm chết tính năng bóc băng.
+    #
+    # Phép dò là `import` THẬT, không phải đọc `sys.modules` hay bắt `Exception` chung:
+    # `ImportError` là tín hiệu DUY NHẤT nghĩa là "image này không có OCR". Một lỗi khác
+    # (`OSError` khi model hỏng, `RuntimeError` khi thiếu CUDA) KHÔNG được nuốt — nó phải
+    # nổi lên, vì im lặng bỏ OCR sẽ khiến pipeline lặng lẽ kém đi mà không ai biết.
+    ocr_engine = None
+    try:
+        import rapidocr_onnxruntime  # noqa: F401
+    except ImportError:
+        ocr_engine = None
+    else:
+        ocr_engine = RapidOCREngine()
+
     transcribe_handler = TranscribeHandler(
         repos, specs, engine_factory=_engine_factory, workdir=MEDIA_DIR,
         # R58/WQ-02: engine dịch mặc định là DỮ LIỆU của registry (`default_mt`),
@@ -428,6 +446,9 @@ def build_components():
         # đúng dict đã đặt vào `spec.capabilities` ở trên: hai đường cùng ghi
         # `translations.prompt_version` mà tính riêng thì chúng trôi khỏi nhau.
         prompt_versions=prompt_versions,
+        # OCR là TUỲ CHỌN: `None` nghĩa là image không có thư viện OCR, và đường ASR
+        # thuần chạy y bản cũ.
+        ocr_engine=ocr_engine,
     )
     handlers = {
         # I-3 + I-6: handler thật nhận registry và gốc media; thiếu chúng thì nó

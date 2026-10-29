@@ -30,6 +30,8 @@ import json
 import pathlib
 
 import pytest
+import numpy as np
+import soundfile as sf
 
 from app.adapters.registry_file import load_default_asr, load_default_mt, load_registry
 from app.domain import job_state as js
@@ -582,7 +584,13 @@ def test_a_finished_transcription_enqueues_a_translation_the_handler_consumes(
     # tạo ra, và ba bài anh em dưới đây vốn đã đặt đúng.
     wav = harness.data / "media" / "a.wav"
     wav.parent.mkdir(parents=True, exist_ok=True)
-    wav.write_bytes(b"RIFF")
+    # 🔴 WAV PHAI HOP LE, khong phai 4 byte "RIFF" (do duoc). Ban dau o day ghi
+    # `b"RIFF"` — bon byte, khong phai tep WAV. Duong ASR cu chi MO tep nen no khong
+    # bao gio lo ra; nhung khi `run` di qua OCR, adapter goi `ffprobe` de biet kich
+    # thuoc khung va no chet, job asr thanh failed, `list_transcripts()` rong va
+    # bon bai nay do vi mot ly do KHONG LIEN QUAN toi thu chung dinh kiem.
+    # Ghi WAV that bang `soundfile` (co san trong venv, khong can ffmpeg).
+    sf.write(str(wav), np.zeros(16_000, dtype=np.float32), 16_000)
     sid = repos.add_source(kind="file", origin="a.mp4", media_path=str(wav),
                            lang="zh", audio_path=str(wav), duration=4.0)
     asr_engine = load_default_asr()
@@ -651,7 +659,7 @@ def test_auto_forward_default_is_on_but_a_user_choice_is_not_overwritten(harness
 
     wav = harness.data / "media" / "b.wav"
     wav.parent.mkdir(parents=True, exist_ok=True)
-    wav.write_bytes(b"RIFF")
+    sf.write(str(wav), np.zeros(16_000, dtype=np.float32), 16_000)
     sid = repos2.add_source(kind="file", origin="b.mp4", media_path=str(wav),
                             lang="zh", audio_path=str(wav), duration=4.0)
     engine_id = load_default_asr()
@@ -687,7 +695,7 @@ def test_translation_records_the_version_at_forward_time_not_one(harness):
 
     wav = harness.data / "media" / "v.wav"
     wav.parent.mkdir(parents=True, exist_ok=True)
-    wav.write_bytes(b"RIFF")
+    sf.write(str(wav), np.zeros(16_000, dtype=np.float32), 16_000)
     sid = repos.add_source(kind="file", origin="v.mp4", media_path=str(wav),
                            lang="zh", audio_path=str(wav), duration=4.0)
     tid = repos.add_transcript(
@@ -739,7 +747,7 @@ def test_a_forwarded_translation_records_the_glossary_version(harness):
 
     wav = harness.data / "media" / "g.wav"
     wav.parent.mkdir(parents=True, exist_ok=True)
-    wav.write_bytes(b"RIFF")
+    sf.write(str(wav), np.zeros(16_000, dtype=np.float32), 16_000)
     sid = repos.add_source(kind="file", origin="g.mp4", media_path=str(wav),
                            lang="zh", audio_path=str(wav), duration=4.0)
     asr_engine = load_default_asr()

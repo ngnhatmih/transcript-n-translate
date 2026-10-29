@@ -24,13 +24,26 @@ from app.domain.phu_de import (
 
 
 def _kich_thuoc(video_path: str) -> tuple[int, int]:
-    """`(rộng, cao)` của video. Gọi `ffprobe` — không kéo thư viện video vào."""
+    """`(rộng, cao)` của video. Gọi `ffprobe` — không kéo thư viện video vào.
+
+    🔴 AUDIO-ONLY TRẢ `(0, 0)`, KHÔNG NÉM (đo được). `ffprobe` trên một tệp WAV không
+    có stream video in ra CHUỖI RỖNG, và `"".split("x")` cho `[""]` — một phần tử, nên
+    `rong, cao = ...` ném `ValueError: not enough values to unpack (expected 2, got 1)`.
+    Đo được: job `asr` trên WAV 1 giây im lặng -> failed, 0 transcript.
+
+    Audio-only là đầu vào HỢP LỆ của pipeline (video không hình), nên nó phải đi tiếp
+    tới chỗ nói "không có phụ đề cứng" chứ không chết ở đây. `(0, 0)` làm
+    `tim_dai_phu_de` trả `(0.0, 0.0)` (nó đã có guard `chieu_cao <= 0`), bộ lọc dải
+    bị bỏ qua, và tầng 3 xoá sạch hộp — đúng ý "không có gì để đọc".
+    """
     ra = subprocess.run(
         ["ffprobe", "-v", "error", "-select_streams", "v:0",
          "-show_entries", "stream=width,height", "-of", "csv=p=0:s=x", video_path],
         capture_output=True, text=True, check=True).stdout.strip()
-    rong, cao = ra.split("x")[:2]
-    return int(rong), int(cao)
+    phan = ra.split("x")
+    if len(phan) < 2 or not phan[0] or not phan[1]:
+        return 0, 0
+    return int(phan[0]), int(phan[1])
 
 
 def _diem_goc(box) -> list:
@@ -141,6 +154,13 @@ class RapidOCREngine:
             raise ValueError(f"fps phải > 0, đo được {fps}")
 
         rong, cao = _kich_thuoc(video_path)
+        # 🔴 KHONG CO STREAM VIDEO THI KHONG CO PHU DE CUNG (do duoc). `_kich_thuoc` tra
+        # `(0, 0)` cho tep audio-only, va `ffmpeg -vf fps=...` tren tep do chet ngay:
+        #   exit 4294967274 (khong co stream de loc)
+        # Tra `[]` la CAU TRA LOI DUNG ("khong doc duoc phu de nao"), va `chon_nguon`
+        # se roi ve ASR. Nem o day bien mot dau vao hop le thanh mot job failed.
+        if cao <= 0 or rong <= 0:
+            return []
         engine = self._tao_engine()
 
         with tempfile.TemporaryDirectory(prefix="ocr-") as tam:

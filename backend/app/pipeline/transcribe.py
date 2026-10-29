@@ -164,38 +164,55 @@ class TranscribeHandler:
             raise FileNotFoundError(f"tệp audio không tồn tại: {audio}")
 
         lang = source.lang or "zh"
-        # Dựng adapter TRƯỚC khi báo (nó lười: chưa nạp model), để hỏi được "model đã có trên
-        # đĩa chưa". Lần ĐẦU dùng một engine là một lượt TẢI MODEL (fw-large-v3 = 2,9 GB),
-        # không phải một lượt bóc băng — và trước bản vá này nó hoàn toàn VÔ HÌNH: đo được trên
-        # stack thật, job `asr` với `fw-large-v3` đứng ở `15%` suốt **6 phút** trong khi thư
-        # mục `/models/models--Systran--faster-whisper-large-v3` đang được ghi. Người dùng đọc
-        # "nạp engine" + một thanh đứng im thì không phân biệt được "đang tải 2,9 GB" với
-        # "treo". Nên: NÓI RA trước khi nạp.
-        engine = self._engine_for(job.engine or "")
-        hoi_cache = getattr(engine, "model_cached", None)
-        # CHỈ cảnh báo khi adapter trả ĐÚNG `False` ("chắc chắn không có"). `None` = không
-        # biết, và một câu "chưa có model" sai còn tệ hơn không nói gì — bản đầu của bản vá
-        # này báo sai cho MỌI job vì `spec.model_ref` là bí danh (`large-v3-turbo`) còn repo
-        # thật là `mobiuslabsgmbh/...`.
-        if callable(hoi_cache) and hoi_cache() is False:
-            report(0.05, f"chưa có model của {job.engine} trên đĩa — lần đầu phải tải về, "
-                         f"có thể mất vài phút (không phải treo)")
+        # Nguồn chữ do `chon_doan` quyết: OCR (nếu có engine) -> ASR -> lỗi. Đường ASR
+        # THUẦN vẫn nguyên khi `self._ocr is None`, nên mọi hành vi cũ giữ nguyên.
+        #
+        # Báo "nạp engine" / "tải model" CHỈ có nghĩa với ASR: adapter ASR nạp model 2,9 GB
+        # ở lần dùng đầu và thanh tiến độ đứng im suốt lúc đó (đo được: 6 phút ở 15%). OCR
+        # không có bước ấy — nó đọc khung và báo tiến độ ở `report(0.30, ...)`.
+        if self._ocr is None:
+            engine = self._engine_for(job.engine or "")
+            hoi_cache = getattr(engine, "model_cached", None)
+            # CHỈ cảnh báo khi adapter trả ĐÚNG `False` ("chắc chắn không có"). `None` = không
+            # biết, và một câu "chưa có model" sai còn tệ hơn không nói gì — bản đầu của bản
+            # vá này báo sai cho MỌI job vì `spec.model_ref` là bí danh (`large-v3-turbo`)
+            # còn repo thật là `mobiuslabsgmbh/...`.
+            if callable(hoi_cache) and hoi_cache() is False:
+                report(0.05, f"chưa có model của {job.engine} trên đĩa — lần đầu phải tải "
+                             f"về, có thể mất vài phút (không phải treo)")
+            else:
+                report(0.05, f"nạp engine {job.engine}")
+
+            # `report` đi TIẾP vào trong vòng lặp của adapter để progress nhích theo số đoạn
+            # đã bóc, thay vì đứng ở 0,15 cho tới khi xong. Trần 0,89: ba bước sau (lưu
+            # transcript, tạo job dịch, xong) vẫn có chỗ riêng của chúng.
+            def bao_tien_do(da_toi: float, tong_giay: float) -> None:
+                if tong_giay <= 0:
+                    return
+                ti_le = min(1.0, max(0.0, da_toi / tong_giay))
+                report(0.15 + 0.74 * ti_le,
+                       f"bóc băng {audio.name}: {dinh_dang_giay(da_toi)} / "
+                       f"{dinh_dang_giay(tong_giay)} ({round(100 * ti_le)}%)")
+
+            report(0.15, f"bóc băng {audio.name} (lang={lang})")
+            segments = _boc_bang(engine, str(audio), lang, bao_tien_do)
+            ly_do = f"dùng ASR: {len(segments)} đoạn lời nói"
         else:
-            report(0.05, f"nạp engine {job.engine}")
+            report(0.05, f"chọn nguồn chữ cho {audio.name} (lang={lang})")
+            segments, ly_do = self.chon_doan(str(audio), lang,
+                                            asr_engine_id=job.engine or None)
+            # Tiến độ ĐÃ báo trong `chon_doan`/ASR; không gắn `on_progress` cho OCR vì đọc
+            # khung không phát tiến độ theo đoạn, thanh sẽ đứng ở 15 % suốt 6 phút.
+            report(0.30, ly_do)
 
-        # `report` đi TIẾP vào trong vòng lặp của adapter để progress nhích theo số đoạn đã
-        # bóc, thay vì đứng ở 0,15 cho tới khi xong. Trần 0,89: ba bước sau (lưu transcript,
-        # tạo job dịch, xong) vẫn có chỗ riêng của chúng.
-        def bao_tien_do(da_toi: float, tong_giay: float) -> None:
-            if tong_giay <= 0:
-                return
-            ti_le = min(1.0, max(0.0, da_toi / tong_giay))
-            report(0.15 + 0.74 * ti_le,
-                   f"bóc băng {audio.name}: {dinh_dang_giay(da_toi)} / "
-                   f"{dinh_dang_giay(tong_giay)} ({round(100 * ti_le)}%)")
-
-        report(0.15, f"bóc băng {audio.name} (lang={lang})")
-        segments = _boc_bang(engine, str(audio), lang, bao_tien_do)
+        #: `engine` ghi ĐÚNG nguồn đã dùng, không phải engine của job: nếu chữ đến từ OCR mà
+        #: ghi `fw-large-v3` thì lịch sử nói dối, và không cách nào phát hiện bằng cách đọc
+        #: transcript. Đây là lý do `chon_doan` trả kèm `ly_do` chứ không chỉ danh sách.
+        # `ly_do` được `chon_doan` đặt cho MỌI nhánh (OCR, ASR, và cả nhánh ASR
+        # thuần khi không có OCR). Tiền tố là hợp đồng đã ghim ở `test_nguon_chu.py`,
+        # nên đọc nó ở đây không phải đoán chuỗi tự do.
+        engine_ghi = ("rapidocr" if ly_do.startswith("dùng OCR")
+                      else (job.engine or ""))
 
         # R68, và cố ý đặt ở ĐÂY chứ không trong từng adapter: guard này phải
         # đúng cho MỌI engine. `SenseVoiceEngine` đã có guard riêng của nó
@@ -213,7 +230,7 @@ class TranscribeHandler:
 
         report(0.9, f"đã có {len(segments)} đoạn")
         transcript_id = self._repos.add_transcript(
-            source_id=source_id, engine=job.engine or "", lang=lang, segments=segments,
+            source_id=source_id, engine=engine_ghi, lang=lang, segments=segments,
         )
         report(0.95, f"lưu transcript #{transcript_id}")
 

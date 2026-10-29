@@ -722,3 +722,45 @@ def test_release_survives_runtimeerror_from_cuda_is_available(asr_spec, monkeypa
     assert engine._model is None and engine._batched is None, (
         "hai tham chiếu model phải được xoá TRƯỚC khối try, kể cả khi is_available nổ"
     )
+
+def test_run_dung_ocr_khi_handler_co_ocr_engine(repos, specs, tmp_path):
+    """Đường THẬT: `run` phải đi qua OCR khi handler có engine, và ghi `engine` của OCR.
+
+    Vì sao ghim cả cột `engine`: nếu `run` dùng chữ OCR nhưng ghi `engine="fw-large-v3-turbo"`
+    thì lịch sử nói dối về nguồn — và không ai phát hiện được bằng cách đọc transcript.
+    """
+    import numpy as np
+    import soundfile as sf
+
+    class OcrGia:
+        engine_id = "rapidocr"
+
+        def doc_phu_de(self, video_path, *, fps=2.0, khoang_asr=None):
+            return [Segment(i=0, start=0.0, end=2.0, text="từ phụ đề")]
+
+        def release(self):
+            pass
+
+    class AsrGia:
+        engine_id = "fw-large-v3-turbo"
+
+        def transcribe(self, audio_path, lang):
+            return [Segment(i=0, start=0.0, end=2.0, text="từ âm thanh")]
+
+        def release(self):
+            pass
+
+    media = tmp_path / "m.wav"
+    sf.write(str(media), np.zeros(48_000, dtype=np.float32), 48_000)
+    sid = repos.add_source(kind="file", origin="a", media_path=str(media),
+                           audio_path=str(media), lang="zh")
+    h = TranscribeHandler(repos, specs, lambda spec: AsrGia(),
+                          workdir=tmp_path, ocr_engine=OcrGia())
+    job_id = repos.add_job(Job(id=None, workspace=1, type="asr",
+                               engine="fw-large-v3-turbo", phase="asr:fw-large-v3-turbo",
+                               payload={"source_id": sid}))
+    h.run(repos.get_job(job_id), lambda p, line: None)
+
+    t = repos.list_transcripts()[0]
+    assert [s.text for s in t.segments] == ["từ phụ đề"], [s.text for s in t.segments]
+    assert t.engine == "rapidocr", f"cột engine phải nói ĐÚNG nguồn, đo được {t.engine!r}"

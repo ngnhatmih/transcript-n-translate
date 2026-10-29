@@ -119,8 +119,19 @@ class StubIngest:
         source = self._repos.get_source(sid)
         # R37: tệp wav phải TỒN TẠI, nếu không `TranscribeHandler` ném
         # FileNotFoundError và job ASR thành FAILED.
+        #
+        # 🔴 WAV PHAI HOP LE, khong phai vai byte rac (do duoc). Ban dau o day ghi
+        # `b"stub-wav"` — 9 byte, khong phai tep WAV. Duong ASR cu chi MO tep nen no
+        # khong bao gio lo ra; nhung khi `run` di qua OCR, adapter goi `ffprobe` de
+        # biet kich thuoc khung va no chet:
+        #   CalledProcessError: ffprobe ... returned non-zero exit status 1
+        # => job asr failed, 0 transcript, va test do vi mot ly do KHONG LIEN QUAN
+        # toi thu no dinh kiem. Ghi WAV that bang `soundfile` (da co san trong venv,
+        # va khong can ffmpeg): 1 giay im lang, 16 kHz, mono.
         audio = pathlib.Path(source.media_path).with_suffix(".wav")
-        audio.write_bytes(b"stub-wav")
+        import numpy as np
+        import soundfile as sf
+        sf.write(str(audio), np.zeros(16_000, dtype=np.float32), 16_000)
         self._repos.set_source_audio(sid, str(audio), 8.0)
         # R7: và phải TẠO JOB ASR — không có nó thì không có gì chạy bóc băng.
         self._repos.add_job(Job(id=None, workspace=1, type="asr",
