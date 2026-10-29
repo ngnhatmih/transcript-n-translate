@@ -1535,29 +1535,54 @@ def main() -> None:
         "so_ban_dich": len(tat_ca),
     }
 
-    # --- So 1: take/chỗ. Take THAT nam trong plan.json (neu da long lan nao) ---
-    # Khong co plan.json thi KHONG bia: bao thieu.
+    # --- So 1: take/chỗ. Take THẬT nằm trong plan.json (nếu đã lồng lần nào) ---
+    # Không có plan.json thì KHÔNG bịa: báo thiếu.
+    #
+    # 🔴 ĐỌC ĐƯỢC CẢ HAI HÌNH DẠNG. Đo được trên đĩa lúc viết task: ba tệp duy nhất có
+    # trong /data/output/dubs là dub-2, dub-4, dub-10 — CẢ BA do dub.py BẢN CŨ ghi, nên
+    # chúng có `tran` + `dem.phai_sua` + `trang_thai == "phai-sua"`. dub.py mới (Task 1) bỏ
+    # `tran`, đổi `phai_sua` thành `nen_manh`, và `trang_thai` chỉ còn vua/nen. Script chỉ
+    # đọc hình dạng mới sẽ KeyError hoặc lặng lẽ đếm thiếu. Nên đếm theo CẢ HAI tên, và ghi
+    # rõ tệp nào là hình dạng cũ để báo cáo không trộn số của hai chính sách khác nhau.
+    #
+    # `take`/`slot` thì giống nhau ở cả hai hình dạng — đó là số đo thô của TTS, không phải
+    # kết luận của chính sách, nên dùng chung được.
     co_ke_hoach = []
     for tep in sorted(pathlib.Path("/data/output/dubs").glob("dub-*.plan.json")):
         try:
-            co_ke_hoach.append(json.loads(tep.read_text(encoding="utf-8")))
+            kh = json.loads(tep.read_text(encoding="utf-8"))
         except Exception:
             continue
+        kh["_tep"] = tep.name
+        kh["_hinh_dang"] = "cu" if "tran" in kh else "moi"
+        co_ke_hoach.append(kh)
     if co_ke_hoach:
         tong_take = 0.0
         tong_noi = 0.0
         so_dong = 0
+        dem_trang_thai: dict[str, int] = {}
+        so_dong_bi_kep_tran = 0
         for kh in co_ke_hoach:
             for d in kh.get("dong", []):
                 tong_take += float(d["take"])
                 tong_noi += float(d["slot"])
                 so_dong += 1
+                tt = d.get("trang_thai")
+                if tt:
+                    dem_trang_thai[tt] = dem_trang_thai.get(tt, 0) + 1
+                # Trần cũ kẹp speed ở 1,35: đếm xem nó THẬT SỰ kẹp bao nhiêu dòng.
+                if float(d.get("speed") or 1.0) >= 1.35 - 1e-9:
+                    so_dong_bi_kep_tran += 1
         ra["so_1_ti_le_take_tren_noi"] = {
             "so_dong": so_dong,
             "tong_take": round(tong_take, 3),
             "tong_noi": round(tong_noi, 3),
             "ti_le": round(tong_take / tong_noi, 4) if tong_noi else None,
             "nguon": "plan.json co san",
+            "cac_tep": [{"tep": kh["_tep"], "hinh_dang": kh["_hinh_dang"],
+                         "so_dong": len(kh.get("dong", []))} for kh in co_ke_hoach],
+            "dem_trang_thai": dem_trang_thai,
+            "so_dong_bi_kep_tran_cu": so_dong_bi_kep_tran,
         }
     else:
         ra["so_1_ti_le_take_tren_noi"] = {
