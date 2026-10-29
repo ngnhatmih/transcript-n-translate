@@ -35,7 +35,7 @@ cứng.
 | ASR word-level | `words[].s/.e` chính xác ~0,1 s | có sẵn trong transcript |
 | Mốc OCR ở 2 fps | ±0,5 s | giới hạn bởi tần số lấy mẫu |
 | `htdemucs` toàn video | 39 s | RTF 0,0249 |
-| BS-RoFormer-1296 toàn video | ~9,3 phút | RTF 0,448 — **không dùng** |
+| BS-RoFormer-1296 toàn video | ~9,3 phút | RTF 0,448 — **đã loại, chỉ dùng demucs** |
 
 ## 3. Phần A — Phát hiện phụ đề
 
@@ -192,9 +192,12 @@ gì, chỉ để người dùng biết chỗ nào nên rút gọn bản dịch v
 
 ## 6. Phần D — Tách nền và remux
 
-**Tách nền: `htdemucs`.** Đo được 39 s cho toàn video 20,8 phút. Không dùng RoFormer: chậm 14–18
-lần (RTF 0,448 so với 0,0249) mà lợi ích không chuyển thành chất lượng ở đây — đã đo, cả ba
-RoFormer đều cho ASR **kém hơn** bản gốc, và mục đích ở đây chỉ là lấy nền.
+**Tách nền: `htdemucs` — và CHỈ `htdemucs`.** Người dùng chốt: chỉ dùng demucs, không dùng model
+tách nào khác. Đo được 39 s cho toàn video 20,8 phút (RTF 0,0249).
+
+Đây là quyết định dứt khoát, không phải mặc định có thể đổi: ba model BS/Mel-RoFormer đã thử
+nghiệm (1296, 1297, 1143) đều chạy được trên 8 GB VRAM nhưng **không** được đưa vào pipeline —
+chậm hơn 14–18 lần mà lợi ích SDR không chuyển thành chất lượng, và mục đích ở đây chỉ là lấy nền.
 
 **Remux: đã có, đã đo.** `h264` copy + `aac` 192k. Lần đo trước: video 1249,233 s, audio
 1249,210 s, peak −0,42 dB. Chỉ thay nguồn audio từ bản dub sạch sang bản trộn nền + dub.
@@ -222,7 +225,7 @@ Spec này cố ý **không** chốt bốn con số, vì chưa đo thì chốt l�
 
 - Không sửa khâu dịch (đã có, người dùng nói không cần lo).
 - Không sửa lỗi peak `0,000000 dB` của `dub.py`.
-- Không dùng RoFormer cho phần nền.
+- Không dùng model tách nào ngoài `htdemucs` — kể cả BS-RoFormer/Mel-RoFormer đã thử nghiệm.
 - Không xử lý video **không có** phụ đề cứng — trường hợp đó vẫn phải dùng ASR, và spec này không
   thiết kế đường đó.
 - Không commit gì vào `gd4-tts`; mọi thay đổi ở nhánh `thu-nghiem-tach-giong`.
@@ -235,4 +238,4 @@ Spec này cố ý **không** chốt bốn con số, vì chưa đo thì chốt l�
 | `numpy` trong venv app đã lên 2.2.6 khi cài `rapidocr` | **phải chạy backend test suite trước khi commit** — chưa đo |
 | Dòng bị nén mạnh (> 1,5×) nghe không được | ghi log, không tự sửa; người dùng rút gọn bản dịch |
 | `rapidocr` không có CUDA (`onnxruntime` CPU) | đã đo 372,8 s cho 20,8 phút — chấp nhận được |
-| Model RoFormer tải về chiếm ~2,3 GB trong `/tmp` | xoá được, không nằm trong repo |
+| Model RoFormer tải về chiếm ~2,3 GB trong `/tmp` | không dùng trong pipeline; xoá được bất cứ lúc nào, không nằm trong repo |
