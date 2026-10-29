@@ -178,3 +178,119 @@ def test_duong_canh_ma_nguon_KHONG_co_thi_roi_ve_duong_trong_image(tmp_path):
     )
 
 
+
+
+# ----------- `tron_nen` mac dinh: ba muc, va muc thu ba la phep DO -----------
+
+#: Doan ma chay TRONG tien trinh con - doc `_tron_nen_mac_dinh()` voi moi truong da dat.
+#: Phai la tien trinh MOI vi bai test can moi truong SACH: `os.environ` cua pytest da co san
+#: bien cua may, va sua tai cho thi khong do duoc nhanh "khong dat gi".
+_DO_TRON_NEN = (
+    "import json, app.main as m; "
+    "print(json.dumps({'tron_nen': m._tron_nen_mac_dinh()}))"
+)
+
+
+def _chay_tron_nen(env_them: dict[str, str], *, xoa: tuple[str, ...] = ()) -> bool:
+    """Import `app.main` trong tien trinh MOI, tra `_tron_nen_mac_dinh()`."""
+    env = {k: v for k, v in os.environ.items() if k not in xoa}
+    env.update(env_them)
+    env["PYTHONUTF8"] = "1"
+    r = subprocess.run(
+        [sys.executable, "-B", "-c", _DO_TRON_NEN],
+        cwd=str(BACKEND_DIR), env=env, capture_output=True, text=True, timeout=180,
+    )
+    assert r.returncode == 0, (
+        f"import app.main trong tien trinh con FAILED (exit {r.returncode})\n"
+        f"STDOUT={r.stdout[-2000:]}\nSTDERR={r.stderr[-3000:]}")
+    return bool(json.loads(r.stdout.strip().splitlines()[-1])["tron_nen"])
+
+
+def test_tron_nen_bien_moi_truong_ep_bat_va_ep_tat():
+    """`PHUDE_DUB_TRON_NEN=1` phai BAT ke ca khi may khong co `demucs`.
+
+    Vi sao ghim chieu BAT: muc 3 la phep do `demucs`, va tren may KHONG co demucs phep do tra
+    `False`. Neu bien moi truong khong thang duoc phep do thi no la khai bao chet - nguoi dung
+    dat `PHUDE_DUB_TRON_NEN=1` trong image co GPU nhung cai demucs theo cach phep do khong thay
+    se khong bao gio bat duoc, ma cung khong co cau loi nao.
+    """
+    for gia_tri in ("1", "true", "yes", "on", "TRUE", " On "):
+        assert _chay_tron_nen({"PHUDE_DUB_TRON_NEN": gia_tri}) is True, gia_tri
+    for gia_tri in ("0", "false", "no", "off", "FALSE"):
+        assert _chay_tron_nen({"PHUDE_DUB_TRON_NEN": gia_tri}) is False, gia_tri
+
+
+def test_tron_nen_khong_dat_thi_roi_ve_phep_do_demucs():
+    """Vang bien thi theo phep do, va tren may KHONG co demucs thi phai la `False`.
+
+    Day la bai ghim su that cua MOI TRUONG: `backend/.venv` khong cai `demucs`, nen mac dinh
+    phai TAT. Neu no thanh `True` thi moi job `dub` tren may nay chay toi 90 % roi `failed` -
+    dung loai loi im lang ma co nay sinh ra de tranh.
+    """
+    import importlib.util
+
+    co_demucs = importlib.util.find_spec("demucs.api") is not None
+    assert _chay_tron_nen({}, xoa=("PHUDE_DUB_TRON_NEN",)) is co_demucs, (
+        f"mac dinh phai bang phep do; may nay co demucs = {co_demucs}")
+
+
+def test_tron_nen_gia_tri_rac_thi_roi_ve_phep_do():
+    """Gia tri go sai KHONG duoc coi la bat - roi ve phep do, khong doan.
+
+    Vi sao khong nem: day la mot tuy chon, va giet ca tien trinh vi mot chuoi go sai con te hon
+    la dung mac dinh. Nhung "go sai" tuyet doi khong duoc hieu thanh "bat": bat nham tren image
+    CPU la moi job `dub` chet o 90 %.
+    """
+    import importlib.util
+
+    co_demucs = importlib.util.find_spec("demucs.api") is not None
+    for gia_tri in ("rac", "2", "-1", "bat", "truee"):
+        assert _chay_tron_nen({"PHUDE_DUB_TRON_NEN": gia_tri}) is co_demucs, gia_tri
+
+
+# ----------- `_chon_tron_nen`: ham THUAN, test duoc ca hai chieu -----------
+
+def test_chon_tron_nen_ep_tat_thang_phep_do_CO_demucs():
+    """`PHUDE_DUB_TRON_NEN=0` phai TAT ke ca khi may CO `demucs`.
+
+    🔴 Vi sao bai nay phai la ham THUAN: ban dau `_tron_nen_mac_dinh()` tu do `demucs` ben
+    trong, nen bai test phai chay tren may THAT. Do duoc he qua: dot bien bo nhanh ep TAT
+    (`if ep in ("0","false","no","off")` -> `if False:`) van XANH, vi tren may khong co demucs
+    thi phep do CUNG tra `False` - hai duong cho CUNG ket qua. Nhanh ep TAT la nhanh duy nhat
+    duoc dung de tranh loi im lang tren image CPU, nen no phai phan biet duoc.
+    """
+def test_chon_tron_nen_ep_tat_thang_phep_do_CO_demucs():
+    """`PHUDE_DUB_TRON_NEN=0` phai TAT ke ca khi may CO `demucs`.
+
+    🔴 Vi sao bai nay phai la ham THUAN: ban dau `_tron_nen_mac_dinh()` tu do
+    `demucs` ben trong, nen bai test phai chay tren may THAT. Do duoc he qua: dot bien
+    bo nhanh ep TAT (`if ep in ("0","false","no","off")` -> `if False:`) van XANH, vi
+    tren may khong co demucs thi phep do CUNG tra `False` - hai duong cho CUNG ket qua.
+    Nhanh ep TAT la nhanh duy nhat duoc dung de tranh loi im lang tren image CPU, nen
+    no phai phan biet duoc.
+
+    ⚠️ HOP DONG: `ep` la gia tri DA chuan hoa (lower + strip) - `_tron_nen_mac_dinh`
+    lam viec do truoc khi goi. Bai test truyen chuoi thuong, dung hop dong. Ban dau
+    bai nay truyen `"FALSE"`/`" off "` tho va DO - dung ly do: ham thuan khong chuan
+    hoa lai, va khong duoc chuan hoa lai (hai noi cung chuan hoa la mot cho de lech).
+    """
+    from app.main import _chon_tron_nen
+
+    for ep in ("0", "false", "no", "off"):
+        assert _chon_tron_nen(ep, True) is False, (ep, "co demucs van phai TAT")
+        assert _chon_tron_nen(ep, False) is False, (ep, "khong co demucs thi cang phai TAT")
+
+
+def test_chon_tron_nen_ep_bat_thang_phep_do_KHONG_co_demucs():
+    """`PHUDE_DUB_TRON_NEN=1` phai BAT ke ca khi phep do bao khong.
+
+    Ghi chu: bat tren image KHONG co demucs thi job se `failed` o 90 % - do la lua chon
+    cua nguoi dat bien, va no phai duoc THI HANH, khong bi phep do am tham ghi de. Im
+    lang bo qua mot bien moi truong dat tuong minh con te hon la de job chet roi bao
+    dung ly do.
+    """
+    from app.main import _chon_tron_nen
+
+    for ep in ("1", "true", "yes", "on"):
+        assert _chon_tron_nen(ep, False) is True, (ep, "phai BAT du phep do bao khong")
+        assert _chon_tron_nen(ep, True) is True, ep

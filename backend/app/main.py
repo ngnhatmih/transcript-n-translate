@@ -82,6 +82,48 @@ if not os.path.exists(TTS_PYTHON) and os.path.exists(_TTS_PYTHON_TRONG_IMAGE):
 _AUTO_FORWARD_ON = "1"
 
 
+def _chon_tron_nen(ep: str, co_demucs: bool) -> bool:
+    """Phan giai ba muc thanh mot quyet dinh. HAM THUAN - khong doc moi truong.
+
+    Ba muc, theo thu tu thang:
+      1. `payload["tron_nen"]` cua TUNG job - xu ly o `DubHandler.run`, khong o day;
+      2. `ep` (gia tri `PHUDE_DUB_TRON_NEN`) - ep bat/tat cho ca tien trinh;
+      3. `co_demucs` - tien trinh nay co tach duoc nen khong.
+
+    🔴 Vi sao tach THANH HAM THUAN: ban dau ham nay doc `os.environ` va tu do
+    `demucs` ben trong, nen bai test phai chay mot tien trinh con cho moi gia tri. Do
+    duoc he qua: dot bien bo nhanh ep TAT (`if ep in ("0",...)` -> `if False:`) van
+    XANH, vi tren may KHONG co demucs thi phep do cung tra `False` - hai duong cho
+    CUNG ket qua nen bai test khong phan biet duoc. Nhanh ep TAT la nhanh DUY NHAT
+    duoc dung de tranh loi im lang tren image CPU, nen no phai test duoc.
+    """
+    if ep in ("1", "true", "yes", "on"):
+        return True
+    if ep in ("0", "false", "no", "off"):
+        return False
+    return co_demucs
+
+
+def _tron_nen_mac_dinh() -> bool:
+    """Job `dub` co tron nen cua video goc theo MAC DINH khong.
+
+    Chi lo phan DOC moi truong; quyet dinh nam o `_chon_tron_nen`.
+
+    🔴 Vi sao muc 3 la phep DO chu khong phai `True` viet cung: do duoc gia cua tron
+    nen la **+66 s va 555 MiB VRAM** cho phim 20,8 phut, va `demucs` chi co trong
+    image co GPU. Image CPU bat co nay thi MOI job `dub` chay toi 90 % roi `failed` -
+    sau khi nguoi dung da cho TTS xong.
+    """
+    ep = (os.environ.get("PHUDE_DUB_TRON_NEN") or "").strip().lower()
+    try:
+        import demucs.api  # noqa: F401
+    except ImportError:
+        co_demucs = False
+    else:
+        co_demucs = True
+    return _chon_tron_nen(ep, co_demucs)
+
+
 def _mark_availability(specs) -> None:
     """Ghi `capabilities["available"]` cho mọi engine DỊCH, dò Ollama MỘT lần.
 
@@ -480,12 +522,18 @@ def build_components():
         # `dub` nhận rồi `failed` ở 5%, sau khi người dùng đã chờ. Trên Linux venv đặt python ở
         # `bin/python`; và dù đường đúng thì image cũng KHÔNG có `vieneu` — nên route từ chối
         # sớm bằng `san_sang()` thay vì để job chết.
+        #: TRỘN NỀN: đo được giá **+66 s và 555 MiB VRAM** cho phim 20,8 phút (tách
+        #: 43,9 s + remux 21,7 s). Mặc định BẬT khi tiến trình này có `demucs` — image có
+        #: GPU thì có, image CPU thì không, và ở đó bật là mọi job `dub` chết ở 90 %.
+        #: `PHUDE_DUB_TRON_NEN=0/1` ép tắt/bật mà không sửa mã. Cờ THEO JOB
+        #: (`payload["tron_nen"]`) vẫn thắng giá trị này.
         "dub": DubHandler(
             repos, OUTPUT_DIR / "dubs",
             chay_tts_batch(
                 TTS_PYTHON, BACKEND_DIR / "scripts" / "tts_batch.py"),
             python=TTS_PYTHON,
-            script=str(BACKEND_DIR / "scripts" / "tts_batch.py")),
+            script=str(BACKEND_DIR / "scripts" / "tts_batch.py"),
+            tron_nen=_tron_nen_mac_dinh()),
         "export": ExportHandler(repos, out_dir=OUTPUT_DIR),
     }
     broker = JobEventBroker()
