@@ -124,6 +124,33 @@ def test_gop_thanh_dong_gop_khung_lien_tiep_cung_chu():
     assert segs[0].text == "这个酸菜里面有肉汤"
 
 
+def test_gop_thanh_dong_start_lay_tu_hop_dau_khong_phai_khong():
+    """`Segment.start` phải là `t` của hộp ĐẦU, không phải hằng 0.
+
+    🔴 Vì sao có bài này (reviewer Task 2, finding 6): bài gộp phía trên dùng hộp đầu
+    `t=0.0`, nên `start == 0.0` đúng một cách TÌNH CỜ — đột biến `start=0.0` cho mọi
+    Segment vẫn làm bài đó XANH. Đo được: `start=0.0` (cả hai nhánh) và `start=end` đều
+    cho 10/10 PASS. Bài này đẩy hộp đầu lên `t=1.0` nên hằng 0 KHÔNG thể qua.
+    """
+    hops = [_hop(text="câu một", t=1.0), _hop(text="câu một", t=1.5)]
+    segs = gop_thanh_dong(hops, fps=2.0)
+    assert len(segs) == 1, [s.text for s in segs]
+    assert segs[0].start == 1.0, (
+        f"start phải lấy từ hộp đầu (1,0 s), không phải 0; đo được {segs[0].start}"
+    )
+    assert segs[0].end > segs[0].start, (
+        f"end phải sau start; đo được start={segs[0].start} end={segs[0].end}"
+    )
+
+    """2 fps: cùng một dòng phụ đề xuất hiện ở nhiều khung ⇒ MỘT Segment, không phải 5."""
+    hops = [_hop(text="这个酸菜里面有肉汤", t=0.5 * k) for k in range(5)]
+    segs = gop_thanh_dong(hops, fps=2.0)
+    assert len(segs) == 1, f"phải gộp thành 1 dòng, đo được {len(segs)}"
+    assert segs[0].start == 0.0
+    assert abs(segs[0].end - 2.5) < 1e-6, f"kết thúc phải ~2,5 s, đo được {segs[0].end}"
+    assert segs[0].text == "这个酸菜里面有肉汤"
+
+
 def test_gop_thanh_dong_tach_khi_chu_doi():
     hops = [_hop(text="câu một", t=0.0), _hop(text="câu một", t=0.5),
             _hop(text="câu hai", t=1.0), _hop(text="câu hai", t=1.5)]
