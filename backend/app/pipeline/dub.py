@@ -28,38 +28,39 @@ import numpy as np
 
 from app.worker import JobCancelled
 
-TOC_DO_TRAN = 1.35
-BAC_TOC_DO = 0.05
 NGUONG_IM_LANG = 0.01
 
 
-def ke_hoach_toc_do(takes: list[float], slots: list[float], avails: list[float], *,
-                    tran: float = TOC_DO_TRAN, bac: float = BAC_TOC_DO
-                    ) -> tuple[list[float], list[float], list[int]]:
-    """Tốc độ cho từng dòng + danh sách dòng KHÔNG cứu được bằng tốc độ.
+def ke_hoach_toc_do(takes: list[float], slots: list[float], avails: list[float]
+                    ) -> tuple[list[float], list[float]]:
+    """Tốc độ cho từng dòng, và `need` (tốc độ tối thiểu) để chẩn đoán.
 
-    `avails[i]` = từ `start` của dòng tới `start` của dòng kế (được mượn khoảng lặng giữa hai
-    dòng). `need_i = take_i / min(slot_i, avail_i)` là tốc độ TỐI THIỂU để dòng đó không đè dòng
-    sau. Thang bậc: chọn bậc nhỏ nhất ≥ `need_i`, nên tốc độ chỉ rơi vào các mốc cách nhau `bac`.
+    `avails[i]` = từ `start` của dòng tới `start` của dòng kế. `need_i = take_i /
+    max(slot_i, avail_i)` là tốc độ TỐI THIỂU để dòng đó không đè dòng sau — tức
+    ràng buộc CỨNG của sản phẩm.
 
-    Trả về `(toc_do, need, qua_tran)`; `qua_tran` là các chỉ số có `need > tran` — những dòng đó
-    phải sửa chữ, và bị gán `tran` (không nén quá trần).
+    🔴 VÌ SAO BỎ TRẦN VÀ BỎ THANG BẬC (đổi hành vi, có chủ):
+    Bản cũ kẹp `need` ở `TOC_DO_TRAN = 1.35` và trả thêm `qua_tran`. Đo được hệ quả: dòng
+    vượt trần VẪN chồng sang dòng sau (vì 1,35 không đủ), và mã chỉ báo "phải sửa chữ".
+    Người dùng chốt hai điều trái với cách đó: (a) không chồng lấn là điều kiện ĐÚNG/SAI;
+    (b) "ko cần phải cắt mà chỉnh tốc độ là được". Nên nay nén tới ĐÚNG mức cần, không cắt
+    chữ, không kẹp trần.
+
+    Thang bậc (`BAC_TOC_DO`) cũng bỏ: nó tồn tại để giữ tốc độ "gần đều", nhưng bậc nhỏ hơn
+    `need` sẽ GÂY chồng — tức phá ràng buộc cứng để giữ một mong muốn. Đổi lại, phần lớn dòng
+    nay ở đúng 1,0× (khi take ngắn hơn chỗ), nên tốc độ thực tế đều hơn cả bản cũ.
+
+    `need_i` có thể > 1 rất nhiều khi hai dòng quá sát nhau; đó là dữ liệu, không phải lỗi —
+    xem `_ghi_ke_hoach` (đếm `nen_manh`).
     """
     need: list[float] = []
     for take, slot, avail in zip(takes, slots, avails):
         # Cua so cho phep = TROI tu start nay toi start cua dong sau: take duoc TRAI vao khoang
-        # lang, nen tran la `max(slot, avail)` — KHONG phai `min`. (Lan dau toi viet `min` va bai
-        # test bat duoc: muon 0,5 s lang ma van bao phai nen 1.35x.)
+        # lang, nen lay `max(slot, avail)` — KHONG phai `min`.
         cho = max(slot, avail) if avail > 0 else slot
         need.append(take / cho if cho > 0 else 1.0)
-    qua_tran = [i for i, n in enumerate(need) if n > tran + 1e-9]
-    toc_do: list[float] = []
-    for n in need:
-        n = min(n, tran)
-        # bậc nhỏ nhất >= n, đo từ 1.0 theo bước `bac` (1.0 là sàn: không BAO GIỜ đọc chậm đi)
-        so_bac = max(0, int(np.ceil((n - 1.0) / bac - 1e-9)))
-        toc_do.append(round(1.0 + so_bac * bac, 4))
-    return toc_do, need, qua_tran
+    toc_do = [max(1.0, n) for n in need]
+    return toc_do, need
 
 
 def trong_im_lang(mau: np.ndarray, *, nguong: float = NGUONG_IM_LANG) -> np.ndarray:
@@ -141,12 +142,11 @@ class DubHandler:
     """
 
     def __init__(self, repos, out_dir: pathlib.Path, tts_runner, *,
-                 tran: float = TOC_DO_TRAN, dinh_dangs=None,
+                 dinh_dangs=None,
                  python: str = "", script: str = "") -> None:
         self._repos = repos
         self._out_dir = pathlib.Path(out_dir)
         self._tts = tts_runner
-        self._tran = tran
         self._dinh_dangs = dinh_dangs or DINH_DANG
         # Đường của tiến trình TTS — CHỈ để `san_sang()` trả lời được "máy này có TTS chưa".
         # Vắng (`""`) thì `san_sang()` trả `True`: một handler tự dựng trong test (với runner
@@ -237,7 +237,7 @@ class DubHandler:
             slots = [max(0.01, s.end - s.start) for s in dung]
             avails = [(dung[k + 1].start if k + 1 < len(dung) else dung[k].end) - dung[k].start
                       for k in range(len(dung))]
-            toc_do, need, qua_tran = ke_hoach_toc_do(takes, slots, avails, tran=self._tran)
+            toc_do, need = ke_hoach_toc_do(takes, slots, avails)
 
             sr = 48_000
             dat: list[tuple[float, np.ndarray]] = []
@@ -268,29 +268,33 @@ class DubHandler:
         # ra thì giao diện chỉ có thể bịa, hoặc phải chạy lại TTS (5–7 phút) để xem lại một lượt
         # đã xong. Tệp là DẪN XUẤT của lượt chạy, không phải nguồn sự thật thứ hai: xoá nó đi
         # thì route trả `null` và giao diện nói "chưa có số đo", KHÔNG bịa số.
-        self._ghi_ke_hoach(tid, dung, takes, slots, avails, toc_do, need, qua_tran)
+        self._ghi_ke_hoach(tid, dung, takes, slots, avails, toc_do, need)
 
         report(0.92, f"xuất {len(self._dinh_dangs)} định dạng")
         xuat_dinh_dang(master_path, self._out_dir, self._dinh_dangs)
-        if qua_tran:
-            report(1.0, f"xong · {len(qua_tran)} dòng vượt trần {self._tran}× (nén tới trần, vẫn đè "
-                        f"dòng sau): " + ", ".join(str(dung[k].i) for k in qua_tran))
+        manh = [k for k, s in enumerate(toc_do) if s > 1.5]
+        if manh:
+            report(1.0, f"xong · {len(manh)} dòng phải nén trên 1,5× (đã nén đủ để không "
+                        f"chồng, không cắt chữ): " + ", ".join(str(dung[k].i) for k in manh))
         else:
             report(1.0, "xong")
 
-    def _ghi_ke_hoach(self, tid: int, dung, takes, slots, avails, toc_do, need, qua_tran) -> None:
+    def _ghi_ke_hoach(self, tid: int, dung, takes, slots, avails, toc_do, need) -> None:
         """Ghi `dub-<tid>.plan.json`: số đo của TỪNG dòng cho bảng ở màn Lồng tiếng.
 
-        `trang_thai` là ba câu KHÁC NHAU, không phải ba mức của một thang:
+        `trang_thai` là HAI câu khác nhau, không phải ba:
           * `vua`      — take ≤ chỗ, không phải nén;
-          * `nen`      — take > chỗ, đã nén trong trần, vẫn nằm trong dòng;
-          * `phai-sua` — nén TỚI TRẦN vẫn tràn sang dòng sau ⇒ phải sửa chữ, không phải tăng tốc.
+          * `nen`      — take > chỗ, đã nén ĐỦ để không chồng sang dòng sau.
+
+        🔴 Bản cũ có trạng thái thứ ba `phai-sua` ("nén tới trần vẫn tràn ⇒ phải sửa chữ").
+        Trạng thái đó biến mất cùng trần: nay không còn dòng nào "không cứu được bằng tốc độ",
+        vì tốc độ không bị kẹp. `nen_manh` là con số CHẨN ĐOÁN (> 1,5×, mức khó nghe), không
+        phải trạng thái chặn.
 
         Ghi bằng `ensure_ascii=False` để tệp đọc được bằng mắt khi cần chẩn đoán.
         """
         import json as _json
 
-        qua = set(qua_tran)
         dong = []
         for k, s in enumerate(dung):
             dong.append({
@@ -303,17 +307,17 @@ class DubHandler:
                 "avail": round(float(avails[k]), 3),
                 "speed": round(float(toc_do[k]), 3),
                 "need": round(float(need[k]), 3),
-                "trang_thai": "phai-sua" if k in qua else ("nen" if need[k] > 1.0 + 1e-9 else "vua"),
+                "trang_thai": "nen" if need[k] > 1.0 + 1e-9 else "vua",
             })
         so_vua = sum(1 for d in dong if d["trang_thai"] == "vua")
         so_nen = sum(1 for d in dong if d["trang_thai"] == "nen")
+        so_manh = sum(1 for d in dong if d["speed"] > 1.5)
         trung_vi = float(np.median([d["speed"] for d in dong])) if dong else 0.0
         ke_hoach = {
             "translation_id": tid,
-            "tran": float(self._tran),
             "tong_giay": round(float(max(s.end for s in dung)), 3),
             "so_dong": len(dong),
-            "dem": {"vua": so_vua, "nen": so_nen, "phai_sua": len(qua)},
+            "dem": {"vua": so_vua, "nen": so_nen, "nen_manh": so_manh},
             "trung_vi_toc_do": round(trung_vi, 3),
             "dong": dong,
         }

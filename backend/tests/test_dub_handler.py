@@ -237,8 +237,9 @@ def test_plan_ghi_du_sau_so_cua_tung_dong(repos, tmp_path):
     assert kh["translation_id"] == tid
     assert kh["so_dong"] == 2, f"bản dịch fixture có hai dòng, đo được {kh['so_dong']}"
     assert kh["tong_giay"] == 5.0
-    # take 1,0 s: dòng #0 (chỗ 2,0 s) vừa, dòng #1 (chỗ 2,0 s) vừa ⇒ 0 nén, 0 phải sửa.
-    assert kh["dem"] == {"vua": 2, "nen": 0, "phai_sua": 0}, kh["dem"]
+    assert "tran" not in kh, "khoá `tran` phải BIẾN MẤT cùng trần 1,35"
+    # take 1,0 s: dòng #0 (chỗ 2,0 s) vừa, dòng #1 (chỗ 2,0 s) vừa ⇒ 0 nén, 0 nén mạnh.
+    assert kh["dem"] == {"vua": 2, "nen": 0, "nen_manh": 0}, kh["dem"]
     mot = kh["dong"][0]
     assert set(mot) == {"i", "start", "end", "text", "take", "slot", "avail", "speed", "need",
                         "trang_thai"}, f"hàng phải có đúng chín khoá, đo được {sorted(mot)}"
