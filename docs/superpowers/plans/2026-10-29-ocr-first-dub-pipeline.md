@@ -623,6 +623,10 @@ def loc_hinh_dang(hops: list[Hop]) -> list[Hop]:
             continue
         if len([c for c in _cum_so(t)]) > SO_CUM_SO_TOI_DA:
             continue
+        # GỘP dòng lặp y nguyên LIÊN TIẾP: logo bị OCR đọc nhiều khung thành '好好好' sẽ
+        # thành một dòng, không phải năm. Giữ hộp ĐẦU (mốc thời gian sớm nhất).
+        if ra and ra[-1].text.strip() == t:
+            continue
         ra.append(h)
     return ra
 
@@ -752,13 +756,20 @@ from app.adapters.ocr_rapidocr import RapidOCREngine
 from app.ports.ocr import OCREngine
 
 
+#: Font PHẢI chỉ định tường minh: `ffmpeg` trên image Debian KHÔNG có font mặc định và
+#: `drawtext` không có `fontfile` sẽ chết với "Cannot find a valid font". Kiểm trước bằng:
+#:   docker compose exec -T api fc-list | head -1
+#: Image hiện tại có DejaVu; nếu vắng thì `apt-get install -y fonts-dejavu-core`.
+FONT = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
+
+
 def _lam_video(ra: str, *, giay: float = 2.0, fps: int = 2) -> str:
     """Video 320x240, nền đen, chữ trắng ở dải dưới (y ~ 200/240 = 0,83)."""
     subprocess.run(
         ["ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
          "-f", "lavfi", "-i", f"color=c=black:s=320x240:d={giay}:r={fps}",
-         "-vf", ("drawtext=text='hello world':fontcolor=white:fontsize=22:"
-                 "x=40:y=200"),
+         "-vf", (f"drawtext=fontfile={FONT}:text='hello world':fontcolor=white:"
+                 "fontsize=22:x=40:y=200"),
          "-pix_fmt", "yuv420p", ra],
         check=True, capture_output=True,
     )
