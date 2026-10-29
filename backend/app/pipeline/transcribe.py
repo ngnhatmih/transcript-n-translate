@@ -12,7 +12,9 @@ from typing import Callable, Iterable, Mapping
 from app.domain import job_state as js
 from app.domain.models import Job
 from app.domain.paths import PathOutsideRoot, resolve_within
+from app.domain.nguon_chu import chon_nguon, khoang_co_tieng
 from app.ports.asr import ASREngine
+from app.ports.ocr import OCREngine
 from app.ports.repos import Repos
 from app.registry import (MT_DEFAULT_SETTING, EngineSpec, by_id,
                           default_mt_engine)
@@ -59,6 +61,7 @@ class TranscribeHandler:
         workdir: str | pathlib.Path,
         declared_default_mt: str | None = None,
         prompt_versions: Mapping[str, str] | None = None,
+        ocr_engine: OCREngine | None = None,
     ) -> None:
         self._repos = repos
         self._specs = list(specs)
@@ -75,6 +78,11 @@ class TranscribeHandler:
         self._prompt_versions = dict(prompt_versions or {})
         self._engine: ASREngine | None = None
         self._engine_id: str | None = None
+        #: OCR la TUY CHON: `None` nghia la "khong co OCR", va duong ASR thuan van
+        #: nguyen ven. Moi bai test `transcribe` cu dung handler khong truyen tham so
+        #: nay, nen chung ghim dung hanh vi cu — do la ly do no la tham so keyword co
+        #: mac dinh.
+        self._ocr = ocr_engine
 
     def handles(self) -> str:
         return "asr"
@@ -95,6 +103,37 @@ class TranscribeHandler:
             self._engine.release()
             self._engine = None
             self._engine_id = None
+
+    def chon_doan(self, media_path: str, lang: str, *,
+                  dung_ocr_lam_goc: bool = True,
+                  asr_engine_id: str | None = None) -> tuple[list[Segment], str]:
+        """Chọn nguồn chữ cho MỘT media. Trả `(đoạn, lý do tiếng Việt)`.
+
+        Thứ tự: OCR (nếu có engine VÀ `dung_ocr_lam_goc`) -> ASR -> lỗi.
+
+        🔴 VÌ SAO KHÔNG PHẢI "CHỈ OCR": video không có phụ đề cứng thì OCR trả `[]` một cách
+        HỢP LỆ, và rơi về ASR là hành vi đúng. ĐO ĐƯỢC lý do vẫn ưu tiên OCR khi có: trên
+        đoạn 120-420 s của video thật, ASR chỉ đúng 66,27 % ký tự (bản gốc) và 60,48 %
+        (trên vocals tách); OCR đọc chữ đã biên tập nên đúng chính tả, lại phủ tới 1243 s
+        trong khi ASR dừng ở 1186,4 s.
+
+        ASR LUÔN chạy trước khi gọi OCR, vì tầng lọc 4 cần `khoang_asr`. Đó là chi phí đã
+        biết: muốn dùng tầng 4 thì phải trả tiền ASR.
+        """
+        engine_id = asr_engine_id or self._engine_id
+        doan_asr: list[Segment] = []
+        if self._ocr is not None and engine_id:
+            # Chạy ASR TRƯỚC để có `khoang_asr` cho tầng lọc 4. `_engine_for` giữ engine
+            # theo id nên nạp model một lần, không phải mỗi lượt.
+            doan_asr = self._engine_for(engine_id).transcribe(media_path, lang)
+        if self._ocr is not None and dung_ocr_lam_goc:
+            khoang = khoang_co_tieng(doan_asr)
+            doan_ocr = self._ocr.doc_phu_de(media_path, khoang_asr=khoang or None)
+            if doan_ocr:
+                return chon_nguon(doan_ocr, doan_asr)
+        if not doan_asr and engine_id:
+            doan_asr = self._engine_for(engine_id).transcribe(media_path, lang)
+        return chon_nguon([], doan_asr)
 
     def run(self, job: Job, report: Callable[[float, str], None]) -> None:
         source_id = job.payload["source_id"]

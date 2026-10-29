@@ -63,32 +63,32 @@ GPU. Nó tự ép UTF-8 cho stdout (console Windows mặc định cp1252, còn s
 tiếng Trung/Việt) và tự đặt cache model trước khi nạp `faster_whisper`.
 
 Con số nền của lần chạy mặc định, đo sau khi xoá `__pycache__` (lệnh ở mục
-"Kiểm thử" trên, chạy từ trong `backend\`). Thứ có nghĩa là **1381 / 15**, không
+"Kiểm thử" trên, chạy từ trong `backend\`). Thứ có nghĩa là **1389 / 15**, không
 phải số giây — thời gian trôi giữa các lần chạy (đã thấy 24,00–30,94 s) còn con
 số bài thì không:
 
 ```
-1381 passed, 15 deselected, 1 warning
+1389 passed, 15 deselected, 1 warning
 ```
 
 Hai con số đó là SỐ BÀI ĐƯỢC CHỌN, và chúng khớp với số mà `--collect-only` báo
-(`1381/1396`, 15 bài `live` bị bỏ;
+(`1389/1404`, 15 bài `live` bị bỏ;
 `tests/test_backend_readme.py::test_readme_baseline_matches_the_tests_actually_
 collected` đối chiếu mỗi lần chạy).
 
 
-Máy này **CÓ** `ffmpeg 8.1.1` + `ffprobe` trên PATH (đã đo), nên `1381/15` ở trên
+Máy này **CÓ** `ffmpeg 8.1.1` + `ffprobe` trên PATH (đã đo), nên `1389/15` ở trên
 là số THẬT của nó. Máy **không có** `ffmpeg`/`ffprobe` cho một kết quả KHÁC: cả
 `tests/test_ingest.py` bị `skipif` ở cấp module — **9** bài cùng skip một lượt —
-nên dòng tổng kết của máy đó là **`1372 passed, 9 skipped, 15 deselected`** (=
-`1381 − 9`; con số này TỪNG ghi `978`, tức một baseline rất cũ, và nó lệch phép
+nên dòng tổng kết của máy đó là **`1380 passed, 9 skipped, 15 deselected`** (=
+`1389 − 9`; con số này TỪNG ghi `978`, tức một baseline rất cũ, và nó lệch phép
 trừ của chính khối nền ngay trên nó). Đó là
 con số của máy thiếu ffmpeg, **không phải** con số máy này từng in ra; đừng chép
 nó vào khối nền ở trên, và đừng "sửa" số nền xuống chỉ vì thiếu ffmpeg.
 
 ⚠️ Con số `856` ở đây TỪNG không khớp phép trừ của chính nó: `865 − 9 = 856`, tức
 nó là số của lượt TRƯỚC `V1` (+3 bài) còn sót lại. Phép trừ của khối nền hiện tại
-là `1381 − 9` = `1372`.
+là `1389 − 9` = `1380`.
 
 
 (Con số này từng bị ghi là `798`: bài `test_a_failed_translation_leaves_the_
@@ -97,7 +97,7 @@ số nền không được bump. Nó tồn tại để phát hiện TRÔI, nên 
 chạy báo dương tính giả.
 
 
-Lần bump này, `1353/15` → `1381/15` (**+28 bài**), do **BỐN TẦNG LỌC PHỤ ĐỀ** trong
+Lần bump này, `1353/15` → `1389/15` (**+36 bài**), do **BỐN TẦNG LỌC PHỤ ĐỀ** trong
 `app/domain/phu_de.py`: `tests/test_phu_de.py` là tệp mới với 12 bài ghim hàm THUẦN
 `tim_dai_phu_de`, `loc_on_dinh`, `loc_hinh_dang`, `loc_theo_asr`, `gop_thanh_dong` — tầng lọc
 cho đường OCR-first, chưa nối vào pipeline (việc nối là task sau). Bài thứ 11 ghim đúng lỗi
@@ -111,6 +111,13 @@ vào một dải khi số hộp bằng nhau. Bài thứ 12 ghim `Segment.start` 
 entry `rapidocr` — id TRÙNG `RapidOCREngine.engine_id` (lệch nhau thì chọn engine theo id
 không tìm thấy adapter, lỗi chỉ lộ lúc chạy), đủ bốn khoá, và `opts.fps = 2.0` là DỮ LIỆU
 chứ không hard-code.
+`tests/test_transcribe_ocr.py` mới **+7 bài** (Task 7): nối OCR vào `TranscribeHandler` qua
+`chon_doan` — phương thức MỚI, `run` không đổi (22 bài `transcribe` cũ phải nguyên vẹn).
+Bảy bài ghim: `ocr_engine=None` thì hành vi y bản cũ; có OCR + OCR có chữ thì dùng OCR; OCR
+rỗng (video không phụ đề cứng) thì rơi về ASR và KHÔNG ném; cả hai rỗng thì NÉM (trả `[]`
+im lặng sẽ khiến job "thành công" với bản lồng rỗng); `khoang_asr` được truyền cho tầng lọc
+4 (hai đoạn cách 0,2 s gộp thành một khoảng); cờ `dung_ocr_lam_goc=False` thì KHÔNG đọc
+khung; và `asr_engine_id` cho phép gọi `chon_doan` ngoài `run`.
 `tests/test_nguon_chu.py` mới **+6 bài** (Task 5): chính sách chọn nguồn chữ trong
 `app/domain/nguon_chu.py`. OCR là CHÍNH (đo được: ASR trên audio gốc chỉ 66,27 % ký tự và
 DỪNG ở 1186,4 s; OCR phủ tới 1243 s), ASR là dự phòng khi video không có phụ đề cứng. Sáu
@@ -445,7 +452,7 @@ lần dịch lại, không `EchoProblem`, ≤ ~40 s": V2 là biến thể duy nh
 nên KHÔNG nhận biến thể nào ở lượt này, và đòn bẩy tiếp theo là kiến trúc hybrid
 (opus-mt trước, hy-mt chỉ trên các đoạn bị gắn cờ), không phải prompt.
 
-Lần bump trước, `1165/15` → `1187/15` (**+28 bài**), do **hatch biến thể prompt**
+Lần bump trước, `1165/15` → `1187/15` (**+36 bài**), do **hatch biến thể prompt**
 của lượt đo echo (`tests/test_mt_prompt_styles.py`, **+22**): bốn biến thể V0–V3
 (mặc định; chỉ dẫn dời xuống cuối; một cặp ví dụ Hán -> Việt; dòng dữ liệu đánh số
 `[i]`) chọn bằng `prompts.EXPERIMENT_PROMPT_STYLE_ENV` và CHỈ cho `hy-mt-1.5-7b`,
@@ -710,7 +717,7 @@ Hợp đồng: `vram` là số hoặc `null` (không đọc được ⇒ `null`,
 
 #### VRAM của lượt dịch (`--sample-vram`) — có artifact, trích dẫn được
 
-Lượt trước báo *peak 6830 MiB / headroom 1372 / steady ~6433 / model 100% GPU*
+Lượt trước báo *peak 6830 MiB / headroom 1380 / steady ~6433 / model 100% GPU*
 nhưng **không tệp nào trên đĩa** chứa những số đó. Lượt `20261019-vram-sample`
 (cùng clip 115 đoạn, 5 thuật ngữ, prompt v0, lô 30, `echo_guard` BẬT, RTX 3070
 8 GB) ghi từng mẫu `nvidia-smi --query-gpu=memory.used` (~1 Hz) vào khối `vram`
@@ -1092,6 +1099,7 @@ là vô dụng.
 Audio **im lặng** làm job `asr` thành `FAILED`, **không** sinh transcript rỗng
 (xem `tests/test_silent_audio.py`). Một transcript rỗng trông y hệt một lần bóc
 băng thành công, nên nó giấu mất lỗi thật.
+
 
 
 
