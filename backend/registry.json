@@ -58,6 +58,15 @@
       "opts": { "use_itn": true }
     }
   ],
+  "_ghi_chu_ocr": "OCR đọc phụ đề CỨNG của video. Cùng khuôn `asr`: id phải TRÙNG `engine_id` của adapter (ghim bằng test_registry_ocr.py). `opts.fps` là DỮ LIỆU: đo được trên video 20,8 phút, 2 fps đủ (dòng phụ đề ngắn nhất 0,5 s) và tốn 372,8 s; 10 fps sẽ tốn ~31 phút mà chỉ đổi ±0,5 s thành ±0,1 s. Tầng lọc 4 (đối chiếu ASR) KHÔNG khai ở đây vì nó là tham số của LƯỢT GỌI, và mặc định TẮT — pipeline phải chạy được khi không có ASR.",
+  "ocr": [
+    {
+      "id": "rapidocr",
+      "label": "RapidOCR (PP-OCRv4, đọc phụ đề cứng)",
+      "runtime": "inprocess",
+      "opts": { "fps": 2.0 }
+    }
+  ],
   "mt": [
     {
       "id": "opus-mt",
