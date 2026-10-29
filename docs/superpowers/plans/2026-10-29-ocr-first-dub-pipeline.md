@@ -827,28 +827,69 @@ bài này chỉ kiểm ĐƯỜNG ỐNG, không kiểm chất lượng đọc ti�
 """
 from __future__ import annotations
 
+import pathlib
 import subprocess
-
 import pytest
 
 from app.adapters.ocr_rapidocr import RapidOCREngine
 from app.ports.ocr import OCREngine
 
 
-#: Font PHẢI chỉ định tường minh: `ffmpeg` trên image Debian KHÔNG có font mặc định và
-#: `drawtext` không có `fontfile` sẽ chết với "Cannot find a valid font". Kiểm trước bằng:
-#:   docker compose exec -T api fc-list | head -1
-#: Image hiện tại có DejaVu; nếu vắng thì `apt-get install -y fonts-dejavu-core`.
-FONT = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
+#: Font PHẢI chỉ định tường minh: `drawtext` không có `fontfile` sẽ chết với
+#: "Cannot find a valid font" trên image Debian, và trên Windows thì không có DejaVu.
+#:
+#: 🔴 VÌ SAO PHẢI CHỌN THEO NỀN TẢNG (đo được, không phải phòng xa):
+#:   · container Debian: `/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf` (đã kiểm `fc-list`)
+#:   · Windows: KHÔNG có DejaVu (`C:\Windows\Fonts\DejaVu*` rỗng). Trỏ vào đường Linux thì
+#:     `ffmpeg` Windows chết với exit `3221225477` (access violation), không phải lỗi font
+#:     lịch sự. `C:\Windows\Fonts\arial.ttf` vẽ được, nhưng phải escape dấu `:` thành `\:`.
+#: Nên hàm tự dò: có DejaVu thì dùng, không thì rơi về font hệ thống của nền tảng đang chạy.
+def _font_drawtext() -> str:
+    r"""Đường font cho `drawtext`, hợp lệ trên nền tảng đang chạy.
+
+    🔴 PHẢI HAI BACKSLASH trên Windows. Đo được bằng `subprocess` (đúng đường test dùng):
+
+        fontfile=C:/Windows/Fonts/arial.ttf      -> exit 4294967274
+            "No option name near '/Windows/Fonts/arial.ttf:text=Hello!..."
+        fontfile=C:\:/Windows/Fonts/arial.ttf    -> exit 4294967274  (một backslash, vẫn hỏng)
+        fontfile=C:\\:/Windows/Fonts/arial.ttf   -> OK, 2262 byte
+
+    Vì sao hai: `drawtext` nhận một chuỗi `key=value` các tham số ngăn bằng `:`; dấu `:` của
+    đường dẫn phải escape MỘT lần cho tầng tham số, và escape LẦN NỮA cho tầng parse
+    filterchain phía ngoài. Chuỗi Python phải chứa hai ký tự backslash thật, tức viết
+    `"\\\\:"` trong mã nguồn — không phải `"\\:"` (một backslash) như bản sửa đầu của tôi.
+
+    Docstring là RAW (tiền tố `r`) vì nó chứa ví dụ có backslash: không raw thì
+    Python cảnh báo `DeprecationWarning: invalid escape sequence` và docstring đọc sai.
+    """
+    for ung in (
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",   # container Debian, không cần escape
+        "C:/Windows/Fonts/arial.ttf",                        # Windows, cần escape `:` hai lần
+    ):
+        if pathlib.Path(ung).is_file():
+            return ung.replace(":", "\\\\:")
+    raise RuntimeError("không tìm được font cho drawtext — cài fonts-dejavu-core")
+
+
+FONT = _font_drawtext()
 
 
 def _lam_video(ra: str, *, giay: float = 2.0, fps: int = 2) -> str:
-    """Video 320x240, nền đen, chữ trắng ở dải dưới (y ~ 200/240 = 0,83)."""
+    """Video 320x240, nền đen, chữ trắng ở dải dưới (y ~ 200/240 = 0,83).
+
+    🔴 CHỮ PHẢI CÓ DẤU CÂU, không phải `hello world` trần. Đo được: `loc_hinh_dang` bỏ
+    mọi hộp mà MỌI ký tự là chữ cái Latinh (`_toan_latinh`, luật của Task 2 để diệt logo
+    `ebilibili`), và `rapidocr` đôi khi trả `'helloworld'` — MẤT DẤU CÁCH — nên chữ trần
+    bị tầng 3 xoá sạch: `doc_phu_de` trả `[]`, test ĐỎ vì lý do không liên quan tới OCR.
+    Đo lại trong container: `'Hello!'` -> `['Hello!']` 1 segment; `'hello world'` ->
+    `['hello world']` 1 segment; `'helloworld'` -> 0. Dấu `!` sống sót qua OCR và phá
+    luật toàn-Latinh, nên đây là dạng chữ BỀN nhất cho fixture.
+    """
     subprocess.run(
         ["ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
          "-f", "lavfi", "-i", f"color=c=black:s=320x240:d={giay}:r={fps}",
-         "-vf", (f"drawtext=fontfile={FONT}:text='hello world':fontcolor=white:"
-                 "fontsize=22:x=40:y=200"),
+         "-vf", (f"drawtext=fontfile={FONT}:text='Hello!':fontcolor=white:"
+                 "fontsize=32:x=40:y=190"),
          "-pix_fmt", "yuv420p", ra],
         check=True, capture_output=True,
     )
@@ -856,9 +897,21 @@ def _lam_video(ra: str, *, giay: float = 2.0, fps: int = 2) -> str:
 
 
 def test_port_khai_dung_bon_thu():
-    """Cổng phải khai `engine_id`, `doc_phu_de`, `release` — cùng khuôn `ASREngine`."""
-    for ten in ("engine_id", "doc_phu_de", "release"):
-        assert hasattr(OCREngine, ten) or ten in dir(OCREngine), ten
+    """Cổng phải khai `engine_id`, `doc_phu_de`, `release` — cùng khuôn `ASREngine`.
+
+    🔴 KHÔNG dùng `hasattr(OCREngine, "engine_id")`: trong một `Protocol`, `engine_id: str`
+    là ANNOTATION, không phải thuộc tính lớp — `hasattr` trả False và test ĐỎ dù cổng
+    khai đúng (đo được: `'engine_id' in dir(OCREngine)` = False). Kiểm qua
+    `__annotations__`, đúng cách một Protocol khai hợp đồng dữ liệu.
+    """
+    assert "engine_id" in getattr(OCREngine, "__annotations__", {}), (
+        f"cổng phải khai `engine_id: str`; đo được "
+        f"{list(getattr(OCREngine, '__annotations__', {}))}"
+    )
+    for ten in ("doc_phu_de", "release"):
+        assert callable(getattr(OCREngine, ten, None)), (
+            f"cổng phải khai hàm `{ten}`; đo được {type(getattr(OCREngine, ten, None))}"
+        )
 
 
 def test_doc_duoc_chu_va_tra_segment(tmp_path):
