@@ -1,0 +1,206 @@
+@import "tailwindcss" source(none);
+@source "../src";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+/*
+ * Phòng thu biên tập — graphite ấm, một màu nhấn amber.
+ * Mặc định tối; [data-theme="light"] là chế độ ban ngày dùng chung vai trò màu.
+ */
+
+@theme inline {
+  --font-sans: "Archivo", system-ui, sans-serif;
+  --font-display: "Archivo", system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, monospace;
+  --radius-sm: 2px;
+  --radius-md: 2px;
+  --radius-lg: 3px;
+  --radius-xl: 4px;
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-ring-offset-background: var(--background);
+  --color-panel-0: var(--panel-0);
+  --color-panel-1: var(--panel-1);
+  --color-panel-2: var(--panel-2);
+  --color-panel-3: var(--panel-3);
+  --color-ink-0: var(--ink-0);
+  --color-ink-1: var(--ink-1);
+  --color-ink-2: var(--ink-2);
+  --color-rule: var(--rule);
+  --color-signal: var(--signal);
+  --color-signal-soft: var(--signal-soft);
+  --color-fault: var(--fault);
+  --color-ok: var(--ok);
+  --color-wave: var(--wave);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+}
+
+:root {
+  color-scheme: dark;
+  --radius: 2px;
+  --panel-0: oklch(0.17 0.004 75);
+  --panel-1: oklch(0.205 0.004 75);
+  --panel-2: oklch(0.24 0.004 75);
+  --panel-3: oklch(0.27 0.005 75);
+  --ink-0: oklch(0.92 0.012 80);
+  --ink-1: oklch(0.67 0.014 75);
+  --ink-2: oklch(0.52 0.014 75);
+  --rule: oklch(0.3 0.006 75);
+  --signal: oklch(0.8 0.16 75);
+  --signal-soft: color-mix(in oklab, var(--signal) 14%, transparent);
+  --fault: oklch(0.66 0.11 25);
+  --ok: oklch(0.62 0.06 125);
+  --wave: oklch(0.45 0.01 75);
+
+  --background: var(--panel-0);
+  --foreground: var(--ink-0);
+  --card: var(--panel-1);
+  --card-foreground: var(--ink-0);
+  --popover: var(--panel-2);
+  --popover-foreground: var(--ink-0);
+  --primary: var(--signal);
+  --primary-foreground: var(--panel-0);
+  --secondary: var(--panel-2);
+  --secondary-foreground: var(--ink-0);
+  --muted: var(--panel-2);
+  --muted-foreground: var(--ink-1);
+  --accent: var(--panel-3);
+  --accent-foreground: var(--ink-0);
+  --destructive: var(--fault);
+  --destructive-foreground: var(--panel-0);
+  --border: var(--rule);
+  --input: var(--rule);
+  --ring: var(--signal);
+  --chart-1: var(--signal);
+  --chart-2: var(--ok);
+  --chart-3: var(--fault);
+  --chart-4: var(--ink-1);
+  --chart-5: var(--ink-2);
+  --sidebar: var(--panel-1);
+  --sidebar-foreground: var(--ink-0);
+  --sidebar-primary: var(--signal);
+  --sidebar-primary-foreground: var(--panel-0);
+  --sidebar-accent: var(--panel-2);
+  --sidebar-accent-foreground: var(--ink-0);
+  --sidebar-border: var(--rule);
+  --sidebar-ring: var(--signal);
+
+  --hatch: repeating-linear-gradient(45deg, var(--fault) 0 1px, transparent 1px 4px);
+}
+
+[data-theme="light"] {
+  color-scheme: light;
+  --panel-0: oklch(0.96 0.008 85);
+  --panel-1: oklch(0.985 0.005 85);
+  --panel-2: oklch(0.93 0.009 85);
+  --panel-3: oklch(0.89 0.01 85);
+  --ink-0: oklch(0.22 0.01 75);
+  --ink-1: oklch(0.42 0.012 75);
+  --ink-2: oklch(0.55 0.012 75);
+  --rule: oklch(0.86 0.01 80);
+  --signal: oklch(0.62 0.15 65);
+  --fault: oklch(0.52 0.15 25);
+  --ok: oklch(0.48 0.08 130);
+  --wave: oklch(0.72 0.01 75);
+}
+
+@layer base {
+  * {
+    border-color: var(--color-border);
+  }
+  html,
+  body {
+    height: 100%;
+  }
+  body {
+    background-color: var(--color-background);
+    color: var(--color-foreground);
+    font-family: var(--font-sans);
+    font-size: 13px;
+    -webkit-font-smoothing: antialiased;
+  }
+  ::selection {
+    background: color-mix(in oklab, var(--signal) 35%, transparent);
+  }
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--panel-3) transparent;
+  }
+  :focus-visible {
+    outline: 1px solid var(--signal);
+    outline-offset: 2px;
+  }
+}
+
+@utility label-engraved {
+  font-family: var(--font-display);
+  font-stretch: 125%;
+  font-weight: 600;
+  font-size: 9.5px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink-2);
+}
+@utility num {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+@utility hatch-left {
+  background-image: var(--hatch);
+  background-size: 6px 100%;
+  background-repeat: no-repeat;
+}
+@utility kbd {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  padding: 1px 5px;
+  border: 1px solid var(--rule);
+  border-radius: 2px;
+  color: var(--ink-1);
+  background: var(--panel-2);
+}
+
+@keyframes flash-signal {
+  from {
+    background: color-mix(in oklab, var(--signal) 22%, transparent);
+  }
+}
+@utility animate-flash {
+  animation: flash-signal 0.9s ease-out;
+}
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation: none !important;
+    transition: none !important;
+  }
+}

@@ -64,3 +64,8 @@ backend/data/dubs/
 # khung hinh trich ra. DO DUOC: 19 tep / 1,16 GB. Day la ket qua do, khong phai ma do an —
 # cung loai voi `data/output/` o tren. Spec cua no nam trong docs/superpowers/specs/.
 tach-giong/
+
+# Ban sao luu TRUOC khi doi stack (rollup + CSS tu viet) — 54 tep, giu de doi chieu, khong phai ma.
+_frontend-cu/
+# Ma nguon Lovable TAI VE (17 tep, 71 442 B) — nguon doi chieu cua ban da duyet, khong phai ma cua app.
+_lovable-code/

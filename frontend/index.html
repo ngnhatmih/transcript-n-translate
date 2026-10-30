@@ -3,7 +3,31 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>phu-de-lab</title>
+    <title>Phòng thu biên tập — dịch và lồng tiếng video</title>
+    <meta
+      name="description"
+      content="Biên tập phụ đề trên dạng sóng, đối chiếu bản dịch, lồng tiếng và xuất video ngay trên máy."
+    />
+    <!--
+      FONT — nạp từ Google Fonts, ĐÚNG như bản đã duyệt.
+
+      🔴 NGUỒN GỐC: `_lovable-code/src/routes/__root.tsx:88..94` khai đúng ba thẻ
+      `preconnect`/`stylesheet` này trong `head()`. Repo từng tự host 12 tệp woff2
+      (`frontend/public/fonts/`, 315 972 B) vì lý do "không phụ thuộc mạng ngoài" —
+      nhưng đó là quyết định của TÔI, không phải của bản đã duyệt, và nó làm URL font
+      khác đi. Bản đã duyệt nạp từ CDN; giữ nguyên như thế.
+
+      ⚠️ `wdth,wght@62..125,400..700` là trục biến thiên THẬT của Archivo: `62..125`
+      là `wdth` (độ giãn), `400..700` là `wght`. Thiếu `wdth` thì `font-stretch: 125%`
+      trong `styles.css` không có gì để bẻ và nhãn khắc hiện hẹp hơn 19% — đã đo.
+    -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,400..700&family=IBM+Plex+Mono:wght@400;500&display=swap"
+    />
+    <link rel="icon" href="/favicon.ico" type="image/x-icon" />
   </head>
   <body>
     <div id="root"></div>

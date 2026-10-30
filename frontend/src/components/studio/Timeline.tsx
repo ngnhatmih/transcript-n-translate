@@ -1,76 +1,19 @@
-/**
- * Dải THỜI GIAN — thước + sóng âm vẽ bằng canvas + khối đoạn kéo được + đầu phát.
- *
- * 🔴 NGUỒN GỐC: `_lovable-code/src/components/studio/Timeline.tsx` (163 dòng). Giữ nguyên
- * HÌNH HỌC đo được, đổi hai chỗ:
- *
- *  1. **Khối đoạn hiện CHỮ BẢN DỊCH, không phải bản gốc** — bản gốc dùng
- *     `s.translations[s.chosen]` (mô hình hai bản dịch song song của nó). Repo có
- *     `TranslationDetail.segments`, nên chữ đi vào qua prop `chuCuaDoan`.
- *
- *  2. **Sóng âm là dữ liệu THẬT hoặc KHÔNG VẼ** — bản gốc nhận `peaks` từ `fakePeaks`
- *     khi chưa nạp tệp. Ở đây `peaks` rỗng thì canvas để trống (xem `use-player.docSong`).
- *
- * 📏 SỐ ĐO trên bản đã duyệt (Chrome, 1680×1050):
- *      khung ngoài : 1376×160, `border-y 1px --rule`, `background --panel-0`
- *      khung trong : 2200×148 (`width = duration * pxPerSec`, mặc định 40 px/s)
- *      thước       : cao 20 px, nhãn mỗi 5 giây, mono 9,5 px màu `--ink-2`
- *      canvas      : 2200×96, đặt tại `top: 20px`, màu sóng `--wave`
- *      khối đoạn   : cao 32 px ở đáy, `top: 1px bottom: 1px` bên trong, radius 2 px
- *      đầu phát    : 1 px rộng, cao hết khung, mũi tên `clip-path` 9×8 ở đỉnh
- *
- * ## Vì sao khối đoạn KHÔNG dùng phần trăm
- *
- * Bản gốc đặt `left: s.start * pxPerSec` và `width: (s.end - s.start) * pxPerSec` — toạ độ
- * TUYỆT ĐỐI theo px. Giữ đúng cách đó: phần trăm sẽ làm khối co giãn khi `pxPerSec` đổi
- * nhưng vị trí nhãn thước thì không, và hai thứ sẽ lệch nhau ngay ở mức phóng to 10 px/s.
- *
- * ## Vì sao kéo mép dùng `pointerdown` trên `window` chứ không `onMouseMove`
- *
- * Bản gốc gắn `pointermove`/`pointerup` lên `window` trong lúc kéo. Đó là cách DUY NHẤT
- * đúng: con trỏ rời khỏi khối đoạn (rất dễ xảy ra khi kéo) vẫn phải tiếp tục kéo, và một
- * `onMouseLeave` sẽ cắt ngang thao tác giữa chừng.
- */
 import { useEffect, useRef } from "react";
+import type { Dong } from "@/lib/studio";
+import { viecCuaDong } from "@/lib/studio";
+import { formatTimecode } from "@/lib/timecode";
+import { cn } from "@/lib/utils";
 
-import type { Segment } from "../../api/types.ts";
-import { viecCuaDoan, type Viec } from "../../lib/studio.ts";
-
-/** Cao thước, px. */
-const CAO_THUOC = 20;
-/** Cao canvas sóng, px. */
-const CAO_SONG = 96;
-/** Cao khối đoạn, px. */
-const CAO_KHOI = 32;
-/** Tổng cao khung trong = thước + sóng + khối. */
-const CAO_TONG = CAO_THUOC + CAO_SONG + CAO_KHOI;
-
-export interface TimelineProps {
-  segments: readonly Segment[];
-  /** Biên độ sóng ∈ [0,1]; MẢNG RỖNG = chưa đọc được, canvas để trống. */
-  peaks: readonly number[];
+interface Props {
+  segments: Dong[];
+  peaks: number[];
   duration: number;
   time: number;
   pxPerSec: number;
-  /** `Segment.i` đang chọn (đoạn sáng, có viền amber). */
-  currentSegment: number | null;
-  /** `Segment.i` ĐANG PHÁT (khác `currentSegment` khi người dùng chọn một đoạn nhưng chưa phát). */
-  playingSegment: number | null;
-  /** Chữ hiện trên khối đoạn — bản dịch đang xem, hoặc bản gốc khi chưa dịch. */
-  chuCuaDoan: (seg: Segment) => string;
-  /** Mọi việc cần xử lý — để khối đoạn có vân "nghi ngờ" và viền lỗi. */
-  viec: readonly Viec[];
+  currentId: number | null;
   onSeek: (t: number) => void;
-  onSelect: (i: number) => void;
-  /** Kéo mép ⇒ sửa mốc. `edge` là `"start"` hoặc `"end"`, `t` là giây mới. */
-  onResize: (i: number, edge: "start" | "end", t: number) => void;
-}
-
-/** `m:ss` — nhãn thước, KHÔNG phải timecode đầy đủ (thước chỉ cần tới giây). */
-function nhanThuoc(t: number): string {
-  const m = Math.floor(t / 60);
-  const s = Math.floor(t % 60);
-  return `${m}:${String(s).padStart(2, "0")}`;
+  onSelect: (id: number) => void;
+  onResize: (id: number, edge: "start" | "end", t: number) => void;
 }
 
 export function Timeline({
@@ -79,157 +22,153 @@ export function Timeline({
   duration,
   time,
   pxPerSec,
-  currentSegment,
-  playingSegment,
-  chuCuaDoan,
-  viec,
+  currentId,
   onSeek,
   onSelect,
   onResize,
-}: TimelineProps) {
-  const khungRef = useRef<HTMLDivElement | null>(null);
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const rong = Math.max(1, duration * pxPerSec);
+}: Props) {
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const width = Math.max(1, duration * pxPerSec);
+  const H = 96;
 
-  // ── VẼ SÓNG ──────────────────────────────────────────────────────────────────────
-  // `devicePixelRatio` là bắt buộc: không nhân thì trên màn Retina (và trên Windows ở
-  // 150 %) sóng bị vẽ ở nửa độ phân giải và trông nhoè — đo được trên ảnh chụp.
+  // vẽ sóng
   useEffect(() => {
     const c = canvasRef.current;
-    if (c === null) return;
+    if (!c) return;
     const dpr = window.devicePixelRatio || 1;
-    c.width = Math.max(1, Math.round(rong * dpr));
-    c.height = Math.max(1, Math.round(CAO_SONG * dpr));
+    c.width = width * dpr;
+    c.height = H * dpr;
     const g = c.getContext("2d");
-    if (g === null) return;
-    g.setTransform(dpr, 0, 0, dpr, 0, 0);
-    g.clearRect(0, 0, rong, CAO_SONG);
-    if (peaks.length === 0) return; // chưa đọc được sóng ⇒ để trống, KHÔNG bịa
+    if (!g) return;
+    g.scale(dpr, dpr);
+    g.clearRect(0, 0, width, H);
     g.fillStyle = getComputedStyle(c).color;
-    const beRong = rong / peaks.length;
-    peaks.forEach((p, idx) => {
-      const cao = Math.max(1, Math.min(1, p) * (CAO_SONG - 12));
-      g.fillRect(idx * beRong, (CAO_SONG - cao) / 2, Math.max(1, beRong - 0.6), cao);
+    const bw = width / peaks.length;
+    peaks.forEach((p, i) => {
+      const h = Math.max(1, p * (H - 12));
+      g.fillRect(i * bw, (H - h) / 2, Math.max(1, bw - 0.6), h);
     });
-  }, [peaks, rong]);
+  }, [peaks, width]);
 
-  // ── CUỘN THEO ĐẦU PHÁT ───────────────────────────────────────────────────────────
-  // Chỉ cuộn khi đầu phát RA KHỎI vùng nhìn thấy. Cuộn mọi khung hình là dải thời gian
-  // trượt liên tục dưới mắt người đọc — không đọc được dòng nào.
+  // cuộn theo đầu phát
   useEffect(() => {
-    const el = khungRef.current;
-    if (el === null) return;
+    const el = scrollRef.current;
+    if (!el) return;
     const x = time * pxPerSec;
     if (x < el.scrollLeft + 40 || x > el.scrollLeft + el.clientWidth - 80) {
-      el.scrollLeft = Math.max(0, x - el.clientWidth / 3);
+      el.scrollLeft = x - el.clientWidth / 3;
     }
   }, [time, pxPerSec]);
 
-  /** Đổi `clientX` của con trỏ thành giây trên dải. */
-  const raGiay = (clientX: number): number => {
-    const el = khungRef.current;
-    if (el === null) return 0;
-    const r = el.getBoundingClientRect();
-    return (clientX - r.left + el.scrollLeft) / pxPerSec;
+  const toTime = (clientX: number) => {
+    const r = scrollRef.current!.getBoundingClientRect();
+    return (clientX - r.left + scrollRef.current!.scrollLeft) / pxPerSec;
   };
 
-  const batDauKeo = (suKien: React.PointerEvent, i: number, edge: "start" | "end") => {
-    suKien.stopPropagation();
-    suKien.preventDefault();
-    const di = (ev: PointerEvent) => onResize(i, edge, raGiay(ev.clientX));
-    const tha = () => {
-      window.removeEventListener("pointermove", di);
-      window.removeEventListener("pointerup", tha);
-      window.removeEventListener("pointercancel", tha);
+  const startDrag = (e: React.PointerEvent, id: number, edge: "start" | "end") => {
+    e.stopPropagation();
+    e.preventDefault();
+    const move = (ev: PointerEvent) => onResize(id, edge, toTime(ev.clientX));
+    const up = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
     };
-    window.addEventListener("pointermove", di);
-    window.addEventListener("pointerup", tha);
-    window.addEventListener("pointercancel", tha);
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
   };
 
-  // Nhãn thước mỗi 5 giây. `duration` có thể là 0 (chưa `loadedmetadata`) ⇒ 0 nhãn.
-  const soNhan = duration > 0 ? Math.floor(duration / 5) + 1 : 0;
-  const nhan = Array.from({ length: soNhan }, (_, k) => k * 5);
+  const ticks = Array.from({ length: Math.floor(duration / 5) + 1 }, (_, i) => i * 5);
 
   return (
     <div
-      ref={khungRef}
-      className="tl"
+      ref={scrollRef}
+      className="relative overflow-x-auto overflow-y-hidden border-y border-rule bg-panel-0"
       role="slider"
       aria-label="Dòng thời gian"
       aria-valuemin={0}
-      aria-valuemax={Math.round(duration)}
-      aria-valuenow={Math.round(time)}
+      aria-valuemax={duration}
+      aria-valuenow={time}
       tabIndex={0}
     >
       <div
-        className="tl__trong"
-        style={{ width: `${rong}px`, height: `${CAO_TONG}px` }}
-        onPointerDown={(e) => onSeek(raGiay(e.clientX))}
+        className="relative cursor-crosshair"
+        style={{ width, height: H + 52 }}
+        onPointerDown={(e) => onSeek(toTime(e.clientX))}
       >
-        {/* THƯỚC */}
-        <div className="tl__thuoc" style={{ height: `${CAO_THUOC}px` }}>
-          {nhan.map((t) => (
-            <span key={t} className="tl__nhan" style={{ left: `${t * pxPerSec + 3}px` }}>
-              {nhanThuoc(t)}
+        {/* thước */}
+        <div className="absolute inset-x-0 top-0 h-5 border-b border-rule">
+          {ticks.map((t) => (
+            <span
+              key={t}
+              className="num absolute top-1 text-[9.5px] text-ink-2"
+              style={{ left: t * pxPerSec + 3 }}
+            >
+              {formatTimecode(t)}
             </span>
           ))}
         </div>
-
-        {/* SÓNG */}
         <canvas
           ref={canvasRef}
-          className="tl__song"
-          style={{ width: `${rong}px`, height: `${CAO_SONG}px`, top: `${CAO_THUOC}px` }}
+          className="absolute left-0 top-5 text-wave"
+          style={{ width, height: H }}
         />
-
-        {/* KHỐI ĐOẠN */}
-        <div className="tl__khoi-hop" style={{ height: `${CAO_KHOI}px` }}>
-          {segments.map((seg) => {
-            const dsViec = viecCuaDoan(viec, seg.i);
-            const lop = ["tl__khoi"];
-            if (seg.i === currentSegment) lop.push("is-chon");
-            if (seg.i === playingSegment) lop.push("is-phat");
-            if (dsViec.some((v) => v.loai === "nghi-ngo")) lop.push("is-nghi-ngo");
-            if (dsViec.some((v) => v.loai === "nen")) lop.push("is-nen");
-            const chu = chuCuaDoan(seg);
+        {/* khối đoạn */}
+        <div className="absolute inset-x-0 bottom-0 h-8">
+          {segments.map((s) => {
+            const bad = viecCuaDong(s).length > 0;
+            const cur = s.i === currentId;
             return (
               <div
-                key={seg.i}
-                className={lop.join(" ")}
-                style={{
-                  left: `${seg.start * pxPerSec}px`,
-                  width: `${Math.max(6, (seg.end - seg.start) * pxPerSec)}px`,
-                }}
-                title={chu}
+                key={s.i}
+                className={cn(
+                  "group absolute top-1 bottom-1 overflow-hidden text-ellipsis rounded-sm border px-1.5 text-[10.5px] leading-[22px] whitespace-nowrap transition-colors",
+                  cur
+                    ? "border-signal bg-signal-soft text-ink-0"
+                    : "border-rule bg-panel-2 text-ink-1 hover:border-ink-2",
+                  s.daDuyet && !cur && "border-ok/60",
+                  bad && "hatch-left pl-3",
+                )}
+                style={{ left: s.start * pxPerSec, width: (s.end - s.start) * pxPerSec }}
                 onPointerDown={(e) => {
                   e.stopPropagation();
-                  onSelect(seg.i);
+                  onSelect(s.i);
                 }}
+                title={s.dich === "" ? s.text : s.dich}
               >
-                {chu}
-                {/* HAI TAY NẮM KÉO MÉP. Chỉ hiện khi rê chuột (CSS), nhưng LUÔN có trong DOM
-                    và luôn bấm được — ẩn bằng `opacity` chứ không `display:none`. */}
+                {/*
+                  CHU TRONG KHOI DOAN — chi hien khi khoi du rong.
+
+                  DO THAT tren du lieu that: 438 doan trong 49669px, doan #1 rong 81,6px con
+                  doan #2 rong 48,8px. Mot cau tieng Viet dai 40-60 ky tu can ~250px; ve no
+                  trong 48px thi `overflow-hidden` cat con mot manh vo nghia ("Ban chac chan").
+
+                  Nguong 60px la so DO, khong phai cam tinh: duoi 60px mot cau bat dau bang
+                  mot tu tieng Viet thong thuong (~7 ky tu x 6,3px = 44px) cong padding 12px
+                  da khong con cho. Duoi nguong do, khoi chi la mot vach thoi gian — dung
+                  nghia cua no o muc thu phong 40px/s.
+                */}
+                {(s.end - s.start) * pxPerSec >= 60 && (s.dich === "" ? s.text : s.dich)}
                 <span
-                  className="tl__keo tl__keo--dau"
-                  role="separator"
+                  className="absolute inset-y-0 left-0 w-1.5 cursor-ew-resize opacity-0 group-hover:opacity-100 bg-signal/60"
+                  onPointerDown={(e) => startDrag(e, s.i, "start")}
                   aria-label="Kéo giờ vào"
-                  onPointerDown={(e) => batDauKeo(e, seg.i, "start")}
                 />
                 <span
-                  className="tl__keo tl__keo--cuoi"
-                  role="separator"
+                  className="absolute inset-y-0 right-0 w-1.5 cursor-ew-resize opacity-0 group-hover:opacity-100 bg-signal/60"
+                  onPointerDown={(e) => startDrag(e, s.i, "end")}
                   aria-label="Kéo giờ ra"
-                  onPointerDown={(e) => batDauKeo(e, seg.i, "end")}
                 />
               </div>
             );
           })}
         </div>
-
-        {/* ĐẦU PHÁT */}
-        <div className="tl__dau-phat" style={{ left: `${time * pxPerSec}px` }} aria-hidden="true">
-          <span className="tl__mui" />
+        {/* đầu phát */}
+        <div
+          className="pointer-events-none absolute top-0 bottom-0 w-px bg-signal"
+          style={{ left: time * pxPerSec }}
+        >
+          <span className="absolute -left-[4px] top-0 h-2 w-[9px] bg-signal [clip-path:polygon(0_0,100%_0,50%_100%)]" />
         </div>
       </div>
     </div>

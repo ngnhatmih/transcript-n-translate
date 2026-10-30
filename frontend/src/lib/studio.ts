@@ -24,7 +24,45 @@
  *    tính lại từ `no_speech_prob`/`avg_logprob`.
  */
 
-import type { Segment, Transcript, TranslationCps, TranslationDetail } from "../api/types.ts";
+import type { DubPlanRow, Segment, Transcript, TranslationCps, TranslationDetail } from "../api/types.ts";
+
+/**
+ * HÌNH DẠNG MỘT DÒNG MÀ `SegmentRow`/`Timeline`/`Studio` TIÊU THỤ.
+ *
+ * 🔴 VÌ SAO CẦN KIỂU NÀY: bản đã duyệt (`_lovable-code/src/lib/studio.ts:3..14`) khai
+ * `interface Segment` RIÊNG với `translations` (Record engine→chữ), `chosen`, `take`,
+ * `approved` — bốn trường mà backend KHÔNG có. Backend có `Segment.text` (bản gốc),
+ * `Segment.t` (bản dịch đã lưu), `Segment.suspect`, và CPS/take đến từ hai route khác.
+ *
+ * Hai lựa chọn, và đây là lựa chọn ĐÃ CHỌN:
+ *   (a) Chép nguyên kiểu của bản duyệt rồi BỊA giá trị cho bốn trường đó ⇒ dòng nào cũng
+ *       có "take" và "approved" giả. Đó đúng là thứ repo này cấm.
+ *   (b) Khai một kiểu TRUNG GIAN mang đúng những gì máy chủ gửi, cộng các trường SUY RA
+ *       được từ số đo thật (`cps`, `cpsOver`, `tiLeNen`). Không trường nào là hằng số bịa.
+ * Chọn (b). `Dong` dưới đây là kiểu đó.
+ */
+export interface Dong {
+  /** `Segment.i` — khoá ghép với bảng CPS và với take. */
+  i: number;
+  start: number;
+  end: number;
+  /** Chữ BẢN GỐC (`Segment.text`). */
+  text: string;
+  /** Chữ BẢN DỊCH nếu đã có (`Segment.t` hoặc `TranslationDetail.segments[].t`); `""` nếu chưa. */
+  dich: string;
+  /** Cờ CỦA MÁY CHỦ (`Segment.suspect`) — không tính lại từ `avg_logprob`. */
+  suspect: boolean;
+  /** CPS của máy chủ (`TranslationCpsRow.cps`); `null` khi chưa có bản dịch. */
+  cps: number | null;
+  /** Cờ `over` của máy chủ — ĐỌC, không tự so `cps > max`. */
+  cpsOver: boolean;
+  /** Ngưỡng CPS của máy chủ (`TranslationCpsRow.max_cps`). */
+  maxCps: number;
+  /** Tỉ lệ take/chỗ; `null` khi CHƯA lồng đoạn này (khác `0`). */
+  tiLeNen: number | null;
+  /** Đã duyệt — tập cục bộ của `App`, không phải trường máy chủ (backend duyệt cả bản ghi). */
+  daDuyet: boolean;
+}
 
 /** Ngưỡng nén mạnh — chép từ bản đã duyệt (`COMPRESS_LIMIT = 1.5`). */
 export const NGUONG_NEN = 1.5;
@@ -64,18 +102,36 @@ export function soVi(x: number, chuSo: number): string {
 }
 
 /**
- * Tỉ lệ nén của một đoạn = độ dài take / độ dài chỗ. `null` khi KHÔNG có take.
+/**
+ * Tỉ lệ nén của một đoạn = `take / avail` — ĐỌC từ máy chủ, không tự chia.
  *
- * ⚠️ `null` KHÁC `0`: `LongTiengScreen` chỉ biết `take` khi đã lồng tiếng xong đoạn đó,
- * nên "chưa có take" không phải "take dài 0 giây". Trộn hai thứ đó là bịa ra một cảnh báo
- * nén 0× cho mọi đoạn chưa lồng.
+ * 🔴 SỬA MỘT CÔNG THỨC SAI ĐÃ ĐO ĐƯỢC. Bản trước tính `take / (end - start)`, tức
+ * chia cho CHỖ của chính dòng đó. ĐO TRÊN MÁY CHỦ THẬT (`GET /api/dubs/4/plan`):
+ *
+ *     i=0  take=3.2  slot=2.04  avail=4.36  need=0.734  trang_thai="vua"
+ *
+ * Chia cho `slot` ra `3.2 / 2.04 = 1.57` ⇒ giao diện báo "NÉN 1,57×" cho một dòng
+ * máy chủ đánh giá là `"vua"` (vừa). Sai ở MẪU SỐ: `avail` — cửa sổ tới dòng sau —
+ * mới là trần thật của việc nén, vì câu lồng tiếng được phép tràn sang khoảng lặng
+ * trước dòng kế. Đó là lý do `DubPlanRow.avail` tồn tại, và `need` chính là
+ * `take / avail` ĐÃ TÍNH SẴN (xem docblock `DubPlanRow` trong `api/types.ts`).
+ *
+ * Vì thế hàm này KHÔNG chia gì cả khi có `need`: nó trả số của máy chủ. Chỉ khi
+ * một hàng kế hoạch thiếu `need` (dữ liệu cũ) mới tự chia theo `avail`, và nếu
+ * `avail` cũng không dương thì trả `null` — "không đo được", khác `0`.
+ *
+ * ⚠️ `null` KHÁC `0`: chỉ biết `take` khi đã lồng tiếng xong đoạn đó, nên "chưa có
+ * take" không phải "take dài 0 giây". Trộn hai thứ đó là bịa ra một cảnh báo nén 0×
+ * cho mọi đoạn chưa lồng.
  */
-export function tiLeNen(take: number | null | undefined, seg: Pick<Segment, "start" | "end">): number | null {
-  if (take === null || take === undefined) return null;
-  if (!Number.isFinite(take) || take <= 0) return null;
-  return take / doDai(seg);
+export function tiLeNen(d: DubPlanRow | null | undefined): number | null {
+  if (d === null || d === undefined) return null;
+  if (Number.isFinite(d.need) && d.need > 0) return d.need;
+  if (Number.isFinite(d.take) && d.take > 0 && Number.isFinite(d.avail) && d.avail > 0) {
+    return d.take / d.avail;
+  }
+  return null;
 }
-
 /** Bảng tra CPS theo `Segment.i`, dựng MỘT lần từ `TranslationCps` của máy chủ. */
 export function bangCps(cps: TranslationCps | null | undefined): Map<number, { cps: number | null; over: boolean; maxCps: number }> {
   const m = new Map<number, { cps: number | null; over: boolean; maxCps: number }>();
@@ -94,7 +150,7 @@ export function bangCps(cps: TranslationCps | null | undefined): Map<number, { c
 export function viecCuaBanGhi(
   transcript: Transcript | null,
   cps: TranslationCps | null | undefined,
-  takeTheoDoan: ReadonlyMap<number, number>,
+  keHoach: ReadonlyMap<number, DubPlanRow>,
   daDuyet: ReadonlySet<number>,
 ): Viec[] {
   if (transcript === null) return [];
@@ -110,7 +166,7 @@ export function viecCuaBanGhi(
       // được tính từ `cps` khác `null`), nhưng nó là kiểu đọc an toàn.
       ra.push({ i: seg.i, loai: "cps", nhan: c.cps === null ? "CPS cao" : `CPS ${soVi(c.cps, 1)}` });
     }
-    const tiLe = tiLeNen(takeTheoDoan.get(seg.i), seg);
+    const tiLe = tiLeNen(keHoach.get(seg.i));
     if (tiLe !== null && tiLe > NGUONG_NEN) {
       ra.push({ i: seg.i, loai: "nen", nhan: `nén ${soVi(tiLe, 2)}×` });
     }
@@ -129,19 +185,29 @@ export function viecCuaDoan(viec: readonly Viec[], i: number): Viec[] {
 
 export type TrangThaiBuoc = "xong" | "dang-chay" | "bi-chan" | "chua";
 
+/**
+ * MOT BUOC cua duong ong.
+ *
+ * Ten truong TRUNG voi `Step` cua ban da duyet (`id`/`name`/`state`/`note`) de
+ * `PipelineBar.tsx` — BAN SAO NGUYEN VAN cua `_lovable-code/src/components/studio/PipelineBar.tsx` —
+ * bien dich duoc ma khong phai sua mot ky tu nao. Doi ten o day thi phai sua JSX,
+ * va moi lan sua JSX la mot cho co the lech hinh hoc.
+ */
 export interface BuocDuongOng {
   id: string;
-  ten: string;
-  /** Dòng thứ hai: engine đã chạy, hoặc lý do bị chặn. */
-  ghiChu: string;
-  trangThai: TrangThaiBuoc;
+  /** Ten buoc, hien tren thanh duong ong. */
+  name: string;
+  /** Dong thu hai: engine da chay, hoac ly do bi chan. */
+  note: string;
+  /** Bon trang thai — TRUNG TEN voi `StepState` cua ban da duyet. */
+  state: "done" | "running" | "blocked" | "todo";
 }
 
-/** Đầu vào của phép suy đường ống — TẤT CẢ là dữ liệu máy chủ, không có cờ cục bộ nào. */
+/** Dau vao cua phep suy duong ong — TAT CA la du lieu may chu, khong co co cuc bo nao. */
 export interface DauVaoDuongOng {
-  /** Có bản ghi đang mở chưa (`transcript !== null`). */
+  /** Co ban ghi dang mo chua (`transcript !== null`). */
   coBanGhi: boolean;
-  /** Engine ASR đã sinh ra bản ghi — `null` khi chưa có. */
+  /** Engine ASR da sinh ra ban ghi — `null` khi chua co. */
   engineAsr: string | null;
   /** Có bản dịch nào `done` chưa. */
   coBanDich: boolean;
@@ -150,9 +216,9 @@ export interface DauVaoDuongOng {
   /** Số việc cần xử lý còn lại. */
   soViec: number;
   /** Trạng thái job `dub` của bản dịch đang xem — `null` khi không có job. */
-  dubState: "queued" | "running" | "done" | "failed" | "cancelled" | null;
+  dubState: "queued" | "running" | "done" | "failed" | "interrupted" | "cancelled" | null;
   /** Job `tron_nen` (ghép nền) — `null` khi chưa từng chạy. */
-  ghepState: "queued" | "running" | "done" | "failed" | "cancelled" | null;
+  ghepState: "queued" | "running" | "done" | "failed" | "interrupted" | "cancelled" | null;
   /** Đã có file `dub-{id}.mp4` để xuất chưa (đọc từ `kichThuocDub`). */
   coFileXuat: boolean;
 }
@@ -166,48 +232,49 @@ export interface DauVaoDuongOng {
  */
 export function duongOng(d: DauVaoDuongOng): BuocDuongOng[] {
   const buocAsr: BuocDuongOng = d.coBanGhi
-    ? { id: "asr", ten: "Phiên âm", ghiChu: d.engineAsr ?? "", trangThai: "xong" }
-    : { id: "asr", ten: "Phiên âm", ghiChu: "chưa nạp", trangThai: "chua" };
+    ? { id: "asr", name: "Phiên âm", note: d.engineAsr ?? "", state: "done" }
+    : { id: "asr", name: "Phiên âm", note: "chưa nạp", state: "todo" };
 
   const buocDich: BuocDuongOng = d.coBanDich
-    ? { id: "dich", ten: "Dịch", ghiChu: d.engineMt ?? "", trangThai: "xong" }
-    : { id: "dich", ten: "Dịch", ghiChu: d.coBanGhi ? "chưa dịch" : "chờ phiên âm", trangThai: d.coBanGhi ? "bi-chan" : "chua" };
+    ? { id: "dich", name: "Dịch", note: d.engineMt ?? "", state: "done" }
+    : { id: "dich", name: "Dịch", note: d.coBanGhi ? "chưa dịch" : "chờ phiên âm", state: d.coBanGhi ? "blocked" : "todo" };
 
   const buocDuyet: BuocDuongOng =
     !d.coBanDich
-      ? { id: "duyet", ten: "Duyệt", ghiChu: "chờ bản dịch", trangThai: "chua" }
+      ? { id: "duyet", name: "Duyệt", note: "chờ bản dịch", state: "todo" }
       : d.soViec > 0
-        ? { id: "duyet", ten: "Duyệt", ghiChu: `còn ${d.soViec} việc`, trangThai: "bi-chan" }
-        : { id: "duyet", ten: "Duyệt", ghiChu: "hết việc", trangThai: "xong" };
+        ? { id: "duyet", name: "Duyệt", note: `còn ${d.soViec} việc`, state: "blocked" }
+        : { id: "duyet", name: "Duyệt", note: "hết việc", state: "done" };
 
   /** Job → trạng thái bước. `failed` KHÁC `cancelled`: hỏng thì phải sửa, huỷ thì không. */
-  const tuJob = (id: string, ten: string, ghiChuChay: string, s: DauVaoDuongOng["dubState"]): BuocDuongOng => {
-    if (s === null) return { id, ten, ghiChu: "chưa chạy", trangThai: "chua" };
-    if (s === "done") return { id, ten, ghiChu: ghiChuChay, trangThai: "xong" };
-    if (s === "running") return { id, ten, ghiChu: "đang chạy…", trangThai: "dang-chay" };
-    if (s === "queued") return { id, ten, ghiChu: "chờ tới lượt", trangThai: "dang-chay" };
-    if (s === "failed") return { id, ten, ghiChu: "lỗi — xem hàng đợi", trangThai: "bi-chan" };
-    return { id, ten, ghiChu: "đã huỷ", trangThai: "chua" };
+  const tuJob = (id: string, name: string, noteChay: string, s: DauVaoDuongOng["dubState"]): BuocDuongOng => {
+    if (s === null) return { id, name, note: "chưa chạy", state: "todo" };
+    if (s === "done") return { id, name, note: noteChay, state: "done" };
+    if (s === "running") return { id, name, note: "đang chạy…", state: "running" };
+    if (s === "queued") return { id, name, note: "chờ tới lượt", state: "running" };
+    if (s === "failed") return { id, name, note: "lỗi — xem hàng đợi", state: "blocked" };
+    if (s === "interrupted") return { id, name, note: "bị ngắt — chạy lại được", state: "blocked" };
+    return { id, name, note: "đã huỷ", state: "todo" };
   };
 
   // Lồng tiếng chỉ ĐƯỢC PHÉP chạy khi đã duyệt xong — cùng luật với bản đã duyệt.
   const buocLong: BuocDuongOng =
     d.soViec > 0 && d.dubState === null
-      ? { id: "long", ten: "Lồng tiếng", ghiChu: "cần duyệt xong", trangThai: "chua" }
+      ? { id: "long", name: "Lồng tiếng", note: "cần duyệt xong", state: "todo" }
       : tuJob("long", "Lồng tiếng", "đã lồng", d.dubState);
 
   const buocGhep: BuocDuongOng =
     d.dubState !== "done" && d.ghepState === null
-      ? { id: "ghep", ten: "Ghép nền", ghiChu: "cần lồng tiếng xong", trangThai: "chua" }
+      ? { id: "ghep", name: "Ghép nền", note: "cần lồng tiếng xong", state: "todo" }
       : tuJob("ghep", "Ghép nền", "đã ghép", d.ghepState);
 
   const buocXuat: BuocDuongOng = d.coFileXuat
-    ? { id: "xuat", ten: "Xuất", ghiChu: "sẵn sàng", trangThai: "xong" }
+    ? { id: "xuat", name: "Xuất", note: "sẵn sàng", state: "done" }
     : {
         id: "xuat",
-        ten: "Xuất",
-        ghiChu: d.soViec > 0 ? "cần duyệt xong" : d.ghepState !== "done" ? "cần ghép nền" : "chưa có tệp",
-        trangThai: "chua",
+        name: "Xuất",
+        note: d.soViec > 0 ? "cần duyệt xong" : d.ghepState !== "done" ? "cần ghép nền" : "chưa có tệp",
+        state: "todo",
       };
 
   return [buocAsr, buocDich, buocDuyet, buocLong, buocGhep, buocXuat];
@@ -222,7 +289,7 @@ export function duongOng(d: DauVaoDuongOng): BuocDuongOng[] {
 export function lyDoChuaXuatDuoc(buoc: readonly BuocDuongOng[]): string | null {
   const xuat = buoc.find((b) => b.id === "xuat");
   if (xuat === undefined) return null;
-  return xuat.trangThai === "xong" ? null : xuat.ghiChu;
+  return xuat.state === "done" ? null : xuat.note;
 }
 
 // ---------------------------------------------------------------------------
@@ -296,4 +363,94 @@ export function bangBanDich(detail: TranslationDetail | null): Map<number, strin
   if (detail === null) return m;
   for (const s of detail.segments) m.set(s.i, s.t ?? s.text);
   return m;
+}
+
+// ---------------------------------------------------------------------------
+// DỰNG `Dong[]` TỪ DỮ LIỆU THẬT — cầu nối duy nhất giữa API và giao diện
+// ---------------------------------------------------------------------------
+
+/**
+ * Dựng danh sách dòng từ HAI nguồn THẬT: bản ghi (bản gốc) và bản dịch.
+ *
+ * 🔴 SỬA MỘT HIỂU SAI ĐÃ ĐO ĐƯỢC. Lần đầu tệp này coi `transcript.segments[].text`
+ * là "bản gốc" và `translation.segments[].t` là "bản dịch". ĐO TRÊN MÁY CHỦ THẬT:
+ *
+ *     GET /api/translations/4  ->  segments[0].text = "Bạn chắc chắn chưa từng ăn món mì lạnh..."
+ *                                  segments[0].t    = ""
+ *
+ * `text` là TIẾNG VIỆT, tức BẢN DỊCH, và `t` rỗng. Đối chiếu mã nguồn
+ * `backend/app/api/routes_translations.py:323` — `"segments": [s.to_json() for s in
+ * row.segments]` — `row` là HÀNG BẢN DỊCH, nên `segments` ở route này là đoạn của
+ * BẢN DỊCH, KHÔNG phải của bản ghi. Docblock route nói đúng câu đó ở dòng 301:
+ * *"`segments` là đoạn của BẢN DỊCH"*.
+ *
+ * Vì thế hai nguồn phải đọc từ hai route khác nhau:
+ *
+ *   - BẢN GỐC (`text`)  <- `GET /api/transcripts/{id}` -> `segments[].text`
+ *   - BẢN DỊCH (`dich`) <- `GET /api/translations/{id}` -> `segments[].text`
+ *                          (bản dịch tay đã lưu `t` được ưu tiên khi có)
+ *
+ * Ghép theo `Segment.i`. Đoạn nào bản dịch không có thì `dich = ""` — câu trả lời
+ * thật cho "chưa dịch đoạn này", khác với chép bản gốc vào chỗ bản dịch.
+ *
+ * `cps`/`cpsOver`/`maxCps` vẫn đọc từ `TranslationCpsRow` của máy chủ. KHÔNG tự
+ * tính `chữ.length / (end-start)`: bản đã duyệt làm thế và nó báo "CPS cao" cho
+ * MỌI đoạn ngắn (xem docblock đầu tệp).
+ *
+ * `tiLeNen` <- `takeTheoDoan` (từ `DubPlanRow.take`), `null` khi chưa lồng đoạn đó.
+ *
+ * ⚠️ `maxCps` khi CHƯA có bảng CPS là `0`, không phải một ngưỡng chọn sẵn: nó chỉ
+ * được đọc khi `cpsOver === true`, mà cờ đó chỉ `true` khi máy chủ đã trả một hàng
+ * có ngưỡng. Khai một ngưỡng mặc định ở đây là dựng nguồn sự thật thứ hai.
+ */
+export function dungDong(
+  transcript: Transcript | null,
+  banDich: TranslationDetail | null,
+  cps: TranslationCps | null | undefined,
+  keHoach: ReadonlyMap<number, DubPlanRow>,
+  daDuyet: ReadonlySet<number>,
+): Dong[] {
+  if (transcript === null) return [];
+  const bang = bangCps(cps);
+  // Bản dịch theo `Segment.i` — `text` của route đó LÀ bản dịch; `t` là bản sửa tay.
+  const banDichTheoI = new Map<number, string>();
+  if (banDich !== null) {
+    for (const s of banDich.segments) banDichTheoI.set(s.i, s.t !== undefined && s.t !== null ? s.t : s.text);
+  }
+  return transcript.segments.map((seg) => {
+    const c = bang.get(seg.i);
+    return {
+      i: seg.i,
+      start: seg.start,
+      end: seg.end,
+      text: seg.text,
+      dich: banDichTheoI.get(seg.i) ?? "",
+      suspect: seg.suspect,
+      cps: c === undefined ? null : c.cps,
+      cpsOver: c === undefined ? false : c.over,
+      maxCps: c === undefined ? 0 : c.maxCps,
+      tiLeNen: tiLeNen(keHoach.get(seg.i)),
+      daDuyet: daDuyet.has(seg.i),
+    };
+  });
+}
+
+/** Việc của MỘT dòng, đọc từ chính dòng đó — dùng cho nhãn trên `SegmentRow`. */
+export function viecCuaDong(d: Dong): Viec[] {
+  // Duyệt rồi thì hết việc — CÙNG luật với `issuesFor` của bản đã duyệt (`approved ⇒ []`).
+  if (d.daDuyet) return [];
+  const ra: Viec[] = [];
+  if (d.suspect) ra.push({ i: d.i, loai: "nghi-ngo", nhan: "nghi ngờ phiên âm" });
+  if (d.cpsOver) {
+    ra.push({ i: d.i, loai: "cps", nhan: d.cps === null ? "CPS cao" : `CPS ${soVi(d.cps, 1)}` });
+  }
+  if (d.tiLeNen !== null && d.tiLeNen > NGUONG_NEN) {
+    ra.push({ i: d.i, loai: "nen", nhan: `nén ${soVi(d.tiLeNen, 2)}×` });
+  }
+  return ra;
+}
+
+/** Mọi việc của cả danh sách dòng — chip lọc và số đếm đọc từ đây. */
+export function viecCuaDongList(ds: readonly Dong[]): Viec[] {
+  return ds.flatMap(viecCuaDong);
 }
