@@ -119,6 +119,7 @@ export interface StudioProps {
 export function Studio(props: StudioProps) {
   const {
     sources,
+    sourcesError,
     source,
     transcript,
     banDich,
@@ -187,11 +188,34 @@ export function Studio(props: StudioProps) {
     return () => clearTimeout(t);
   }, [notice]);
 
-  /** Thong bao loi tu tang tren — KHONG nuot. */
+  /**
+   * Thong bao loi tu tang tren — KHONG nuot.
+   *
+   * ⚠️ HAI NGUON, khong phai mot. `loi` la loi cua cac HANH DONG GHI (PATCH, POST,
+   * upload). `sourcesError` la loi cua luot nap DANH SACH KENH — mot duong khac han,
+   * va no da tung bi nuot:
+   *
+   *   DO DUOC truoc khi sua: `App.tsx:84` goi `setSourcesError(...)`, `App.tsx:422`
+   *   truyen `sourcesError={sourcesError}`, `Studio.tsx:84` KHAI bao no trong
+   *   `StudioProps` — va khong mot dong nao DOC no. Grep toan `src/`: hai khai bao,
+   *   bon cho ghi/truyen, KHONG cho doc. Nghia la khi `GET /api/sources` hong (backend
+   *   chua len, sai cong, 500), nguoi dung thay mot danh sach kenh RONG va khong mot
+   *   loi nao — khong phan biet duoc "chua co kenh nao" voi "khong doc duoc kenh".
+   *
+   * Do la dung loai khai bao chet ma repo nay xoa, va o day no khong chi chet: no lam
+   * giao dien NOI DOI ve ly do trang dang trong.
+   */
   useEffect(() => {
     if (loi === undefined || loi === null || loi === "") return;
     setNotice(loi);
   }, [loi]);
+
+  useEffect(() => {
+    if (sourcesError === undefined || sourcesError === null || sourcesError === "") return;
+    // Giu nguyen cau cua tang duoi (thong diep cua `fetch`/FastAPI), chi noi RO no
+    // thuoc phan nao — mot cau "Failed to fetch" tran trui khong cho biet hong o dau.
+    setNotice(`Không nạp được danh sách kênh: ${sourcesError}`);
+  }, [sourcesError]);
 
   /**
    * SONG AM — tinh O SERVER, khong giai ma trong trinh duyet.

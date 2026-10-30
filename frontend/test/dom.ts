@@ -38,6 +38,13 @@ const MANAGED_GLOBALS = [
   "getComputedStyle",
   "fetch",
   "IS_REACT_ACT_ENVIRONMENT",
+  // Ba global duoi day duoc dat trong `setupDom` nhung TUNG khong co trong danh
+  // sach nay — nghia la `teardownDom()` khong tra chung, va chung ro sang moi tep
+  // test chay sau trong cung tien trinh (`--test-isolation=none`).
+  "ResizeObserver",
+  "scrollIntoView",
+  "requestAnimationFrame",
+  "cancelAnimationFrame",
 ] as const;
 
 interface DaLuu {
@@ -183,6 +190,31 @@ export function setupDom(origin: string): void {
     "scrollIntoView",
     w.Element.prototype.scrollIntoView,
   );
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // `requestAnimationFrame` / `cancelAnimationFrame` — jsdom KHONG dat len
+  // `globalThis` du da bat `pretendToBeVisual: true`.
+  //
+  // DO DUOC: khi render `App` (no dung `Studio` -> `Timeline`), `useEffect` cua
+  // `Timeline` goi `requestAnimationFrame(X)` va nem
+  //   ReferenceError: requestAnimationFrame is not defined
+  // => `useEffect` chet giua chung, `setKhungNhin` khong bao gio chay, va moi phep
+  // do ve sau trong cung bai deu nhin mot cay React chua hoan tat.
+  //
+  // `pretendToBeVisual` chi gan hai ham nay len `window`; ma `Timeline` goi ten
+  // TRAN, khong qua `window.`, nen phai co tren `globalThis`.
+  // ───────────────────────────────────────────────────────────────────────────
+  if (typeof w.requestAnimationFrame === "function") {
+    datGlobal("requestAnimationFrame", w.requestAnimationFrame.bind(w));
+    datGlobal("cancelAnimationFrame", w.cancelAnimationFrame.bind(w));
+  } else {
+    // Du phong: neu jsdom khong bat `pretendToBeVisual` thi van phai co, khong thi moi
+    // `useEffect` dung khung hinh deu nem. `setTimeout(0)` la ban thay the dung nghia
+    // "chay o khung hinh ke tiep", khong phai mot ham rong.
+    datGlobal("requestAnimationFrame", (cb: FrameRequestCallback) =>
+      setTimeout(() => cb(Date.now()), 0) as unknown as number);
+    datGlobal("cancelAnimationFrame", (id: number) => clearTimeout(id));
+  }
 
   // CAU NOI URL — KHONG phai gia lap mang: request van la HTTP THAT di ra server
   // that trong tien trinh (xem `useJobStream.test.ts`). Ly do can: `client.ts`
