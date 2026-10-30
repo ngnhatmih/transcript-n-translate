@@ -657,6 +657,34 @@ export function Studio(props: StudioProps) {
                 </li>
               );
             })}
+            {/* Ba nhom dem — bam de LOC danh sach ben duoi. */}
+            {/* Luôn hiện danh sách: chưa lọc thì đây là toàn bộ 185 việc, đã lọc thì là nhóm đó. */}
+            {shownIssues.map((v) => {
+              const s = segments.find((x) => x.i === v.i);
+              if (s === undefined) return null;
+              const soDoan = segments.findIndex((x) => x.i === v.i) + 1;
+              return (
+                <li key={`dong-${v.i}-${v.loai}`}>
+                  <button
+                    onClick={() => select(v.i)}
+                    className={cn(
+                      "w-full border-b border-rule px-3 py-1.5 text-left transition-colors hover:bg-panel-2",
+                      currentId === v.i && "bg-signal-soft",
+                    )}
+                  >
+                    <div className="flex items-baseline justify-between gap-2">
+                      <span className="num shrink-0 text-[10.5px] text-ink-2">
+                        #{soDoan} · {timecode(s.start)}
+                      </span>
+                      <span className="label-engraved shrink-0 !text-fault">{NHAN_LOAI_VIEC[v.loai]}</span>
+                    </div>
+                    <p className="mt-0.5 truncate text-[11.5px] text-ink-1">
+                      {s.dich === "" ? s.text : s.dich}
+                    </p>
+                  </button>
+                </li>
+              );
+            })}
             {shownIssues.length === 0 && (
               <li className="px-3 py-8 text-center text-[12px] text-ok">Không còn việc nào. Sẵn sàng xuất.</li>
             )}
