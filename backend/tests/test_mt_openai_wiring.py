@@ -88,7 +88,35 @@ def test_any_failure_means_empty_set_never_an_exception(resp):
 
 # -- available --------------------------------------------------------------
 def _mark(monkeypatch, specs, *, models):
+    """Ghi `available` bằng một phép dò GIẢ, và cách ly khỏi cấu hình máy thật.
+
+    🔴 VÌ SAO PHẢI XOÁ `PHUDE_OPENAI_BASE_URL` Ở ĐÂY (đo được, không đoán):
+
+        $ python -m pytest tests/test_mt_openai_wiring.py
+        assert calls == ["https://api.example.test/v1"]
+        AssertionError: assert ['http://host...rnal:8790/v1'] == ['https://api...mple.test/v1']
+        FAILED ... ::test_http_engine_is_available_when_the_endpoint_declares_its_model
+
+        $ env -u PHUDE_OPENAI_BASE_URL python -m pytest tests/test_mt_openai_wiring.py
+        22 passed                                    EXITCODE=0
+
+    Nguyên nhân nằm ở CODE CHỨ KHÔNG PHẢI Ở TEST: `main._http_engine_opts` đi qua
+    `config.resolve_openai_base_url`, và hàm đó cho env THẮNG hàng registry — có chủ ý,
+    vì cùng một hàng phải chạy được ở máy (`127.0.0.1`) và trong container
+    (`host.docker.internal`); xem docblock `_http_engine_opts`.
+
+    Nhưng như vậy nghĩa là bài test đọc CẤU HÌNH CỦA MÁY ĐANG CHẠY nó: trên một máy
+    dev có đặt biến đó (và trong image này biến đó LUÔN được đặt), bài test kiểm một
+    endpoint khác với endpoint nó vừa khai ba dòng phía trên. Một bài test phải tự
+    lập — nó kiểm LOGIC, không kiểm môi trường.
+
+    Xoá biến chứ không nới `assert`: nới thành "hoặc cái này hoặc cái kia" thì bài
+    không còn chứng minh được việc `base_url` từ registry có tới được phép dò hay
+    không, mà đó chính là điều nó sinh ra để ghim.
+    """
     calls = []
+
+    monkeypatch.delenv("PHUDE_OPENAI_BASE_URL", raising=False)
 
     def fake_probe(base_url, api_key=None, timeout=1.5, client=None):
         calls.append(base_url)

@@ -1497,17 +1497,47 @@ def test_safe_basename_keeps_every_legitimate_name():
     assert safe_basename(None, fallback="khac.bin") == "khac.bin"
 
 
-def test_safe_basename_treats_a_leading_colon_prefix_as_a_drive():
-    """`a:b.mp4` là ổ đĩa `a:` + tên `b.mp4` với `pathlib`, y như `C:\\...`.
+def test_safe_basename_tu_choi_moi_dau_hai_cham_ke_ca_tien_to_giong_o_dia():
+    """`a:b.mp4` bi TU CHOI, khong bi cat thanh `b.mp4`.
 
-    Dấu hai chấm chỉ "sống sót" khi nó KHÔNG phải tiền tố ổ đĩa (`ab:c.mp4`,
-    đã nằm trong bảng từ chối ở trên); còn tiền tố ổ đĩa thì bị cắt như mọi
-    thành phần đường dẫn khác — hành vi `C:\\media\\x.mp4` mà repo đã chốt.
+    🔴 BAI CU DOI DIEU NGUOC LAI, VA NO SAI — do duoc, khong doan:
+
+        >>> pathlib.PurePath("a:b.mp4")
+        .name='a:b.mp4'  .drive=''  .parts=('a:b.mp4',)
+        >>> pathlib.PurePath("C:\\media\\x.mp4".replace("\\","/"))
+        .name='x.mp4'    .drive=''  .parts=('C:', 'media', 'x.mp4')
+
+    Docblock cu khang dinh "`a:b.mp4` la o dia `a:` + ten `b.mp4` voi
+    `pathlib`". Tren Linux dieu do SAI: `.drive` la `''`, `.name` giu nguyen
+    `a:b.mp4`. `PurePath` chi tach o dia khi he dieu hanh la Windows; san pham
+    chay trong Docker Linux.
+
+    Va quan trong hon: `"ab:c.mp4"` nam trong `_UNSAFE_FILENAMES` ngay trong
+    tep nay va PHAI nem `InvalidBasename`. Neu bai cu dung thi mot trong hai
+    bai phai sai — khong the vua tu choi `ab:c.mp4` vua cat `a:b.mp4` thanh
+    `b.mp4` bang cung mot quy tac `:`.
+
+    `safe_basename` tu choi MOI dau hai cham, khong phu thuoc nen tang: `:`
+    lam `open()` nem `OSError` tren Windows va la ky tu khong an toan o moi
+    noi. Do truc tiep ba ten:
+
+        'a:b.mp4'   -> NEM: ten tep chua ky tu khong an toan: ':' 
+        'x:y.mp4'   -> NEM
+        'ab:c.mp4'  -> NEM
+
+    Con duong dan Windows THAT (`C:\\media\\x.mp4`) van dung: `.parts` tach
+    `'C:'` thanh mot thanh phan rieng va `.name` la `'x.mp4'`, nen no di qua
+    nhu moi thanh phan duong dan khac — do la hanh vi repo da chot.
     """
-    from app.domain.paths import safe_basename
+    from app.domain.paths import InvalidBasename, safe_basename
 
-    assert safe_basename("a:b.mp4") == "b.mp4"
-    assert safe_basename("x:y.mp4") == "y.mp4"
+    for ten in ("a:b.mp4", "x:y.mp4", "ab:c.mp4"):
+        with pytest.raises(InvalidBasename) as excinfo:
+            safe_basename(ten)
+        assert "tên tệp" in str(excinfo.value), ten
+
+    # Duong dan Windows that van bi cat dung — day la dieu bai cu MUON noi.
+    assert safe_basename("C:\\media\\x.mp4") == "x.mp4"
 
 
 

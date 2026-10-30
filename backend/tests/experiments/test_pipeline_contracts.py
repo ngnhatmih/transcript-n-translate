@@ -298,10 +298,38 @@ def test_visual_pipeline_requests_frames_and_keeps_visual_facts_separate(monkeyp
     monkeypatch.setattr(pipeline, "visual_facts", lambda *_a, **_k: ({
         "entities": ["张三"], "setting": "医院", "notes": []
     }, 1))
+    # 🔴 HAI BAN VA CON THIEU, do duoc chu khong doan:
+    #
+    #   $ pytest tests/experiments/test_pipeline_contracts.py::\
+    #       test_visual_pipeline_requests_frames_and_keeps_visual_facts_separate
+    #   E  httpcore.ConnectError: [Errno 111] Connection refused
+    #   E  httpx.ConnectError: [Errno 111] Connection refused
+    #
+    # Bai nay va `extract_context_frames`, `transcribe`, `visual_facts`,
+    # `translate`, `edit_translation` — nhung `visual_context.run` con goi
+    # `reconcile_asr`, va ham do goi `chat` -> `ollama_json` THAT toi
+    # `context.ollama_base_url`. Khong co may Ollama nao chay trong buoc test nen
+    # no no o tang socket, khong phai o logic.
+    #
+    # Va ban va `edit_translation` cu tra `raw` (MOT gia tri) trong khi chu ky
+    # that tra `(edited, stats)` — `run()` giai nen hai gia tri nen ban cu cung
+    # se no ngay sau khi sua xong cho `reconcile_asr`. Doi chieu chu ky that
+    # trong `postprocess.py`:
+    #
+    #   def reconcile_asr(...) -> tuple[list[Segment], list[Segment], dict]
+    #   def edit_translation(...) -> tuple[list[Segment], dict]
+    #
+    # Va ca hai tra ve DUNG LOAI do, khong phai `None`/`raw`: mot ban va tra sai
+    # hinh dang lam bai test xanh ma khong chung minh gi ve duong that.
+    monkeypatch.setattr(
+        pipeline, "reconcile_asr",
+        lambda primary, alternative, **_kw: (primary, alternative, {}))
     monkeypatch.setattr(pipeline, "translate", lambda _engine, segments, *_a, **_k: [
         Segment(i=s.i, start=s.start, end=s.end, text="Anh ấy là Trương Tam") for s in segments
     ])
-    monkeypatch.setattr(pipeline, "edit_translation", lambda _source, raw, *_a, **_k: raw)
+    monkeypatch.setattr(
+        pipeline, "edit_translation",
+        lambda _source, raw, *_a, **_k: (raw, {}))
 
     result = pipeline.run(context(tmp_path))
 

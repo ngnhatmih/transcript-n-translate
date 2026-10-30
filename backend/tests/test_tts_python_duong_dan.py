@@ -31,6 +31,8 @@ import shutil
 import subprocess
 import sys
 
+import pytest
+
 BACKEND_DIR = pathlib.Path(__file__).resolve().parents[1]
 
 #: Đoạn mã chạy TRONG tiến trình con: chỉ in ra đường đã chọn, không dựng app.
@@ -122,7 +124,27 @@ def test_khong_dat_bien_thi_duong_canh_ma_nguon_thang_duong_trong_image():
 
     Đây là đường phát triển trên máy, và nó phải thắng đường `/opt/venv-tts` của image — nếu
     không, một máy có cả hai sẽ chạy TTS bằng interpreter khác với cái người dùng vừa cài.
+
+    🔴 BỎ QUA TRONG IMAGE, và đây là lý do ĐO ĐƯỢC:
+
+        $ python -m pytest tests/test_tts_python_duong_dan.py
+        assert '.venv-tts' in '/opt/venv-tts/bin/python'
+        AssertionError: đường mặc định phải là venv TTS cạnh mã nguồn
+
+    Trong image KHÔNG có `.venv-tts` — đó là venv phát triển trên máy, không bao giờ
+    nằm trong ảnh. Nên hàm rơi về `/opt/venv-tts/bin/python`, tức đúng nhánh mà bài
+    NGAY DƯỚI kiểm (`test_duong_canh_ma_nguon_KHONG_co_thi_roi_ve_duong_trong_image`).
+    Hai bài loại trừ nhau theo môi trường: bài này chỉ có nghĩa khi `.venv-tts` TỒN TẠI.
+
+    Bỏ qua chứ không nới điều kiện: nới `assert` thành "hoặc `.venv-tts` hoặc `/opt`"
+    thì bài này không còn chứng minh gì — nó sẽ xanh ở cả hai môi trường và không
+    phát hiện được việc đảo thứ tự ưu tiên.
     """
+    goc = pathlib.Path(__file__).resolve().parents[1]
+    venv_canh_ma = goc / ".venv-tts"
+    if not venv_canh_ma.is_dir():
+        pytest.skip(f"không có {venv_canh_ma} — bài này chỉ kiểm trên máy phát triển")
+
     duong = _chay({}, xoa=("PHUDE_TTS_PYTHON",))
     ten = "Scripts/python.exe" if os.name == "nt" else "bin/python"
     assert duong.replace("\\", "/").endswith(ten), (

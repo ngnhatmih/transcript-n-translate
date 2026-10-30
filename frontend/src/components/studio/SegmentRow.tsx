@@ -65,7 +65,16 @@ export const SegmentRow = forwardRef<HTMLLIElement, Props>(function SegmentRow(
       ref={ref}
       onClick={onSelect}
       className={cn(
-        "relative grid grid-cols-[88px_1fr_auto] gap-x-4 border-b border-rule px-4 py-2.5 transition-colors",
+        /*
+          DO TREN KHUNG 375 px: cot gio 88 + cot phai ~92 + hai gap 32 + padding 32
+          = 244 px, con 131 px cho chu — chu phu de bi bop con ~16 ky tu moi dong.
+          Do la noi dung CHINH cua man hinh nay, nen duoi `sm` no phai duoc uu tien:
+          cot gio thu ve 44 px, cot phai ROT xuong thanh mot hang rieng (`col-start-2`),
+          va gap/ padding gon lai. Ket qua: ~311 px cho chu, tuc gap 2,4 lan.
+
+          Tu `sm` tro len tra ve dung bo cuc cu — khong doi mot pixel nao.
+        */
+        "relative grid grid-cols-[44px_minmax(0,1fr)] gap-x-2 gap-y-1.5 border-b border-rule px-2.5 py-2 transition-colors sm:grid-cols-[88px_minmax(0,1fr)_auto] sm:gap-x-4 sm:gap-y-2 sm:px-4 sm:py-2.5",
         current ? "bg-signal-soft" : "hover:bg-panel-1",
         issues.length > 0 && "hatch-left",
         flash && "animate-flash",
@@ -92,7 +101,15 @@ export const SegmentRow = forwardRef<HTMLLIElement, Props>(function SegmentRow(
           </>
         )}
         {view === "compare" && (
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 sm:gap-3">
+            {/*
+              YEU CAU: "Phan so sanh ban goc va ban dich xep thanh mot cot" tren dien thoai.
+
+              Hai cot 13,5 px trong 311 px chia nhau con ~140 px moi ben — mot cau tieng
+              Viet 40 ky tu bi ngat thanh 4-5 dong, va mat kha nang doi chieu vi hai khoi
+              khong con nam ngang tam mat. Mot cot thi doc theo chieu doc, dung nhu khi
+              doc phu de that. Tu `sm` tro len moi ve hai cot.
+            */}
             <div className="rounded-sm border border-rule p-2 text-left">
               <span className="label-engraved mb-1 block">Bản gốc</span>
               <span className="text-[13.5px] leading-5 text-ink-1">{seg.text}</span>
@@ -114,9 +131,15 @@ export const SegmentRow = forwardRef<HTMLLIElement, Props>(function SegmentRow(
           </div>
         )}
         {view === "dub" && (
-          <div className="flex items-center gap-3">
-            <p className="flex-1 text-[14px] text-ink-0">{banDich}</p>
-            <div className="h-1.5 w-32 overflow-hidden rounded-sm bg-panel-3" title="Take so với khung thời gian">
+          <div className="flex flex-wrap items-center gap-2 sm:flex-nowrap sm:gap-3">
+            {/*
+              Ban cu: `flex items-center gap-3` khong cho xuong dong, ma hang nay gom
+              mot doan chu + thanh ti le 128 px + so + hai nut = ~260 px co dinh. Tren
+              311 px thi doan chu chi con ~50 px — moi tu mot dong. `flex-wrap` +
+              `basis-full` cho doan chu: no chiem tron mot hang, cac dieu khien xuong duoi.
+            */}
+            <p className="min-w-0 flex-1 basis-full text-[14px] text-ink-0 sm:basis-auto">{banDich}</p>
+            <div className="h-1.5 w-20 overflow-hidden rounded-sm bg-panel-3 sm:w-32" title="Take so với khung thời gian">
               <div
                 className={cn(
                   "h-full",
@@ -181,7 +204,12 @@ export const SegmentRow = forwardRef<HTMLLIElement, Props>(function SegmentRow(
         )}
       </div>
 
-      <div className="flex flex-col items-end gap-1.5 pt-0.5">
+      {/*
+        COT PHAI — duoi `sm` la mot HANG ngang o cuoi dong (`col-start-2`), vi mot cot
+        doc 92 px khong vua 375 px ma khong an mat phan chu. Tu `sm` tro len tra ve
+        cot doc ben phai nhu cu.
+      */}
+      <div className="col-start-2 flex flex-row flex-wrap items-center justify-end gap-x-2 gap-y-1 pt-0.5 sm:col-start-auto sm:flex-col sm:flex-nowrap sm:items-end sm:gap-1.5">
         <span
           className={cn("num text-[10.5px]", seg.cpsOver ? "text-fault" : "text-ink-2")}
           title={
@@ -205,7 +233,7 @@ export const SegmentRow = forwardRef<HTMLLIElement, Props>(function SegmentRow(
             onApprove();
           }}
           className={cn(
-            "flex items-center gap-1 rounded-sm border px-2 py-0.5 text-[11px] transition-colors",
+            "flex items-center gap-1 rounded-sm border px-2 py-1 text-[11px] transition-colors sm:py-0.5",
             seg.daDuyet
               ? "border-ok/60 text-ok"
               : "border-rule text-ink-1 hover:border-signal hover:text-signal",

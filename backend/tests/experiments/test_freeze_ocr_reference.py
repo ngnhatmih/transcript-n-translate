@@ -9,8 +9,45 @@ from pathlib import Path
 
 BACKEND_DIR = Path(__file__).resolve().parents[2]
 SCRIPT = BACKEND_DIR / "scripts" / "freeze_ocr_reference.py"
-V4_SHA256 = "fa35ddb2718bf897a97b3711ce8c3cc04ce113ad259d418928200c839a7909ad"
-HISTORICAL_V2_SHA256 = "9c8bd23a80523a1fa79745f16557744c8f1a1d6c1ae612abcc0fdbc4b9f26b8e"
+V4_SHA256 = "cc5c8aaa3cc2d886d141e75d917b2d64d211d99443b05c8a555c83e45a917818"
+HISTORICAL_V2_SHA256 = "b95621e28f9708bcd89b9a6879979d370961eb119eeb7f53394bd73f08f8ee67"
+
+
+def _sha256_chuan_hoa(path: Path) -> str:
+    """sha256 cua NOI DUNG, sau khi dua xuong dong ve LF.
+
+    🔴 VI SAO KHONG BAM THANG `path.read_bytes()` (do duoc, khong doan):
+
+        $ git config --get core.autocrlf
+        true
+        $ git ls-files --eol .../ocr-caption-reference-v4.json
+        i/lf    w/crlf  attr/
+        $ git cat-file -s HEAD:backend/.../ocr-caption-reference-v4.json
+        64241                       <- blob trong git, LF
+        $ (Get-Item .../ocr-caption-reference-v4.json).Length
+        65865                       <- working tree, CRLF
+
+        $ diff /tmp/that.json /tmp/ref-z.json | grep -cE "^[<>]"
+        3248                        <- "khac het 1624 dong"
+        $ python -c "a=...replace(b'\r\n',b'\n'); b=...; print(a==b)"
+        giong het sau khi chuan hoa: True
+        sha256 that (LF): cc5c8aaa...
+        sha256 sinh (LF): cc5c8aaa...
+
+    NOI DUNG GIONG HET TUNG BYTE. Khac biet duy nhat la xuong dong: git luu LF
+    (`i/lf`), `core.autocrlf=true` doi thanh CRLF khi checkout (`w/crlf`), nen
+    file TREN DIA tren may Windows co 65 865 B con trong container Linux co
+    64 241 B. `V4_SHA256` duoc tinh tren ban CRLF.
+
+    Nghia la bai test cu ghim mot hash PHU THUOC CAU HINH GIT cua may checkout:
+    no xanh tren Windows co `autocrlf=true` va do trong container Linux — cung
+    mot noi dung, hai ket qua. Do la loi cua TEST, khong phai cua script: script
+    tai lap dung tuyet doi, va chinh bai nay khang dinh dieu do o dong
+    `output.read_bytes() == second_output.read_bytes()`.
+
+    Chuan hoa ve LF truoc khi bam: hash ghim NOI DUNG, khong ghim cach checkout.
+    """
+    return hashlib.sha256(path.read_bytes().replace(b"\r\n", b"\n")).hexdigest()
 
 
 def test_freeze_records_density_scan_and_model_support(tmp_path: Path) -> None:
@@ -79,14 +116,14 @@ def test_freeze_v4_has_reproducible_identity_and_does_not_replace_v2(tmp_path: P
     document = json.loads(output.read_text(encoding="utf-8"))
     assert document["dataset_id"] == "ocr-caption-reference-v2"
     assert document["version"] == 4
-    assert hashlib.sha256(output.read_bytes()).hexdigest() == V4_SHA256
+    assert _sha256_chuan_hoa(output) == V4_SHA256
     assert output.read_bytes() == second_output.read_bytes()
 
     historical_v2 = (
         BACKEND_DIR.parent
         / "data/experiments/accuracy-pipelines/20261015-ocr-reference-v2/reference.json"
     )
-    assert hashlib.sha256(historical_v2.read_bytes()).hexdigest() == HISTORICAL_V2_SHA256
+    assert _sha256_chuan_hoa(historical_v2) == HISTORICAL_V2_SHA256
 
 
 def test_freeze_assigns_the_chronological_dev_test_split(tmp_path: Path) -> None:

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Command as CmdIcon, Film, Moon, Pause, Play, Repeat, Sun, Upload, Cpu } from "lucide-react";
+import { Command as CmdIcon, Film, Menu, Moon, Pause, Play, Repeat, Sun, Upload, Cpu, X } from "lucide-react";
 
 import { mediaUrl, exportUrl, getPeaks } from "@/api/endpoints";
 import type { DubPlanRow, Job, Source, TranslationCps, TranslationDetail, Transcript } from "@/api/types";
@@ -148,6 +148,17 @@ export function Studio(props: StudioProps) {
   const [queueOpen, setQueueOpen] = useState(false);
   const [issueFilter, setIssueFilter] = useState<LoaiViec | "all">("all");
   const [onlyIssues, setOnlyIssues] = useState(false);
+  /**
+   * DRAWER "VIEC CAN XU LY" — chi ton tai o man hinh NHO (`lg` tro xuong).
+   *
+   * Do that tren khung 375 px: cot viec rong 260 px + hang doi 44 px = 304 px,
+   * con 71 px cho ban lam viec. Khong phai "chat" — do la khong dung duoc. Nen
+   * duoi `lg` cot viec ROT KHOI luoi va thanh mot drawer truot tu trai.
+   *
+   * Mac dinh DONG: tren dien thoai, thu nguoi dung can dau tien la video va danh
+   * sach phu de, khong phai mot danh muc viec chiem het man hinh khi vua mo.
+   */
+  const [viecMo, setViecMo] = useState(false);
 
   const media: string | null = source === null ? null : mediaUrl(source.id);
   const player = usePlayer(media);
@@ -555,6 +566,31 @@ export function Studio(props: StudioProps) {
     [onDuyet],
   );
 
+  // ───────────────────────────────────────────────────────────────────────────
+  // DRAWER: dong bang `Escape`, va khong de trang nen cuon sau lop phu.
+  //
+  // Hai viec, ca hai deu la hau qua truc tiep cua viec drawer la `fixed`:
+  //   1. `Escape` — khong co no thi ban phim khong co loi ra, va nguoi dung
+  //      phai roi tay khoi ban phim de bam nut X. Mot lop phu dong duoc bang
+  //      `Escape` la hanh vi quen thuoc cua moi dialog.
+  //   2. `overflow: hidden` tren `body` — drawer la `fixed` nen trang VAN cuon
+  //      o phia sau khi vuot tren lop phu. Do la loi kinh dien cua drawer:
+  //      nguoi dung vuot de cuon danh sach trong drawer, va trang ben duoi
+  //      chay theo. Khoa `body` khi mo, tra lai khi dong hoac unmount.
+  // ───────────────────────────────────────────────────────────────────────────
+  useEffect(() => {
+    if (!viecMo) return;
+    const khiPhim = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setViecMo(false);
+    };
+    document.addEventListener("keydown", khiPhim);
+    const cu = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.removeEventListener("keydown", khiPhim);
+      document.body.style.overflow = cu;
+    };
+  }, [viecMo]);
   /**
    * `loadFile(f)` cua ban goc nap tep tu dia vao trinh phat.
    *
@@ -567,12 +603,69 @@ export function Studio(props: StudioProps) {
     },
     [onNapTep],
   );
+
+
+  /*
+  KHUNG NGOAI — ba thay doi cho man hinh nho, va ly do DO DUOC cua tung cai:
+
+  1. `h-screen overflow-hidden` -> `min-h-dvh lg:h-screen lg:overflow-hidden`.
+     Do tren khung 375x667: ban cu khoa trang o 667 px va cat moi thu duoi
+     man hinh; danh sach 438 doan khong bao gio cuon duoc. Dien thoai thi
+     TRANG PHAI CUON DUOC — do la hanh vi nguoi dung mong doi, khong phai
+     mot ngoai le. Tu `lg` tro len moi khoa lai, vi o do cot trai va danh
+     sach co khung cuon rieng va khoa `h-screen` moi dung nghia.
+
+  2. `grid-rows-[52px_1fr]` -> `lg:grid-rows-[52px_1fr]`. Tren dien thoai
+     header cao hon 52 px khi ten buoc dai, nen mot hang co dinh se cat no.
+
+  3. `grid-cols-[260px_1fr_auto]` -> `lg:grid-cols-[260px_1fr_auto]`.
+     Do: 260 + 44 = 304 px tren 375 px, con 71 px cho ban lam viec. Duoi
+     `lg` cot viec va hang doi deu ROT khoi luoi (xem hai `<aside>`).
+  */
   return (
-    <div className="grid h-screen grid-rows-[52px_1fr] overflow-hidden bg-background text-foreground">
+    <div className="flex min-h-dvh flex-col bg-background text-foreground lg:grid lg:h-screen lg:grid-rows-[52px_1fr] lg:overflow-hidden">
       {/* đầu trang */}
-      <header className="flex items-center gap-4 border-b border-rule bg-panel-0 px-4">
+      <header className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1.5 border-b border-rule bg-panel-0 px-3 py-1.5 sm:gap-x-4 sm:px-4 sm:py-0 lg:flex-nowrap lg:py-0">
+        {/*
+          NUT MO DRAWER — chi hien duoi `lg`. Day la duong DUY NHAT toi danh muc
+          viec tren dien thoai, nen no phai nam trong header chu khong bi an.
+        */}
+        <button
+          onClick={() => setViecMo(true)}
+          className="flex shrink-0 items-center gap-1.5 rounded-sm border border-rule px-2 py-1 text-[11.5px] text-ink-1 hover:border-ink-1 hover:text-ink-0 lg:hidden"
+          aria-label="Mở danh sách việc cần xử lý"
+          aria-expanded={viecMo}
+        >
+          <Menu className="size-3.5" />
+          <span className="num">{issues.length}</span>
+        </button>
         <h1 className="label-engraved shrink-0 !text-[11px] !text-ink-0">Phòng thu biên tập</h1>
-        <div className="min-w-0 flex-1 overflow-x-auto">
+        {/*
+          Thanh buoc: `min-w-0 flex-1` de no co lai thay vi day header rong ra.
+          Tren dien thoai no chiem HANG RIENG (`basis-full`), vi mot thanh 6 buoc
+          khong the vua 375 px canh tieu de va hai nut.
+        */}
+        {/*
+          DO O 768 px: `basis-full` tu `sm` (640) lam thanh buoc chiem CA mot hang,
+          day header len 104 px va cat mat 13 px cua buoc cuoi (`pipeline.scrollW=749`
+          so voi `w=736`). Tu 768 da du cho no nam cung hang voi tieu de va hai nut:
+          do duoc `h1` ket thuc o x=274, con 494 px cho thanh buoc — thua 749-494.
+
+          Nen moc la `md` chu khong phai `sm`: duoi `md` van la hang rieng (dien thoai
+          that su khong the chia se hang), tu `md` tro len la cung hang.
+        */}
+        {/*
+          DO O 768 px: can 1206 px (do tung con: 59 + 183 + 736 + 119 + 28 = 1125,
+          cong 3 khe 48 va padding 32), chi co 768 — nen khoi buoc xuong hang va
+          header cao 104 px. Nguyen nhan khong phai `basis` (no da la `auto` roi)
+          ma la `flex-grow: 1`: khoi bi keo ra 736 px, va ben trong no `ol` rong
+          749 px KHONG CO LAI duoc vi `overflow-x-auto` giu nguyen be rong noi dung.
+
+          Nen tu `md`: `basis-0` (khong doi hoi cho truoc) + `overflow-visible` (de
+          `ol` duoc phep co theo khung). Duoi `md` giu `basis-full` + `overflow-x-auto`:
+          dien thoai that khong du cho 749 px, va cuon ngang o do la dung.
+        */}
+        <div className="order-last min-w-0 basis-full overflow-x-auto md:order-none md:basis-0 md:flex-1 md:overflow-visible">
           <PipelineBar steps={steps} onStep={onStep} />
         </div>
         <button
@@ -583,7 +676,7 @@ export function Studio(props: StudioProps) {
         </button>
         <button
           onClick={() => setTheme((t) => (t === "dark" ? "light" : "dark"))}
-          className="rounded-sm border border-rule p-1.5 text-ink-1 hover:border-ink-1 hover:text-ink-0"
+          className="ml-auto shrink-0 rounded-sm border border-rule p-1.5 text-ink-1 hover:border-ink-1 hover:text-ink-0 lg:ml-0"
           aria-label={theme === "dark" ? "Chuyển chế độ sáng" : "Chuyển chế độ tối"}
           title={theme === "dark" ? "Chế độ sáng" : "Chế độ tối"}
         >
@@ -591,15 +684,55 @@ export function Studio(props: StudioProps) {
         </button>
       </header>
 
-      <div className="grid min-h-0 grid-cols-[260px_1fr_auto]">
-        {/* hộp việc */}
-        <aside className="flex min-h-0 flex-col border-r border-rule bg-panel-1">
+      <div className="flex min-h-0 flex-1 flex-col lg:grid lg:grid-cols-[260px_1fr_auto]">
+        {/*
+          MAN CHE + DRAWER "VIEC CAN XU LY" — chi duoi `lg`.
+
+          Do tren khung 375 px: cot viec 260 px + hang doi 44 px = 304 px, con
+          71 px cho ban lam viec. Nen duoi `lg` cot viec KHONG nam trong luoi;
+          no la mot drawer truot tu trai, mo bang nut trong header.
+
+          Ba thu phai co de drawer dung nghia, va ca ba deu la loi ich cu the:
+            · man che bam-duoc  -> dong drawer bang cach bam ra ngoai, khong phai
+                                   tim nut X;
+            · `role="dialog"` + `aria-modal` -> trinh doc man hinh biet day la lop
+                                   phu, khong phai mot phan cua trang;
+            · `Escape` dong duoc  -> phim quen thuoc, va khong co no thi drawer
+                                   thanh mot cai bay khong loi ra tren ban phim.
+        */}
+        {viecMo && (
+          <div
+            className="fixed inset-0 z-30 bg-panel-0/70 lg:hidden"
+            onClick={() => setViecMo(false)}
+            aria-hidden
+          />
+        )}
+        <aside
+          role={viecMo ? "dialog" : undefined}
+          aria-modal={viecMo ? true : undefined}
+          aria-label="Việc cần xử lý"
+          className={cn(
+            "flex min-h-0 flex-col bg-panel-1",
+            // Duoi `lg`: drawer co dinh, truot bang `translate-x`.
+            "fixed inset-y-0 left-0 z-40 w-[min(86vw,320px)] border-r border-rule shadow-2xl transition-transform duration-200",
+            viecMo ? "translate-x-0" : "-translate-x-full",
+            // Tu `lg`: tra ve cot binh thuong trong luoi, khong con lop phu.
+            "lg:static lg:z-auto lg:w-auto lg:translate-x-0 lg:border-r lg:shadow-none",
+          )}
+        >
           <div className="border-b border-rule px-3 py-3">
-            <div className="flex items-baseline justify-between">
+            <div className="flex items-baseline justify-between gap-2">
               <span className="label-engraved">Việc cần xử lý</span>
               <span className={cn("num text-[18px]", issues.length ? "text-signal" : "text-ok")}>
                 {issues.length}
               </span>
+              <button
+                onClick={() => setViecMo(false)}
+                className="ml-auto rounded-sm border border-rule p-1 text-ink-1 hover:border-ink-1 hover:text-ink-0 lg:hidden"
+                aria-label="Đóng danh sách việc"
+              >
+                <X className="size-3.5" />
+              </button>
             </div>
             <div className="mt-2 h-1 overflow-hidden rounded-sm bg-panel-3">
               <div
@@ -719,8 +852,20 @@ export function Studio(props: StudioProps) {
         {/* bàn làm việc */}
         <main className="flex min-h-0 min-w-0 flex-col">
           {/* sân khấu */}
-          <div className="flex shrink-0 gap-4 bg-panel-0 p-3">
-            <div className="relative aspect-video w-[min(42%,420px)] shrink-0 overflow-hidden rounded-sm border border-rule bg-panel-1">
+          {/*
+            SAN KHAU — tren dien thoai video chiem HET chieu ngang, cot chu thong
+            tin xuong duoi, va hang nut duoc phep xuong dong.
+
+            Do tren khung 375 px: `w-[min(42%,420px)]` = 157 px, tuc video chi
+            rong 157 px trong khi con 218 px bo trong ben canh chi de chua hai dong
+            chu. Doi lai thanh `basis-full` duoi `sm`: video rong 351 px, cot chu
+            xuong duoi. Tu `sm` tro len tra ve dung bo cuc cu.
+
+            `flex-wrap` tren hang nut: 4 nut + dong thoi gian dai ~330 px, khong vua
+            351 px. Ban cu de chung tran ra ngoai khung va bi cat.
+          */}
+          <div className="flex shrink-0 flex-col gap-3 bg-panel-0 p-2.5 sm:flex-row sm:gap-4 sm:p-3">
+            <div className="relative aspect-video w-full shrink-0 overflow-hidden rounded-sm border border-rule bg-panel-1 sm:w-[min(42%,420px)]">
               {player.src ? (
                 <video ref={player.videoRef} src={player.src} className="size-full object-contain" playsInline />
               ) : (
@@ -763,7 +908,7 @@ export function Studio(props: StudioProps) {
                   </div>
                 )}
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <button
                   onClick={player.toggle}
                   className="flex items-center gap-1.5 rounded-sm bg-signal px-3 py-1.5 text-[12px] font-semibold text-primary-foreground hover:bg-signal/90"
@@ -821,13 +966,20 @@ export function Studio(props: StudioProps) {
           />
 
           {/* thanh góc nhìn */}
-          <div className="flex shrink-0 items-center gap-1 border-b border-rule bg-panel-1 px-3 py-1.5">
+          {/*
+            `flex-wrap` + `gap-y-1`: ba nhom dieu khien (3 nut goc nhin, mot hop
+            kiem, mot thanh thu phong) dai ~420 px, khong vua 351 px tren dien
+            thoai. Ban cu de chung tran ra va bi cat mat phan thu phong.
+            `ml-auto` chi giu tu `sm` — khi da xuong dong thi `ml-auto` day thanh
+            thu phong sang phai mot minh, trong nhu mot loi bo cuc.
+          */}
+          <div className="flex shrink-0 flex-wrap items-center gap-x-1 gap-y-1 border-b border-rule bg-panel-1 px-2 py-1.5 sm:px-3">
             {VIEWS.map((v, i) => (
               <button
                 key={v.id}
                 onClick={() => setView(v.id)}
                 className={cn(
-                  "rounded-sm px-2.5 py-1 text-[12px] transition-colors",
+                  "rounded-sm px-2 py-1 text-[12px] transition-colors sm:px-2.5",
                   view === v.id ? "bg-panel-3 text-ink-0" : "text-ink-1 hover:text-ink-0",
                 )}
                 aria-pressed={view === v.id}
@@ -835,11 +987,11 @@ export function Studio(props: StudioProps) {
                 {v.label} <span className="kbd ml-1 !text-[9px]">{i + 1}</span>
               </button>
             ))}
-            <label className="ml-3 flex cursor-pointer items-center gap-1.5 text-[11.5px] text-ink-1">
+            <label className="flex cursor-pointer items-center gap-1.5 text-[11.5px] text-ink-1 sm:ml-3">
               <input type="checkbox" checked={onlyIssues} onChange={(e) => setOnlyIssues(e.target.checked)} className="accent-[var(--signal)]" />
               Chỉ đoạn có vấn đề
             </label>
-            <label className="ml-auto flex items-center gap-2 text-[11px] text-ink-2">
+            <label className="flex items-center gap-2 text-[11px] text-ink-2 sm:ml-auto">
               Thu phóng
               <input
                 type="range"
@@ -847,7 +999,7 @@ export function Studio(props: StudioProps) {
                 max={160}
                 value={pxPerSec}
                 onChange={(e) => setPxPerSec(+e.target.value)}
-                className="w-24 accent-[var(--signal)]"
+                className="w-20 accent-[var(--signal)] sm:w-24"
               />
             </label>
           </div>
@@ -882,10 +1034,18 @@ export function Studio(props: StudioProps) {
           </ul>
         </main>
 
-        {/* hàng đợi thu gọn */}
+        {/*
+          HANG DOI — AN HOAN TOAN duoi `lg`.
+
+          YEU CAU: "An cot Hang doi tren dien thoai". Khong phai thu nho: tren
+          khung 375 px, mot cot 44 px chiem 12% chieu ngang chi de hien mot icon
+          Cpu. Trang thai hang doi la thong tin PHU khi dang sua phu de, va no
+          khong co duong nao de mo rong ra tren man hinh hep ma khong de len
+          danh sach doan. Nen `hidden lg:flex` — khong ton tai duoi `lg`.
+        */}
         <aside
           className={cn(
-            "flex min-h-0 flex-col border-l border-rule bg-panel-1 transition-[width]",
+            "hidden min-h-0 flex-col border-l border-rule bg-panel-1 transition-[width] lg:flex",
             queueOpen ? "w-64" : "w-11",
           )}
         >
