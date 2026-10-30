@@ -2,6 +2,10 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 
 import { App } from "./shell/App";
+// FONT nạp TRƯỚC `tokens.css`: `--font-label`/`--font-mono` chỉ là TÊN, còn `@font-face`
+// mới là thứ làm tên đó có mặt chữ. Đặt sau cũng chạy, nhưng đặt trước thì khai báo font
+// đã sẵn sàng trước khung hình đầu — cùng lý do `preload` đứng trước `stylesheet`.
+import "./styles/_font.css";
 import "./styles/tokens.css";
 // 🔴 GIAO DIỆN MỚI (2026-10-30): ba tệp dưới thay `app.css` cũ (3 096 dòng, đã xoá cùng bốn
 // màn cũ). Thứ tự nạp LÀ NGHĨA: `_studio-phan2` sau `_studio` để phần dòng phụ đề / hàng

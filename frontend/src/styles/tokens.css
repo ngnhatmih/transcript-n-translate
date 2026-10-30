@@ -69,12 +69,44 @@
   --surface-step: 4%;
 
   /* ── §2.1 Chữ ──────────────────────────────────────────────────────────── */
-  /* Ràng buộc cứng §2.1/§8.1: ba mặt chữ self-host woff2, KHÔNG nạp từ Google Fonts CDN.
-     Stack dưới đây là ĐÍCH danh; tệp woff2 + @font-face chưa có trong giai đoạn này
-     (không task nào trong plan tạo chúng — đã ghi ở báo cáo Task 1). */
-  --font-label: "Archivo Expanded", "Archivo", system-ui, sans-serif; /* tiêu đề, nhãn khắc (trục wdth) */
+  /* Ràng buộc cứng §2.1/§8.1: mặt chữ self-host woff2, KHÔNG nạp từ Google Fonts CDN.
+     Tệp woff2 nằm ở `public/fonts/` (12 tệp, 315 972 B) và `@font-face` ở `_font.css`.
+     Bỏ bốn nhóm unicode không dùng (cyrillic, cyrillic-ext, greek, greek-ext).
+
+     🔴 SỬA 2026-10-30 — `"Archivo Expanded"` KHÔNG PHẢI TÊN FONT NÀO CẢ. Nó từng đứng
+     đầu `--font-label` với ý "nhãn khắc dùng trục wdth". Nhưng không `@font-face` nào
+     khai tên đó, nên trình duyệt BỎ QUA nó và rơi xuống `"Archivo"` ở **wdth 100%** —
+     trục biến thiên vẫn nạp nhưng KHÔNG được dùng. Đo được trên bản build, cùng một
+     chuỗi `PHÒNG THU BIÊN TẬP` ở 11px/600/giãn 0.14em:
+
+         wdth 100%   145,3 px
+         wdth 110%   160,0 px
+         wdth 115%   167,3 px
+         wdth 120%   174,6 px
+         wdth 125%   181,9 px   <- bản duyệt đo 183 px
+         "expanded"  181,9 px   (= 125%, nhưng là giá trị từ khoá, không phải số)
+
+     Vì vậy tên giả bị xoá; độ giãn khai bằng SỐ. `font-stretch` là thuộc tính KẾ THỪA,
+     nên khai một lần trên `:root` là đủ cho mọi nhãn dùng `--font-label`. */
+  --font-label: "Archivo", system-ui, sans-serif; /* nhãn khắc, tiêu đề (wdth 125%) */
   --font-ui: "Archivo", system-ui, sans-serif; /* nội dung, giao diện */
   --font-mono: "IBM Plex Mono", ui-monospace, "Cascadia Mono", monospace; /* số liệu, timecode */
+
+  /* TRỤC wdth CỦA ARCHIVO — 125% là giá trị ĐO ĐƯỢC khớp bản duyệt.
+     Trang đo tạm `/_do-font.html` (Chrome headless thật, `document.fonts.ready` xong):
+
+         .head__ten, wdth 125%   183,38 × 17,05 px   <- bản duyệt: 183 × 17
+         cùng chuỗi, wdth 100%   146,25 px           <- lệch 37 px, tức 25%
+
+     ⚠️ KHÔNG khai `font-stretch` trên `:root`. Bản đầu tôi đặt nó ở đây với lý do "nó kế
+     thừa nên một chỗ là đủ" — SAI, và phép đo bắt được: dòng phụ đề `--font-ui` và
+     timecode `--font-mono` cũng nhận `stretch: 125%`. Với Plex Mono (font tĩnh) trình
+     duyệt bỏ qua nên không thấy khác biệt, nhưng với `--font-ui` CÙNG LÀ ARCHIVO thì chữ
+     nội dung bị giãn 25% — một thay đổi hình học không ai yêu cầu, và nó sẽ làm mọi dòng
+     phụ đề dài thêm một phần tư.
+
+     Đúng ra: độ giãn thuộc về NHÃN KHẮC, không thuộc về font. Nó được khai ở đúng ba lớp
+     dùng `--font-label`: `.head__ten`, `.nhan-khac`, và nút chính. Xem `_studio.css`. */
 
   --fs-label: 9.5px; /* nhãn mono in hoa — cỡ nhỏ nhất được phép (§7) */
   --fs-num: 10.5px; /* số liệu phụ */

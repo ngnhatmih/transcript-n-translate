@@ -8,8 +8,8 @@
 //   - interop CJS tu viet      : khong can @rollup/plugin-commonjs (khong cai duoc: npm cache EPERM)
 //   - resolve bang import.meta.resolve : resolver cua chinh Node, khong spawn
 // Khong co dependency nao ngoai rollup + @swc/core (ca hai da co san trong node_modules).
-import { existsSync, readFileSync, rmSync } from "node:fs";
-import { dirname, isAbsolute, join, resolve } from "node:path";
+import { existsSync, readFileSync, readdirSync, rmSync } from "node:fs";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { transformSync } from "@swc/core";
 
@@ -169,6 +169,35 @@ function htmlPlugin() {
   };
 }
 
+/**
+ * Chep `public/` sang `dist/` — thu muc tep TINH, giu NGUYEN duong dan.
+ *
+ * Vi sao can: `rmSync(dist)` o cuoi tep xoa sach `dist` moi lan build, va bon plugin tren
+ * chi emit CSS/JS/HTML. Khong co buoc nay thi `public/fonts/*.woff2` KHONG BAO GIO sang
+ * `dist`, va `@font-face` tro toi `/fonts/...` nhan 404 trong im lang — trinh duyet roi ve
+ * font du phong, chu hep lai, va khong mot dong loi nao hien ra. Do la kieu hong te nhat:
+ * trang van chay, chi la sai.
+ *
+ * Vi sao KHONG dung `emitFile` voi ten `assets/[name][extname]`: no doi duong dan thanh
+ * `/assets/archivo-latin-400-700.woff2` trong khi `_font.css` ghi `/fonts/...`. Chep nguyen
+ * cay thi ca duong dan tuong doi trong CSS lan tuyet doi trong `_font.css` deu dung.
+ */
+function publicPlugin() {
+  const NGUON = join(ROOT, "public");
+  return {
+    name: "public-inproc",
+    generateBundle() {
+      if (!existsSync(NGUON)) return;
+      for (const entry of readdirSync(NGUON, { recursive: true, withFileTypes: true })) {
+        if (!entry.isFile()) continue;
+        const duongDan = join(entry.parentPath ?? entry.path, entry.name);
+        const tuongDoi = relative(NGUON, duongDan).split(sep).join("/");
+        this.emitFile({ type: "asset", fileName: tuongDoi, source: readFileSync(duongDan) });
+      }
+    },
+  };
+}
+
 // `assert-no-bare-imports` da bi XOA o day (I-3). No la code chet: `onwarn` ben duoi nem loi o pha
 // BUILD, truoc `generateBundle`, nen guard khong bao gio toi duoc dung ca no sinh ra de bat. Do lai:
 //   chen `import "node:fs";` vao src/main.tsx -> rollup -c chet
@@ -224,7 +253,15 @@ export default {
     assetFileNames: "assets/[name][extname]",
     sourcemap: true,
   },
-  plugins: [resolvePlugin(), cjsPlugin(), swcPlugin(), cssPlugin(), htmlPlugin(), cjsLeftoverPlugin()],
+  plugins: [
+    resolvePlugin(),
+    cjsPlugin(),
+    swcPlugin(),
+    cssPlugin(),
+    htmlPlugin(),
+    publicPlugin(),
+    cjsLeftoverPlugin(),
+  ],
   onwarn(warning, warn) {
     if (warning.code === "UNRESOLVED_IMPORT" || warning.code === "MISSING_EXPORT") throw new Error(warning.message);
     warn(warning);

@@ -32,6 +32,9 @@
   margin: 0;
   flex: 0 0 auto;
   font-family: var(--font-label);
+  /* wdth 125% — ĐO ĐƯỢC 183,38 px cho "PHÒNG THU BIÊN TẬP" (bản duyệt: 183 px). Xem ghi
+     chú dài trong `tokens.css` về vì sao KHÔNG đặt nó trên `:root`. */
+  font-stretch: 125%;
   font-size: 11px;
   letter-spacing: 0.14em;
   font-weight: 600;
@@ -43,6 +46,7 @@
 .nhan-khac {
   display: block;
   font-family: var(--font-label);
+  font-stretch: 125%; /* cùng trục wdth với `.head__ten` — nhãn khắc là MỘT hệ chữ */
   font-size: var(--fs-label);
   font-weight: 600;
   letter-spacing: var(--track-label);
@@ -206,11 +210,19 @@
 .hop-viec__chip-hop {
   display: flex;
   flex-wrap: wrap;
+  /* ⚠️ HAI HÀNG LÀ THIẾT KẾ ĐÃ DUYỆT, KHÔNG PHẢI LỖI (đối chiếu ảnh chuẩn 2026-10-30).
+     Bản Lovable cũng xếp `Tất cả` / `Nghi ngờ` / `CPS cao` ở hàng một và `Nén mạnh` rơi
+     xuống hàng hai trong cùng cột 260 px. `flex-wrap: wrap` ở đây KHÔNG phải để phòng:
+     nó là thứ tạo ra bố cục đó.
+     ĐO ĐƯỢC trên bản build: bốn chip rộng `57,8 + 59 + 67,8 + 69,1 = 253,7` px cộng ba
+     khoảng 3 px = 262,7 px, khung 235 px ⇒ `soHangChip = 2`. Đó là số ĐÚNG.
+     Đừng "sửa" bằng cách bỏ chip hay hạ cỡ chữ: `10,5px` là sàn §7, và chip `Tất cả` là
+     trạng thái mặc định người dùng cần thấy. */
   gap: var(--sp-1);
   margin-top: var(--sp-3);
 }
 
-/* Chip lọc: viền 1px, radius 2, 10,5px — đo được 51×22 cho "Tất cả 9". */
+/* Chip lọc: viền 1px, radius 2, 10,5px — đo được 51×22 cho "Tất cả 9" trên bản duyệt. */
 .chip {
   appearance: none;
   display: inline-flex;
