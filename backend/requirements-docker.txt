@@ -34,6 +34,39 @@ transformers==4.46.3
 sentencepiece==0.2.0
 sacremoses==0.1.1
 
+# --- Tách nền: htdemucs (Phần D — trộn nền vào bản lồng) ---
+# `tach_nen.py` tách nhạc/tiếng động khỏi giọng gốc bằng `htdemucs` rồi trộn với bản lồng.
+#
+# 🔴 DÒNG NÀY ĐẢO NGƯỢC MỘT QUYẾT ĐỊNH CŨ, VÀ ĐÓ LÀ CHỦ Ý — ghi lại để không ai "dọn" nó đi.
+#
+# Ngày 2026-10-14, demucs được cài vào host venv cho một thí nghiệm A/B rồi GỠ, kèm ghi chú ở
+# `backend/experiments/accuracy_pipelines/README.md:39`: "Demucs was installed into the local
+# backend venv for this experiment and is not a production dependency." Kết luận thí nghiệm đó
+# (CER trên 84 caption có người kiểm): audio gốc **0,0453**, demucs vocals **0,2441** — tách
+# giọng làm CER xấu đi **5,4 lần**. Nên câu "demucs không phải phụ thuộc sản phẩm" là ĐÚNG
+# cho đường ASR, và đó là lý do dòng này từng không tồn tại.
+#
+# Nay nó thành phụ thuộc vì một việc KHÁC HẲN: không đưa stem qua ASR, mà lấy phần CÒN LẠI
+# (drums+bass+other) để trộn vào bản lồng tiếng. CER không liên quan — nền không đi qua nhận
+# dạng chữ nào. Đo được: tách 1249,24 s audio tốn 42,6–43,9 s, RTF 0,0341–0,0352, GPU đỉnh
+# 549–555 MiB.
+#
+# Trước dòng này, `demucs 4.1.0` có trong container mà KHÔNG được khai ở đâu: `git log --all
+# -S'demucs' -- requirements*.txt Dockerfile` trả về RỖNG trên cả 14 nhánh. Nó vào image bằng
+# `pip install` TAY lúc `Oct 29 08:38`. Hệ quả nếu dựng lại image: không có demucs ->
+# `_tron_nen_mac_dinh()` trả `False` -> tính năng trộn nền TỰ TẮT IM LẶNG, và bài test duy
+# nhất chạm demucs tiếp tục `skip` nên không ai biết. Đó là kiểu hỏng tệ nhất: mất tính năng
+# mà không có lỗi.
+#
+# `demucs` cần `torch` — đã cài riêng ở `Dockerfile` với index `whl/cu121` (cùng lý do
+# đã ghi ở mục MT: để index đó trong tệp này thì pip hỏi `download.pytorch.org` cho MỌI
+# gói và build FAILED vì ReadTimeout). Nên ở đây KHÔNG khai `torch`.
+#
+# `diffq` KHÔNG cần: đo được trong container `find_spec('diffq')` là `False` mà
+# `htdemucs` vẫn tách được (42,6–43,9 s cho 1249,24 s audio, RTF 0,0341–0,0352).
+# Nó là extra lượng tử hoá của demucs, không phải phụ thuộc bắt buộc.
+demucs==4.1.0
+
 # --- Tiện ích ---
 httpx==0.28.1
 yt-dlp==2025.1.15

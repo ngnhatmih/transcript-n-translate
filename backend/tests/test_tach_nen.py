@@ -241,3 +241,100 @@ def test_tach_nen_bat_buoc_demucs_va_sr_dung():
     sf.write(str(p), np.zeros((1000, 2), dtype=np.float32), 48_000)
     with pytest.raises(ValueError, match="44100"):
         tach_nen(p)
+
+
+def test_tron_nen_end_to_end_that_qua_handler(tmp_path):
+    """🔴 NỢ 1: đường `tron_nen=True` chạy TRỌN, có video ra, không cần sửa tay.
+
+    Đây là bài duy nhất chạm `DubHandler._tron_va_remux`. Trước nó, đường trộn nền chỉ được
+    chứng minh BẰNG TAY trong container (job #36), không bằng test — nên ai đổi
+    `tach_nen.py` hay `_tron_va_remux` sẽ không thấy gì đỏ cho tới khi chạy thật.
+
+    Chạy được trên HOST vì `demucs==4.1.0` đã được khai vào `requirements-docker.txt` và cài
+    vào `backend\\.venv`; trước đó bài này buộc phải `skip` và `_tron_nen_mac_dinh()` trên host
+    trả `False` một cách giả tạo.
+
+    Video 2 s, một dòng dịch 0–1 s. Kiểm BỐN thứ, và mỗi thứ là một cách hỏng khác nhau:
+      · có tệp `dub-<tid>.mp4` (nhánh trộn nền thật sự chạy, không bị bỏ qua);
+      · độ dài video ra BẰNG video gốc (thiếu `-af apad` thì mất phần đuôi — ERRATA 4);
+      · audio trong tệp ra là `aac` 48 kHz 2 kênh (resample đúng, không để encoder tự quyết);
+      · audio KHÔNG kẹp mẫu nào (nền `htdemucs` peak > 1,0 nên thiếu chuẩn hoá là kẹp).
+    """
+    pytest.importorskip("demucs.api", reason="cần demucs để tách nền")
+    pytest.importorskip("torch")
+    import json
+    import subprocess
+
+    import soundfile as sf
+    from fastapi.testclient import TestClient
+
+    from app.adapters.clock_system import SystemClock
+    from app.adapters.persist.sqlite_repos import SqliteRepos
+    from app.domain.models import Job, Segment
+    from app.pipeline.dub import DubHandler
+
+    if not CAN_FFMPEG:
+        pytest.skip("cần ffmpeg")
+
+    # Video 2 s CÓ tiếng (sine 440 Hz) và CÓ hình — nền phải tách được từ chính nó.
+    video = tmp_path / "goc.mp4"
+    subprocess.run(
+        ["ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
+         "-f", "lavfi", "-i", "color=c=blue:s=64x64:d=2:r=10",
+         "-f", "lavfi", "-i", "sine=frequency=440:duration=2",
+         "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", "-shortest", str(video)],
+        check=True, capture_output=True)
+
+    r = SqliteRepos(tmp_path / "t.db", clock=SystemClock())
+    r.init_schema()
+    sid = r.add_source(kind="file", origin="a", media_path=str(video), lang="zh")
+    tid = r.add_transcript(source_id=sid, engine="fw", lang="zh",
+                           segments=[Segment(i=0, start=0.0, end=1.0, text="你好")])
+    ban_id = r.add_translation(transcript_id=tid, transcript_version=1, engine="x",
+                               target_lang="vi", prompt_version="p1",
+                               segments=[Segment(i=0, start=0.0, end=1.0, text="Xin chào")])
+
+    def tts_gia(items, voice, out_dir):
+        out_dir = pathlib.Path(out_dir)
+        out_dir.mkdir(parents=True, exist_ok=True)
+        ra = {}
+        for it in items:
+            p = out_dir / f"{it['i']:05d}.wav"
+            sf.write(str(p), np.full(48_000, 0.3, dtype=np.float32), 48_000)
+            ra[it["i"]] = {"i": it["i"], "seconds": 1.0, "path": str(p)}
+        return ra
+
+    out = tmp_path / "dubs"
+    h = DubHandler(r, out, tts_gia, tron_nen=True)
+    job_id = r.add_job(Job(id=None, workspace=2, type="dub", engine="vieneu-v3-turbo",
+                           phase="dub:vieneu-v3-turbo",
+                           payload={"translation_id": ban_id, "tron_nen": True}))
+    h.run(r.get_job(job_id), lambda p, line: None)
+
+    mp4 = out / f"dub-{ban_id}.mp4"
+    assert mp4.is_file() and mp4.stat().st_size > 0, (
+        f"thiếu {mp4.name} — nhánh trộn nền không chạy; có: {[p.name for p in out.iterdir()]}")
+
+    info = json.loads(subprocess.run(
+        ["ffprobe", "-v", "error", "-print_format", "json", "-show_streams", "-show_format",
+         str(mp4)], capture_output=True, text=True, check=True).stdout)
+    dai_video = float(info["format"]["duration"])
+    dai_goc = float(subprocess.run(
+        ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0",
+         str(video)], capture_output=True, text=True, check=True).stdout.strip())
+    assert abs(dai_video - dai_goc) < 0.15, (
+        f"mất phim: gốc {dai_goc:.3f} s nhưng ra {dai_video:.3f} s — thiếu `-af apad`?")
+
+    audio = [s for s in info["streams"] if s["codec_type"] == "audio"][0]
+    assert audio["codec_name"] == "aac", audio["codec_name"]
+    assert int(audio["sample_rate"]) == 48_000, audio["sample_rate"]
+    assert int(audio["channels"]) == 2, audio["channels"]
+
+    # Giải mã audio trong tệp ra và đếm mẫu kẹp.
+    giai = tmp_path / "kiem.wav"
+    subprocess.run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-i", str(mp4),
+                    "-vn", "-acodec", "pcm_f32le", "-ar", "48000", "-ac", "2", str(giai)],
+                   check=True, capture_output=True)
+    mau, _ = sf.read(str(giai), dtype="float32", always_2d=True)
+    assert float(np.abs(mau).max()) < 1.0, (
+        f"audio kẹp trần: peak {float(np.abs(mau).max()):.6f} — nền chưa chuẩn hoá?")

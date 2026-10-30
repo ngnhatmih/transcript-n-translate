@@ -88,10 +88,25 @@ def test_port_khai_dung_bon_thu():
     là ANNOTATION, không phải thuộc tính lớp — `hasattr` trả False và test ĐỎ dù cổng
     khai đúng (đo được: `'engine_id' in dir(OCREngine)` = False). Kiểm qua
     `__annotations__`, đúng cách một Protocol khai hợp đồng dữ liệu.
+
+    🔴 VÀ PHẢI KIỂM KIỂU, KHÔNG CHỈ KIỂM TÊN (nợ review Task 3, F4). Bản đầu của bài
+    này chỉ hỏi `"engine_id" in __annotations__`, nên `engine_id: int` — một hợp đồng
+    SAI hẳn — vẫn XANH.
+
+    ⚠️ `from __future__ import annotations` ở `app/ports/ocr.py` biến MỌI annotation
+    thành CHUỖI, nên `khai["engine_id"]` là `'str'` chứ không phải lớp `str` — đo
+    được `assert 'str' is str` ĐỎ khi tôi so trực tiếp với lớp. Phép kiểm đúng
+    chấp nhận cả hai dạng: lớp thật (không future import) và chuỗi (có future import).
     """
-    assert "engine_id" in getattr(OCREngine, "__annotations__", {}), (
-        f"cổng phải khai `engine_id: str`; đo được "
-        f"{list(getattr(OCREngine, '__annotations__', {}))}"
+    khai = getattr(OCREngine, "__annotations__", {})
+    assert "engine_id" in khai, (
+        f"cổng phải khai `engine_id: str`; đo được {list(khai)}"
+    )
+    kieu = khai["engine_id"]
+    ten_kieu = kieu if isinstance(kieu, str) else getattr(kieu, "__name__", repr(kieu))
+    assert ten_kieu == "str", (
+        f"`engine_id` phải kiểu `str`, đo được {kieu!r} — một kiểu khác"
+        f" (ví dụ `int`) là hợp đồng SAI dù tên đúng"
     )
     for ten in ("doc_phu_de", "release"):
         assert callable(getattr(OCREngine, ten, None)), (
@@ -139,10 +154,25 @@ def test_engine_id_la_chuoi_khong_rong():
 
 
 def test_release_an_toan_khi_goi_nhieu_lan():
-    """Hợp đồng của `release`: gọi nhiều lần phải an toàn (giống `ASREngine.release`)."""
+    """Hợp đồng của `release`: gọi nhiều lần phải an toàn, VÀ phải THẬT SỰ nhả model.
+
+    🔴 Nợ review Task 3 (F8): bản đầu của bài này chỉ gọi `release()` hai lần rồi hết —
+    KHÔNG một assert nào, nên `def release(self): pass` cũng XANH. Đó là pin giả: nó
+    không phân biệt được `release` thật với `release` rỗng, đúng loại lỗi mà
+    `test_mt_opus.py` đã ghi lại cho `OpusMtEngine` ("Test đó KHÔNG kiểm được gì về
+    `release()`... Nó xanh trên một `release()` rỗng").
+
+    Nay ghim ĐÚNG thứ `release` hứa: sau khi gọi, `_engine` phải là `None`. Đặt một
+    vật giả vào `_engine` thay vì nạp model thật — cùng hợp đồng, không tốn 2 s nạp
+    ONNX và không cần `rapidocr` có mặt.
+    """
     eng = RapidOCREngine()
+    eng._engine = object()          # gói giả: chỉ cần KHÁC None
+    assert eng._engine is not None, "phép kiểm vô nghĩa nếu chưa đặt gì"
     eng.release()
-    eng.release()
+    assert eng._engine is None, "release() phải THẬT SỰ nhả model, không chỉ không ném"
+    eng.release()                   # lần hai: no-op, không ném
+    assert eng._engine is None
 
 
 def test_khong_co_tep_thi_bao_loi_ro_rang(tmp_path):

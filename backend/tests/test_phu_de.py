@@ -12,7 +12,8 @@ from __future__ import annotations
 import pytest
 
 from app.domain.phu_de import (
-    Hop, gop_thanh_dong, loc_hinh_dang, loc_on_dinh, loc_theo_asr, tim_dai_phu_de,
+    DUNG_SAI_X, Hop, gop_thanh_dong, loc_hinh_dang, loc_on_dinh, loc_theo_asr,
+    tim_dai_phu_de,
 )
 
 CAO = 720
@@ -190,3 +191,67 @@ def test_gop_thanh_dong_danh_so_tang_dan_tu_khong():
     hops = [_hop(text=f"câu {k}", t=float(k)) for k in range(4)]
     segs = gop_thanh_dong(hops, fps=2.0)
     assert [s.i for s in segs] == list(range(len(segs))), [s.i for s in segs]
+
+
+# ───────────── Số đo trên dữ liệu THẬT (video 1249,237 s, 7864 hộp thô) ─────────────
+#
+# Hai bài dưới ghim hai phát hiện chỉ lộ ra khi chạy OCR thật, không lộ ra bằng fixture
+# tổng hợp. Số đo đầy đủ ở docstring `DUNG_SAI_X` và `tim_dai_phu_de`.
+
+
+def test_tim_dai_phu_de_khong_tra_toan_khung_khi_cum_that_hep():
+    """Cụm phụ đề DÀY 2 dải phải thắng cửa sổ RỘNG 15 dải rải rác.
+
+    Đây là lỗi ĐO ĐƯỢC trên video thật, và fixture tổng hợp không bắt được. Bản trước
+    chấm điểm bằng TỔNG số dòng, mà tổng ĐƠN ĐIỆU TĂNG theo bề rộng cửa sổ — nên
+    `DAY_DAI_TOI_DA` không còn là ràng buộc mà thành MỤC TIÊU, và cửa sổ luôn rộng nhất.
+    Đo được trên 7864 hộp thô: cửa sổ 15 dải từ dải 0 có tổng 1121, thắng cụm thật ở dải
+    86-87 (tổng 698), trả `y0=0,0000 y1=0,9986` = 100 % khung.
+
+    Fixture dưới đây dựng đúng hình dạng đó ở quy mô nhỏ: nhiều dòng RẢI RÁC ở nửa trên
+    (tổng lớn) cộng một cụm DÀY ở đáy (mật độ lớn). Chấm theo mật độ thì cụm đáy thắng.
+    """
+    hops = []
+    # Nửa trên: 60 dòng rải trên 12 dải liền nhau, mỗi dải 5 dòng.
+    for i in range(60):
+        dai = 10 + (i % 12)
+        hops.append(Hop(text=f"tren{i}", x0=100.0, y0=dai * 7.2 + 1,
+                        x1=200.0, y1=dai * 7.2 + 6, t=i * 0.5, diem=0.9))
+    # Đáy: 30 dòng dồn trong 1 dải (87) -> mật độ 30/1 = 30, cao hơn 60/12 = 5.
+    for i in range(30):
+        hops.append(Hop(text=f"duoi{i}", x0=100.0, y0=87 * 7.2 + 1,
+                        x1=200.0, y1=87 * 7.2 + 6, t=i * 0.5, diem=0.9))
+
+    y0, y1 = tim_dai_phu_de(hops, 720)
+    assert y0 >= 0.80, (
+        f"phải chọn cụm ĐÁY (dải 87), đo được y0={y0:.4f} — cửa sổ rộng đã thắng lại")
+    assert (y1 - y0) < 0.15, (
+        f"bề dày phải dưới DAY_DAI_TOI_DA, đo được {y1 - y0:.4f} ({y1 - y0:.0%} khung)")
+
+
+def test_dung_sai_x_nam_trong_khoang_trong_do_duoc():
+    """Ngưỡng `DUNG_SAI_X` phải nằm trong KHOẢNG TRỐNG giữa phụ đề và chữ rời.
+
+    ĐO ĐƯỢC trên 403 text lặp lại của video thật, sau khi lọc đúng dải: spread
+    `max(x0)-min(x0)` có 398 text (98,3 %) <= 12 px, rồi KHÔNG CÓ text nào trong
+    khoảng 12..31 px, rồi mới tới các mẩu menu ('12' 31 px, '驴肉' 60, '15' 63,
+    '20元' 91, '16' 98, '烤' 408, '元' 755).
+
+    Nên mọi ngưỡng trong [12, 31) cho CÙNG kết quả. Ghim CẢ HAI ĐẦU: dưới 12 sẽ bỏ oan
+    phụ đề thật (ở 4 px mất 22 text, ở 8 px mất 11), từ 31 trở lên sẽ giữ lại '12' như
+    một dòng đứng yên.
+    """
+    assert 12.0 <= DUNG_SAI_X < 31.0, (
+        f"DUNG_SAI_X={DUNG_SAI_X} ra ngoài khoảng trống đo được [12, 31): "
+        f"dưới 12 bỏ oan phụ đề thật, từ 31 giữ lại mẩu menu '12'")
+
+    def _hop(text, x0):
+        return Hop(text=text, x0=x0, y0=600.0, x1=x0 + 200, y1=640.0, t=0.0, diem=0.9)
+
+    # 12 px: phụ đề thật, phải GIỮ (đây là cạnh dưới của khoảng trống).
+    giu = loc_on_dinh([_hop("phu de that", 100.0), _hop("phu de that", 112.0)], fps=2.0)
+    assert len(giu) == 2, f"12 px phải coi là ĐỨNG YÊN, đo được {len(giu)}/2 hộp giữ"
+
+    # 31 px: mẩu menu '12', phải BỎ (cạnh trên của khoảng trống).
+    bo = loc_on_dinh([_hop("12", 100.0), _hop("12", 131.0)], fps=2.0)
+    assert bo == [], f"31 px phải coi là CHẠY, đo được {[h.text for h in bo]} còn lại"

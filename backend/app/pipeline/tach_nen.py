@@ -93,18 +93,35 @@ def tach_nen(audio: pathlib.Path, *, device: str = "cuda") -> np.ndarray:
 
     KHÔNG chuẩn hoá ở đây — `chuan_hoa_nen` làm việc đó, và tách riêng để test được phép kiểm
     "peak nền > 1,0" mà không cần GPU.
+
+    🔴 KIỂM SAMPLE RATE TRƯỚC KHI NẠP MODEL, và thứ tự này là yêu cầu chứ không phải phong
+    cách. Bản đầu dựng `Separator(...)` rồi mới kiểm `sr`, nên muốn test phép kiểm đó phải nạp
+    `htdemucs` thật (~1,6 GB, 3,14 s) — và vì `backend\\.venv` không có `demucs`, bài test phải
+    `importorskip`, tức nó KHÔNG BAO GIỜ chạy trên máy phát triển. Đo được: `1408 passed,
+    1 skipped` — cái `skipped` đúng là bài này, suốt từ lúc viết. Kiểm tham số trước khi nạp
+    model là thứ tự đúng cho CẢ mã lẫn test: sai đầu vào thì không có lý do gì tiêu 1,6 GB
+    VRAM để rồi ném.
     """
     import soundfile as sf
+
+    mau, sr = sf.read(str(audio), dtype="float32", always_2d=True)
+    if sr != SR_MODEL:
+        raise ValueError(
+            f"audio phải ở {SR_MODEL} Hz (sample rate của htdemucs), đo được {sr}. "
+            f"Resample TRƯỚC bằng `trich_audio_goc`, đừng truyền `sr=` vào model — nó không "
+            f"đổi sample rate đầu ra, chỉ đổi cách resample đầu vào.")
+
     import torch
     from demucs.api import Separator
 
     sep = Separator(model="htdemucs", device=device, progress=False)
-    mau, sr = sf.read(str(audio), dtype="float32", always_2d=True)
-    if sr != int(sep.samplerate):
-        raise ValueError(
-            f"audio phải ở {sep.samplerate} Hz (sample rate của htdemucs), đo được {sr}. "
-            f"Resample TRƯỚC bằng `trich_audio_goc`, đừng truyền `sr=` vào model — nó không "
-            f"đổi sample rate đầu ra, chỉ đổi cách resample đầu vào.")
+    # `sep.samplerate` là sự thật của MODEL, không phải của `SR_MODEL`. Kiểm lại SAU khi nạp:
+    # nếu demucs đổi sample rate ở bản sau thì đây là chỗ báo, thay vì lặng lẽ chia sai —
+    # đúng lỗi đã xảy ra một lần (ERRATA 5 ở docstring đầu tệp).
+    if int(sep.samplerate) != SR_MODEL:
+        raise RuntimeError(
+            f"htdemucs trả {sep.samplerate} Hz nhưng `SR_MODEL` ghim {SR_MODEL} Hz. "
+            f"Sửa hằng số `SR_MODEL` — mọi phép chia thời gian trong tệp này dựa vào nó.")
     _, ra = sep.separate_tensor(torch.from_numpy(mau.T.copy()), sr=sr)
     nen = sum(ra[k] for k in ("drums", "bass", "other")).numpy()
     return np.ascontiguousarray(nen, dtype=np.float32)

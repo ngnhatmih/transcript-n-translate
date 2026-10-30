@@ -51,6 +51,22 @@ DAI_MIN, DAI_MAX = 3, 40
 SO_CUM_SO_TOI_DA = 2
 
 #: Dung sai `x` khi coi hai khung là CÙNG một dòng đứng yên (pixel).
+#:
+#: ĐO ĐƯỢC trên 7864 hộp thô của video 1249,237 s, sau khi lọc đúng dải phụ đề
+#: (`tim_dai_phu_de` -> `y ∈ [0,87; 0,996]`): 403 text lặp lại, spread `max(x0)-min(x0)`:
+#:
+#:     <=  0 px:  96 text (23,7 %)      <=  8 px: 394 text (97,3 %)
+#:     <=  1 px: 244 text (60,2 %)      <= 12 px: 398 text (98,3 %)  <- hết cụm phụ đề
+#:     <=  2 px: 340 text (84,0 %)        31 px: 1 text  ('12')
+#:     <=  4 px: 383 text (94,6 %)        60 px: 1 text  ('驴肉')
+#:                                       755 px: 1 text  ('元')
+#:
+#: KHOẢNG TRỐNG **12 -> 31 px RỖNG HOÀN TOÀN**. Mọi ngưỡng trong `[12, 31)` cho CÙNG kết
+#: quả: bỏ đúng 7 text, giữ 398. Nên 24 nằm giữa một cao nguyên 19 px rộng, không phải một
+#: con số may mắn — ghim bằng `test_dung_sai_x_nam_trong_khoang_trong_do_duoc`.
+#:
+#: 7 text bị bỏ đều là mẩu menu giá / chữ rời, không phải phụ đề: '12', '驴肉', '15',
+#: '20元', '16', '烤', '元'. Hạ ngưỡng xuống 4 hoặc 8 sẽ bỏ OAN 15–22 dòng phụ đề thật.
 DUNG_SAI_X = 24.0
 
 
@@ -61,7 +77,20 @@ def tim_dai_phu_de(hops: list[Hop], chieu_cao: int) -> tuple[float, float]:
     ghim bằng `test_tim_dai_phu_de_tra_ti_le_khong_phai_pixel`.
 
     Chia khung thành 100 dải, đếm số DÒNG KHÁC NHAU có ĐỈNH nằm trong mỗi dải, rồi
-    lấy cụm dải liên tiếp DÀY NHẤT mà bề dày <= `DAY_DAI_TOI_DA`.
+    lấy cụm dải liên tiếp có MẬT ĐỘ cao nhất mà bề dày <= `DAY_DAI_TOI_DA`.
+
+    🔴 MẬT ĐỘ, KHÔNG PHẢI TỔNG (bản trước cộng dồn — SAI, đo được trên video thật).
+    Tổng các dải ĐƠN ĐIỆU TĂNG theo bề rộng cửa sổ, nên "tổng lớn nhất" luôn chọn cửa sổ
+    RỘNG NHẤT: `DAY_DAI_TOI_DA` không còn là ràng buộc mà thành MỤC TIÊU. Đo được trên
+    7864 hộp thô của video 1249,237 s: cửa sổ 15 dải từ dải 0 có tổng 1121 và THẮNG, trong
+    khi cụm phụ đề thật ở dải 86-87 chỉ có 698. Kết quả trả về `y0=0,0000 y1=0,9986` —
+    bề dày **719/720 pixel = 100 % khung**, tức không tìm ra dải nào cả.
+    Chấm theo `tổng / bề rộng` thì cụm thật thắng: dải 87 một mình có mật độ **509**, và
+    trả `y0=0,8700 y1=0,9958` — bề dày 90,6 pixel = 13 % khung, khớp `[627, 682]/720` đã
+    ghi ở `DAY_DAI_TOI_DA`.
+    Số đo từng dải (text khác nhau): 87 -> 509, 86 -> 189, 3 -> 254, 0 -> 138; phần còn
+    lại dưới 80. Một dải phụ đề dày 2 dải thắng một cửa sổ 15 dải rải rác — đó là điều
+    "mật độ" nói và "tổng" không nói được.
 
     🔴 ĐẾM DÒNG KHÁC NHAU, KHÔNG ĐẾM HỘP (bản đầu đếm hộp — SAI, đo được).
     Logo/wartermark là HẰNG SỐ theo thời gian: nó xuất hiện ở MỌI khung với cùng một
@@ -76,23 +105,20 @@ def tim_dai_phu_de(hops: list[Hop], chieu_cao: int) -> tuple[float, float]:
     Vì sao đúng: một logo lặp y nguyên ở 20 khung là MỘT dòng; 10 câu phụ đề khác nhau
     là MƯỜI dòng. Đếm dòng đo ĐÚNG lượng thông tin, đếm hộp đo số lần lặp.
 
-    🔴 LUẬT PHÁ HOÀ — hai khoá, và một ràng buộc bắt buộc:
+    🔴 LUẬT PHÁ HOÀ — mật độ là khoá, `x` là khoá phụ, và ràng buộc bắt buộc:
 
-    (1) NHIỀU HỘP NHẤT. Fixture của `test_tim_dai_phu_de_tra_ti_le_khong_phai_pixel` đặt
-    20 hộp phụ đề ở dải 87 và 20 hộp watermark ở dải 1 — hai cụm DÀY BẰNG NHAU, nên khoá
-    này một mình KHÔNG quyết được. Docstring cũ nói "watermark mỏng hơn nên không thắng"
-    là SAI với chính dữ liệu của bài test.
+    (1) MẬT ĐỘ CAO NHẤT (`tổng / bề rộng`). Không dùng tổng trần — xem vì sao ở trên.
 
     (2) CAO HƠN, khi (1) hoà. Lý do đo được, không phải khẩu vị: phụ đề nhúng đáy khung
     (y ∈ [627, 682] của 720); watermark/logo ở đỉnh (y ≤ 70). Không video nào đặt phụ đề
-    trên cao hơn logo.
+    trên cao hơn logo. Hoà mật độ là ca THẬT: `test_tim_dai_phu_de_tra_ti_le_khong_phai_pixel`
+    đặt 20 dòng phụ đề ở dải 87 và 20 dòng watermark ở dải 1 — hai cụm mật độ 20,00 như nhau.
 
     🔴 RÀNG BUỘC: cửa sổ phải BẮT ĐẦU ở một dải CÓ HỘP. Không có nó, cửa sổ rộng 15 dải
-    bắt đầu ở dải 0 (rỗng) phủ trọn cụm dải 1 nên tổng cũng bằng 20 và thắng ở lần lặp
-    cuối — trả `(0.00, 0.15)`, một dải rỗng. Đây là bản sửa của một bản sửa SAI: tôi từng
-    thêm khoá "HẸP NHẤT" để chặn đúng ca này, nhưng khoá đó phá khoá (1) — đo được, 30 hộp
-    phụ đề trải trên dải 87/88/91 thua 30 hộp logo dồn vào dải 1, trả `(0.02, 0.083)`.
-    Ràng buộc "bắt đầu ở dải có hộp" chặn cửa sổ rỗng mà KHÔNG đụng tới khoá (1).
+    bắt đầu ở một dải rỗng sẽ có mật độ thấp hơn (cùng tổng, chia nhiều dải hơn) — nên
+    ràng buộc này vẫn cần cho trường hợp bề rộng lớn hơn làm loãng mật độ. Nó KHÔNG chặn
+    được ca 100 % khung: dải 0 của video thật CÓ 138 text, nên cửa sổ từ dải 0 hợp lệ và
+    mật độ của nó (1121/15 = 74,7) vẫn thua 509 của dải 87.
     """
     if not hops or chieu_cao <= 0:
         return (0.0, 0.0)
@@ -105,8 +131,11 @@ def tim_dai_phu_de(hops: list[Hop], chieu_cao: int) -> tuple[float, float]:
     dem = [len(theo_dai.get(i, ())) for i in range(SO_DAI)]
 
     toi_da_dai = max(1, int(DAY_DAI_TOI_DA * SO_DAI))
-    tot_nhat, tot_nhat_dau, tot_nhat_dai = -1, 0, 0
-    # Hai khoá: (1) nhiều DÒNG nhất; (2) cao nhất khi hoà. Cộng ràng buộc `dem[dau] > 0`.
+    # Khoá (1) là MẬT ĐỘ, không phải tổng — xem docstring. Khoá (2) `dau > tot_nhat_dau`
+    # phá hoà theo hướng CAO HƠN, và chỉ chạy khi mật độ BẰNG NHAU thật (`==` trên float
+    # ở đây an toàn vì cả hai vế đều là `tong / dai` của số nguyên — cùng phép chia, cùng
+    # kết quả, không có tích luỹ sai số).
+    tot_nhat, tot_nhat_dau, tot_nhat_dai = -1.0, 0, 0
     for dau in range(SO_DAI):
         if dem[dau] == 0:
             continue          # cửa sổ phải bắt đầu ở dải CÓ hộp
@@ -114,12 +143,13 @@ def tim_dai_phu_de(hops: list[Hop], chieu_cao: int) -> tuple[float, float]:
             if dau + dai > SO_DAI:
                 break
             tong = sum(dem[dau:dau + dai])
+            mat_do = tong / dai
             tot_hon = (
-                tong > tot_nhat
-                or (tong == tot_nhat and dau > tot_nhat_dau)
+                mat_do > tot_nhat
+                or (mat_do == tot_nhat and dau > tot_nhat_dau)
             )
             if tot_hon:
-                tot_nhat, tot_nhat_dau, tot_nhat_dai = tong, dau, dai
+                tot_nhat, tot_nhat_dau, tot_nhat_dai = mat_do, dau, dai
     if tot_nhat <= 0:
         return (0.0, 0.0)
 
