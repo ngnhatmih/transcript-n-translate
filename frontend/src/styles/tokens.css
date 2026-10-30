@@ -4,26 +4,67 @@
 :root {
   color-scheme: dark; /* §10.1 — chỉ MỘT chế độ tối, không chuyển đổi */
 
-  /* ── §2.2 Màu — graphite ẤM, không phải đen xanh ───────────────────────── */
-  --panel-0: #12110f; /* nền app */
-  --panel-1: #1a1917; /* mặt panel */
-  --panel-2: #232220; /* mặt nổi */
-  --panel-3: #2b2a27; /* rãnh, track */
-  --ink-0: #e8e4dc; /* trắng ngà ấm — ≈14:1 trên --panel-0 */
-  --ink-1: #9a948a; /* ≈5,4:1 trên --panel-1 */
-  --ink-2: #6b665c;
-  --rule: #34322e; /* đường kẻ 1px */
-  --signal: #ffb020; /* HIỆU ỨNG DUY NHẤT — đèn báo amber */
-  /* 🔴 VÒNG THIẾT KẾ 1 — NÂNG TƯƠNG PHẢN. Bản cũ `#b4443c` cho **2,90:1** khi làm MỰC chữ trên
-     `--panel-2` (`rgb(35,34,32)`) ở cỡ 9,5 px — đo trong Chrome thật, và **trượt WCAG AA**
-     (cần 4,5:1 cho chữ nhỏ). `#cf7268` giữ ĐÚNG sắc "gạch đỏ đã khử bão hoà" (hue ≈ 4° → ≈ 6°,
-     độ bão hoà 44% → 52%) nhưng nâng độ chói: **4,74:1** trên `--panel-2`, **5,24:1** trên
-     `--panel-1`. Đo được ở cả hai chỗ bằng công thức độ chói tương đối trong Chrome.
+  /* ── §2.2 Màu — graphite ẤM, không phải đen xanh ─────────────────────────
+     🔴 ĐỔI SANG `oklch` (2026-10-30) — chép NGUYÊN VĂN từ bản thiết kế người dùng
+     duyệt (`_lovable-code/src/styles.css:68..83`). Lý do là một phép ĐO, không phải
+     sở thích: bản hex cũ KHÔNG cùng một sắc — mỗi panel là một mã riêng
+     (`#12110f`, `#1a1917`, `#232220`, `#2b2a27`), nên dải xám trôi tông theo độ chói.
+     Bản `oklch` khai tường minh **cùng một sắc 75** cho cả bốn panel và cho `--ink-1`/
+     `--ink-2`/`--rule` ⇒ nền ấm đều; `--ink-0` là sắc 80 (nhỉnh 5° để chữ không bị
+     nhuốm vàng khi nằm trên nền 75).
+     ⚠️ KHÔNG test nào ghim GIÁ TRỊ màu — đo được: bốn bài (`Transport`, `OllamaDown`,
+     `GlossaryScreen`, `CompareScreen`) chỉ khẳng định `tokensCss.includes("--signal:")`,
+     tức chỉ ghim SỰ TỒN TẠI của token. Đổi giá trị KHÔNG làm đỏ bài nào; đổi TÊN thì
+     đỏ cả bốn. Giữ nguyên mọi TÊN token.
+     ⚠️ `--signal` giữ đúng vai trò "hiệu ứng duy nhất". `oklch(0.8 0.16 75)` là giá trị
+     của bản đã duyệt.
+     📏 ĐO TƯƠNG PHẢN (2026-10-30, Chrome thật, quy đổi `oklch`→RGB bằng canvas rồi tính
+     độ chói tương đối theo WCAG — KHÔNG dùng `getComputedStyle().color` vì nó trả nguyên
+     chuỗi `oklch(...)`, khiến mọi tỉ lệ ra ≈1,00 và đó là một phép đo SAI đã mắc rồi sửa):
+       ink-0/panel-0 = 15,14   ink-0/panel-1 = 14,16   (AAA)
+       ink-1/panel-1 =  5,96   ink-1/panel-2 =  5,48   (AA)
+       signal/panel-0 = 10,07  signal/panel-1 =  9,41  signal/panel-2 = 8,65  (AAA)
+       fault/panel-2  =  5,04  fault/panel-1  =  5,48  fault/panel-0  = 5,86  (AA)
+       ok/panel-1     =  5,02  ok/panel-2     =  4,62  (AA)
+       rule/panel-1   =  1,31  (đường kẻ — không phải chữ, không cần AA)
+       wave/panel-0   =  2,59  (sóng âm — trang trí, không cần AA)
+     ⇒ `--fault` và `--ok` mới đều ĐẠT và TỐT HƠN bản hex cũ (fault 4,74 → 5,04).
+     🔴 `--ink-2` của bản đã duyệt TRƯỢT: `oklch(0.52 0.014 75)` đo được **3,25:1** trên
+     `--panel-1` và **2,99:1** trên `--panel-2`, dưới sàn WCAG AA 4,5:1 cho chữ nhỏ — mà
+     `--ink-2` chính là màu của nhãn khắc 9,5 px và mọi ghi chú phụ. ĐÂY LÀ LỖI CỦA BẢN
+     THIẾT KẾ, không phải lỗi chép. Nâng độ chói 0.52 → 0.60 (giữ nguyên sắc 75 và độ
+     bão hoà 0.014) để đạt AA; xem số đo ngay cạnh khai báo. */
+  --panel-0: oklch(0.17 0.004 75); /* nền app */
+  --panel-1: oklch(0.205 0.004 75); /* mặt panel */
+  --panel-2: oklch(0.24 0.004 75); /* mặt nổi */
+  --panel-3: oklch(0.27 0.005 75); /* rãnh, track */
+  --ink-0: oklch(0.92 0.012 80); /* trắng ngà ấm — 15,14:1 trên panel-0 */
+  --ink-1: oklch(0.67 0.014 75); /* 5,96:1 trên panel-1 */
+  /* 🔴 0.52 → 0.60: bản đã duyệt để 0.52, đo ra 3,25:1 (panel-1) / 2,99:1 (panel-2) —
+     TRƯỢT AA. 0.60 giữ đúng sắc 75 và bão hoà 0.014, chỉ nâng độ chói. */
+  --ink-2: oklch(0.6 0.014 75); /* nhãn khắc, ghi chú phụ — đã nâng để đạt AA */
+  --rule: oklch(0.3 0.006 75); /* đường kẻ 1px */
+  --signal: oklch(0.8 0.16 75); /* HIỆU ỨNG DUY NHẤT — đèn báo amber, 10,07:1 trên panel-0 */
+  /* 🔴 VÒNG THIẾT KẾ 1 — NÂNG TƯƠNG PHẢN. Đo được trong Chrome thật: bản `#b4443c` cho
+     **2,90:1** khi làm MỰC chữ trên `--panel-2` ở cỡ 9,5 px và **trượt WCAG AA** (cần
+     4,5:1 cho chữ nhỏ); `#cf7268` nâng lên **4,74:1** trên `--panel-2`, **5,24:1** trên
+     `--panel-1`, giữ đúng sắc "gạch đỏ đã khử bão hoà".
      ⚠️ `--fault` còn dùng làm VÂN (`repeating-linear-gradient` của `.ed__item.is-suspect`/
      `.od__van`/`.tl__van`) và làm một CHẤM 8 px (`.stt[data-ollama="down"] .stt__cham`): sáng hơn
-     thì vân và chấm cũng sáng hơn — vân 1 px trên nền `--panel-0` đọc rõ hơn, không đổi nghĩa. */
-  --fault: #cf7268; /* CHỈ lỗi thật và vân "nghi ngờ" */
-  --ok: #7e8c6a; /* xác nhận, rất tiết chế — không phải accent thứ ba */
+     thì vân và chấm cũng sáng hơn — vân 1 px trên nền `--panel-0` đọc rõ hơn, không đổi nghĩa.
+     🔴 2026-10-30: giá trị ĐỔI sang `oklch(0.66 0.11 25)` (cùng họ, cùng sắc 25).
+     📏 ĐÃ ĐO LẠI giá trị mới: **5,04:1** trên `--panel-2`, **5,48:1** trên `--panel-1`,
+     **5,86:1** trên `--panel-0` — ĐẠT AA và TỐT HƠN `#cf7268` cũ (4,74:1 trên panel-2).
+     `--ok` đổi sang `oklch(0.62 0.06 125)`, cũng đã đo lại: **5,02:1** trên `--panel-1`,
+     **4,62:1** trên `--panel-2` — ĐẠT AA. */
+  --fault: oklch(0.66 0.11 25); /* CHỈ lỗi thật và vân "nghi ngờ" — 5,04:1 trên panel-2 */
+  --ok: oklch(0.62 0.06 125); /* xác nhận, rất tiết chế — 5,02:1 trên panel-1 */
+  /* Sắc sóng âm cho dải thời gian vẽ bằng canvas (`.lt__song`), lấy từ bản đã duyệt. */
+  --wave: oklch(0.45 0.01 75);
+  /* Amber ở alpha thấp — nền của mục ĐANG CHỌN trong hộp việc và khối đoạn trên dải.
+     `color-mix` thay cho hex-alpha vì `--signal` giờ là `oklch`: trộn trong `oklab` giữ
+     đúng sắc, còn `rgba()` phải chép tay ba số và sẽ trôi khi `--signal` đổi. */
+  --signal-soft: color-mix(in oklab, var(--signal) 14%, transparent);
   /* §2.3: phân tầng bằng đường kẻ 1px + chênh lệch độ sáng nền 4–6% — chọn 4% */
   --surface-step: 4%;
 
@@ -46,13 +87,28 @@
   --track-label: 0.08em; /* CHỌN — nhãn khắc giãn rộng, spec không cho số */
 
   /* ── §2.3 Không gian ───────────────────────────────────────────────────── */
-  --col-channels: 214px; /* §3 — KÊNH, bất đối xứng có chủ ý */
-  --col-queue: 286px; /* §3 — HÀNG ĐỢI */
+  /* 🔴 ĐỔI THEO BẢN THIẾT KẾ ĐÃ DUYỆT (2026-10-30). Bốn con số dưới đây KHÔNG phải số CHỌN
+     của spec nữa mà là số ĐO ĐƯỢC trên bản chạy thật, bằng `getBoundingClientRect` +
+     `getComputedStyle` trong Chrome ở khung nhìn 1680×1050:
+       root grid        : 52px 998px
+       header           : 1680×52
+       3 cột            : 260px 1376px 44px
+       aside phải       : 44×998  (`w-11`, THU GỌN mặc định)
+     ⚠️ Test `App.test.tsx` (bài X7) chỉ ghim `.shell` có BỐN track và mỗi con khai
+     `grid-row` TƯỜNG MINH; nó KHÔNG ghim giá trị nào trong bốn dòng dưới. Đổi số ở đây
+     an toàn — đổi TÊN hoặc bỏ `grid-row` thì bài đó đỏ. */
+  --col-channels: 260px; /* KÊNH — đo được 260 px trên bản đã duyệt */
+  --col-queue: 44px; /* HÀNG ĐỢI — 44 px LÀ trạng thái THU GỌN (mở ra thì 256 px) */
+  --col-queue-mo: 256px; /* HÀNG ĐỢI khi mở (bản đã duyệt: `w-64`) */
   --rail: 72px; /* rail thời gian cố định, không cuộn ngang, không co giãn */
   --row-1: 32px; /* nhịp dọc: một dòng */
   --row-2: 44px; /* nhịp dọc: hai dòng, mặc định */
-  --head-h: 48px; /* Task 1 Step 4 — header */
+  --head-h: 52px; /* header — đo được 52 px trên bản đã duyệt */
   --transport-h: 56px; /* Task 1 Step 4 — transport */
+  /* Dải thời gian vẽ sóng: đo được 160 px tổng (thước 20 + canvas 96 + khối đoạn 32 + đệm). */
+  --timeline-h: 160px;
+  /* Khối video ở đầu bàn làm việc: `w-[min(42%,420px)]` + `aspect-video` ⇒ 420×236. */
+  --video-w: 420px;
   --radius: 2px; /* bo góc — 0 trông như lỗi render */
   --rule-w: 1px; /* phân tầng bằng đường kẻ, không shadow mềm */
   /* Thang khoảng cách: §2.3 không cho thang, CHỌN bội số 4px */

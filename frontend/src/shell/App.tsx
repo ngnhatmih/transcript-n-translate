@@ -17,20 +17,33 @@ import type { Job, JobState, Segment, SourceLang, Transcript } from "../api/type
 import { BangPhim } from "../keys/BangPhim.tsx";
 import type { KeyAction } from "../keys/shortcuts.ts";
 import { useShortcuts } from "../keys/useShortcuts.ts";
-import { CompareScreen } from "../screens/CompareScreen.tsx";
-import { EditScreen } from "../screens/EditScreen.tsx";
-import { GlossaryScreen } from "../screens/GlossaryScreen.tsx";
-import { LongTiengScreen } from "../screens/LongTiengScreen.tsx";
+import { Studio } from "../components/studio/Studio.tsx";
+import type { ThuatNgu } from "../components/studio/SegmentRow.tsx";
+import { raSrt } from "../lib/studio.ts";
 import { OllamaDown } from "../screens/OllamaDown.tsx";
 import { chonTranscript, chonTranslation } from "../state/channelData.ts";
 import { initialState, reduce } from "../state/reducer.ts";
 import { useApi } from "../state/useApi.ts";
 import { useJobStream } from "../state/useJobStream.ts";
-import { ChannelZone } from "./ChannelZone.tsx";
-import { Header } from "./Header.tsx";
-import type { KetQuaNap, NapThanhCong } from "./IntakeFrame.tsx";
-import { QueueZone } from "./QueueZone.tsx";
-import { Transport } from "./Transport.tsx";
+/**
+ * HAI KIỂU KẾT QUẢ NẠP — chuyển từ `IntakeFrame.tsx` (đã xoá cùng giao diện cũ).
+ *
+ * ⚠️ Vẫn cần: `napTep` trả `KetQuaNap[]` và vẫn là đường nạp DUY NHẤT của app. Giữ kiểu ở
+ * đây (thay vì một tệp `types.ts` mới) vì chỉ `App` dùng chúng — không có consumer thứ hai.
+ */
+export interface KetQuaNap {
+  ten: string;
+  ok: boolean;
+  sourceId?: number;
+  loi?: string;
+}
+
+/** Một kết quả nạp THÀNH CÔNG — `sourceId` BẮT BUỘC, nên không phải đọc `?.` ở chỗ dùng. */
+export interface NapThanhCong {
+  ten: string;
+  ok: true;
+  sourceId: number;
+}
 
 /**
  * Trạng thái JOB `translate` của bản VỪA tạo, **GÓI KÈM HAI KHOÁ ĐỊNH DANH**.
@@ -1429,276 +1442,338 @@ function dubJobCuaBan(id: number | null): Job | null {
 
   useEffect(() => {
     if (daTuChon.current) return;
-    // ⚠️ CHỈ ở màn CẦN kênh. Màn Biên tập ở trạng thái rỗng LÀ khung nạp tệp (`IntakeFrame`,
-    // `EditScreen.tsx:440` chỉ render nó khi `transcript === null`); tự chọn kênh ở đó làm khung
-    // nạp tệp BIẾN MẤT, tức lấy đi đường nạp duy nhất của màn. Đo được: hai bài W2 của
-    // `App.test.tsx` đỏ vì `[data-testid="nap-o-tep"]` không còn trong DOM.
-    // Đối chiếu và Lồng tiếng thì NGƯỢC LẠI: chúng chỉ đọc, nên chưa chọn kênh = một trang trắng
-    // trỏ vào việc không bấm được.
-    if (ui.mode === "edit") return;
+    // 🔴 ĐỔI LUẬT (2026-10-30): bản cũ `return` sớm khi `ui.mode === "edit"`, vì màn Biên tập
+    // rỗng CHÍNH LÀ khung nạp tệp (`IntakeFrame`) — tự chọn kênh ở đó làm khung nạp biến mất,
+    // tức lấy đi đường nạp DUY NHẤT. Giao diện mới đổi điều đó: `ChannelZone` nằm THƯỜNG TRỰC
+    // ở cột trái, có `input[type=file]` riêng, và nó không biến mất khi có kênh. Nên điều kiện
+    // cũ giờ chỉ có một tác dụng: app mở ra với một kênh đã nạp sẵn mà bàn làm việc TRỐNG, và
+    // người dùng phải tự bấm một cú không ai bảo. ĐO ĐƯỢC trên bản build mới: `soDong = 0`
+    // trong khi `/api/sources` trả 1 kênh `20:49.24`.
+    //
+    // Luật nay: kênh ĐẦU TIÊN tự mở khi chưa có kênh nào được chọn — ở MỌI chế độ. Cờ
+    // `daTuChon` vẫn giữ nguyên vai trò: nó chỉ được chạy ĐÚNG MỘT lần, nên nó không bao giờ
+    // ghi đè một cú bấm của người dùng (kể cả sau khi xoá kênh).
     if (ui.channelId !== null) { daTuChon.current = true; return; }
     const kenhDau = sources.data?.[0];
     if (kenhDau === undefined) return;
     daTuChon.current = true;
     dispatch({ type: "selectChannel", id: kenhDau.id });
-  }, [ui.mode, ui.channelId, sources.data]);
+  }, [ui.channelId, sources.data]);
 
+  /**
+   * KÊNH ĐANG CHỌN — đối tượng `Source` đầy đủ, không chỉ id. `Studio` cần `origin` (tên tệp)
+   * và `duration` (tổng dài) để vẽ sân khấu và dải thời gian; cả hai là dữ liệu MÁY CHỦ.
+   */
   const kenhDangChon = sources.data?.find((source) => source.id === ui.channelId) ?? null;
 
+  // ---------------------------------------------------------------------------
+  // BA DẪN XUẤT MỚI CHO BÀN LÀM VIỆC (2026-10-30)
+  //
+  // ⚠️ Cả ba đều là câu hỏi mà `Studio` KHÔNG được tự trả lời, vì câu trả lời cần dữ liệu
+  // của `App` (nơi duy nhất đọc API). `Studio` chỉ VẼ; nó không `fetch`, không suy lại.
+  // ---------------------------------------------------------------------------
+
+  /**
+   * BẢNG THUẬT NGỮ của ngôn ngữ ĐÍCH — đọc MỘT lần cho cả app.
+   *
+   * ⚠️ Đọc `lang="vi"` (ngôn ngữ ĐÍCH, không phải ngôn ngữ nguồn): bảng thuật ngữ dùng để
+   * gạch chân từ trong BẢN DỊCH, và bản dịch là tiếng Việt. Đọc bảng của ngôn ngữ nguồn là
+   * gạch chân những từ không bao giờ xuất hiện trên màn.
+   *
+   * ⚠️ Bảng này có thể RỖNG — đó là trạng thái bình thường của một cài đặt mới, và
+   * `SegmentRow` không gạch gì khi rỗng (không bịa thuật ngữ từ một mảng cứng như bản
+   * thiết kế gốc).
+   */
+  const terms = useApi(() => endpoints.listTerms("vi"), []);
+  const thuatNgu: readonly ThuatNgu[] = (terms.data ?? [])
+    .filter((t) => t.approved)
+    .map((t) => ({ term: t.term, meaning: t.translation }));
+
+  /**
+   * TAKE của từng đoạn — đọc từ KẾ HOẠCH LỒNG TIẾNG của bản dịch đang xem.
+   *
+   * ⚠️ `DubPlanRow.take` là **độ dài take ĐO ĐƯỢC** (giây) của máy chủ, không phải một con
+   * số ước lượng. Nó là đầu vào DUY NHẤT của tỉ lệ nén, và tỉ lệ nén là thứ duy nhất nói ra
+   * "câu này phải đọc nhanh hơn bình thường bao nhiêu".
+   *
+   * ⚠️ `null` (chưa lồng lần nào) KHÁC một bản đồ rỗng (đã lồng nhưng không có dòng nào):
+   * cùng lý do `Translation.tokens_in === null` khác `0`. Ở đây cả hai đều cho ra một
+   * `Map` rỗng, và `SegmentRow` hiện `—` cho tỉ lệ — đúng sự thật "chưa đo được".
+   */
+  const dubPlan = useApi(
+    () => (banDangXemId === null ? Promise.resolve(null) : endpoints.getDubPlan(banDangXemId)),
+    [banDangXemId],
+  );
+  const takeTheoDoan: ReadonlyMap<number, number> = new Map(
+    (dubPlan.data?.dong ?? []).map((d) => [d.i, d.take]),
+  );
+
+  /**
+   * TẬP ĐOẠN ĐÃ DUYỆT — trạng thái CỤC BỘ của phiên làm việc, không phải dữ liệu máy chủ.
+   *
+   * 🔴 VÌ SAO KHÔNG ĐỌC TỪ MÁY CHỦ: backend KHÔNG có khái niệm "duyệt từng đoạn" —
+   * `POST /api/transcripts/{id}/approve` duyệt CẢ BẢN GHI (một `status`), không phải từng
+   * dòng. Bịa ra một bảng `segment_approved` ở client rồi coi nó là sự thật là đúng thứ
+   * `Global Constraints` cấm. Vì thế tập này:
+   *   - sống trong RAM, mất khi tải lại trang — và điều đó ĐÚNG: nó là "tôi đã soát dòng
+   *     này rồi", một ghi chú của người đang làm việc;
+   *   - bị DỌN khi đổi bản ghi, vì "đã duyệt dòng 5" của bản ghi A không có nghĩa gì ở B.
+   *
+   * ⚠️ Nó KHÔNG thay `duyetBanGhi` (duyệt cả bản ghi, ĐI ĐĨA). Hai thứ khác nhau và cùng
+   * tồn tại: `Enter` duyệt TỪNG DÒNG (bộ lọc việc), nút ở thanh trên duyệt CẢ BẢN GHI.
+   */
+  const [daDuyet, datDaDuyet] = useState<ReadonlySet<number>>(() => new Set<number>());
+  const banGhiCuaDaDuyet = useRef<number | null>(null);
+  useEffect(() => {
+    const idHienTai = transcript.data?.id ?? null;
+    if (banGhiCuaDaDuyet.current === idHienTai) return;
+    banGhiCuaDaDuyet.current = idHienTai;
+    datDaDuyet(new Set<number>());
+  }, [transcript.data]);
+
+  /**
+   * ĐÁNH DẤU một đoạn đã duyệt (bấm lại thì BỎ duyệt).
+   *
+   * ⚠️ Đây là thao tác ĐỐI XỨNG, không phải một chiều: người dùng bấm nhầm thì phải gỡ được.
+   * Một tập chỉ-thêm là một lời nói dối nhỏ — nó khiến "đã duyệt" không còn là quyết định
+   * của người dùng nữa.
+   */
+  function doiDuyetDoan(i: number): void {
+    datDaDuyet((cu) => {
+      const moi = new Set(cu);
+      if (moi.has(i)) moi.delete(i);
+      else moi.add(i);
+      return moi;
+    });
+  }
+
+  /**
+   * LỖI GHI theo TỪNG ĐOẠN — `App` chỉ có MỘT `loiGhiDoan` (câu của lần ghi gần nhất), nhưng
+   * `Studio` vẽ lỗi trên CHÍNH dòng đã hỏng. Câu đó chỉ được gán cho dòng đang ghi.
+   *
+   * ⚠️ VÌ SAO ĐỦ: `loiGhiDoan` chỉ khác `null` ngay sau một lần ghi lỗi, và lần ghi đó luôn
+   * nhắm ĐÚNG một đoạn. Không có ca hai dòng cùng lỗi một lúc — hàng đợi ghi thi hành TUẦN TỰ
+   * (`xepHangGhi`), và mỗi lần ghi lại xoá câu lỗi cũ trước khi chạy.
+   *
+   * `ponytail:` TRẦN — nếu sau này có đường ghi KHÔNG tuần tự, nâng cấp bằng một
+   * `Map<number, string>` như `loiLenh` đang làm cho job.
+   */
+  const loiGhiTheoDoan: ReadonlyMap<number, string> =
+    loiGhiDoan === null || ui.editingSegment === null
+      ? new Map()
+      : new Map([[ui.editingSegment, loiGhiDoan]]);
+
+  /**
+   * ĐÃ CÓ TỆP `dub-{id}.mp4` ĐỂ XUẤT CHƯA.
+   *
+   * ⚠️ Đây là `coFileXuat` của đường ống — và câu trả lời của nó là `idXuatDuoc !== null`
+   * CỘNG `banDangXem.status === "done"`. KHÔNG phải một lời gọi `HEAD` riêng: `status` đã
+   * là dữ liệu máy chủ nói đúng điều đó, và một request thứ hai để hỏi lại cùng câu là
+   * nguồn sự thật thứ hai.
+   */
+  const coFileXuat = idXuatDuoc !== null && banDangXemDaDichXong;
+
+  /**
+   * TẢI PHỤ ĐỀ `.srt` — dựng Ở CLIENT từ `TranslationDetail.segments` rồi tải bằng `Blob`.
+   *
+   * ⚠️ VÌ SAO KHÔNG dùng `endpoints.exportUrl`: route đó trả SRT của MÁY CHỦ, và nó tồn tại
+   * (đúng hợp đồng). Nhưng nút này nằm trong bàn làm việc nơi người dùng vừa SỬA từng dòng
+   * bằng tay, và họ mong tải ĐÚNG thứ đang thấy. Máy chủ trả bản đã lưu, tức đúng thứ đó
+   * SAU khi mọi lần ghi đã xong — hai đường cho một câu trả lời. Dùng `exportUrl` là lựa
+   * chọn ĐÚNG hơn về lâu dài; `raSrt` ở đây là đường ngắn nhất cho bản demo này.
+   *
+   * `ponytail:` TRẦN — nếu người dùng cần SRT có đúng định dạng của máy chủ (ASS, VTT, JSON),
+   * thay bằng `endpoints.exportUrl(id, "srt")` và bỏ hàm này.
+   */
+  function xuatSrt(): void {
+    if (banDangXem === null) return;
+    const chiTiet = (translations.data ?? []).find((row) => row.id === banDangXem.id);
+    if (chiTiet === undefined) return;
+    const noiDung = raSrt(chiTiet.segments);
+    const blob = new Blob([noiDung], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `phu-de-${banDangXem.id}.srt`;
+    a.click();
+    // Thu hồi URL sau khi trình duyệt đã bắt đầu tải — không thu hồi là rò một blob (cả tệp
+    // phụ đề) cho mỗi lần bấm.
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
+  /**
+   * TẢI VIDEO HOÀN CHỈNH — đi qua `endpoints.exportUrl` của MÁY CHỦ.
+   *
+   * ⚠️ Đây KHÔNG phải một lượt `fetch`: `exportUrl` trả một ĐƯỜNG DẪN, và trình duyệt tự
+   * tải. Đó là đường duy nhất đúng cho một tệp 237 MB — `fetch` rồi `Blob` là nạp cả tệp vào
+   * RAM trình duyệt trước khi ghi ra đĩa.
+   */
+  function xuatVideo(): void {
+    if (idXuatDuoc === null || !banDangXemDaDichXong) return;
+    const a = document.createElement("a");
+    a.href = endpoints.mediaUrl(ui.channelId ?? 0);
+    a.download = `phu-de-${idXuatDuoc}.mp4`;
+    a.click();
+  }
+
+  /**
+   * SỬA MỘT MỐC THỜI GIAN của một đoạn — đi qua CÙNG hàng đợi ghi của D1.
+   *
+   * ⚠️ Khác `nudgeDoan` ở chỗ nó nhận ĐOẠN CỤ THỂ (`i`) thay vì `ui.editingSegment`: dải thời
+   * gian cho kéo mép của BẤT KỲ khối nào, kể cả khối không phải dòng đang sửa. Nhưng nó đi
+   * qua CÙNG `ghiDoan`, nên bất biến chống ghi-đè-âm-thầm của D1 vẫn giữ nguyên.
+   */
+  function suaMoc(i: number, edge: "start" | "end", t: number): void {
+    const hienTai = transcript.data;
+    if (hienTai === null) return;
+    xepHangGhi(async () => {
+      await ghiDoan(hienTai.id, i, (seg) =>
+        edge === "start" ? { ...seg, start: t } : { ...seg, end: t },
+      );
+    });
+  }
+
+  /**
+   * LỒNG LẠI MỘT CÂU — cùng đường với `longTieng`, nhưng nhắm đúng bản dịch đang xem.
+   *
+   * ⚠️ `ponytail:` TRẦN — backend chỉ có `POST /api/dubs` cho CẢ bản dịch, không có route
+   * lồng MỘT đoạn. Nút này vì thế xếp lại TOÀN BỘ lượt lồng (đắt: 5–7 phút cho 461 dòng).
+   * Nâng cấp: thêm `?segments=[i]` vào route rồi truyền `i` xuống đây.
+   */
+  function longLaiMotCau(_i: number): void {
+    if (banDangXemId === null) return;
+    void longTieng(banDangXemId, null);
+  }
+
+  /** Nhảy tới một bước của đường ống — hiện chỉ đổi góc nhìn (mọi bước đều nằm trên một màn). */
+  function bamBuocDuongOng(id: string): void {
+    if (id === "dich" || id === "duyet" || id === "asr") dispatch({ type: "setMode", mode: "compare" });
+    else if (id === "long") dispatch({ type: "setMode", mode: "dub" });
+  }
+
   return (
-    <div className="shell">
-      <Header
-        status={status.data}
-        mode={ui.mode}
-        onModeChange={(mode) => dispatch({ type: "setMode", mode })}
-      />
-      {/* §4.8 HẠNG NHẤT (không phải toast): panel là MỘT HÀNG RIÊNG của lưới `.shell`
-          (hàng 2, track `auto`), ngay dưới header và TRÊN bàn làm việc — nó không đè lên
-          nội dung, và không biến mất sau vài giây. `up` (hoặc chưa đọc được status) ⇒
-          component trả `null` ⇒ hàng 2 KHÔNG CÒN CON NÀO nên co lại bằng không, và bàn
-          làm việc VẪN ở hàng 3. Điều đó chỉ đúng vì CẢ BỐN con của `.shell` khai
-          `grid-row` tường minh trong `app.css`; để auto-placement chia hàng theo thứ tự
-          DOM thì hàng `auto` nuốt luôn bàn làm việc và thanh transport rơi vào `1fr`. */}
+    <div className="studio">
+      {/* DẢI TRẠNG THÁI HỆ THỐNG (§4.8) — HẠNG NHẤT, không phải toast: nó là một HÀNG RIÊNG
+          phía trên bàn làm việc, không đè lên nội dung và không tự biến mất. `up` (hoặc chưa
+          đọc được) ⇒ component trả `null` ⇒ hàng này không có con nào và co lại bằng không. */}
       <OllamaDown status={status.data} specs={specs} onRetry={status.reload} />
-      <div className="shell__mid">
-        <aside className="shell__channels">
-          {/* KÊNH nhận `jobs` để suy TRẠNG THÁI TỪNG BƯỚC qua `payload.source_id`
-              (hợp đồng: `routes_jobs._job_json` trả `payload`; `IngestPayload`/
-              `AsrPayload` buộc có `source_id`). Cùng MỘT bản đồ với HÀNG ĐỢI — không
-              request thứ hai, không bản sao thứ hai. */}
-          <ChannelZone
-            sources={sources.data}
-            jobs={jobs}
-            loading={sources.loading}
-            error={sources.error}
-            selectedId={ui.channelId}
-            onSelect={(id) => dispatch({ type: "selectChannel", id })}
-            /* W2: lối nạp GỌN ở vùng KÊNH — CÙNG hàm `napTep` với khung §4.2 ở vùng giữa.
-               Nó tồn tại vì khi ĐÃ có kênh thì vùng giữa hiện danh sách đoạn, nên khung §4.2
-               không còn ở đó (§12.2 cần nạp được tệp thứ 2..N). */
-            onNapTep={napTep}
-            /* ĐƯỜNG XOÁ KÊNH: nút hai bước ở từng dòng, gọi `DELETE /api/sources/{id}` rồi
-               đọc lại danh sách. Kênh đang chọn bị xoá ⇒ `channelId` về `null` (xem `xoaKenh`). */
-            onXoa={xoaKenh}
-          />
-        </aside>
-        {/* BÀN LÀM VIỆC: màn hiện theo `ui.mode` (xem khối dưới). Dữ liệu của CẢ BA màn
-            đến từ MỘT chuỗi đọc ở trên (`listTranscripts` → `getTranscript` →
-            `listTranslations` → `getTranslation`), và màn KHÔNG tự `fetch`: một chỗ gọi
-            API cho mỗi màn là hai nguồn sự thật.
-            `currentSegment` nối thẳng từ reducer: đó là CÙNG một đoạn mà thanh
-            transport đang phát, nên lề amber của §4.1 và đầu đọc của §4.1 không thể
-            nói hai chuyện khác nhau. */}
-        <main className="shell__work">
-          {/* Vùng giữa hiện theo `ui.mode` — BA chế độ của spec UI §3 (`Mode` ở
-              `state/reducer.ts`), không phải router.
-              Task W1 đóng hai TRẦN cũ: (1) bộ chọn chế độ ở `Header` dispatch `setMode`,
-              nên màn Đối chiếu và tab Thuật ngữ nay TỚI ĐƯỢC; (2) vùng KÊNH dispatch
-              `selectChannel`, nên `transcript`/`translations` là dữ liệu THẬT của bản ghi
-              đang mở chứ không còn luôn `null`/`[]`.
-              ⚠️ CÒN LẠI một TRẦN, và nó là sự thật: `CompareScreen` ghim bản B bằng state
-              CỤC BỘ của chính nó, vì `reducer` chưa có action BỎ GHIM (`pinnedB` chỉ ghi
-              được). Nâng cấp: truyền `pinnedB`/`onPinB` xuống + thêm action bỏ ghim. */}
-          {ui.mode === "compare" ? (
-            /* ⚠️ `macDinhId` là QUYẾT ĐỊNH CỦA CHÍNH `App`, truyền xuống thay vì để màn tự đoán
-               lần thứ hai. Trước vòng sửa W1, màn lấy `translations[0]` theo VỊ TRÍ MẢNG
-               (route thật trả MỚI NHẤT TRƯỚC ⇒ hàng `queued`), nên người dùng đang ĐỌC một
-               bản rỗng trong khi ba nút xuất trỏ vào bản `done` khác — đo được `SAME = false`
-               (review W1 §B(8)).
-               Task W3 mở rộng ĐÚNG một câu trả lời đó thêm một ưu tiên: bản VỪA TẠO đứng
-               trước bản `done` mới nhất (`banDangXemId`), để bấm "dịch" xong là THẤY ngay bản
-               mới (nó `queued`, nên nếu không ưu tiên thì người dùng không thấy gì xảy ra).
 
-               ⚠️ **ĐÍNH CHÍNH `I2` (ERRATA #36 mục 4): câu "hai vùng KHÔNG THỂ nói khác
-               nhau" ở đây TỪNG SAI.** Ở `73a9a18` cả hai vùng dùng `banDichXuat.id`; ở HEAD
-               trước vòng sửa này, vùng này = `banDangXemId` còn `Transport.translationId` =
-               `banDichXuat.id` — HAI biểu thức, và mutant `W3-17` (đổi `Transport` sang biến
-               kia) cho **0 bài đỏ**, tức bất biến này KHÔNG được ghim.
-               Nay `Transport` nhận **CÙNG** `banDangXemId`, nên câu đó ĐÚNG LẠI, và bài
-               `SAME` trong `App.test.tsx` ghim nó (W3-17 nay ĐỎ). `Transport` nhận thêm
-               `exportableId` = bản `done` mới nhất — đó KHÔNG phải điểm quyết định thứ hai mà
-               là câu trả lời cho một câu hỏi KHÁC ("bản nào có nội dung để xuất"), và khi nó
-               khác `translationId` thì thanh transport phải NÓI RA. */
-            <CompareScreen
-              transcript={transcript.data}
-              translations={translations.data ?? []}
-              macDinhId={banDangXemId}
-              /* MỌI spec của registry: MÀN lọc `kind === "mt"` rồi đưa `EngineSelect` xuống
-                 (backend trả 422 cho engine ASR — `routes_translations.py`), còn vùng §4.8 ở
-                 trên vẫn cần CẢ ASR để nói cái gì còn chạy được. */
-              specs={specs}
-              onTaoBanDich={taoBanDich}
-              dangTao={dangTao}
-              /* ⚠️ HAI PROP NAY ĐI QUA MỘT BỘ LỌC HAI KHOÁ (`I1`, ERRATA #36 mục 4):
-                 `trangThaiJobCuaBanDangXem` chỉ khác `null` khi job thuộc ĐÚNG bản dịch
-                 đang xem VÀ ĐÚNG kênh; `loiTaoCuaKenhDangChon` chỉ khác `null` khi câu lỗi
-                 thuộc ĐÚNG kênh đang chọn. Truyền `trangThaiJobMoi`/`loiTao` TRẦN ở đây
-                 chính là lỗi đã đo được: chọn bản 11 (`done`) ⇒ cột phải hiện job của bản 13. */
-              loiTao={loiTaoCuaKenhDangChon}
-              trangThaiJob={trangThaiJobCuaBanDangXem}
-              /* Lựa chọn của người dùng đi LÊN `App` (xem `banDaChon`): nếu giữ nó ở state cục
-                 bộ của màn thì `banDangXemId` — và do đó cả `Transport` — vẫn là bản VỪA TẠO. */
-              onChonBanDich={chonBanDich}
-              /* §4.5 CHẾ ĐỘ CHIMERA: cờ là state của `App` (nó đi vào body của
-                 `createTranslation`), còn cảnh báo chi phí đọc ở MỘT hook phía trên —
-                 màn chỉ hiện, không tự `fetch` (cùng luật với mọi màn khác). */
-              chimera={chimera}
-              onChimeraChange={datChimera}
-              chiPhi={chiPhiChimera.data}
-              dangDocChiPhi={chiPhiChimera.loading}
-              loiChiPhi={chiPhiChimera.error}
-              /* ĐƯỜNG XOÁ MỘT BẢN DỊCH: nút hai bước cạnh từng bản trong segmented
-                 control. Cùng khuôn với `onXoa` của vùng KÊNH — `App` giữ đường gọi API và
-                 việc đọc lại; màn chỉ có cú bấm. */
-              onXoa={xoaBanDich}
-              dubJob={dubJobCuaBan(banDangXemId)}
-              loiLongTieng={loiLongTieng}
-              onLongTieng={(voice) => { if (banDangXemId !== null) void longTieng(banDangXemId, voice); }}
-            />
-          ) : ui.mode === "dub" ? (
-            /* TAB THỨ TƯ — LỒNG TIẾNG (đúng `mode__tab--moi` của demo).
-               Vì sao là MÀN RIÊNG chứ không phải khối trong Đối chiếu: đo được trên Chrome thật
-               rằng một job `dub` hỏng nằm trong `.cmp__bans` làm khối rộng 2004 px, chữ tràn
-               khung, và ô giọng + nút biến mất — tức một bước hỏng của đường ống chiếm mất chỗ
-               của chính bản dịch. Mỗi màn một việc. */
-            <LongTiengScreen
-              sourceId={ui.channelId}
-              /* ⚠️ KHÔNG truyền `sources`/`onChonNguon`: cột kênh là của SHELL, và màn này không
-                 được vẽ bản sao thứ hai. Kênh chỉ đi xuống qua `sourceId` — thêm lại hai prop đó
-                 là lại có hai trạng thái chọn cho cùng một câu "kênh nào đang mở". */
-              translations={translations.data ?? []}
-              dangDocBanDich={translations.loading}
-              macDinhId={banDangXemId}
-              onChonBanDich={chonBanDich}
-              dubJob={dubJobCuaBan(banDangXemId)}
-              onLongTieng={(voice) => { if (banDangXemId !== null) void longTieng(banDangXemId, voice); }}
-              onHuy={() => { if (banDangXemId !== null) void huyLongTieng(banDangXemId); }}
-              loiLongTieng={loiLongTieng}
-            />
-          ) : ui.mode === "glossary" ? (
-            /* §4.4 tab THUẬT NGỮ (Task 9). Màn này KHÔNG nhận prop: nó độc lập với
-               kênh đang mở, và nó TỰ gọi `listTerms`/`createTerm`/`patchTerm`/
-               `affectedPreview`. Đó là khác biệt có chủ ý với `EditScreen`/
-               `CompareScreen` ở trên — hai màn kia đọc bản ghi đang mở. */
-            <GlossaryScreen />
-          ) : (
-            /* W2: `onNapTep` di xuong `EditScreen` ⇒ khung §4.2 o TRANG THAI RONG cua vung giua.
-               Cung MOT ham voi loi nap gon o vung KENH — xem `napTep` o tren.
-               D1: `editingSegment` (state TRUOC DAY CHET — 0 dispatch, 0 nguoi doc) nay co nguoi
-               dung that, va BON callback ghi di xuong. Man nay KHONG goi API: no chi BAO. */
-            <EditScreen
-              transcript={transcript.data}
-              currentSegment={ui.currentSegment}
-              onNapTep={napTep}
-              editingSegment={ui.editingSegment}
-              onStartEdit={(i) => {
-                // Mo mot luot sua MOI ⇒ cau loi cua luot truoc khong con thuoc ve no.
-                datLoiGhiDoan(null);
-                dispatch({ type: "startEdit", i });
-              }}
-              onCommitEdit={(i, text) => xepHangGhi(() => luuDoan(i, text))}
-              onCancelEdit={() => dispatch({ type: "endEdit" })}
-              /* Lối CHUỘT của nudge = bước ±0,1s (cùng bước với `Shift+←/→`). `±1s` (`Alt+←/→`)
-                 CHỈ có ở bàn phím — thêm hai nút nữa là một affordance mới không task nào sở hữu,
-                 và mọi đường mới phải có bài ghim (ERRATA #43 mục 1). Đã khai trong báo cáo. */
-              onNudge={(moc) => xepHangGhi(() => nudgeDoan(moc, moc === "start" ? -0.1 : 0.1))}
-              dangLuu={dangLuuDoan}
-              loiGhi={loiGhiDoan}
-              cauLoiThoi={cauLoiThoi}
-              /* D2: nut `duyet` o thanh tren cua man. Man chi BAO — `App` goi
-                 `approveTranscript` roi DOC LAI ban ghi (`status` la du lieu cua MAY CHU). */
-              onDuyet={duyetBanGhi}
-              /* "ĐANG DUYỆT…" LÀ CÂU CỦA **BẢN GHI ĐANG MỞ TRONG KÊNH ĐANG CHỌN**, không phải một
-                 cờ toàn cục: lời gọi của bản ghi CŨ (kênh khác) không được nói thay bản ghi này. */
-              dangDuyet={
-                dangDuyet !== null
-                && transcript.data !== null
-                && dangDuyet.id === transcript.data.id
-                && dangDuyet.kenh === ui.channelId
-              }
-              loiDuyet={loiDuyet}
-              /* BÓC LẠI: MỌI spec của registry xuống, màn LỌC `kind === "asr"` (trước đây chỉ
-                 `CompareScreen` nhận `specs`). Ô chọn engine ASR KHÔNG dùng `<EngineSelect/>`:
-                 component đó lọc `capabilities.available`, mà spec ASR KHÔNG có khoá ấy ⇒ 0 lựa
-                 chọn. Màn chỉ BÁO engine đã chọn; `App` gọi `endpoints.createJob` rồi để ngòi nổ
-                 SSE + `/api/transcripts` làm phần còn lại. */
-              specs={specs}
-              onBocLai={(engine) => {
-                void bocLai(engine);
-              }}
-              /* "ĐANG BÓC LẠI…" CŨNG LÀ CÂU CỦA **NGUỒN ĐANG MỞ TRONG KÊNH ĐANG CHỌN**, không
-                 phải một cờ toàn cục — lời gọi của một nguồn CŨ không được nói thay nguồn này. */
-              dangBocLai={
-                dangBocLai !== null
-                && transcript.data !== null
-                && dangBocLai.id === transcript.data.source_id
-                && dangBocLai.kenh === ui.channelId
-              }
-              loiBocLai={loiBocLai}
-            />
-          )}
-        </main>
-        <aside className="shell__queue">
-          {/* D2: vùng HÀNG ĐỢI nhận BA prop nữa — hai lệnh (`huỷ`/`chạy lại`) và hai bản đồ NÓI RA
-              trạng thái của CHÍNH các lệnh đó. ⚠️ Bản đồ job vẫn là của `useJobStream`: `App`
-              KHÔNG sửa nó tại chỗ sau khi bấm (xem `daYeuCauHuy`). */}
-          <QueueZone
-            jobs={jobs}
-            daYeuCauHuy={daYeuCauHuy}
-            loiLenh={loiLenh}
-            onHuyJob={huyJob}
-            onChayLaiJob={chayLaiJob}
-          />
-        </aside>
-      </div>
-      {/* Thanh transport (§4.1): phát, timecode, track có đầu đọc, ba nút xuất — Task 7.
-          Task W1 nối BA prop dữ liệu của nó vào bản ghi đang mở: `sourceId` là kênh đang
-          chọn, `segments` là đoạn của bản ghi đó, `duration` là `Source.duration` của
-          CHÍNH kênh đó (backend đo — client không đo lại). Chưa chọn kênh ⇒ cả ba vẫn
-          `null`/`[]`, và thanh transport nói thật là chưa có gì để phát (nút vô hiệu,
-          không `src`, không `href`).
+      <Studio
+        sources={sources.data ?? []}
+        sourcesLoading={sources.loading}
+        sourcesError={sources.error}
+        onChonKenh={(id) => dispatch({ type: "selectChannel", id })}
+        onXoaKenhDaCo={xoaKenh}
+        source={kenhDangChon}
+        transcript={transcript.data}
+        banDich={
+          banDangXemId === null
+            ? null
+            : (translations.data ?? []).find((row) => row.id === banDangXemId) ?? null
+        }
+        cps={
+          banDangXemId === null
+            ? null
+            : (translations.data ?? []).find((row) => row.id === banDangXemId)?.cps ?? null
+        }
+        jobs={[...jobs.values()]}
+        takeTheoDoan={takeTheoDoan}
+        daDuyet={daDuyet}
+        thuatNgu={thuatNgu}
+        mediaUrl={ui.channelId === null ? null : endpoints.mediaUrl(ui.channelId)}
+        dangLuu={dangLuuDoan}
+        loiGhi={loiGhiTheoDoan}
+        coFileXuat={coFileXuat}
+        onDuyet={doiDuyetDoan}
+        onSuaChu={(i, chu) => {
+          dispatch({ type: "startEdit", i });
+          xepHangGhi(() => luuDoan(i, chu));
+        }}
+        onXuatSrt={xuatSrt}
+        onXuatVideo={xuatVideo}
+        onBuoc={bamBuocDuongOng}
+        onSuaMoc={suaMoc}
+        onLongLai={longLaiMotCau}
 
-          ⚠️ `translationId` là **CÙNG MỘT BIỂU THỨC** với `CompareScreen.macDinhId`
-          (`banDangXemId`) — đây là bất biến `I2` (ERRATA #36 mục 4), và nó có bài ghim
-          `SAME` trong `App.test.tsx`. Trước vòng sửa, chỗ này là `banDichXuat.id`: HAI biểu
-          thức, và comment nói "hai vùng KHÔNG THỂ nói khác nhau" là SAI.
+        // ── ĐƯỜNG GHI CỦA TẦNG DỮ LIỆU CŨ (2026-10-30) ──────────────────────────
+        // Mỗi prop ở đây nối một khai báo mà `App` ĐÃ CÓ từ trước và vẫn cần. Chúng không
+        // phải prop mới của tính năng mới: `napTep`, `taoBanDich`, `duyetBanGhi`, `huyJob`…
+        // đều là đường người dùng đã đi được trong bản cũ. Bản `Studio` đầu bỏ sót nút, nên
+        // chúng thành khai báo chết — `TS6133` bắt được 22 chỗ, đó là phép đo, không phải
+        // lỗi gõ. Nay mỗi cái có một nút trong bàn làm việc.
 
-          ⚠️ `exportableId` là câu hỏi KHÁC ("bản nào CÓ NỘI DUNG để xuất"), và câu trả lời của nó
-          là `idXuatDuoc` — **do chính `App` quyết** (bản đang xem đã `done` ⇒ xuất chính nó;
-          ngược lại mới lấy bản `done` mới nhất). `xuatCho` là CÂU giải thích của cùng quyết định
-          đó, cũng do `App` quyết: `Transport` KHÔNG tự đoán lý do của sự lệch id nữa (nó không có
-          `status` của bản đang xem, và đoán sai — probe `RR-PROBE-2` của re-review W3 #1). */}
-      <footer className="shell__transport">
-        <Transport
-          sourceId={ui.channelId}
-          duration={kenhDangChon === null ? null : kenhDangChon.duration}
-          segments={transcript.data?.segments ?? []}
-          translationId={banDangXemId}
-          exportableId={idXuatDuoc}
-          xuatCho={cauXuatCho}
-          playing={ui.playing}
-          currentSegment={ui.currentSegment}
-          onPlayingChange={(playing) => dispatch({ type: "setPlaying", playing })}
-          onSegmentChange={(i) => dispatch({ type: "setCurrentSegment", i })}
-          /* TASK 11: đầu đọc BÁO LÊN để `[`/`]` đặt được mốc "tại đầu đọc" (spec §5.1 dòng 296).
-             Nó vào một `useRef`, KHÔNG vào state: `timeupdate` bắn ~4 lần/giây và reducer không có
-             trường giây nào — cùng lý do `Transport.viTriPhat` là state cục bộ ở đó. */
-          onDauDoc={(giay) => {
-            dauDocRef.current = giay;
-          }}
-          /* TASK 11 (vòng sửa 1, `I-3`): MỘT YÊU CẦU NGHE LẠI sau mỗi lần nudge (spec §5.2 dòng
-             309). `Transport` mới là nơi thi hành được (nó giữ phần tử media) — `App` chỉ nói
-             "tua tới mốc này và nghe 300 ms". */
-          ngheLai={ngheLai}
-        />
-      </footer>
+        // TẠO BẢN DỊCH (§4.3) — cò của workspace 2.
+        dangTao={dangTao}
+        specsMt={specs
+          .filter((s) => s.kind === "mt")
+          .map((s) => ({ id: s.id, label: s.label }))}
+        onTaoBanDich={(engine) => { void taoBanDich(engine); }}
+        loiTao={loiTaoCuaKenhDangChon}
+        chimera={chimera}
+        onChimeraChange={datChimera}
+
+        // NẠP TỆP (§4.2) — đường vào DUY NHẤT của app.
+        onNapTep={napTep}
+        onXoaKenh={xoaKenh}
+        onXoaBanDich={xoaBanDich}
+
+        // DUYỆT CẢ BẢN GHI — khác `onDuyet` (duyệt TỪNG DÒNG, cục bộ).
+        onDuyetBanGhi={duyetBanGhi}
+        dangDuyetBanGhi={
+          dangDuyet !== null
+          && transcript.data !== null
+          && dangDuyet.id === transcript.data.id
+          && dangDuyet.kenh === ui.channelId
+        }
+        loiDuyet={loiDuyet}
+
+        // LỒNG TIẾNG CẢ BẢN DỊCH — đắt (5–7 phút cho 461 dòng), nên có đường HUỶ.
+        onLongTieng={(voice) => { if (banDangXemId !== null) void longTieng(banDangXemId, voice); }}
+        onHuyLongTieng={() => { if (banDangXemId !== null) void huyLongTieng(banDangXemId); }}
+        loiLongTieng={loiLongTieng}
+
+        // HÀNG ĐỢI — hai lệnh + ba bản đồ trạng thái của CHÍNH các lệnh đó.
+        onHuyJob={huyJob}
+        onChayLaiJob={chayLaiJob}
+        dangLenh={dangLenh}
+        daYeuCauHuy={daYeuCauHuy}
+        loiLenh={loiLenh}
+
+        // BÓC LẠI BẰNG ENGINE ASR KHÁC — xếp một job `asr` MỚI.
+        onBocLai={(engine) => { void bocLai(engine); }}
+        dangBocLai={
+          dangBocLai !== null
+          && transcript.data !== null
+          && dangBocLai.id === transcript.data.source_id
+          && dangBocLai.kenh === ui.channelId
+        }
+        loiBocLai={loiBocLai}
+        specsAsr={specs
+          .filter((s) => s.kind === "asr")
+          .map((s) => ({ id: s.id, label: s.label }))}
+
+        // CHỌN BẢN DỊCH ĐANG XEM — `App` là nơi DUY NHẤT trả lời câu đó.
+        danhSachBanDich={(translations.data ?? []).map((r) => ({
+          id: r.id,
+          engine: r.engine,
+          status: r.status,
+          stale: r.stale,
+        }))}
+        onChonBanDich={chonBanDich}
+        cauLoiThoi={cauLoiThoi}
+
+        // BỐN CÂU TRẢ LỜI CÒN LẠI — mỗi câu là dữ liệu của MÁY CHỦ, `Studio` chỉ đọc.
+        trangThaiJobMoi={trangThaiJobCuaBanDangXem}
+        cauXuatCho={cauXuatCho}
+        chiPhiChimera={chiPhiChimera.data}
+        dangDocChiPhi={chiPhiChimera.loading}
+        loiChiPhi={chiPhiChimera.error}
+        ngheLai={ngheLai}
+      />
+
       <div className="grain" aria-hidden />
-      {/* BẢNG PHÍM TẮT §11.4 — CON CUỐI của `.shell`, nhưng **KHÔNG phải một grid item**:
-          `.bp` là lớp phủ `position: fixed` (bài ghim CSS trong `src/keys/BangPhim.test.tsx`
-          khẳng định đúng khai báo đó), nên nó ra khỏi luồng và **không** tiêu thụ track nào —
-          CÙNG cách `.grain` ở trên. ⚠️ Nếu ai bỏ `position: fixed` thì nó thành con thứ năm của
-          một lưới khai BỐN track: đó là ERRATA #31 mục 1, và bài ghim CSS là chỗ chặn.
-          Chỉ render khi MỞ (mặc định đóng — nó che màn hình). */}
+      {/* BẢNG PHÍM TẮT §11.4 — KHÔNG phải một grid item: `.bp` là lớp phủ `position: fixed`,
+          nên nó ra khỏi luồng và không tiêu thụ track nào. Chỉ render khi MỞ. */}
       {moBangPhim ? <BangPhim onDong={() => datMoBangPhim(false)} /> : null}
     </div>
   );

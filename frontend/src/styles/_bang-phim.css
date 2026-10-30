@@ -1,0 +1,122 @@
+/* ═══ BẢNG PHÍM TẮT §11.4 (`.bp`) ═════════════════════════════════════════════════════
+   🔴 TỆP NÀY TỒN TẠI VÌ MỘT LỖ HỔNG ĐO ĐƯỢC (2026-10-30): khi `app.css` (3 096 dòng) bị
+   xoá cùng bốn màn cũ, MỌI luật `.bp*` biến mất — nhưng `BangPhim.tsx` vẫn render và
+   `BangPhim.test.tsx` vẫn ghim "mọi lớp `bp*` trong DOM phải có LUẬT". Phép đếm sau khi
+   xoá: `Select-String '^\.bp' _studio.css,_studio-phan2.css,_duong-ong.css` = **0**.
+   Tức bảng phím tắt rơi về chữ trần của trình duyệt: không lớp phủ, không `z-index`, danh
+   sách có dấu đầu dòng. Đó là lý do tệp này ra đời, không phải để làm đẹp.
+
+   📏 SỐ ĐO giữ nguyên từ bản cũ (spec UI §11.4 + đo trên Chrome thật):
+        lớp phủ    : `position: fixed`, `inset: 0`, `z-index: 3` (TRÊN `.grain` = 1)
+        khung      : 720px rộng tối đa, `--panel-1`, viền 1px `--rule`, radius 2px
+        mỗi hàng   : lưới `120px 1fr auto`, pad 6px 12px, viền dưới 1px
+        tổ hợp phím: mono, `--signal`
+   ⚠️ `.bp` PHẢI `position: fixed`: nó là CON CUỐI của `.studio` (một lưới khai HAI hàng),
+   nên nếu nó thành phần tử trong luồng thì nó tạo thêm một hàng và đẩy bố cục — đúng lớp
+   lỗi ERRATA #31 mục 1. Bài ghim CSS trong `BangPhim.test.tsx` canh đúng khai báo này.
+   ═══════════════════════════════════════════════════════════════════════════════════ */
+
+.bp {
+  position: fixed;
+  inset: 0;
+  z-index: 3;
+  display: grid;
+  place-items: center;
+  padding: var(--sp-4);
+  background: color-mix(in oklab, var(--panel-0) 78%, transparent);
+  backdrop-filter: blur(2px);
+}
+
+.bp__khung {
+  width: 720px;
+  max-width: 94vw;
+  max-height: 86vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: var(--rule-w) solid var(--rule);
+  border-radius: var(--radius);
+  background: var(--panel-1);
+  box-shadow: 0 16px 48px rgb(0 0 0 / 55%);
+}
+
+.bp__dau {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-4);
+  border-bottom: var(--rule-w) solid var(--rule);
+}
+
+.bp__tieu-de {
+  margin: 0;
+  font-family: var(--font-label);
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  font-weight: 600;
+  color: var(--ink-0);
+}
+
+.bp__dong-nut {
+  appearance: none;
+  padding: 2px 8px;
+  border: var(--rule-w) solid var(--rule);
+  border-radius: var(--radius);
+  background: none;
+  color: var(--ink-1);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+  transition: border-color var(--dur-1) var(--ease-1), color var(--dur-1) var(--ease-1);
+}
+
+.bp__dong-nut:hover {
+  border-color: var(--ink-1);
+  color: var(--ink-0);
+}
+
+/* RESET `<ul>` — thiếu reset thì trình duyệt vẽ dấu đầu dòng và thụt lề. Bài ghim CSS đòi
+   đúng ba khai báo `margin: 0`, `padding: 0`, `list-style: none` trong MỘT khối. */
+.bp__danh-sach {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  overflow-y: auto;
+  min-height: 0;
+}
+
+.bp__dong {
+  display: grid;
+  grid-template-columns: 120px 1fr auto;
+  align-items: baseline;
+  gap: var(--sp-3);
+  padding: 6px var(--sp-4);
+  border-bottom: var(--rule-w) solid var(--rule);
+  font-size: var(--fs-ui);
+}
+
+.bp__dong:last-child {
+  border-bottom: 0;
+}
+
+.bp__to-hop {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--fs-num);
+  color: var(--signal);
+  white-space: nowrap;
+}
+
+.bp__viec {
+  color: var(--ink-0);
+}
+
+/* Dấu "chưa nối" — CHỮ, không phải chỉ màu (§7): người mù màu vẫn đọc được. */
+.bp__chua-noi {
+  font-family: var(--font-mono);
+  font-size: var(--fs-num);
+  color: var(--fault);
+  white-space: nowrap;
+}

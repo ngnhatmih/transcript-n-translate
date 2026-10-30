@@ -65,3 +65,39 @@ export function readheadPercent(currentTime: number, duration: number | null): n
   const phanTram = (currentTime / duration) * 100;
   return Math.min(100, Math.max(0, phanTram));
 }
+
+/**
+ * Chi so cua doan DANG PHAT tai `currentTime`, hoac `null` khi dang o KHOANG LANG.
+ *
+ * Dung cho dai thoi gian: phat toi dau thi doan tuong ung sang toi do. Khac
+ * `nextSegmentAfter` o ba diem, va ca ba deu la LY DO no la mot ham RIENG chu khong
+ * phai mot tham so cua ham kia:
+ *
+ *  - Khong can `currentIndex`: ham nay la anh xa THUAN tu thoi gian sang chi so, nen
+ *    no dung duoc ca khi nguoi dung vua TUA video toi mot cho bat ky (luc do chi so
+ *    cu khong con nghia gi).
+ *  - Khoang lang giua hai doan tra `null`, khong tra doan truoc. Do la su that cua
+ *    du lieu: giua `2,0` va `2,4` khong ai noi gi, nen khong doan nao duoc sang.
+ *  - Moc `end` KHONG thuoc doan: `[start, end)`. Nguoc voi `nextSegmentAfter` (o do
+ *    `currentTime <= segment.end` van thuoc doan, vi no dang NOI), o day moc cuoi la
+ *    luc doan DA HET — hai cau hoi khac nhau nen hai quy uoc khac nhau, va moi cai
+ *    co bai ghim rieng.
+ *
+ * Chiu duoc du lieu rac ma KHONG nem, KHONG tra `NaN`:
+ *  - `currentTime` khong huu han (`NaN`, `Infinity`) ⇒ `null`.
+ *  - `currentTime` am ⇒ `null` (chua bat dau).
+ *  - Doan co `start`/`end` khong huu han ⇒ BO QUA doan do, khong giet ca phep tim.
+ *  - `segments` rong ⇒ `null`.
+ *
+ * Tra ve CHI SO trong mang, khong tra `Segment`: noi goi can `segments[i]` de doc
+ * `text`, va mot chi so thi so sanh duoc con mot object thi khong.
+ */
+export function doanDangPhat(currentTime: number, segments: Segment[]): number | null {
+  if (!Number.isFinite(currentTime) || currentTime < 0) return null;
+  for (let i = 0; i < segments.length; i += 1) {
+    const s = segments[i];
+    if (!Number.isFinite(s.start) || !Number.isFinite(s.end)) continue;
+    if (currentTime >= s.start && currentTime < s.end) return i;
+  }
+  return null;
+}

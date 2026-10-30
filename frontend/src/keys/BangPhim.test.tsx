@@ -187,8 +187,8 @@ describe("BangPhim: bảng phím tắt §11.4 render từ CHÍNH bảng dữ li�
     unmount();
   });
 
-  it("HÌNH THỨC: họ lớp `bp*` có LUẬT trong `app.css` VÀ có THẬT trong DOM (hai chiều)", () => {
-    const appCss = readFileSync(new URL("../styles/app.css", import.meta.url), "utf8");
+  it("HÌNH THỨC: họ lớp `bp*` có LUẬT trong `_bang-phim.css` VÀ có THẬT trong DOM (hai chiều)", () => {
+    const appCss = readFileSync(new URL("../styles/_bang-phim.css", import.meta.url), "utf8");
     const { container, unmount } = render(taoPhanTu(BangPhim, { onDong: () => {} }));
 
     const trongDom = new Set<string>();
@@ -204,7 +204,7 @@ describe("BangPhim: bảng phím tắt §11.4 render từ CHÍNH bảng dữ li�
     for (const ten of trongDom) {
       assert.ok(
         khaiBaoCua(appCss, `.${ten}`).size > 0,
-        `lớp \`${ten}\` nằm trong DOM mà app.css KHÔNG tạo kiểu cho nó`,
+        `lớp \`${ten}\` nằm trong DOM mà _bang-phim.css KHÔNG tạo kiểu cho nó`,
       );
     }
     // (b) KHÔNG luật mồ côi: luật nào cũng phải có lớp trong DOM.

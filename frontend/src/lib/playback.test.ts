@@ -20,7 +20,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 
 import type { Segment } from "../api/types.ts";
-import { nextSegmentAfter, readheadPercent } from "./playback.ts";
+import { doanDangPhat, nextSegmentAfter, readheadPercent } from "./playback.ts";
 
 function doan(i: number, start: number, end: number): Segment {
   return { i, start, end, text: `đoạn ${i}`, suspect: false };
@@ -81,5 +81,59 @@ describe("readheadPercent: vi tri dau doc tren track", () => {
     assert.equal(readheadPercent(60, Number.NaN), 0);
     assert.equal(readheadPercent(60, Number.POSITIVE_INFINITY), 0);
     assert.equal(readheadPercent(Number.NaN, 120), 0);
+  });
+});
+describe("doanDangPhat: phat toi dau thi doan tuong ung sang toi do", () => {
+  it("TRONG doan tra dung chi so; khoang lang giua hai doan tra `null`", () => {
+    assert.equal(doanDangPhat(0, BA_DOAN), 0);
+    assert.equal(doanDangPhat(1.99, BA_DOAN), 0);
+    // [2,0 ; 2,4) khong ai noi gi ⇒ khong doan nao sang. Tra doan TRUOC la noi doi.
+    assert.equal(doanDangPhat(2, BA_DOAN), 1);
+    assert.equal(doanDangPhat(3.5, BA_DOAN), 1);
+    assert.equal(doanDangPhat(4.5, BA_DOAN), 2);
+  });
+
+  it("moc `end` KHONG thuoc doan: [start, end)", () => {
+    // Nguoc voi `nextSegmentAfter` (o do `currentTime <= end` van thuoc doan, vi dang NOI).
+    // Hai cau hoi khac nhau: "dang noi" khac "doan nay con hien khong".
+    const mot: Segment[] = [doan(0, 0, 2), doan(1, 2, 4)];
+    assert.equal(doanDangPhat(2, mot), 1);
+  });
+
+  it("khoang lang that giua hai doan tra `null`", () => {
+    const thua: Segment[] = [doan(0, 0, 2), doan(1, 5, 7)];
+    assert.equal(doanDangPhat(2, thua), null);
+    assert.equal(doanDangPhat(3.5, thua), null);
+    assert.equal(doanDangPhat(4.99, thua), null);
+  });
+
+  it("truoc doan dau / sau doan cuoi tra `null`", () => {
+    const tre: Segment[] = [doan(0, 3, 5)];
+    assert.equal(doanDangPhat(0, tre), null);
+    assert.equal(doanDangPhat(2.99, tre), null);
+    assert.equal(doanDangPhat(5, tre), null);
+    assert.equal(doanDangPhat(99, tre), null);
+  });
+
+  it("du lieu rac KHONG nem va KHONG tra `NaN`", () => {
+    assert.equal(doanDangPhat(Number.NaN, BA_DOAN), null);
+    assert.equal(doanDangPhat(Number.POSITIVE_INFINITY, BA_DOAN), null);
+    assert.equal(doanDangPhat(-1, BA_DOAN), null);
+    assert.equal(doanDangPhat(1, []), null);
+  });
+
+  it("mot doan hong thi BO QUA no, khong giet ca phep tim", () => {
+    const hong: Segment[] = [
+      { i: 0, start: Number.NaN, end: 2, text: "hỏng", suspect: false },
+      doan(1, 2, 4),
+    ];
+    assert.equal(doanDangPhat(3, hong), 1);
+  });
+
+  it("chon DUNG doan khi cac doan khong lien tiep va khong theo thu tu gio", () => {
+    const lon: Segment[] = [doan(0, 10, 12), doan(1, 0, 2), doan(2, 5, 7)];
+    assert.equal(doanDangPhat(1, lon), 1);
+    assert.equal(doanDangPhat(6, lon), 2);
+    assert.equal(doanDangPhat(11, lon), 0);
   });
 });

@@ -1,0 +1,266 @@
+/* ═══ VÙNG KÊNH (`.kenh`) — cột trái, TRÊN hộp việc ═══════════════════════════════════
+   🔴 TỆP NÀY TỒN TẠI VÌ MỘT LỖ HỔNG ĐO ĐƯỢC (2026-10-30): sau khi `app.css` và bốn màn cũ
+   bị xoá, phép đo trên bản build mới cho `querySelectorAll('[class*=ch__]').length = 0` —
+   tức app KHÔNG CÒN ĐƯỜNG NẠP TỆP NÀO. Nó trông đúng nhưng không dùng được. Đây là CSS
+   cho đường nạp đã được dựng lại.
+
+   📏 SỐ ĐO: cột trái 260px, kênh chiếm phần trên co giãn (`max-height: 46%`), hộp việc phần
+   dưới. Mỗi dòng kênh: `grid` hai cột `1fr auto`, pad 6px 12px, viền dưới 1px.
+   ═══════════════════════════════════════════════════════════════════════════════════ */
+
+.kenh {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  max-height: 46%;
+  border-bottom: var(--rule-w) solid var(--rule);
+}
+
+.kenh__dau {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  border-bottom: var(--rule-w) solid var(--rule);
+}
+
+.kenh__dem {
+  font-size: 10px;
+  color: var(--ink-2);
+}
+
+/* ── LỐI NẠP ──────────────────────────────────────────────────────────────────── */
+.kenh__nap {
+  flex: 0 0 auto;
+  padding: var(--sp-2) var(--sp-3);
+  border-bottom: var(--rule-w) solid var(--rule);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.kenh__ngon-ngu {
+  display: flex;
+  gap: var(--sp-1);
+}
+
+.kenh__ngon-ngu-o {
+  flex: 1 1 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px 6px;
+  border: var(--rule-w) solid var(--rule);
+  border-radius: var(--radius);
+  font-size: 10.5px;
+  color: var(--ink-1);
+  cursor: pointer;
+  transition: border-color var(--dur-1) var(--ease-1), color var(--dur-1) var(--ease-1);
+}
+
+.kenh__ngon-ngu-o:hover {
+  border-color: var(--ink-2);
+  color: var(--ink-0);
+}
+
+/* Radio ẨN nhưng VẪN trong DOM: bàn phím Tab tới được và mũi tên đổi được lựa chọn — một
+   `<div>` bấm được thì không làm được cả hai. Cùng khuôn `sr-only`. */
+.kenh__ngon-ngu-o input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+.kenh__ngon-ngu-o:has(input:checked) {
+  border-color: var(--signal);
+  color: var(--signal);
+}
+
+.kenh__ngon-ngu-o:has(input:focus-visible) {
+  outline: 1px solid var(--signal);
+  outline-offset: 1px;
+}
+
+/* Ô tệp ẨN VỀ HÌNH THỨC nhưng vẫn là phần tử THẬT: `change` bắn, `files` đọc được. Nút bên
+   dưới chỉ gọi `.click()` hộ nó. `display: none` sẽ làm một số trình duyệt bỏ qua `files`. */
+.kenh__o-tep {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+.kenh__nap-nut {
+  appearance: none;
+  width: 100%;
+  padding: var(--sp-2);
+  border: var(--rule-w) dashed var(--rule);
+  border-radius: var(--radius);
+  background: none;
+  color: var(--ink-1);
+  font: inherit;
+  font-size: var(--fs-ui);
+  cursor: pointer;
+  transition: border-color var(--dur-1) var(--ease-1), color var(--dur-1) var(--ease-1);
+}
+
+.kenh__nap-nut:hover:not(:disabled) {
+  border-color: var(--signal);
+  color: var(--signal);
+}
+
+.kenh__nap-nut:disabled {
+  color: var(--ink-2);
+  cursor: progress;
+}
+
+/* ── KẾT QUẢ NẠP ─────────────────────────────────────────────────────────────── */
+.kenh__ket-qua {
+  flex: 0 0 auto;
+  margin: 0;
+  padding: var(--sp-1) var(--sp-3);
+  list-style: none;
+  border-bottom: var(--rule-w) solid var(--rule);
+  max-height: 88px;
+  overflow-y: auto;
+}
+
+.kenh__kq {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: var(--sp-2);
+  font-size: 10.5px;
+  color: var(--ink-1);
+}
+
+/* Tệp LỖI: chữ `--fault` + câu của backend. Chữ, không phải chỉ màu (§7). */
+.kenh__kq.is-loi {
+  color: var(--fault);
+}
+
+.kenh__kq-ten {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.kenh__kq-tt {
+  font-family: var(--font-mono);
+  white-space: nowrap;
+  text-align: right;
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.kenh__loi {
+  flex: 0 0 auto;
+  margin: 0;
+  padding: var(--sp-1) var(--sp-3);
+  font-size: 10.5px;
+  color: var(--fault);
+  border-bottom: var(--rule-w) solid var(--rule);
+}
+
+/* ── DANH SÁCH KÊNH ──────────────────────────────────────────────────────────── */
+.kenh__ds {
+  flex: 1 1 auto;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  overflow-y: auto;
+}
+
+.kenh__trong {
+  padding: var(--sp-3);
+  font-size: var(--fs-label);
+  color: var(--ink-2);
+  text-align: center;
+}
+
+.kenh__dong {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: stretch;
+  border-bottom: var(--rule-w) solid var(--rule);
+}
+
+/* Kênh ĐANG MỞ: nền amber nhạt + vạch trái 2px. Hai tín hiệu cho một trạng thái, cộng
+   `aria-current` trên nút là tín hiệu thứ ba cho máy đọc. */
+.kenh__dong.is-chon {
+  background: var(--signal-soft);
+  box-shadow: inset 2px 0 0 0 var(--signal);
+}
+
+.kenh__chon {
+  appearance: none;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  padding: 6px var(--sp-3);
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.kenh__chon:hover {
+  background: var(--panel-2);
+}
+
+.kenh__ten {
+  font-size: var(--fs-note);
+  color: var(--ink-0);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.kenh__meta {
+  font-size: 10px;
+  color: var(--ink-2);
+}
+
+/* Nút xoá — LÀ MỘT CỘT RIÊNG, không đặt tuyệt đối: đặt tuyệt đối thì nó đè lên chữ khi tên
+   tệp dài, và một nút xoá nằm trên chữ là một tai nạn chờ xảy ra. */
+.kenh__xoa {
+  appearance: none;
+  width: 28px;
+  border: 0;
+  border-left: var(--rule-w) solid var(--rule);
+  background: none;
+  color: var(--ink-2);
+  font: inherit;
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  transition: color var(--dur-1) var(--ease-1), background-color var(--dur-1) var(--ease-1);
+}
+
+.kenh__xoa:hover:not(:disabled) {
+  color: var(--fault);
+  background: var(--panel-2);
+}
+
+.kenh__xoa:disabled {
+  color: var(--ink-2);
+  cursor: progress;
+}

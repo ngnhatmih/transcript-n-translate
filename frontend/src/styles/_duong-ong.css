@@ -1,0 +1,136 @@
+/* ═══ THANH ĐƯỜNG ỐNG Ở HEADER (`.do`) — sáu bước của pipeline ═══════════════════════
+   📏 MỌI con số dưới đây là số ĐO ĐƯỢC trên bản thiết kế đã duyệt (Chrome, 1680×1050,
+   `getBoundingClientRect` + `getComputedStyle`), không phải số CHỌN:
+     một bước      : 120×35, pad 4px 8px, gap 8px, radius 2px
+     chấm          : 16×16, bo tròn hoàn toàn, icon 10×10
+     dòng tên bước : 12px / 500 / --ink-0
+     dòng ghi chú  : 9,5px / 400 / --ink-2, mono
+     tên app       : 11px / 600 / giãn 1,54px  (xem `.head__ten` bên dưới — ĐÃ SỬA)
+   Luật hình thức của spec vẫn giữ: phân tầng bằng ĐƯỜNG KẺ, không bóng; `--signal` chỉ
+   có một nghĩa. Ở đây `--signal` = "bước này BỊ CHẶN" (cần người dùng làm gì đó), còn
+   "đang chạy" dùng `--ok` ở dạng chấm nhấp nháy — hai chuyện khác nhau, hai dấu khác nhau. */
+
+.do__danh-sach {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  /* Cụm sáu bước chiếm chỗ trống giữa tên app và dải trạng thái. `min-width: 0` để nó
+     co lại được thay vì đẩy dải trạng thái ra ngoài khung khi cửa sổ hẹp. */
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.do__danh-sach::-webkit-scrollbar {
+  display: none;
+}
+
+.do__o {
+  flex: 0 0 auto;
+}
+
+/* Một bước = một NÚT. Bỏ kiểu nút mặc định nhưng GIỮ focus ring toàn cục (`:focus-visible`
+   ở đầu app.css) — bàn phím phải đi tới được từng bước. */
+.do__buoc {
+  appearance: none;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-1) var(--sp-2);
+  border: 0;
+  border-radius: var(--radius);
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color var(--dur-1) var(--ease-1);
+}
+
+.do__buoc:hover {
+  background: var(--panel-2);
+}
+
+/* Chấm trạng thái: 16×16, bo tròn hoàn toàn. VIỀN LUÔN CÓ (kể cả khi rỗng) để sáu chấm
+   thẳng hàng và bề rộng không nhảy khi trạng thái đổi — đây là lý do `border` nằm ngoài
+   mọi nhánh `[data-trang-thai]`. */
+.do__cham {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  border: var(--rule-w) solid currentColor;
+  border-radius: 9999px;
+  color: var(--panel-0);
+}
+
+/* ── BỐN trạng thái = bốn hình dạng KHÁC nhau, không phải bốn sắc của một chấm ───────── */
+
+/* `xong`: chấm ĐẶC màu `--ok`, có dấu ✓ màu nền. */
+.do__buoc[data-trang-thai="xong"] .do__cham {
+  background: var(--ok);
+  border-color: var(--ok);
+}
+
+/* `dang-chay`: chấm RỖNG viền `--ok`, nhấp nháy nhẹ. Nhấp nháy là tín hiệu THỨ HAI —
+   chữ `aria-label` đã nói "đang chạy", và `prefers-reduced-motion` tắt animation ở đầu tệp. */
+.do__buoc[data-trang-thai="dang-chay"] .do__cham {
+  background: transparent;
+  border-color: var(--ok);
+  animation: do-nhap-nhay 1.4s ease-in-out infinite;
+}
+
+@keyframes do-nhap-nhay {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+/* `bi-chan`: chấm ĐẶC màu `--signal` — nghĩa duy nhất của amber ở đây là "cần bạn làm gì". */
+.do__buoc[data-trang-thai="bi-chan"] .do__cham {
+  background: var(--signal);
+  border-color: var(--signal);
+}
+
+/* `chua`: chấm RỖNG viền `--ink-2`, không tô. Đây là trạng thái "chưa tới lượt". */
+.do__buoc[data-trang-thai="chua"] .do__cham {
+  background: transparent;
+  border-color: var(--ink-2);
+  color: var(--ink-2);
+}
+
+/* Hai dòng chữ: `leading-tight` của bản đã duyệt = 1,25. */
+.do__chu {
+  display: block;
+  line-height: 1.25;
+}
+
+.do__ten {
+  display: block;
+  font-size: var(--fs-ui);
+  font-weight: 500;
+  color: var(--ink-0);
+  white-space: nowrap;
+}
+
+.do__ghi-chu {
+  display: block;
+  font-family: var(--font-mono);
+  font-size: var(--fs-label);
+  font-weight: 400;
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+
+/* Bước BỊ CHẶN thì ghi chú của nó mang amber — lý do bị chặn là thứ người dùng cần đọc. */
+.do__buoc[data-trang-thai="bi-chan"] .do__ghi-chu {
+  color: var(--signal);
+}
