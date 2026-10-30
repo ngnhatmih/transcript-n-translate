@@ -729,3 +729,69 @@ Một nút "không có phản ứng" có thể là hai lỗi độc lập chồn
 giá trị lan truyền: `Math.min(NaN, x)` là `NaN`, và `NaN` xuống tầng ghi thành dữ
 liệu hỏng. Chỗ nào có `Math.min`/`Math.max` với một biến "có thể chưa biết", chỗ
 đó cần một phép kiểm `> 0` tường minh.
+## ERRATA #56 — "TanStack Start" đã chốt là KHÔNG dùng, nhưng chưa ai ghi ra
+
+**Trạng thái:** đóng một quyết định treo. **Không** phải một lỗi mới phát hiện khi chạy.
+
+### Quyết định
+
+Stack của `frontend/` là **Vite SPA thuần**, không SSR, không server Node:
+
+```
+vite.config.ts   TanStackRouterVite() + react() + tailwindcss()
+                 KHÔNG có tanstackStart, KHÔNG có nitro
+package.json     KHÔNG có @tanstack/react-start, @tanstack/start, nitro, vinxi
+docker-compose   hai service: api (python) và web (nginx) — KHÔNG có service Node
+```
+
+Đo bằng lệnh, không đọc tên gói:
+
+```
+Select-String -Path frontend\vite.config.ts -Pattern 'tanstackStart|nitro'
+  -> chi khop trong COMMENT, khong co trong `plugins:`
+$j = Get-Content frontend\package.json -Raw
+  '@tanstack/react-start' -> KHONG   'nitro' -> KHONG   'vinxi' -> KHONG
+Select-String -Path docker-compose.yml -Pattern '^  [a-z-]+:'
+  -> api, web   (khong co service Node nao)
+```
+
+`web` là `nginx` phục vụ `frontend/dist`, và `nginx.conf` chuyển `/api/` sang `api`.
+`vite.config.ts` có `server.proxy` cho `/api` — đó là **dev**, không phải production.
+
+### Vì sao không dùng TanStack Start
+
+Bản Lovable bọc `@lovable.dev/vite-tanstack-config`; gói đó CÓ SẴN `tanstackStart`,
+`nitro`, `tsConfigPaths`, alias `@`, dedupe React và dò sandbox. Gói `@lovable.dev/*`
+**không cài được ngoài Lovable**. Dựng lại tay phần `nitro`/`tanstackStart` nghĩa là
+tự viết một tầng SSR + một server Node chỉ để phục vụ một app **không có route nào cần
+SSR**: toàn bộ dữ liệu đến từ `GET /api/*` sau khi trang đã tải, và mọi màn hình đều
+đọc state cục bộ của trình duyệt (video, timeline, waveform).
+
+Đổi lại, SPA thuần cho ba thứ đáng giá:
+
+1. `nginx` phục vụ tệp tĩnh — không thêm tiến trình, không thêm cổng, không thêm
+   điểm chết khi khởi động.
+2. `dist/` là đầu ra duy nhất; deploy là `docker cp dist/... nginx:/usr/share/nginx/html/`
+   (đã dùng suốt lượt này).
+3. Build 1,67 s, bundle 328 kB entry + 74 kB chunk app — đo được, không phải ước lượng.
+
+### Hai tham chiếu CHẾT đã sửa
+
+Comment trong `vite.config.ts` và `src/main.tsx` trỏ tới `docs/ERRATA.md` với câu
+"xem mục *vì sao không dùng TanStack Start*". Đo:
+
+```
+Test-Path docs\ERRATA.md   ->  False
+```
+
+Tệp đó **không tồn tại**. ERRATA của repo nằm trong chính `README.md` (các mục
+`## ERRATA #<n>`). Một tham chiếu tới tệp không ai mở được không phải tài liệu — nó là
+lời chỉ dẫn sai, và nó khiến người đọc tin rằng quyết định đã được ghi ở đâu đó.
+
+Cả hai chỗ nay trỏ về `README.md` (mục này), và ghi rõ rằng chúng từng trỏ sai.
+
+### Nợ còn lại, KHÔNG sửa lượt này
+
+`frontend/e2e/` (Playwright) có thư mục và `README.md` nhưng chưa có bài chạy được
+trong CI. Bộ test thật hiện tại là `node --test` (127 bài). Hoặc viết bài e2e thật, hoặc
+xoá thư mục — nhưng đó là quyết định riêng, cần đo thời gian chạy trước.

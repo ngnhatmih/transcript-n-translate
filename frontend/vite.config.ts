@@ -22,8 +22,11 @@ import { fileURLToPath } from "node:url";
  *     tailwindcss()         → Tailwind v4, đọc `@theme` trong `styles.css`
  *
  * ⚠️ KHÁC BIỆT DUY NHẤT so với Lovable: KHÔNG có `nitro`/`tanstackStart`.
- * Đó là quyết định có ghi chép, không phải thiếu sót — xem
- * `docs/ERRATA.md` mục "vì sao không dùng TanStack Start".
+ * Đó là quyết định có ghi chép, không phải thiếu sót — xem ERRATA #56 trong
+ * `README.md` của repo ("vì sao không dùng TanStack Start").
+ *
+ * ⚠️ Chỗ này TỪNG trỏ tới `docs/ERRATA.md`, và ĐO ĐƯỢC LÀ TỆP ĐÓ KHÔNG TỒN TẠI
+ * (`Test-Path docs\ERRATA.md` = False). ERRATA của repo nằm trong `README.md`.
  */
 export default defineConfig({
   plugins: [

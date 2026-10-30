@@ -10,8 +10,12 @@ import { getRouter } from "./router";
  *
  * NGUON GOC: ban Lovable KHONG co tep nay — TanStack Start tu sinh diem vao
  * (`src/start.ts` + `src/server.ts` cua no lo phan SSR). Vi app nay la SPA do Vite
- * dung (xem `vite.config.ts` va `docs/ERRATA.md`), can dung mot tep noi
- * `createRoot` voi router.
+ * dung (xem docblock `vite.config.ts`), can dung mot tep noi `createRoot` voi router.
+ *
+ * ⚠️ Tep nay TUNG tro toi `docs/ERRATA.md` — DO DUOC LA TEP DO KHONG TON TAI
+ * (`Test-Path docs\ERRATA.md` = False). ERRATA cua repo nay nam trong `README.md`
+ * (cac muc `## ERRATA #<n>`); mot tham chieu toi tep khong ai mo duoc la mot loi
+ * dan sai, khong phai tai lieu.
  *
  * Thu tu import co nghia:
  *   1. `./styles.css` — Tailwind bien dich `@theme`/`@utility` o day. Nap TRUOC
