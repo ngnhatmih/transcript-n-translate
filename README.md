@@ -795,3 +795,67 @@ Cả hai chỗ nay trỏ về `README.md` (mục này), và ghi rõ rằng chún
 `frontend/e2e/` (Playwright) có thư mục và `README.md` nhưng chưa có bài chạy được
 trong CI. Bộ test thật hiện tại là `node --test` (127 bài). Hoặc viết bài e2e thật, hoặc
 xoá thư mục — nhưng đó là quyết định riêng, cần đo thời gian chạy trước.
+## ERRATA #57 — prop `sourcesError` là khai báo chết: lỗi nạp kênh bị nuốt
+
+**Phát hiện lúc:** viết `App.test.tsx` (bài "nguồn lỗi 500 hiện thành chữ, không nuốt im lặng").
+**Mức:** giao diện nói dối về lý do trang trống. **Trạng thái:** đã sửa, đã đo lại.
+
+### Số đo
+
+Grep toàn `src/` cho `sourcesError`:
+
+```
+App.tsx:59    const [sourcesError, setSourcesError] = useState<string | null>(null);
+App.tsx:84      setSourcesError(e instanceof Error ? e.message : String(e));
+App.tsx:422   sourcesError={sourcesError}
+Studio.tsx:84   sourcesError: string | null;
+```
+
+**Hai khai báo, hai chỗ ghi, một chỗ truyền — và KHÔNG một dòng nào ĐỌC.** `Studio` nhận
+prop này rồi bỏ đó. Vì thế `setSourcesError` là một hàm chỉ để nuốt lỗi.
+
+Hệ quả đo được: khi `GET /api/sources` hỏng (backend chưa lên, sai cổng, 500), người dùng
+thấy **danh sách kênh rỗng và không một lời nào**. Không phân biệt được *"chưa có kênh
+nào"* với *"không đọc được kênh"* — hai tình huống cần hai hành động khác nhau.
+
+Bài test bắt được nó theo đúng cách: cho `fetch` trả 500 cho mọi route, rồi khẳng định
+`document.body.textContent` có chữ báo lỗi. Đỏ, vì không có gì được render.
+
+### Sửa
+
+Nối vào chuỗi `notice` sẵn có — cùng khuôn với `loi` (lỗi của các hành động ghi):
+
+```tsx
+useEffect(() => {
+  if (sourcesError === undefined || sourcesError === null || sourcesError === "") return;
+  setNotice(`Không nạp được danh sách kênh: ${sourcesError}`);
+}, [sourcesError]);
+```
+
+Giữ nguyên câu của tầng dưới (thông điệp của `fetch`/FastAPI), chỉ nói rõ nó thuộc phần
+nào — một câu `"Failed to fetch"` trần trụi không cho biết hỏng ở đâu.
+
+Kèm theo: `sourcesError` phải được **destructure** trong `Studio`. Nó đã khai trong
+`StudioProps` từ trước nhưng chưa lấy ra, nên lần dùng đầu tiên làm `tsc` đỏ ngay:
+
+```
+src/components/studio/Studio.tsx(213,9): error TS2304: Cannot find name 'sourcesError'.
+```
+
+Đó là bằng chứng thêm rằng prop này chưa từng được dùng: nếu đã dùng, lỗi biên dịch đã
+nổ từ lâu.
+
+### Bài học
+
+`tsc` **không** bắt được prop khai mà không đọc — nó chỉ bắt *dùng* một cái tên không tồn
+tại. Một prop chết nằm im qua mọi lần build xanh, và cái giá của nó không phải là một dòng
+thừa: nó là một đường báo lỗi bị cắt. Cách duy nhất bắt được là một bài test khẳng định
+**lỗi phải hiện ra**, chứ không phải khẳng định "component render được".
+
+### Phụ: hai global nữa của jsdom
+
+Viết bài test này lộ thêm `ReferenceError: requestAnimationFrame is not defined` —
+`pretendToBeVisual: true` chỉ gắn hai hàm đó lên `window`, còn `Timeline` gọi tên trần.
+`ResizeObserver` và `Element.prototype.scrollIntoView` đã thêm ở lượt trước; cả ba nay nằm
+trong `MANAGED_GLOBALS` để `teardownDom()` trả lại — trước đó chúng rò sang mọi tệp test
+chạy sau, vì `--test-isolation=none` dùng chung một tiến trình.
