@@ -149,7 +149,37 @@ def safe_basename(name: str | None, fallback: str = "upload.bin") -> str:
     """
     if name is None:
         return fallback
-    plain = pathlib.PurePath(name.replace("\\", "/")).name
+    # ── CẮT BẰNG TAY, KHÔNG QUA `pathlib.PurePath` ──────────────────────────────────────
+    #
+    # 🔴 ĐO ĐƯỢC, VÀ ĐÂY LÀ LỖI PHỤ THUỘC NỀN TẢNG THẬT — không phải chuyện thẩm mỹ.
+    #
+    # Bản cũ là `pathlib.PurePath(name.replace("\\", "/")).name`. `PurePath` chọn lớp
+    # con theo HỆ ĐIỀU HÀNH đang chạy (`PureWindowsPath` trên Windows, `PurePosixPath`
+    # trên Linux), và hai lớp đó TÁCH Ổ ĐĨA khác nhau:
+    #
+    #   Windows (máy phát triển):
+    #     >>> PurePath("a:b.mp4")
+    #     .drive='a:'  .name='b.mp4'  .parts=('a:', 'b.mp4')
+    #   Linux (container sản phẩm):
+    #     >>> PurePath("a:b.mp4")
+    #     .drive=''    .name='a:b.mp4' .parts=('a:b.mp4',)
+    #
+    # Nên trên Windows `a:b.mp4` bị cắt thành `b.mp4` — dấu `:` BIẾN MẤT trước khi tới
+    # `_reject_unsafe_name`, tức tên nguy hiểm được chấp nhận và ÂM THẦM ĐỔI TÊN. Trong
+    # container thì `:` còn đó nên bị từ chối. Cùng một mã, hai hợp đồng:
+    #
+    #   safe_basename('a:b.mp4')   Windows -> 'b.mp4'          (KHÔNG ném)
+    #                              Linux   -> InvalidBasename  (ném)
+    #
+    # Bài `test_safe_basename_tu_choi_moi_dau_hai_cham_ke_ca_tien_to_giong_o_dia` ghim
+    # hành vi Linux và đỏ trên Windows: `Failed: DID NOT RAISE InvalidBasename`. Nó đỏ
+    # ĐÚNG — nó bắt được một lỗ thật, chỉ là lỗ đó không lộ ra khi chạy trong Docker.
+    #
+    # Sửa: đường dẫn do client gửi luôn được hiểu theo cú pháp POSIX (`\\` đã đổi thành
+    # `/` ngay trên), nên cắt theo `/` là ĐÚNG NGHĨA ở mọi nền tảng và không còn phụ
+    # thuộc lớp `PurePath` nào. `rsplit` giữ nguyên phần sau dấu `/` cuối cùng, kể cả khi
+    # nó rỗng (`"a/"` -> `""`), và `_INVALID` ngay dưới bắt đúng ca đó.
+    plain = name.replace("\\", "/").rsplit("/", 1)[-1]
     if plain in _INVALID:
         raise InvalidBasename(f"tên tệp không hợp lệ: {name!r}")
     _reject_unsafe_name(plain, name)
