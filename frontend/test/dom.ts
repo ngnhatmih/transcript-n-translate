@@ -149,6 +149,41 @@ export function setupDom(origin: string): void {
   // React 19 chi cho `act()` chay khi co co nay.
   datGlobal("IS_REACT_ACT_ENVIRONMENT", true);
 
+  // ───────────────────────────────────────────────────────────────────────────
+  // `ResizeObserver` — jsdom KHONG CO, trinh duyet THAT co.
+  //
+  // Do duoc: render `Studio` nem `ReferenceError: ResizeObserver is not defined`
+  // tai `Timeline.tsx:246` (`new ResizeObserver(...)` trong `useEffect`). Do la
+  // THIEU HUT CUA HA TANG TEST, khong phai loi cua `Timeline` — nen sua o day,
+  // KHONG them phep kiem `typeof ResizeObserver` vao ma san pham chi de test
+  // chay duoc (lam vay la ha ma san pham xuong muc test).
+  //
+  // Stub nay KHONG BAO GIO GOI callback: trong jsdom moi phan tu co kich thuoc 0,
+  // nen khong co thay doi kich thuoc nao that su. No chi lam cho `observe`/
+  // `unobserve`/`disconnect` khong no.
+  // ───────────────────────────────────────────────────────────────────────────
+  class ResizeObserverStub {
+    observe(): void {}
+    unobserve(): void {}
+    disconnect(): void {}
+  }
+  datGlobal("ResizeObserver", ResizeObserverStub);
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // `Element.prototype.scrollIntoView` — jsdom KHONG CAI, trinh duyet THAT co.
+  //
+  // Do duoc: `Studio.tsx:250` goi `rowRefs.current.get(i)?.scrollIntoView(...)`
+  // trong `useEffect` khi dong dang chon doi. jsdom nem
+  // `TypeError: rowRefs.current.get(...)?.scrollIntoView is not a function`.
+  // cung loai thieu hut ha tang nhu `ResizeObserver` — sua o day, khong them
+  // phep kiem `typeof` vao ma san pham.
+  // ───────────────────────────────────────────────────────────────────────────
+  w.Element.prototype.scrollIntoView = function scrollIntoView(): void {};
+  datGlobal(
+    "scrollIntoView",
+    w.Element.prototype.scrollIntoView,
+  );
+
   // CAU NOI URL — KHONG phai gia lap mang: request van la HTTP THAT di ra server
   // that trong tien trinh (xem `useJobStream.test.ts`). Ly do can: `client.ts`
   // goi `fetch("/api/…")` TUONG DOI, ma `fetch` cua Node nem
@@ -172,6 +207,29 @@ export function teardownDom(): void {
   }
   bridgeOrigin = "";
   traGlobal();
+  // ───────────────────────────────────────────────────────────────────────────
+  // DO DUOC: hai bien module nay PHAI duoc dat lai, khong chi `traGlobal()`.
+  //
+  // Trieu chung do duoc (bai `endpoints.test.ts:173` do sau khi them
+  // `Studio.test.tsx`):
+  //
+  //   sau moi bai, `fetch` cua tien trinh la BAN THAT (khong ro sang tep khac)
+  //   AssertionError: Expected "actual" to be reference-equal to "expected"
+  //     actual:   [Function: cauNoi]
+  //     expected: [Function: fetch]
+  //
+  // Nguyen nhan: `cauNoi` giu cau noi CU, `fetchThat` giu `fetch` THAT cua lan dau.
+  // `traGlobal()` tra `fetch` ve descriptor da chup — nhung neu lan `setupDom` ke
+  // tiep chay TRUOC khi `traGlobal` kip tra (hoac `fetch` hien tai da la `cauNoi`),
+  // thi `if (fetchThat === null || hienTai !== cauNoi)` BO QUA viec cap nhat, va
+  // `cauNoi` moi lai duoc dat lam `fetch` ⇒ `fetch` cua tien trinh tro vao mot
+  // ham cua harness nay vinh vien.
+  //
+  // Dat lai ca hai ve `null`/rong: lan `setupDom` sau se doc `globalThis.fetch`
+  // luc do (da la ban that) va boc lai tu dau.
+  // ───────────────────────────────────────────────────────────────────────────
+  cauNoi = null;
+  fetchThat = null;
 }
 
 /** Hai descriptor co mo ta CUNG mot trang thai khong? Khong goi getter nao ca. */

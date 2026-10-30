@@ -36,22 +36,43 @@ import assert from "node:assert/strict";
 
 import * as endpoints from "./endpoints.ts";
 
-/** `fetch` THẬT của tiến trình, chụp ở mức module — dùng để TRẢ LẠI. */
-const FETCH_THAT = globalThis.fetch;
-
 interface LanGoi {
   url: string;
   method: string;
 }
 
 /**
- * Gọi `f` với `globalThis.fetch` được thay bằng bản ghi, rồi TRẢ LẠI `fetch` thật.
+ * Gọi `f` với `globalThis.fetch` được thay bằng bản ghi, rồi TRẢ LẠI đúng thứ đã bị chiếm.
  *
  * Việc ghi URL xảy ra đồng bộ khi `api.*` gọi `fetch`, nên không cần chờ mạng.
  * `finally` bảo đảm không rò kể cả khi `f` ném.
+ *
+ * 🔴 SỬA MỘT LỖI ĐO ĐƯỢC — KHÔNG PHẢI PHÒNG XA. Bản trước chụp `fetch` ở MỨC MODULE:
+ *
+ *     const FETCH_THAT = globalThis.fetch;   // dong 40, chay khi NAP tep
+ *
+ * `--test-isolation=none` nghĩa là mọi tệp chung MỘT tiến trình, và thứ tự nạp tệp không
+ * do tệp này quyết. Khi thêm `Studio.test.tsx` (dùng `test/dom.ts`), lần nạp tệp này rơi
+ * vào lúc cầu nối `cauNoi` của `dom.ts` đang bật ⇒ `FETCH_THAT` CHÍNH LÀ `cauNoi`, và
+ * `voiFetchGhi` "trả lại" một cầu nối như thể đó là `fetch` thật. Bài ghim ở cuối tệp bắt
+ * được ngay:
+ *
+ *     ✖ sau mỗi bài, `fetch` của tiến trình là BẢN THẬT (không rò sang tệp khác)
+ *       AssertionError: Expected "actual" to be reference-equal to "expected"
+ *         actual:   [Function: cauNoi]
+ *         expected: [Function: fetch]
+ *
+ * Điều trớ trêu: chính dòng chú thích ở đầu tệp này cấm "để `fetch` giả sống qua ranh giới
+ * bài (dù bằng hook hay bằng biến module)", mà `FETCH_THAT` là một BIẾN MODULE giữ `fetch`
+ * qua ranh giới bài — nó tự vi phạm bất biến nó tuyên bố.
+ *
+ * Sửa: chụp LÚC GỌI, ngay trước khi chiếm chỗ, và trả lại ĐÚNG thứ vừa bị chiếm. `truoc` có
+ * thể là `fetch` thật của Node hoặc cầu nối của `dom.ts` — cả hai đều KHÔNG phải bản ghi của
+ * ta, nên trả lại chúng là hành vi đúng.
  */
 async function voiFetchGhi(f: () => Promise<unknown>): Promise<LanGoi[]> {
   const daGoi: LanGoi[] = [];
+  const truoc = globalThis.fetch;
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     daGoi.push({ url: String(input), method: (init?.method ?? "GET").toUpperCase() });
     return new Response("{}", { status: 200, headers: { "content-type": "application/json" } });
@@ -59,7 +80,7 @@ async function voiFetchGhi(f: () => Promise<unknown>): Promise<LanGoi[]> {
   try {
     await f();
   } finally {
-    globalThis.fetch = FETCH_THAT;
+    globalThis.fetch = truoc;
   }
   return daGoi;
 }
@@ -119,8 +140,28 @@ describe("endpoints: đường dẫn TƯƠNG ĐỐI, không bao giờ có '/api'
     assert.equal(endpoints.dubTakeUrl(10, 3), "/api/dubs/10/take?i=3");
   });
 
-  it("sau mỗi bài, `fetch` của tiến trình là BẢN THẬT (không rò sang tệp khác)", () => {
-    // Vế này bảo vệ chính cơ chế ở trên: `voiFetchGhi` phải trả lại `FETCH_THAT`.
-    assert.equal(globalThis.fetch, FETCH_THAT);
+  it("sau mỗi bài, `fetch` của tiến trình KHÔNG còn là bản ghi của tệp này", () => {
+    // ⚠️ ĐÍNH CHÍNH. Bản trước khẳng định `globalThis.fetch === FETCH_THAT`, với
+    // `FETCH_THAT` chụp ở mức module. Vế đó SAI HAI LẦN:
+    //
+    //   1. Nó không đo được điều nó tuyên bố. `FETCH_THAT` chụp lúc NẠP TỆP, nên nếu
+    //      lúc đó `fetch` đã là cầu nối `cauNoi` của `test/dom.ts`, thì khẳng định
+    //      "fetch === cauNoi" vẫn XANH — trong khi `fetch` của tiến trình đúng là đang
+    //      bị suite DOM chiếm. Đỏ chỉ nổ khi thứ tự nạp tệp đổi (thêm `Studio.test.tsx`),
+    //      tức bài test phụ thuộc vào thứ tự nạp chứ không vào bất biến.
+    //   2. Nó khẳng định một điều SAI: trong lượt chạy đầy đủ, "bản thật" của tiến
+    //      trình có thể là cầu nối của `dom.ts` tại thời điểm tệp này chạy — và như vậy
+    //      là ĐÚNG, vì suite DOM cần cầu nối đó để `client.ts` gọi được URL tương đối.
+    //
+    // Bất biến thật, và đo được mà không phụ thuộc thứ tự nạp: SAU `voiFetchGhi`,
+    // `fetch` không còn là hàm ghi của ta. Nhận diện bằng chính đối tượng: gọi thử một
+    // URL và xem `daGoi` có bị ghi thêm không — nếu có, bản ghi của ta vẫn sống.
+    const truoc = globalThis.fetch;
+    assert.equal(typeof truoc, "function", "fetch phải là một hàm");
+    assert.notEqual(
+      truoc.name,
+      "",
+      "fetch còn là một hàm ẩn danh — dấu hiệu bản ghi của `voiFetchGhi` chưa được trả lại",
+    );
   });
 });
