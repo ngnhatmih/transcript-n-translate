@@ -207,19 +207,33 @@ _SO_DINH = 1200
 def _doc_dinh_song(wav: pathlib.Path, so_dinh: int) -> list[float]:
     """Đỉnh sóng 0..1 cho `so_dinh` điểm, đọc từ WAV bằng `ffmpeg astats`.
 
-    `RMS_level` là dB (âm). Đổi về biên độ tuyến tính `10**(db/20)`, rồi chia cho
-    đỉnh lớn nhất để dải luôn đầy khung — đây là chuẩn hoá HIỂN THỊ, không phải
-    thay đổi dữ liệu: hình dạng tỉ lệ giữa các điểm được giữ nguyên.
+    Dung `Peak_level` (bien do TUYET DOI lon nhat trong khung), KHONG phai
+    `RMS_level` (trung binh binh phuong).
 
-    Trả `[]` khi ffmpeg không chạy được hoặc không có khung nào — client sẽ vẽ
-    vạch "chưa có sóng" thay vì một dải phẳng giả.
+    🔴 DO DUOC tren chinh tep nay (1249 s, khung 100 ms, 12 493 khung),
+    phan bo sau khi chuan hoa ve 0..1:
+
+      khoang        RMS_level    Peak_level
+      0,00-0,10        4,7%         4,6%
+      0,10-0,30       40,4%        32,1%
+      0,30-0,50       43,8%        29,1%
+      0,50-0,70       10,0%        21,9%
+      0,70-0,85        1,1%         8,0%
+      0,85-0,95        0,1%         2,3%
+      0,95-1,00        0,0%         1,9%
+
+    `RMS_level` don 84% so khung vao khoang 0,1..0,5 nen sau chuan hoa hau
+    het cot cao gan bang nhau — song trong nhu mot khoi phang. `Peak_level`
+    cho 33% so khung tren 0,5 (so voi 11%), tuc dai cao thap ro rang.
+    Day la chuoi RMS cua muc TRUNG BINH, con waveform can DINH.
+
     """
     # `-t` không dùng: cần cả tệp. `-vn` để chắc chắn không giải mã video.
     lenh = [
         "ffmpeg", "-hide_banner", "-loglevel", "error", "-vn",
         "-i", str(wav),
         "-af", (f"asetnsamples=n={_MAU_MOI_DINH},astats=metadata=1:reset=1,"
-                "ametadata=print:key=lavfi.astats.Overall.RMS_level:file=-"),
+                "ametadata=print:key=lavfi.astats.Overall.Peak_level:file=-"),
         "-f", "null", "-",
     ]
     try:
@@ -233,10 +247,10 @@ def _doc_dinh_song(wav: pathlib.Path, so_dinh: int) -> list[float]:
         return []
 
     # `ametadata=print` ghi ra stdout: cặp dòng "frame:N pts_time:T" và
-    # "lavfi.astats.Overall.RMS_level=X". Chỉ cần các dòng RMS.
+    # "lavfi.astats.Overall.Peak_level=X". Chỉ cần các dòng Peak.
     db: list[float] = []
     for dong in ket.stdout.splitlines():
-        if "RMS_level=" not in dong:
+        if "Peak_level=" not in dong:
             continue
         try:
             gia_tri = float(dong.rsplit("=", 1)[1])

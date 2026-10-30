@@ -140,20 +140,29 @@ export function Timeline({
       return;
     }
 
-    // Một vạch mỗi 3 px — mật độ của bản đã duyệt (~40 vạch / 117 px = 2,9).
-    const soVach = Math.max(1, Math.floor(width / 3));
-    const buoc = peaks.length / soVach;
+    // 🔴 LỖI ĐÃ SỬA: "nhiều nến bằng nhau".
+    //
+    // Bản trước đặt `soVach = floor(width / 3)` = 16 656 ở 40 px/s, nhưng chỉ có
+    // 2 400 đỉnh. Khi `soVach > peaks.length` thì `buoc = peaks.length / soVach`
+    // = 0,14, nên hầu hết `i` cho `dau === cuoi - 1` — CÙNG MỘT ĐỈNH bị vẽ thành
+    // ~7 vạch liền nhau cùng chiều cao. Đó chính là các cụm "nến bằng nhau".
+    //
+    // Số vạch KHÔNG ĐƯỢC VƯỢT số đỉnh có thật: vẽ dày hơn dữ liệu là bịa chi tiết
+    // không tồn tại. Khi số đỉnh nhiều hơn chỗ vẽ thì gộp (lấy MAX); khi ít hơn thì
+    // mỗi đỉnh một vạch và các vạch thưa ra — đúng sự thật của dữ liệu.
+    const soVach = Math.max(1, Math.min(peaks.length, Math.floor(width / 3)));
+    const rongVach = width / soVach;
     for (let i = 0; i < soVach; i++) {
       // Lấy MAX trong nhóm: đỉnh là đỉnh, lấy trung bình làm phẳng chỗ có tiếng nói.
       let p = 0;
-      const dau = Math.floor(i * buoc);
-      const cuoi = Math.max(dau + 1, Math.floor((i + 1) * buoc));
+      const dau = Math.floor((i * peaks.length) / soVach);
+      const cuoi = Math.max(dau + 1, Math.floor(((i + 1) * peaks.length) / soVach));
       for (let j = dau; j < cuoi && j < peaks.length; j++) {
         const v = peaks[j]!;
         if (v > p) p = v;
       }
       const h = Math.max(1, p * (H - 8));
-      g.fillRect(i * 3, (H - h) / 2, 2, h);
+      g.fillRect(i * rongVach, (H - h) / 2, Math.max(1, rongVach - 0.6), h);
     }
   }, [peaks, width]);
 
