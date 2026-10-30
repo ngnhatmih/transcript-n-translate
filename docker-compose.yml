@@ -9,8 +9,19 @@
 services:
   api:
     build: ./backend
+    # ── CỔNG API CHỈ NGHE TRÊN LOOPBACK, KHÔNG PHẢI 0.0.0.0 ───────────────────────────────
+    #
+    # ĐO ĐƯỢC (bản cũ `"8620:8620"`): Docker bind vào MỌI giao diện, nên `8620` lộ ra LAN
+    # và — khi mở tunnel — ra cả Internet. Backend này KHÔNG có một lớp xác thực nào:
+    # không token, không session, không `TrustedHostMiddleware`, CORS chỉ là danh sách hai
+    # origin dev (và CORS không phải xác thực — `curl` bỏ qua nó hoàn toàn). Nghĩa là ai
+    # với tới được cổng đó thì upload tệp, xoá nguồn, duyệt bản ghi, đọc toàn bộ media.
+    #
+    # `127.0.0.1:8620:8620` = chỉ tiến trình TRÊN CHÍNH MÁY này kết nối được. Container
+    # `web` KHÔNG bị ảnh hưởng: nó gọi `http://api:8620` qua mạng nội bộ của compose,
+    # không đi qua cổng đã publish. Đó là lý do ràng buộc này an toàn mà không phá gì.
     ports:
-      - "8620:8620"
+      - "127.0.0.1:8620:8620"
     # GPU cho CẢ hai việc: OPUS-MT (torch) và faster-whisper (CTranslate2 + cuBLAS).
     # Máy KHÔNG có GPU: bỏ dòng `gpus` + `PHUDE_ASR_DEVICE` dưới đây, và đổi torch
     # trong `backend/requirements-docker.txt` sang bản `cpu` (xem README).
@@ -45,8 +56,17 @@ services:
 
   web:
     build: ./frontend
+    # ── CỔNG WEB CŨNG CHỈ NGHE TRÊN LOOPBACK ─────────────────────────────────────────────
+    #
+    # Đây là cổng DUY NHẤT được phép ra ngoài, và nó ra ngoài qua TUNNEL, không qua bind
+    # 0.0.0.0. `cloudflared` chạy trên chính máy này và trỏ `http://127.0.0.1:3100`, nên
+    # nó vẫn vào được; còn máy khác trong LAN thì không vào thẳng được nữa.
+    #
+    # Nếu bạn CHỦ Ý muốn mở cho LAN (điện thoại cùng wifi) mà không dùng tunnel, đổi dòng
+    # dưới thành `"3100:80"` — nhưng biết rằng lúc đó ai trong LAN cũng dùng được toàn bộ
+    # ứng dụng, vì ứng dụng không có đăng nhập.
     ports:
-      - "3100:80"
+      - "127.0.0.1:3100:80"
     depends_on:
       - api
     restart: unless-stopped
