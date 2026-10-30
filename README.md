@@ -859,3 +859,83 @@ Viết bài test này lộ thêm `ReferenceError: requestAnimationFrame is not d
 `ResizeObserver` và `Element.prototype.scrollIntoView` đã thêm ở lượt trước; cả ba nay nằm
 trong `MANAGED_GLOBALS` để `teardownDom()` trả lại — trước đó chúng rò sang mọi tệp test
 chạy sau, vì `--test-isolation=none` dùng chung một tiến trình.
+## ERRATA #58 — `safe_basename` cắt tên khác nhau trên Windows và Linux
+
+**Phát hiện lúc:** chạy `pytest` bằng `.venv` trên máy chủ (Windows) thay vì trong container.
+**Mức:** tên tệp nguy hiểm được chấp nhận và **âm thầm đổi tên** trên Windows. **Trạng thái:** đã sửa, đã đo cả hai nền tảng.
+
+### Số đo
+
+```
+tests/test_api_sources.py::test_safe_basename_tu_choi_moi_dau_hai_cham_ke_ca_tien_to_giong_o_dia
+E  Failed: DID NOT RAISE <class 'app.domain.paths.InvalidBasename'>
+```
+
+Hai nền tảng, cùng một hàm, hai hợp đồng:
+
+| | `PurePath("a:b.mp4")` | `safe_basename("a:b.mp4")` |
+|---|---|---|
+| Windows (máy chủ) | `.drive='a:'` `.name='b.mp4'` | **`'b.mp4'`** — không ném |
+| Linux (container) | `.drive=''` `.name='a:b.mp4'` | `InvalidBasename` — ném |
+
+### Nguyên nhân
+
+`pathlib.PurePath` chọn lớp con theo **hệ điều hành đang chạy**: `PureWindowsPath` trên
+Windows, `PurePosixPath` trên Linux. Hai lớp tách ổ đĩa khác nhau. Trên Windows, dấu `:`
+bị coi là ổ đĩa nên **biến mất** trước khi tới `_reject_unsafe_name`:
+
+```python
+plain = pathlib.PurePath(name.replace("\\", "/")).name   # ← dòng gây lỗi
+```
+
+Tên client gửi lên là dữ liệu không tin được. Trên Windows nó được **chấp nhận với một
+cái tên khác** — tệp ghi xuống đĩa không còn là tệp người dùng gửi.
+
+### Sửa
+
+Đường dẫn do client gửi luôn được hiểu theo cú pháp POSIX (`\` đã đổi thành `/` ngay
+trên), nên cắt theo `/` là đúng nghĩa ở mọi nền tảng:
+
+```python
+plain = name.replace("\\", "/").rsplit("/", 1)[-1]
+```
+
+Đo lại — hai nền tảng cho **cùng kết quả**:
+
+| tên | Windows | Linux |
+|---|---|---|
+| `a:b.mp4` | NÉM | NÉM |
+| `x:y.mp4` | NÉM | NÉM |
+| `ab:c.mp4` | NÉM | NÉM |
+| `C:/media/x.mp4` | `'x.mp4'` | `'x.mp4'` |
+| `..\..\x.mp4` | `'x.mp4'` | `'x.mp4'` |
+| `a/` | NÉM | NÉM |
+| `CON` | NÉM | NÉM |
+| `a//b.mp4` | `'b.mp4'` | `'b.mp4'` |
+
+### Bài học về CÁCH ĐO — quan trọng hơn lỗi
+
+Lỗi này nằm im rất lâu vì **test chạy trong container Linux**, nơi hành vi đúng. Đó là
+chạy test trên nền tảng **khác** nền tảng phát triển, nên nó chỉ bắt được lỗi của Linux.
+
+Nhưng lần này tôi đã đo sai theo chiều ngược lại trước đó: chạy `pytest` trong container
+`api` và thấy `1407 passed` — trong khi `requirements-docker.txt:8` ghi rõ image **cố ý**
+thiếu `pytest`. Lượt đó chạy được chỉ vì container còn `pip install` dư từ lần trước.
+Một môi trường không được định nghĩa bởi image thì kết quả của nó không tái lập được.
+
+Hai điều rút ra:
+
+1. **Chạy suite ở môi trường mà nó được định nghĩa cho** — với repo này là `.venv` trên
+   máy chủ (`requirements.txt` có `pytest==8.3.4`), không phải image chạy sản phẩm.
+2. **Một lỗi phụ thuộc nền tảng chỉ lộ ra khi chạy trên cả hai nền tảng.** Nếu chỉ có
+   một môi trường, hãy biết mình đang mù phía nào — và ghi ra, thay vì coi "xanh" là
+   "đúng".
+
+### Đo cuối
+
+```
+pytest (venv, Windows)   1412 passed, 15 deselected, EXIT_PYTEST=0
+npm test (frontend)      145 pass, 0 fail, EXIT=0
+npx tsc --noEmit         EXIT_TS=0
+npx vite build           EXIT_BUILD=0
+```
