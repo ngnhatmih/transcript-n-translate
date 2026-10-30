@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Command as CmdIcon, Film, Moon, Pause, Play, Repeat, Sun, Upload, Cpu } from "lucide-react";
 
-import { mediaUrl, exportUrl } from "@/api/endpoints";
+import { mediaUrl, exportUrl, getPeaks } from "@/api/endpoints";
 import type { DubPlanRow, Job, Source, TranslationCps, TranslationDetail, Transcript } from "@/api/types";
 import {
   BA_GOC_NHIN,
@@ -23,7 +23,7 @@ import {
 } from "@/lib/studio";
 import { cn } from "@/lib/utils";
 import { formatTimecode } from "@/lib/timecode";
-import { decodePeaks, usePlayer } from "./use-player";
+import { usePlayer } from "./use-player";
 import { Timeline } from "./Timeline";
 import { SegmentRow, type ViewMode } from "./SegmentRow";
 import { PipelineBar } from "./PipelineBar";
@@ -183,37 +183,48 @@ export function Studio(props: StudioProps) {
   }, [loi]);
 
   /**
-   * SONG AM THAT — doc tu URL media cua may chu.
+   * SONG AM — tinh O SERVER, khong giai ma trong trinh duyet.
    *
-   * Ban goc dung `fakePeaks(SAMPLE_DURATION, 20, SAMPLE_SEGMENTS)`: song sinh tu 18
-   * doan mau, khong lien quan gi den tep that. O day doc THAT; that bai thi de TRONG
-   * va noi ro, khong ve mot song trong nhu that.
+   * 🔴 DO DUOC, KHONG DOAN. Ban truoc `fetch(media)` roi `decodeAudioData`:
+   *
+   *     fetch status=206 type=video/mp4
+   *     blob size=238623268 sau 0.0s
+   *     ... roi KHONG co `decodeAudioData OK` lan `LOI` trong 45 giay.
+   *
+   * Tai xong ngay (do toc do: 318 MB/s) nhung `decodeAudioData` TREO tren container
+   * MP4 238 MB — no chi giai ma CA tep va giu toan bo mau da giai ma trong bo nho.
+   * Nen `peaks` luon rong va canvas luon trong.
+   *
+   * Cach lam chuan (Peaks.js cua BBC R&D, `waveform-data.js`) la tinh peaks o server,
+   * client chi ve. Backend `GET /api/media/{id}/peaks` doc `audio_path` (WAV 16 kHz,
+   * 40 MB) bang `ffmpeg astats`, tra JSON. Do duoc: 1,61 s cho 1249 s, 8 297 B
+   * thay vi 238 MB.
+   *
+   * Ban goc cua Lovable dung `fakePeaks()` — may phat so gia (seed 7, Park-Miller)
+   * nhan voi `sin(t * 7.3)`. Ham do KHONG duoc chuyen sang: ve song gia la bia du
+   * lieu. That bai thi de TRONG va noi ro.
    */
   useEffect(() => {
-    if (media === null) {
+    if (source === null) {
       setPeaks([]);
       return;
     }
     let huy = false;
     void (async () => {
       try {
-        const res = await fetch(media, { headers: { Range: "bytes=0-" } });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const blob = await res.blob();
-        const file = new File([blob], "media", { type: blob.type });
-        const p = await decodePeaks(file, 2400);
-        if (!huy) setPeaks(p);
+        const r = await getPeaks(source.id, 2400);
+        if (!huy) setPeaks(r.dinh);
       } catch {
         if (!huy) {
           setPeaks([]);
-          setNotice("Khong doc duoc song am cua tep — dai thoi gian de trong");
+          setNotice("Khong doc duoc song am cua nguon — dai thoi gian de trong");
         }
       }
     })();
     return () => {
       huy = true;
     };
-  }, [media]);
+  }, [source]);
 
   /** VIEC — gop ba nguon that, dung luat "duyet roi thi het viec". */
   const issues = useMemo<Viec[]>(() => viecCuaDongList(dong), [dong]);

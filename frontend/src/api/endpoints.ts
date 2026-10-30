@@ -344,6 +344,33 @@ export function mediaUrl(sourceId: number): string {
 }
 
 /**
+ * ĐỈNH SÓNG ÂM của một nguồn — tính Ở SERVER, trả JSON.
+ *
+ * 🔴 VÌ SAO KHÔNG GIẢI MÃ TRONG TRÌNH DUYỆT (đo được): client từng
+ * `fetch('/api/media/1')` rồi `decodeAudioData`. Đo trên trang thật:
+ *
+ *   fetch status=206 type=video/mp4
+ *   blob size=238623268 sau 0.0s
+ *   ... rồi KHÔNG có `decodeAudioData OK` lẫn `LOI` trong 45 giây.
+ *
+ * Tải xong ngay (318 MB/s) nhưng `decodeAudioData` TREO trên container MP4 238 MB:
+ * nó chỉ giải mã CẢ tệp và giữ toàn bộ mẫu đã giải mã trong bộ nhớ.
+ *
+ * Cách làm chuẩn (Peaks.js của BBC R&D) là tính peaks ở server, client chỉ vẽ.
+ * Backend đọc `audio_path` (WAV 16 kHz, 40 MB) bằng `ffmpeg astats` — đo được
+ * 1,61 s cho 1249 s, trả 8 297 B thay vì 238 MB.
+ */
+export function getPeaks(
+  sourceId: number,
+  soDinh?: number,
+): Promise<{ dinh: number[]; so_dinh: number; giay: number }> {
+  // `api.get` TU ghep `BASE` (client.ts:61), nen duong o day KHONG co `/api`.
+  // Ban truoc truyen `${BASE}/media/...` -> thanh `/api/api/media/1/peaks` -> 404.
+  return api.get<{ dinh: number[]; so_dinh: number; giay: number }>(
+    `/media/${sourceId}/peaks${query(soDinh === undefined ? {} : { so_dinh: soDinh })}`,
+  );
+}
+/**
  * URL xuất phụ đề của MỘT bản dịch (spec §11). Trả nội dung ngay, không xếp job.
  *
  * Ba nút xuất của thanh transport dùng ĐÚNG hàm này — không tự ghép URL ở client,
@@ -431,5 +458,6 @@ export const endpoints = {
   listEngines,
   status,
   mediaUrl,
+  getPeaks,
   exportUrl,
 };

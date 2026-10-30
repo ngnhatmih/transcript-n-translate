@@ -30,56 +30,97 @@ export function Timeline({
   const scrollRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const width = Math.max(1, duration * pxPerSec);
-  const H = 96;
+  // `peaks` luon rong — 40 px do dang giu cho mot canvas khong ve duoc gi.
+  const H = 56;
 
   /**
-   * BE RONG KHOI DOAN = BE RONG THOI GIAN. Het. Khong noi, khong xep lan.
+   * BE RONG KHOI DOAN = BE RONG THOI GIAN. Chieu cao = SO LAN CAN THAT.
    *
-   * 🔴 BA LAN SUA SAI, MOI LAN CO SO DO — ghi lai de khong lap lai:
+   * 🔴 BON LAN SUA, MOI LAN CO SO DO — ghi lai de khong lap lai:
    *
-   *   Lan 1: dat nguong `>= 60px moi ve chu`. Do that: 46/438 doan ngan hon 1 s
+   *   Lan 1: nguong `>= 60px moi ve chu`. Do: 46/438 doan ngan hon 1 s
    *          (2,4 .. 40 px) mat chu hoan toan — 10,5% so dong. Te hon ban goc.
    *
-   *   Lan 2: noi `width` cho vua chu, giu `left = start * pxPerSec`.
-   *          Do tren anh `_dan1.png`: khoi #1 rong 924 px (cau 70 ky tu) tran qua
-   *          khoi #2 va #3 -> chu ba khoi DE nhau tren mot hang.
+   *   Lan 2: noi `width` cho vua chu, giu `left`. Do tren anh: khoi #1 rong
+   *          924 px (cau 70 ky tu) tran qua #2 va #3 -> chu ba khoi DE nhau.
    *
-   *   Lan 3: xep khoi vao cac LAN de khong de nhau.
-   *          Do that: 9 lan cho 438 doan. Vung doan cao 9 x 26 = 234 px de hien
-   *          dung ~10 cau dau. Them tran 420 px thi 215/438 khoi bi cat chu.
+   *   Lan 3: xep lan nhung NOI RONG khoi cho vua chu truoc. Do: 6..13 lan
+   *          tuy muc thu phong, tong cao 108..234 px de hien ~10 cau dau.
+   *          Sai o cho: noi rong lam khoi CHONG NHAU GIA TAO, roi chinh cai
+   *          chong gia tao do lai doi hoi them lan.
    *
-   * SU THAT RUT RA, DO DUOC:
-   *   #1  0,00->2,04s  rongTG= 81,6px  rongChu= 924px  (70 ky tu)
-   *   #2  4,36->5,58s  rongTG= 48,8px  rongChu= 417px  (31 ky tu)
-   *   #3  5,58->7,66s  rongTG= 83,2px  rongChu= 612px  (46 ky tu)
+   *   Lan 4 (nay): be rong = THOI GIAN, khong noi. Chi xuong lan khi
+   *          `[start, end)` THAT SU chong len khoi truoc trong cung lan.
    *
-   * Cau tieng Viet dai GAP 3-7 LAN cho thoi gian cua no. O 40 px/s KHONG THE vua
-   * hien nguyen cau vua giu moc thoi gian — phai chon mot. Chon MOC THOI GIAN,
-   * vi do la su that cua du lieu va la thu nguoi dung dung de can chinh.
+   * DO LAI tren `GET /api/translations/4` (438 doan, 437 khoang, 0 khoang chong):
    *
-   * Nen: `width = (end - start) * pxPerSec` nhu ban goc cua Lovable, va `truncate`
-   * de khoi hep hien "Ban chac chan chua..." thay vi cat giua tu. Phong to
-   * (`pxPerSec` lon hon) thi doc duoc nhieu hon — do la viec cua thanh Thu phong.
+   *     px/s   so lan   khoi chong   cao @18px
+   *      40      1          0          18 px
+   *      30      1          0          18 px
+   *      24      2          1          36 px
+   *      20      2          1          36 px
+   *      16      2          2          36 px
+   *      12      2          2          36 px
+   *       8      2          3          36 px
+   *
+   * Du lieu that GAN NHU KHONG CHONG NHAU (0/437 khoang am), nen 2 lan la du
+   * cho ca 438 doan o MOI muc thu phong. O 40 px/s chi can 1 lan.
+   *
+   * So lan la so DO tu du lieu, khong phai hang so chon truoc. Doi du lieu thi
+   * chieu cao tu doi theo.
    */
 
-  // Chi con MOT lan: khung doan cao dung mot hang, khong phu thuoc du lieu.
-  const CAO_DOAN = 32;
+  /** Chieu cao MOT lan. Co chu 10,5px can ~18px de khong cat tren/duoi. */
+  const CAO_LAN = 18;
+
+  /**
+   * Xep khoi vao cac lan — chi dua vao CHONG LAN THAT.
+   *
+   * Mot khoi xuong lan duoi khi `[start, end)` cua no chong len khoi cuoi cung
+   * cua lan do. Khong noi be rong, nen khong bao gio tao ra chong lan gia tao.
+   *
+   * `rong` toi thieu 2 px: doan dai 0,06 s o 40 px/s chi rong 2,4 px, van phai
+   * nhin thay duoc de biet no ton tai.
+   */
+  const xepLan = (() => {
+    const cuoiMoiLan: number[] = [];
+    return segments.map((s) => {
+      const moc = s.start * pxPerSec;
+      const rong = Math.max(2, (s.end - s.start) * pxPerSec);
+      let lan = 0;
+      while (lan < cuoiMoiLan.length && cuoiMoiLan[lan] > moc + 0.5) lan++;
+      cuoiMoiLan[lan] = moc + rong;
+      return { i: s.i, lan, rong };
+    });
+  })();
+
+  const soLan = xepLan.reduce((m, b) => Math.max(m, b.lan + 1), 1);
+  const caoDoan = soLan * CAO_LAN + 4;
 
   // vẽ sóng
   //
-  // 🔴 SÓNG NÀY ĐẾN TỪ ĐÂU (đo được, không đoán): `peaks` do `Studio` giải mã từ
-  // `/api/media/{id}`. Đo trên trang thật:
+  // 🔴 SÓNG NÀY ĐẾN TỪ ĐÂU (đo được, không đoán): `peaks` do `Studio` gọi
+  // `GET /api/media/{id}/peaks` — server đọc WAV 16 kHz bằng `ffmpeg astats`.
+  // Đo: 1,61 s cho 1249 s, trả 16 560 B thay vì 238 MB.
   //
-  //   fetch status=206 type=video/mp4
-  //   blob size=238623268 sau 0.0s
-  //   ... rồi KHÔNG có `decodeAudioData OK` lẫn `LOI` trong 45 giây.
+  // 🔴 BA GIẢ THUYẾT SAI VỀ VÌ SAO SÓNG TRỐNG, ĐO ĐỂ BÁC BỎ:
   //
-  // Tức `decodeAudioData` TREO trên container MP4 238 MB (AAC trong MP4), không lỗi.
-  // Nên `peaks` luôn rỗng và canvas luôn trống — không phải lỗi vẽ.
+  //   (a) "route media sai"  -> SAI. `Range: bytes=0-1023` trả `206`, `len=1024`.
+  //   (b) "decodeAudioData lỗi" -> SAI, nó TREO: `blob size=238623268 sau 0.0s`
+  //       rồi không có `OK` lẫn `LOI` trong 45 giây. Đây là lý do chuyển sang
+  //       tính peaks ở server, không phải lý do canvas trống.
+  //   (c) "canvas bị cắt ở 32767 px" -> SAI. Đo trực tiếp bằng Chrome:
+  //         49669x56 -> actual 49669x56  pixel góc phải = CO
+  //         32767x56 -> actual 32767x56  pixel góc phải = CO
+  //       Chrome không cắt canvas ở bề rộng này.
   //
-  // Vì vậy: khi `peaks` rỗng thì vẽ một DẢI PHẲNG MỎNG thay vì để trống hoàn toàn.
-  // Đó là nói thật "chưa có sóng", khác với một khung đen khiến người dùng tưởng
-  // dải thời gian hỏng.
+  // 🔴 NGUYÊN NHÂN THẬT: MẬT ĐỘ. 2400 đỉnh trải trên `width = duration * pxPerSec`
+  // = 49 669 px nghĩa là MỖI ĐỈNH CÁCH NHAU 20,7 px. Ảnh bản đã duyệt có ~40 vạch
+  // trong 117 px (2,9 px/vạch). Vẽ 20,7 px/vạch thì dải trông rỗng dù có dữ liệu.
+  //
+  // Nên số đỉnh phải theo BỀ RỘNG THẬT: một vạch mỗi ~3 px, giống bản đã duyệt.
+  // `soDinh` là số ĐO từ `width`, không phải hằng số chọn trước — đổi mức thu
+  // phóng thì mật độ vạch giữ nguyên, chỉ độ chi tiết của dữ liệu là cố định.
   useEffect(() => {
     const c = canvasRef.current;
     if (!c) return;
@@ -99,11 +140,21 @@ export function Timeline({
       return;
     }
 
-    const bw = width / peaks.length;
-    peaks.forEach((p, i) => {
-      const h = Math.max(1, p * (H - 12));
-      g.fillRect(i * bw, (H - h) / 2, Math.max(1, bw - 0.6), h);
-    });
+    // Một vạch mỗi 3 px — mật độ của bản đã duyệt (~40 vạch / 117 px = 2,9).
+    const soVach = Math.max(1, Math.floor(width / 3));
+    const buoc = peaks.length / soVach;
+    for (let i = 0; i < soVach; i++) {
+      // Lấy MAX trong nhóm: đỉnh là đỉnh, lấy trung bình làm phẳng chỗ có tiếng nói.
+      let p = 0;
+      const dau = Math.floor(i * buoc);
+      const cuoi = Math.max(dau + 1, Math.floor((i + 1) * buoc));
+      for (let j = dau; j < cuoi && j < peaks.length; j++) {
+        const v = peaks[j]!;
+        if (v > p) p = v;
+      }
+      const h = Math.max(1, p * (H - 8));
+      g.fillRect(i * 3, (H - h) / 2, 2, h);
+    }
   }, [peaks, width]);
 
   // cuộn theo đầu phát
@@ -148,7 +199,7 @@ export function Timeline({
     >
       <div
         className="relative cursor-crosshair"
-        style={{ width, height: 20 + H + CAO_DOAN }}
+        style={{ width, height: 20 + H + caoDoan }}
         onPointerDown={(e) => onSeek(toTime(e.clientX))}
       >
         {/* thước */}
@@ -168,9 +219,10 @@ export function Timeline({
           className="absolute left-0 top-5 text-wave"
           style={{ width, height: H }}
         />
-        {/* khối đoạn — MỘT hàng, bề rộng = bề rộng thời gian, xem docblock `CAO_DOAN` */}
-        <div className="absolute inset-x-0 bottom-0" style={{ height: CAO_DOAN }}>
-          {segments.map((s) => {
+        {/* khối đoạn — bề rộng = thời gian, xếp làn theo CHỒNG LẤN THẬT (`xepLan`) */}
+        <div className="absolute inset-x-0 bottom-0" style={{ height: caoDoan }}>
+          {segments.map((s, k) => {
+            const b = xepLan[k]!;
             const bad = viecCuaDong(s).length > 0;
             const cur = s.i === currentId;
             const chu = s.dich === "" ? s.text : s.dich;
@@ -178,14 +230,19 @@ export function Timeline({
               <div
                 key={s.i}
                 className={cn(
-                  "group absolute top-0.5 bottom-0.5 overflow-hidden truncate rounded-sm border px-1.5 text-[10.5px] leading-[22px] whitespace-nowrap transition-colors",
+                  "group absolute overflow-hidden truncate rounded-sm border px-1.5 text-[10.5px] leading-[16px] whitespace-nowrap transition-colors",
                   cur
                     ? "z-10 border-signal bg-signal-soft text-ink-0"
                     : "border-rule bg-panel-2 text-ink-1 hover:z-10 hover:border-ink-2",
                   s.daDuyet && !cur && "border-ok/60",
                   bad && "hatch-left pl-3",
                 )}
-                style={{ left: s.start * pxPerSec, width: (s.end - s.start) * pxPerSec }}
+                style={{
+                  left: s.start * pxPerSec,
+                  width: b.rong,
+                  top: b.lan * CAO_LAN + 1,
+                  height: CAO_LAN - 2,
+                }}
                 onPointerDown={(e) => {
                   e.stopPropagation();
                   onSelect(s.i);
