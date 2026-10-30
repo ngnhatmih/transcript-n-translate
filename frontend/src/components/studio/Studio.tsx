@@ -24,7 +24,7 @@ import {
 import { cn } from "@/lib/utils";
 import { formatTimecode } from "@/lib/timecode";
 import { usePlayer } from "./use-player";
-import { Timeline } from "./Timeline";
+import { Timeline, type BaoSong } from "./Timeline";
 import { SegmentRow, type ViewMode } from "./SegmentRow";
 import { PipelineBar } from "./PipelineBar";
 import { CommandPalette, type Command } from "./CommandPalette";
@@ -140,7 +140,7 @@ export function Studio(props: StudioProps) {
   const [currentId, setCurrentId] = useState<number | null>(null);
   const [view, setView] = useState<ViewMode>("edit");
   const [pxPerSec, setPxPerSec] = useState(40);
-  const [peaks, setPeaks] = useState<number[]>([]);
+  const [bao, setBao] = useState<BaoSong>({ tren: [], duoi: [] });
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [theme, setTheme] = useState<"dark" | "light">("dark");
   const [flashId, setFlashId] = useState<number | null>(null);
@@ -206,17 +206,19 @@ export function Studio(props: StudioProps) {
    */
   useEffect(() => {
     if (source === null) {
-      setPeaks([]);
+      setBao({ tren: [], duoi: [] });
       return;
     }
     let huy = false;
     void (async () => {
       try {
-        const r = await getPeaks(source.id, 2400);
-        if (!huy) setPeaks(r.dinh);
+        // 200 000 điểm = 160 px/s (mức thu phóng lớn nhất) × 1249 s. Server trả
+        // 124 924 điểm thật (10 ms/khung) — 2,5 điểm mỗi pixel ở 40 px/s.
+        const r = await getPeaks(source.id, 200000);
+        if (!huy) setBao({ tren: r.tren, duoi: r.duoi });
       } catch {
         if (!huy) {
-          setPeaks([]);
+          setBao({ tren: [], duoi: [] });
           setNotice("Khong doc duoc song am cua nguon — dai thoi gian de trong");
         }
       }
@@ -802,7 +804,7 @@ export function Studio(props: StudioProps) {
 
           <Timeline
             segments={segments}
-            peaks={peaks}
+            bao={bao}
             duration={player.duration}
             time={player.time}
             pxPerSec={pxPerSec}

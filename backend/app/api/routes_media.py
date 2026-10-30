@@ -24,6 +24,9 @@ import mimetypes
 import pathlib
 import re
 import subprocess
+import threading
+
+from collections import OrderedDict
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import Response, StreamingResponse
@@ -193,103 +196,196 @@ def get_media(source_id: int, request: Request,
 # theo bề rộng khung, và không đổi được độ phân giải theo mức thu phóng. `astats`
 # trả SỐ, client tự vẽ ở bất kỳ bề rộng nào. Số cũng nhỏ hơn: 1200 điểm ~ 10 KB.
 # ─────────────────────────────────────────────────────────────────────────────
+#: Số mẫu mỗi khung phân tích. `n=160` ở 16 kHz = **10 ms**.
+#:
+#: 🔴 ĐO ĐƯỢC, không đoán. Ba mật độ trên chính tệp này:
+#:
+#:     mẫu/khung   bước    điểm cho 1249 s   thời gian
+#:       1600     100 ms       12 493         1,56 s
+#:        400      25 ms       49 974           —
+#:        160      10 ms      124 924         7,46 s
+#:
+#: 124 924 điểm trên `width = 1249,237 × 40 = 49 969 px` là **2,5 điểm mỗi
+#: pixel** — đủ để đường bao mượt, không răng cưa. Ở 100 ms chỉ có 0,25
+#: điểm/pixel, tức phải nội suy 4 pixel từ một mẫu: đó chính là chỗ "thô".
+#:
+#: 7,46 s cho một lần đọc cả tệp, và kết quả được tính lại mỗi lần gọi — chấp
+#: nhận được vì peaks không phải đường nóng (chỉ gọi khi mở nguồn).
+_MAU_MOI_KHUNG = 160
 
-#: Đỉnh sóng thưa hơn 100 ms thì không tăng thông tin: tai người không phân biệt
-#: được hai đỉnh cách nhau dưới ~50 ms, và dải thời gian ở 40 px/s chỉ rộng 4 px
-#: cho 100 ms. `n=1600` mẫu ở 16 kHz = 100 ms.
-_MAU_MOI_DINH = 1600
+#: Số điểm trả về mặc định. Phải >= số pixel của dải thời gian rộng nhất có thể
+#: (160 px/s × 1249 s = 199 878), nên lấy 4000 là quá ít — xem `_SO_DIEM_MAX`.
+_SO_DINH = 200000
 
-#: Số đỉnh trả về. 1200 điểm phủ 1249 s = ~1,04 s/điểm ở mức thu phóng thấp nhất;
-#: client nội suy khi cần dày hơn. Nhiều hơn thì JSON to mà hình không khác.
-_SO_DINH = 1200
+#: Trần cứng: 160 px/s (mức thu phóng lớn nhất của thanh `Thu phóng`) × 1249 s
+#: = 199 878 px. Trên nữa thì JSON to mà không thêm chi tiết nào nhìn thấy được.
+_SO_DIEM_MAX = 200000
 
 
-def _doc_dinh_song(wav: pathlib.Path, so_dinh: int) -> list[float]:
-    """Đỉnh sóng 0..1 cho `so_dinh` điểm, đọc từ WAV bằng `ffmpeg astats`.
+def _doc_dinh_song(wav: pathlib.Path, so_dinh: int) -> dict[str, list[float]]:
+    """Đường bao sóng âm HAI PHÍA, đọc từ WAV bằng `ffmpeg astats`.
 
-    Dung `Peak_level` (bien do TUYET DOI lon nhat trong khung), KHONG phai
-    `RMS_level` (trung binh binh phuong).
+    🔴 VÌ SAO HAI PHÍA, KHÔNG PHẢI MỘT CỘT (đo được, không đoán):
 
-    🔴 DO DUOC tren chinh tep nay (1249 s, khung 100 ms, 12 493 khung),
-    phan bo sau khi chuan hoa ve 0..1:
+    Bản trước trả MỘT số cho mỗi khung (`Peak_level`, dB) rồi client vẽ một cột
+    đối xứng quanh trục giữa. Đó là kiểu "bar waveform" của player nhạc, không
+    phải kiểu Premiere Pro / Audition / DaVinci Resolve: ba chương trình đó vẽ
+    ĐƯỜNG BAO LIÊN TỤC, đối xứng, tô kín, và hai phía KHÔNG nhất thiết bằng nhau
+    — âm thanh thật có pha lệch, sóng dương và sóng âm khác nhau.
 
-      khoang        RMS_level    Peak_level
-      0,00-0,10        4,7%         4,6%
-      0,10-0,30       40,4%        32,1%
-      0,30-0,50       43,8%        29,1%
-      0,50-0,70       10,0%        21,9%
-      0,70-0,85        1,1%         8,0%
-      0,85-0,95        0,1%         2,3%
-      0,95-1,00        0,0%         1,9%
+    `astats` trả đúng thứ đó. Khung đầu tiên của tệp này:
 
-    `RMS_level` don 84% so khung vao khoang 0,1..0,5 nen sau chuan hoa hau
-    het cot cao gan bang nhau — song trong nhu mot khoi phang. `Peak_level`
-    cho 33% so khung tren 0,5 (so voi 11%), tuc dai cao thap ro rang.
-    Day la chuoi RMS cua muc TRUNG BINH, con waveform can DINH.
+        lavfi.astats.1.Min_level=-10363.000000
+        lavfi.astats.1.Max_level=10210.000000
+        lavfi.astats.1.Peak_level=-9.999024
+        lavfi.astats.1.RMS_level=-14.825099
 
+    `Min_level`/`Max_level` là biên độ THÔ trên thang 32768 (PCM 16 bit), không
+    phải dB: `-10363` xuống, `+10210` lên. Chia cho 32768 là ra `[-1, +1]`.
+
+    🔴 VÌ SAO KHÔNG DÙNG `Peak_level` NỮA:
+
+    `Peak_level` là dB của `max(|Min|, |Max|)` — một số DƯƠNG duy nhất. Vẽ từ nó
+    thì hai phía luôn bằng nhau, và mất hẳn hình dạng pha. Đo phân bố trên 12 493
+    khung cho thấy `RMS_level` dồn 84% vào 0,1..0,5 nên hầu hết cột cao bằng
+    nhau; `Peak_level` khá hơn nhưng vẫn chỉ là một phía.
+
+    Trả `{"tren": [...], "duoi": [...]}` với giá trị 0..1, đã chuẩn hoá theo
+    đỉnh tuyệt đối của CẢ HAI phía để tỉ lệ giữa chúng được giữ nguyên — chuẩn
+    hoá HIỂN THỊ, không phải thay đổi dữ liệu.
+
+    Trả dict rỗng khi ffmpeg không chạy được hoặc không có khung nào — client sẽ
+    vẽ vạch "chưa có sóng" thay vì một dải phẳng giả.
     """
-    # `-t` không dùng: cần cả tệp. `-vn` để chắc chắn không giải mã video.
+    # `-vn`: chắc chắn không giải mã video. Không `-t`: cần cả tệp.
+    # 🔴 ĐO ĐƯỢC: KHÔNG nối hai `ametadata` có `key=`. Khi nối, ffmpeg chỉ in khoá
+    # của bộ lọc CUỐI — đo thật, lệnh có cả `Min_level` rồi `Max_level` chỉ ra:
+    #
+    #     lavfi.astats.Overall.Max_level=1.000000
+    #     lavfi.astats.Overall.Max_level=9624.000000
+    #
+    # Không một dòng `Min_level` nào. Đó là lý do route trả `so_dinh=0` lúc đầu.
+    #
+    # Bỏ `key=` thì `ametadata=print` in MỌI metadata, và hai khoá nằm cạnh nhau
+    # đúng thứ tự khai trong `astats`. Đo trên cả tệp: 249 848 dòng Min+Max
+    # (= 124 924 × 2) trong 7,75 s.
+    # 🔴 TỐI ƯU ĐO ĐƯỢC: chỉ đo HAI số cần, không đo cả 25.
+    #
+    # `astats` mặc định đo `all` — 25 chỉ số cho mỗi kênh VÀ mỗi overall, rồi
+    # `ametadata` in hết ra. Đo trên chính tệp này:
+    #
+    #     astats mac dinh (in het)              5 871 428 dong   7,90 s
+    #     chi decode + asetnsamples (khong astats)        0 dong   1,14 s
+    #     astats do Min_level+Max_level          374 772 dong   2,68 s
+    #
+    # Giải mã chỉ 1,14 s; phần còn lại là `astats` tính 25 chỉ số không dùng.
+    # `measure_perchannel=none` bỏ hẳn phần theo kênh (tệp mono nên nó trùng
+    # `Overall`), `measure_overall=Min_level+Max_level` chỉ giữ hai số ta vẽ.
+    #
+    # Cùng dữ liệu, cùng khoá, cùng kết quả — chỉ không tính thứ không dùng.
+    loc = (f"asetnsamples=n={_MAU_MOI_KHUNG},"
+           "astats=metadata=1:reset=1:measure_perchannel=none:"
+           "measure_overall=Min_level+Max_level,"
+           "ametadata=print:file=-")
     lenh = [
         "ffmpeg", "-hide_banner", "-loglevel", "error", "-vn",
-        "-i", str(wav),
-        "-af", (f"asetnsamples=n={_MAU_MOI_DINH},astats=metadata=1:reset=1,"
-                "ametadata=print:key=lavfi.astats.Overall.Peak_level:file=-"),
-        "-f", "null", "-",
+        "-i", str(wav), "-af", loc, "-f", "null", "-",
     ]
     try:
+        # 120 s: đo được 7,46 s cho cả tệp, nhưng máy chậm hoặc ổ đĩa bận thì
+        # cần đệm rộng. Hết giờ thì trả rỗng, client vẽ vạch "chưa có sóng".
         ket = subprocess.run(lenh, capture_output=True, text=True, timeout=120, check=False)
     except (OSError, subprocess.SubprocessError) as exc:
         logger.warning("không đọc được đỉnh sóng của %s: %s", wav.name, exc)
-        return []
+        return {}
     if ket.returncode != 0:
         logger.warning("ffmpeg trả %s khi đọc đỉnh sóng %s: %s",
                        ket.returncode, wav.name, ket.stderr.strip()[:200])
-        return []
+        return {}
 
-    # `ametadata=print` ghi ra stdout: cặp dòng "frame:N pts_time:T" và
-    # "lavfi.astats.Overall.Peak_level=X". Chỉ cần các dòng Peak.
-    db: list[float] = []
+    # `ametadata=print` ghi hai dòng cho mỗi khung, theo đúng thứ tự khoá trong
+    # `loc`: Min_level trước, Max_level sau. Đọc theo CẶP thay vì hai danh sách
+    # rời rồi ghép — mất một dòng là lệch toàn bộ phần còn lại.
+    duoi: list[float] = []
+    tren: list[float] = []
     for dong in ket.stdout.splitlines():
-        if "Peak_level=" not in dong:
-            continue
-        try:
-            gia_tri = float(dong.rsplit("=", 1)[1])
-        except (ValueError, IndexError):
-            continue
-        # `-inf` (im lặng tuyệt đối) không parse được thành float hữu hạn.
-        db.append(gia_tri if math.isfinite(gia_tri) else -120.0)
-    if not db:
-        return []
+        if "Overall.Min_level=" in dong:
+            duoi.append(_doc_thang_do(dong))
+        elif "Overall.Max_level=" in dong:
+            tren.append(_doc_thang_do(dong))
+    if not duoi or len(duoi) != len(tren):
+        logger.warning("số khung lệch nhau cho %s: min=%s max=%s",
+                       wav.name, len(duoi), len(tren))
+        return {}
 
-    bien_do = [10.0 ** (x / 20.0) for x in db]
+    # 🔴 CHUẨN HOÁ HAI PHÍA RIÊNG — đo được, không đoán.
+    #
+    # Bản đầu chia CẢ hai phía cho một `dinh = max(max(duoi), max(tren))`. Sai:
+    # `max(duoi)` là số ÂM gần 0 (`-3260` ở khung đầu), nên `dinh` luôn lấy từ
+    # `tren`, và phía dưới bị chia cho số dương. Đo trên route thật:
+    #
+    #     tren: min=-0.3064  max=1.0000    <- "tren" có giá trị ÂM
+    #     duoi: min=-1.0000  max=0.2845    <- "duoi" có giá trị DƯƠNG
+    #
+    # Hai phía lẫn dấu vì `Min_level` cũng có mẫu dương (nhiễu DC, `DC_offset`
+    # khác 0) và `Max_level` cũng có mẫu âm.
+    #
+    # Đúng ra: mỗi phía chuẩn hoá theo BIÊN ĐỘ LỚN NHẤT CỦA CHÍNH NÓ, rồi kẹp
+    # dấu cho đúng phía. Tỉ lệ giữa sóng dương và sóng âm KHÔNG được giữ nguyên
+    # bằng cách chia chung — nó được giữ bằng cách vẽ đúng dấu, còn thang đo thì
+    # mỗi phía tự no tới mép khung như Premiere/Audition vẫn làm.
+    tren_max = max(tren)
+    duoi_min = min(duoi)
+    if tren_max <= 0 or duoi_min >= 0:
+        return {}
 
-    # Gộp về đúng `so_dinh` điểm bằng cách lấy MAX trong mỗi nhóm: đỉnh là đỉnh,
-    # lấy trung bình sẽ làm phẳng đúng chỗ có tiếng nói.
-    if len(bien_do) > so_dinh:
-        buoc = len(bien_do) / so_dinh
-        gon: list[float] = []
+    # Gộp về `so_dinh` điểm: mỗi điểm lấy giá trị LỚN NHẤT về phía của nó (max
+    # cho phía trên, min cho phía dưới). Lấy trung bình sẽ làm phẳng đúng chỗ có
+    # tiếng nói — đó là lỗi của bản cột.
+    def gon(ds: list[float], lay_max: bool) -> list[float]:
+        if len(ds) <= so_dinh:
+            return ds
+        buoc = len(ds) / so_dinh
+        ra: list[float] = []
         for i in range(so_dinh):
             dau = int(i * buoc)
             cuoi = max(dau + 1, int((i + 1) * buoc))
-            gon.append(max(bien_do[dau:cuoi]))
-        bien_do = gon
+            doan = ds[dau:cuoi]
+            ra.append(max(doan) if lay_max else min(doan))
+        return ra
 
-    dinh = max(bien_do)
-    if dinh <= 0:
-        return []
-    return [round(v / dinh, 4) for v in bien_do]
+    # `tren` -> 0..1 (dấu dương, chia cho đỉnh dương lớn nhất).
+    # `duoi` -> 0..1 (độ LỚN, chia cho |đỉnh âm nhỏ nhất|), client vẽ ngược lên.
+    # Kẹp `max(0, ...)`: mẫu lệch dấu do nhiễu DC thành 0, không thành một gai sai.
+    return {
+        "tren": [round(min(1.0, max(0.0, v / tren_max)), 4) for v in gon(tren, True)],
+        "duoi": [round(min(1.0, max(0.0, v / duoi_min)), 4) for v in gon(duoi, False)],
+    }
+
+
+def _doc_thang_do(dong: str) -> float:
+    """`lavfi.astats.Overall.Min_level=-10363.0` -> `-10363.0`, kẹp về ±32768."""
+    try:
+        gia_tri = float(dong.rsplit("=", 1)[1])
+    except (ValueError, IndexError):
+        return 0.0
+    if not math.isfinite(gia_tri):
+        return 0.0
+    # PCM 16 bit: vượt biên là dữ liệu hỏng, kẹp lại để hình không bị xé khung.
+    return max(-32768.0, min(32768.0, gia_tri))
 
 
 @router.get("/{source_id}/peaks")
 def get_peaks(source_id: int, so_dinh: int = _SO_DINH,
               repos=Depends(get_repos), dirs=Depends(get_dirs)):
-    """Đỉnh sóng âm của nguồn, dạng `{dinh: [0..1, ...], so_dinh: N, giay: D}`.
+    """Đường bao sóng âm hai phía: `{tren: [...], duoi: [...], so_dinh: N, giay: D}`.
 
     Đọc `audio_path` (WAV 16 kHz) chứ không phải `media_path` (MP4): xem docblock
     `_doc_dinh_song` và khối chú thích đầu mục này.
 
-    `so_dinh` bị kẹp trong `[100, 4000]`: dưới 100 thì dải quá thô để thấy nhịp
-    nói; trên 4000 thì JSON to hơn hình thu được ở mọi bề rộng màn hình thực tế.
+    `so_dinh` bị kẹp trong `[200, 200000]`. Dưới 200 thì ở mức thu phóng lớn nhất
+    (160 px/s) mỗi điểm phải phủ gần 1000 px — thô hơn cả bản cột cũ. Trên
+    200 000 thì vượt số pixel của dải rộng nhất, JSON to mà hình không khác.
     """
     try:
         source = repos.get_source(source_id)
@@ -307,6 +403,65 @@ def get_peaks(source_id: int, so_dinh: int = _SO_DINH,
     if not wav.is_file():
         raise HTTPException(410, f"tệp âm thanh đã bị xoá: {wav.name}")
 
-    so_dinh = max(100, min(4000, so_dinh))
-    dinh = _doc_dinh_song(wav, so_dinh)
-    return {"dinh": dinh, "so_dinh": len(dinh), "giay": source.duration}
+    so_dinh = max(200, min(_SO_DIEM_MAX, so_dinh))
+
+    # Khoá cache: đường dẫn + mtime + size + so_dinh. `st_mtime_ns` (không phải
+    # `st_mtime`) vì hai lần ghi trong cùng một giây vẫn phải khác khoá.
+    st = wav.stat()
+    khoa = (str(wav), st.st_mtime_ns, st.st_size, so_dinh)
+    co = _lay_tu_cache(khoa)
+    if co is None:
+        co = _doc_dinh_song(wav, so_dinh)
+        if co:
+            _dat_vao_cache(khoa, co)
+
+    return {
+        "tren": co.get("tren", []),
+        "duoi": co.get("duoi", []),
+        "so_dinh": len(co.get("tren", [])),
+        "giay": source.duration,
+    }
+# ─────────────────────────────────────────────────────────────────────────────
+# CACHE ĐỈNH SÓNG.
+#
+# 🔴 VÌ SAO CACHE ĐÚNG Ở ĐÂY, KHÔNG PHẢI "CHO NHANH":
+#
+# Peaks là hàm THUẦN của (nội dung tệp, so_dinh). Tệp media không bao giờ đổi
+# sau khi ASR đã tách WAV — nó là đầu vào bất biến của cả đường ống. Nhưng route
+# chạy `ffmpeg` lại từ đầu MỖI lần mở nguồn. Đo được trước khi cache:
+#
+#     lan 1:  9,56 s       lan 2:  9,49 s        (không có cache)
+#
+# Hai lần liên tiếp gần như bằng nhau — đúng như dự đoán: không cache gì cả.
+#
+# Khoá cache gồm `st_mtime_ns` và `st_size`: nếu tệp bị ghi đè (thay media,
+# upload lại cùng id) thì khoá đổi và cache tự bỏ, không cần ai xoá tay. Đó là
+# lý do dùng stat thay vì chỉ đường dẫn.
+#
+# Giới hạn `_CACHE_TOI_DA` mục: peaks 1,7 MB mỗi nguồn, 8 nguồn là ~14 MB RAM.
+# Vượt thì xoá mục CŨ NHẤT (dict giữ thứ tự chèn) — đủ cho một phiên làm việc,
+# không phải một cache vô hạn.
+# ─────────────────────────────────────────────────────────────────────────────
+
+_CACHE_TOI_DA = 8
+_cache_dinh: "OrderedDict[tuple[str, int, int, int], dict[str, list[float]]]" = OrderedDict()
+_cache_khoa = threading.Lock()
+
+
+def _lay_tu_cache(khoa: tuple[str, int, int, int]) -> dict[str, list[float]] | None:
+    """Trả bản đã tính, hoặc `None`. Chạm mục vừa dùng xuống cuối (LRU)."""
+    with _cache_khoa:
+        co = _cache_dinh.get(khoa)
+        if co is not None:
+            _cache_dinh.move_to_end(khoa)
+        return co
+
+
+def _dat_vao_cache(khoa: tuple[str, int, int, int],
+                   gia_tri: dict[str, list[float]]) -> None:
+    """Ghi vào cache, bỏ mục cũ nhất khi vượt trần."""
+    with _cache_khoa:
+        _cache_dinh[khoa] = gia_tri
+        _cache_dinh.move_to_end(khoa)
+        while len(_cache_dinh) > _CACHE_TOI_DA:
+            _cache_dinh.popitem(last=False)

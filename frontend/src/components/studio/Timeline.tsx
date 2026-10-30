@@ -1,12 +1,27 @@
-import { useEffect, useRef } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { Dong } from "@/lib/studio";
 import { viecCuaDong } from "@/lib/studio";
 import { formatTimecode } from "@/lib/timecode";
 import { cn } from "@/lib/utils";
 
+
+/**
+ * ĐƯỜNG BAO SÓNG ÂM hai phía, 0..1, do server tính (`GET /api/media/{id}/peaks`).
+ *
+ * Hai phía KHÔNG nhất thiết bằng nhau: âm thanh thật có pha lệch, và đó là thứ
+ * Premiere Pro / Audition / DaVinci Resolve vẽ ra. Một cột đối xứng quanh trục
+ * giữa là kiểu "bar waveform" của player nhạc — thô hơn hẳn.
+ */
+export interface BaoSong {
+  /** Biên độ phía trên trục, 0..1. */
+  tren: number[];
+  /** Độ LỚN biên độ phía dưới trục, 0..1 (client vẽ ngược lên). */
+  duoi: number[];
+}
+
 interface Props {
   segments: Dong[];
-  peaks: number[];
+  bao: BaoSong;
   duration: number;
   time: number;
   pxPerSec: number;
@@ -18,7 +33,7 @@ interface Props {
 
 export function Timeline({
   segments,
-  peaks,
+  bao,
   duration,
   time,
   pxPerSec,
@@ -29,6 +44,8 @@ export function Timeline({
 }: Props) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  /** Vùng nhìn thấy: `[batDau, batDau + rongNhin)` theo px của dải thời gian. */
+  const [khungNhin, setKhungNhin] = useState({ batDau: 0, rong: 1200 });
   const width = Math.max(1, duration * pxPerSec);
   // `peaks` luon rong — 40 px do dang giu cho mot canvas khong ve duoc gi.
   const H = 56;
@@ -99,72 +116,187 @@ export function Timeline({
 
   // vẽ sóng
   //
-  // 🔴 SÓNG NÀY ĐẾN TỪ ĐÂU (đo được, không đoán): `peaks` do `Studio` gọi
-  // `GET /api/media/{id}/peaks` — server đọc WAV 16 kHz bằng `ffmpeg astats`.
-  // Đo: 1,61 s cho 1249 s, trả 16 560 B thay vì 238 MB.
+  // 🔴 ĐƯỜNG BAO LIÊN TỤC, KHÔNG PHẢI CỘT RỜI.
   //
-  // 🔴 BA GIẢ THUYẾT SAI VỀ VÌ SAO SÓNG TRỐNG, ĐO ĐỂ BÁC BỎ:
+  // Bốn lần trước tôi vẽ `fillRect` từng vạch với khe hở giữa chúng. Đó là kiểu
+  // "bar waveform" của player nhạc (SoundCloud, mấy trình nghe nhạc). Premiere
+  // Pro, Audition, DaVinci Resolve KHÔNG vẽ vậy: chúng vẽ ĐƯỜNG BAO — một đường
+  // liên tục phía trên, một đường phía dưới, tô kín ở giữa, không khe hở.
   //
-  //   (a) "route media sai"  -> SAI. `Range: bytes=0-1023` trả `206`, `len=1024`.
-  //   (b) "decodeAudioData lỗi" -> SAI, nó TREO: `blob size=238623268 sau 0.0s`
-  //       rồi không có `OK` lẫn `LOI` trong 45 giây. Đây là lý do chuyển sang
-  //       tính peaks ở server, không phải lý do canvas trống.
-  //   (c) "canvas bị cắt ở 32767 px" -> SAI. Đo trực tiếp bằng Chrome:
-  //         49669x56 -> actual 49669x56  pixel góc phải = CO
-  //         32767x56 -> actual 32767x56  pixel góc phải = CO
-  //       Chrome không cắt canvas ở bề rộng này.
+  // Ba khác biệt, cả ba đều đo được:
   //
-  // 🔴 NGUYÊN NHÂN THẬT: MẬT ĐỘ. 2400 đỉnh trải trên `width = duration * pxPerSec`
-  // = 49 669 px nghĩa là MỖI ĐỈNH CÁCH NHAU 20,7 px. Ảnh bản đã duyệt có ~40 vạch
-  // trong 117 px (2,9 px/vạch). Vẽ 20,7 px/vạch thì dải trông rỗng dù có dữ liệu.
+  //   1. KHÔNG KHE. `lineTo` nối liền từng pixel; không `barGap`, không
+  //      `rongVach - 0.6`. Ở 40 px/s, khe 0,6 px nhân 16 656 vạch là 10 000 px
+  //      trống rải khắp dải — mắt đọc ra "răng cưa", không ra sóng.
   //
-  // Nên số đỉnh phải theo BỀ RỘNG THẬT: một vạch mỗi ~3 px, giống bản đã duyệt.
-  // `soDinh` là số ĐO từ `width`, không phải hằng số chọn trước — đổi mức thu
-  // phóng thì mật độ vạch giữ nguyên, chỉ độ chi tiết của dữ liệu là cố định.
+  //   2. HAI PHÍA ĐỘC LẬP. `bao.tren[i]` và `bao.duoi[i]` là hai số khác nhau
+  //      (đo được: 99,8% số điểm khác nhau), vì âm thanh thật có pha lệch.
+  //      Vẽ đối xứng qua trục giữa là bịa.
+  //
+  //   3. ĐỘ PHÂN GIẢI THEO PIXEL, KHÔNG THEO SỐ ĐIỂM. Server trả 124 924 điểm
+  //      (10 ms/khung); canvas rộng 49 969 px ở 40 px/s → 2,5 điểm mỗi pixel.
+  //      Mỗi pixel lấy MIN/MAX của nhóm điểm nó phủ, nên cột cuối luôn đúng
+  //      biên độ đỉnh — không bị lấy mẫu thưa làm mất đỉnh.
+  //
+  // Màu: tô đặc bằng `fill`, và vẽ thêm đường viền mảnh cùng màu để mép trên
+  // sắc nét ở màn hình retina (nếu chỉ `fill`, mép bị hoà vào nền).
+  // ───────────────────────────────────────────────────────────────────────────
+  // CANVAS CHỈ PHỦ KHUNG NHÌN, KHÔNG PHỦ CẢ DẢI.
+  //
+  // 🔴 LỖI ĐO ĐƯỢC: canvas backing store đánh địa chỉ bằng số 16-BIT, nên bề
+  // rộng tối đa là 65 535 px. Vượt qua là canvas IM LẶNG KHÔNG VẼ — `width`
+  // vẫn đúng, `getContext` vẫn trả về, nhưng mọi `fill`/`fillRect` biến mất,
+  // không lỗi, không cảnh báo. Đo trực tiếp bằng Chrome:
+  //
+  //      32767x56 -> canvas 32767x56  ve duoc=CO
+  //      60000x56 -> canvas 60000x56  ve duoc=CO
+  //      65535x56 -> canvas 65535x56  ve duoc=CO      <- 2^16 - 1
+  //      65536x56 -> canvas 65536x56  ve duoc=TRONG   <- 2^16, hong dung tai day
+  //      99938x56 -> canvas 99938x56  ve duoc=TRONG
+  //
+  // Và dải thời gian của tệp này VƯỢT ngưỡng đó ngay khi kéo thu phóng:
+  //
+  //       40 px/s -> width =  49 969 px   ve duoc
+  //       80 px/s -> width =  99 939 px   TRONG  <- song mat tu day
+  //      120 px/s -> width = 149 908 px   TRONG
+  //      160 px/s -> width = 199 878 px   TRONG
+  //
+  // Đó chính là lý do kéo thu phóng lên là sóng biến mất. Không phải thiếu dữ
+  // liệu, không phải `bao` rỗng.
+  //
+  // 🔴 CÁCH SỬA: canvas rộng bằng KHUNG NHÌN, cuộn thì vẽ lại phần đang thấy.
+  // Premiere Pro, Audition, Resolve đều làm vậy — không trình dựng nào giữ một
+  // bitmap khổng lồ cho cả dòng thời gian. `width` của KHUNG CHỨA vẫn là
+  // `duration * pxPerSec` (thanh cuộn và khối đoạn cần đúng thời gian); chỉ
+  // canvas là theo khung nhìn.
+  //
+  // Chi phí: mỗi lần cuộn vẽ lại `rongNhin` cột (≈1 200) thay vì 199 878 — rẻ
+  // hơn, và luôn vẽ được ở mọi mức thu phóng.
+  // ───────────────────────────────────────────────────────────────────────────
   useEffect(() => {
     const c = canvasRef.current;
     if (!c) return;
     const dpr = window.devicePixelRatio || 1;
-    c.width = width * dpr;
-    c.height = H * dpr;
+
+    // Bề rộng canvas = bề rộng khung nhìn, KHÔNG phải cả dải. `khungNhin.rong`
+    // do effect theo dõi cuộn cập nhật; mặc định 1200 để lần vẽ đầu có gì đó.
+    const rongVe = Math.max(1, Math.min(khungNhin.rong, 16384));
+    c.width = Math.floor(rongVe * dpr);
+    c.height = Math.floor(H * dpr);
+    // Dịch canvas tới đúng vị trí đang nhìn, để nó phủ lên phần dải tương ứng.
+    c.style.width = `${rongVe}px`;
+    c.style.transform = `translateX(${khungNhin.batDau}px)`;
+
     const g = c.getContext("2d");
     if (!g) return;
     g.scale(dpr, dpr);
-    g.clearRect(0, 0, width, H);
-    g.fillStyle = getComputedStyle(c).color;
+    g.clearRect(0, 0, rongVe, H);
 
-    if (peaks.length === 0) {
-      // Vạch giữa mảnh, đứt đoạn — dấu hiệu "chưa có dữ liệu sóng", không phải sóng thật.
+    const soDiem = Math.min(bao.tren.length, bao.duoi.length);
+    if (soDiem === 0) {
+      // Vạch giữa mảnh, đứt đoạn — nói thật "chưa có sóng", không vẽ sóng giả.
+      g.fillStyle = getComputedStyle(c).color;
       const y = H / 2;
-      for (let x = 0; x < width; x += 6) g.fillRect(x, y, 2, 1);
+      for (let x = 0; x < rongVe; x += 6) g.fillRect(x, y, 2, 1);
       return;
     }
 
-    // 🔴 LỖI ĐÃ SỬA: "nhiều nến bằng nhau".
-    //
-    // Bản trước đặt `soVach = floor(width / 3)` = 16 656 ở 40 px/s, nhưng chỉ có
-    // 2 400 đỉnh. Khi `soVach > peaks.length` thì `buoc = peaks.length / soVach`
-    // = 0,14, nên hầu hết `i` cho `dau === cuoi - 1` — CÙNG MỘT ĐỈNH bị vẽ thành
-    // ~7 vạch liền nhau cùng chiều cao. Đó chính là các cụm "nến bằng nhau".
-    //
-    // Số vạch KHÔNG ĐƯỢC VƯỢT số đỉnh có thật: vẽ dày hơn dữ liệu là bịa chi tiết
-    // không tồn tại. Khi số đỉnh nhiều hơn chỗ vẽ thì gộp (lấy MAX); khi ít hơn thì
-    // mỗi đỉnh một vạch và các vạch thưa ra — đúng sự thật của dữ liệu.
-    const soVach = Math.max(1, Math.min(peaks.length, Math.floor(width / 3)));
-    const rongVach = width / soVach;
-    for (let i = 0; i < soVach; i++) {
-      // Lấy MAX trong nhóm: đỉnh là đỉnh, lấy trung bình làm phẳng chỗ có tiếng nói.
-      let p = 0;
-      const dau = Math.floor((i * peaks.length) / soVach);
-      const cuoi = Math.max(dau + 1, Math.floor(((i + 1) * peaks.length) / soVach));
-      for (let j = dau; j < cuoi && j < peaks.length; j++) {
-        const v = peaks[j]!;
-        if (v > p) p = v;
+    const giua = H / 2;
+    // Trừ 2 px mỗi phía để đỉnh cao nhất không chạm mép canvas.
+    const bien = giua - 2;
+
+    // Chỉ số điểm đầu/cuối của VÙNG ĐANG NHÌN trong mảng `bao`. Đây là phép
+    // quy đổi px -> chỉ số, nên cuộn tới đâu vẽ đúng dữ liệu tới đó.
+    const tiLe = soDiem / width;
+    const diemDau = khungNhin.batDau * tiLe;
+    const soDiemNhin = Math.max(1, rongVe * tiLe);
+
+    // Số cột = số pixel nguyên của canvas nhìn thấy.
+    const soCot = Math.max(1, Math.floor(rongVe));
+    const buoc = soDiemNhin / soCot;
+
+    // Dựng hai mảng biên độ theo cột, lấy MAX cho cả hai phía — đỉnh là đỉnh,
+    // lấy trung bình sẽ làm phẳng đúng chỗ có tiếng nói.
+    const tren = new Float32Array(soCot);
+    const duoi = new Float32Array(soCot);
+    for (let x = 0; x < soCot; x++) {
+      const dau = Math.floor(diemDau + x * buoc);
+      const cuoi = Math.max(dau + 1, Math.floor(diemDau + (x + 1) * buoc));
+      let t = 0;
+      let d = 0;
+      for (let j = dau; j < cuoi && j < soDiem; j++) {
+        const vt = bao.tren[j]!;
+        const vd = bao.duoi[j]!;
+        if (vt > t) t = vt;
+        if (vd > d) d = vd;
       }
-      const h = Math.max(1, p * (H - 8));
-      g.fillRect(i * rongVach, (H - h) / 2, Math.max(1, rongVach - 0.6), h);
+      tren[x] = t;
+      duoi[x] = d;
     }
-  }, [peaks, width]);
+
+    // ĐƯỜNG BAO: một path kín đi qua đỉnh trên từ trái sang phải, rồi qua đáy
+    // dưới từ phải về trái. `fill` một lần cho cả dải — liền, không khe.
+    const mau = getComputedStyle(c).color;
+    g.beginPath();
+    g.moveTo(0, giua - tren[0]! * bien);
+    for (let x = 1; x < soCot; x++) {
+      const y = giua - tren[x]! * bien;
+      g.lineTo(x, y);
+    }
+    for (let x = soCot - 1; x >= 0; x--) {
+      const y = giua + duoi[x]! * bien;
+      g.lineTo(x, y);
+    }
+    g.closePath();
+    g.fillStyle = mau;
+    g.fill();
+
+    // Trục giữa: một sợi mảnh, mờ — mốc để mắt đọc biên độ hai phía.
+    g.globalAlpha = 0.35;
+    g.fillRect(0, giua - 0.5, rongVe, 1);
+    g.globalAlpha = 1;
+  }, [bao, width, khungNhin]);
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // THEO DÕI CUỘN + ĐỔI BỀ RỘNG KHUNG.
+  //
+  // Đây là thứ làm canvas-theo-khung-nhìn hoạt động: mỗi lần cuộn hoặc resize,
+  // cập nhật `[batDau, batDau + rong)` rồi effect vẽ chạy lại. Dùng
+  // `useLayoutEffect` để vẽ xong TRƯỚC khi trình duyệt sơn khung hình — nếu
+  // dùng `useEffect` thì có một khung hình canvas trống, mắt thấy nhấp nháy.
+  //
+  // `passive: true`: listener cuộn không được gọi `preventDefault`, và đánh dấu
+  // passive cho trình duyệt biết để không phải chờ — cuộn mượt hơn.
+  //
+  // `setKhungNhin` chỉ gọi khi giá trị ĐỔI thật: so sánh trước khi set để một
+  // lần cuộn 60 lần/giây không tạo 60 lần render vô ích.
+  // ───────────────────────────────────────────────────────────────────────────
+  useLayoutEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+
+    const capNhat = () => {
+      const batDau = Math.floor(el.scrollLeft);
+      const rong = Math.ceil(el.clientWidth);
+      setKhungNhin((cu) =>
+        cu.batDau === batDau && cu.rong === rong ? cu : { batDau, rong },
+      );
+    };
+
+    capNhat();
+    el.addEventListener("scroll", capNhat, { passive: true });
+
+    // `ResizeObserver` chứ không phải `window.resize`: khung này còn đổi bề rộng
+    // khi cột trái co dãn hay thanh bên đóng/mở, mà `window.resize` không bắt
+    // được những lúc đó.
+    const theoDoi = new ResizeObserver(capNhat);
+    theoDoi.observe(el);
+
+    return () => {
+      el.removeEventListener("scroll", capNhat);
+      theoDoi.disconnect();
+    };
+  }, []);
 
   // cuộn theo đầu phát
   useEffect(() => {
@@ -223,10 +355,15 @@ export function Timeline({
             </span>
           ))}
         </div>
+        {/*
+          Bề rộng và vị trí do effect vẽ đặt (`c.style.width`,
+          `c.style.transform`) — KHÔNG khai trong JSX, vì React sẽ ghi đè lại
+          `width` của cả dải và canvas lại vượt ngưỡng 65 535 px.
+        */}
         <canvas
           ref={canvasRef}
           className="absolute left-0 top-5 text-wave"
-          style={{ width, height: H }}
+          style={{ height: H }}
         />
         {/* khối đoạn — bề rộng = thời gian, xếp làn theo CHỒNG LẤN THẬT (`xepLan`) */}
         <div className="absolute inset-x-0 bottom-0" style={{ height: caoDoan }}>

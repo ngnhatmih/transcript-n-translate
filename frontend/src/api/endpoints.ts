@@ -363,10 +363,10 @@ export function mediaUrl(sourceId: number): string {
 export function getPeaks(
   sourceId: number,
   soDinh?: number,
-): Promise<{ dinh: number[]; so_dinh: number; giay: number }> {
+): Promise<{ tren: number[]; duoi: number[]; so_dinh: number; giay: number }> {
   // `api.get` TU ghep `BASE` (client.ts:61), nen duong o day KHONG co `/api`.
   // Ban truoc truyen `${BASE}/media/...` -> thanh `/api/api/media/1/peaks` -> 404.
-  return api.get<{ dinh: number[]; so_dinh: number; giay: number }>(
+  return api.get<{ tren: number[]; duoi: number[]; so_dinh: number; giay: number }>(
     `/media/${sourceId}/peaks${query(soDinh === undefined ? {} : { so_dinh: soDinh })}`,
   );
 }
