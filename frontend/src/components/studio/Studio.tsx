@@ -232,6 +232,40 @@ export function Studio(props: StudioProps) {
   const [chon, datChon] = useState<number | null>(null);
   const [hangDoiMo, datHangDoiMo] = useState(false);
 
+  /**
+   * CHẾ ĐỘ SÁNG/TỐI — bản đã duyệt có nút này (`_lovable-code/Studio.tsx:285..292`).
+   *
+   * ⚠️ `tokens.css` đã có khối `[data-theme="light"]` từ trước, nhưng KHÔNG có đường nào
+   * bật nó: đo được trên bản build cũ, `documentElement.dataset.theme` luôn là `undefined`
+   * và 12 dòng token sáng là code chết. Nút này là đường duy nhất tới chúng.
+   *
+   * ⚠️ Mặc định `"dark"`: cùng mặc định với bản đã duyệt (`useState<"dark" | "light">("dark")`),
+   * nên lần mở đầu tiên không đổi màu so với bản đo.
+   */
+  const [sangToi, datSangToi] = useState<"dark" | "light">("dark");
+
+  /**
+   * GHI `data-theme` LÊN `<html>` — cùng cơ chế với bản đã duyệt
+   * (`_lovable-code/Studio.tsx:52..54`: `document.documentElement.dataset.theme = theme`).
+   *
+   * ⚠️ Phải là `<html>` chứ không phải `.studio`: khối `[data-theme="light"]` trong
+   * `tokens.css` khai trên `:root`, nên nó chỉ khớp khi thuộc tính nằm trên `documentElement`.
+   * Đặt trên `.studio` thì 12 dòng token sáng không bao giờ khớp — im lặng, không lỗi.
+   *
+   * ⚠️ Có hàm dọn: `Studio` bị gỡ (đổi kênh, `OllamaDown`, HMR) mà để lại `data-theme` thì
+   * lần mount sau thừa hưởng chế độ của lần trước trong khi state nói `"dark"` — trạng thái
+   * hai nguồn sự thật, đúng lớp lỗi đã gặp với `daTuChon`.
+   */
+  useEffect(() => {
+    const goc = document.documentElement;
+    const truoc = goc.dataset.theme;
+    goc.dataset.theme = sangToi;
+    return () => {
+      if (truoc === undefined) delete goc.dataset.theme;
+      else goc.dataset.theme = truoc;
+    };
+  }, [sangToi]);
+
   const player = usePlayer(mediaUrl);
   const dongRef = useRef(new Map<number, HTMLLIElement>());
 
@@ -519,10 +553,33 @@ export function Studio(props: StudioProps) {
     <div className="studio">
       {/* ── HEADER ─────────────────────────────────────────────────────────────── */}
       <header className="studio__dau">
+        {/* ⚠️ CHỮ IN HOA NGAY TRONG JSX — chỗ này tôi ĐÃ SỬA SAI rồi sửa lại, ghi lại để
+            không ai lặp lại.
+            `_lovable-code/Studio.tsx:275` khai chữ THƯỜNG (`Phòng thu biên tập`) nhưng
+            class `label-engraved` của nó có `text-transform: uppercase`, nên HIỂN THỊ là
+            IN HOA — ảnh chuẩn `_lovable-chuan.png` cũng hiện IN HOA.
+            Tôi từng "chép cho khớp" bằng cách đổi sang chữ thường. 📏 ĐO ĐƯỢC:
+            `.head__ten` rộng **183,4 px → 148,6 px**, hụt **34,8 px (19%)**. Nguyên nhân:
+            repo KHÔNG có utility `label-engraved`; `text-transform: uppercase` khai riêng
+            ở `.head__ten` trong `_studio.css`. Bỏ chữ hoa khỏi JSX thì CSS vẫn bật chữ hoa,
+            nhưng hình dạng chữ mất một tầng quyết định. Vậy giữ IN HOA ở đây. */}
         <h1 className="head__ten">PHÒNG THU BIÊN TẬP</h1>
         <div className="studio__do">
           <PipelineBar buoc={cacBuoc} onBuoc={bamBuoc} />
         </div>
+        {/* ĐỔI SÁNG/TỐI — `_lovable-code/Studio.tsx:285..292` CÓ, bản repo đầu bỏ sót.
+            Bản Lovable đổi `data-theme` trên `<html>`, và `tokens.css` đã có khối
+            `[data-theme="light"]` — nên đường này nối được ngay, không cần thêm màu.
+            Spec §10.1 của bản CŨ ghi "chỉ MỘT chế độ tối"; bản ĐÃ DUYỆT đổi luật đó. */}
+        <button
+          type="button"
+          className="studio__sang-toi"
+          onClick={() => datSangToi(sangToi === "dark" ? "light" : "dark")}
+          aria-label={sangToi === "dark" ? "Chuyển chế độ sáng" : "Chuyển chế độ tối"}
+          title={sangToi === "dark" ? "Chế độ sáng" : "Chế độ tối"}
+        >
+          {sangToi === "dark" ? "☀" : "☾"}
+        </button>
         <button type="button" className="studio__lenh-nut" onClick={() => datMoLenh(true)}>
           Lệnh <span className="kbd">Ctrl K</span>
         </button>

@@ -125,6 +125,38 @@
   color: var(--ink-0);
 }
 
+/* NÚT ĐỔI SÁNG/TỐI — `_lovable-code/Studio.tsx:285..292`:
+     `rounded-sm border border-rule p-1.5 text-ink-1 hover:border-ink-1 hover:text-ink-0`
+   tức cùng khuôn với `.studio__lenh-nut` nhưng VUÔNG (chỉ một ký tự), không có nhãn chữ.
+   📏 ĐO ĐƯỢC trên bản duyệt: 26×26 px (icon 14 px + pad 6 px + viền 1 px mỗi bên).
+   ⚠️ Ký tự `☀`/`☾` thay cho `<Sun>`/`<Moon>` của lucide-react: repo KHÔNG có thư viện
+   icon (ràng buộc từ đầu — không thêm dependency). Hai ký tự này nằm trong `unicode-range`
+   của cả ba tệp `Archivo` đã nạp, nên chúng vẽ bằng font thật chứ không rơi về font hệ
+   thống; và chúng KHÔNG nằm trong `--font-mono`. */
+.studio__sang-toi {
+  appearance: none;
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: var(--rule-w) solid var(--rule);
+  border-radius: var(--radius);
+  background: none;
+  color: var(--ink-1);
+  font: inherit;
+  font-size: var(--fs-ui);
+  line-height: 1;
+  cursor: pointer;
+  transition: border-color var(--dur-1) var(--ease-1), color var(--dur-1) var(--ease-1);
+}
+
+.studio__sang-toi:hover {
+  border-color: var(--ink-1);
+  color: var(--ink-0);
+}
+
 /* ── BA CỘT ────────────────────────────────────────────────────────────────────── */
 /* ⚠️ `grid-template-rows: 1fr` + `min-height: 0` + `overflow: hidden` là BẮT BUỘC: một mục
    lưới mặc định có `min-height: auto` (= chiều cao nội dung), nên danh sách 600 dòng sẽ

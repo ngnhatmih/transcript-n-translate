@@ -1,6 +1,43 @@
 /* tokens.css — giá trị thiết kế chép từ spec UI `docs/superpowers/specs/2026-09-25-phu-de-lab-ui-design.md` §2.
    Ô nào spec không ghi số thì giá trị ở đây là số CHỌN, ghi rõ ngay cạnh.
    Không có TBD: mọi token đều có giá trị thật. */
+/* ═══ RESET TỐI THIỂU ═══════════════════════════════════════════════════════════════════
+   🔴 ĐO ĐƯỢC (2026-10-30): bản build cũ KHÔNG có reset `margin` cho `body`, nên `.studio`
+   (khai `height: 100vh`) bị đẩy xuống và sang phải **8 px** — `getBoundingClientRect` trả
+   `x=8, y=8, w=1649, h=1050` trên khung 1680×1050 thay vì `0, 0, 1680, 1050`. Hệ quả: một
+   dải 8 px màu `body` ở mép trên và mép trái, và 16 px chiều cao bị cắt ở đáy (`100vh` cộng
+   thêm hai lề 8 px = 1066 > 1050), nên hàng cuối của danh sách bị che.
+
+   Bản đã duyệt có đúng phần này trong `@layer base` (`_lovable-code/src/styles.css:137..151`):
+   `body { background-color; color; font-family; font-size: 13px; -webkit-font-smoothing }`.
+   Repo không dùng Tailwind nên `@layer base` không tồn tại — khai thẳng ở đây.
+
+   ⚠️ Vì sao `html, body { height: 100% }` chứ không chỉ `margin: 0`: `.studio` khai
+   `height: 100vh`, mà `100vh` trên Chrome desktop ĐÃ bao gồm thanh cuộn — nhưng khi trang
+   có nội dung cao hơn khung, `body` không có chiều cao xác định thì `overflow: hidden` của
+   `.studio` không cắt được gì và một thanh cuộn thứ hai xuất hiện. Khai `height: 100%` cho
+   cả hai là cách duy nhất để `100vh` và `overflow: hidden` phối hợp đúng.
+   ═══════════════════════════════════════════════════════════════════════════════════════ */
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+}
+
+body {
+  background: var(--panel-0);
+  color: var(--ink-0);
+  font-family: var(--font-ui);
+  font-size: var(--fs-ui);
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+}
+
 :root {
   color-scheme: dark; /* §10.1 — chỉ MỘT chế độ tối, không chuyển đổi */
 
@@ -186,4 +223,34 @@
   /* ── §7 Khả năng tiếp cận ──────────────────────────────────────────────── */
   --focus-w: 2px; /* focus ring 2px --signal, không bao giờ outline:none */
   --focus-color: var(--signal);
+}
+
+/* ═══ CHẾ ĐỘ SÁNG ═══════════════════════════════════════════════════════════════════════
+   Chép từ bản thiết kế ĐÃ DUYỆT (`_lovable-code/src/styles.css:121..135`) — cùng 12
+   giá trị, cùng sắc, không thêm bớt. Đây KHÔNG phải bảng màu thứ hai: mỗi tên token giữ
+   nguyên VAI TRÒ (panel-0 vẫn là nền app, ink-0 vẫn là mực chính); chỉ ĐỘ CHÓI đổi dấu,
+   vì trên nền sáng thì mực phải tối. `--signal` đổi 0.8→0.62 độ chói và 75→65 sắc để
+   amber còn đọc được trên giấy trắng — nếu giữ 0.8 thì nó thành vàng nhạt, đo được là
+   TRƯỢT tương phản.
+
+   ⚠️ `--signal-soft` KHÔNG khai lại: nó là `color-mix` của `--signal`, nên tự theo.
+   ⚠️ `--fault`, `--ok`, `--wave` khai lại vì cả ba đều là MỰC hoặc VÂN, và bản tối của
+   chúng (0.66/0.62/0.45 độ chói) trên nền 0.96 sẽ gần như vô hình.
+   ⚠️ Thuộc tính này phải nằm trên `<html>` (`documentElement`), không phải `.studio`:
+   khối chọn là `:root[data-theme="light"]`, và `Studio` ghi nó bằng `useEffect`.
+   ═══════════════════════════════════════════════════════════════════════════════════════ */
+:root[data-theme="light"] {
+  color-scheme: light;
+  --panel-0: oklch(0.96 0.008 85);
+  --panel-1: oklch(0.985 0.005 85);
+  --panel-2: oklch(0.93 0.009 85);
+  --panel-3: oklch(0.89 0.01 85);
+  --ink-0: oklch(0.22 0.01 75);
+  --ink-1: oklch(0.42 0.012 75);
+  --ink-2: oklch(0.55 0.012 75);
+  --rule: oklch(0.86 0.01 80);
+  --signal: oklch(0.62 0.15 65);
+  --fault: oklch(0.52 0.15 25);
+  --ok: oklch(0.48 0.08 130);
+  --wave: oklch(0.72 0.01 75);
 }
