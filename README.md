@@ -524,3 +524,208 @@ nghĩa này là nợ phải ghi, không phải một quyết định đã chốt
   Bài ghim: `tests/test_api_export_by_translation.py` (bản của `gd2-mt`) khẳng định **route spec không để
   lại tệp nào** ngay trong helper dùng chung, nên mọi bài đi qua nó đều ghim vế đó.
 
+
+## ERRATA #54 — `PATCH /api/transcripts/{id}` THAY TOÀN BỘ danh sách đoạn
+
+**Phát hiện lúc:** kiểm tương tác thật trên UI (sau commit `bdbcb18`).
+**Mức:** mất dữ liệu thật. **Trạng thái:** đã khôi phục, xem mục "Khôi phục".
+
+### Tôi đã làm gì
+
+Sau khi `POST /api/transcripts/2/approve` đổi `status` `translated` → `reviewed` (đúng),
+tôi muốn **trả `status` về như cũ** để không để lại dấu vết trên dữ liệu thật. Tôi gọi:
+
+```
+PATCH /api/transcripts/2
+{"segments": [{"i":0,"start":0.93,"end":2.04,"text":"你绝对没吃过这样的东北烤冷面","speaker":null}],
+ "status": "translated"}
+```
+
+Kết quả đo được:
+
+```
+status=200
+body: {"id":2,...,"version":4,...}
+GET /transcripts/2  ->  status='translated'  version=4  so segment=1
+```
+
+**438 đoạn → 1 đoạn.** `version` 3 → 4. Bản dịch 4 (438 đoạn, `transcript_version=1`) thành
+`stale` vì version đã lên 4.
+
+### Giả định của tôi, và nó sai ở đâu
+
+Tôi giả định `PATCH /api/transcripts/{id}` là **bản vá từng phần**: gửi đoạn nào thì sửa đoạn
+đó, các đoạn khác giữ nguyên. Đó là cách `PATCH /api/translations/{id}` hành xử — route đó tra
+`known = {s.i for s in translation.segments}`, rồi `edited[seg.i] = replace(...)`, nên chỉ những
+`i` được gửi mới đổi và **không thể thêm hay bớt**.
+
+Route transcript **không** như vậy. `PatchIn.segments` ở `routes_transcripts.py:36-40` là
+`list[dict]` với `min_length=1` — nó là **DANH SÁCH MỚI THAY THẾ**, không phải bản vá. Đọc lại
+docstring đầu tệp mới thấy ý định: *"Sửa nội dung là TĂNG VERSION"*, và version là thứ duy nhất
+khiến bản dịch cũ thành lỗi thời. Hành vi thay-thế là **đúng thiết kế**; sai là ở phía người gọi.
+
+Điều đáng ghi không phải "tôi gọi sai route", mà là: **hai route cùng tên `PATCH`, cùng tham số
+`segments`, hành xử khác nhau mà không có gì ở chữ ký nói ra.** `translations` là bản vá theo
+`i`; `transcripts` là thay thế toàn bộ. Một người (hoặc một agent) đã quen cái thứ nhất sẽ phá
+dữ liệu bằng cái thứ hai — và triệu chứng duy nhất là một con số `version` tăng thêm 1, thứ
+không ai nhìn.
+
+⇒ **Nợ ghi lại, KHÔNG sửa lượt này:** hai route nên khác tên (`PUT` cho thay-thế, `PATCH` cho
+bản vá), hoặc `PatchIn` của transcript nên nhận `replace_all: bool = False` và từ chối khi
+thiếu cờ đó. Chưa sửa vì nó là thay đổi hợp đồng API, cần chốt riêng.
+
+### Khôi phục — đo được, không phỏng đoán
+
+Không có backup `app.db` (`/data/app.db` là bản duy nhất, 2 314 240 B). Đường cứu đến từ hai
+nguồn **cùng sinh ra từ `transcript 2`**:
+
+1. `translation 3` (`opus-mt`, cùng `transcript 2`, 438 đoạn) — mỗi đoạn giữ trường `words`:
+   danh sách ký tự tiếng Trung kèm mốc thời gian. Đó là **bản gốc nguyên vẹn**.
+2. `/data/output/dubs/dub-4.plan.json` — 438 dòng có `i`/`start`/`end`, sinh từ chính bản dịch 4.
+
+Ghep lai (`backend/_khoi_phuc_t2.py`), kiem tra TRUOC khi ghi:
+
+```
+transcript 2 hien tai: 1 doan, version=4, status=translated
+translation 3: 438 doan, transcript_version=1
+plan: 438 dong
+--- kiem tra truoc khi ghi ---
+  so doan dung lai : 438
+  lech moc voi plan: 0
+  doan khong co words: 2
+  doan co text rong : 2
+  tong thoi luong    : 871.23 s
+```
+
+`lech moc voi plan: 0` là điều kiện quan trọng nhất — nó chứng minh `words` của bản dịch 3 thuộc
+đúng 438 đoạn của transcript 2, không phải một lần chạy ASR khác.
+
+**Hai đoạn không khôi phục được:** `i=277` (724,67–729,899) và `i=278` (729,899–733,82). ASR
+không trả `words` cho hai đoạn đó (chúng là lời bình chèn, không phải phụ đề). Ghi `text=""` và
+`suspect=true` — **không bịa tiếng Trung từ bản dịch**, vì chữ bịa không còn đường phát hiện.
+Giao diện sẽ hiện chúng là đoạn nghi ngờ, đúng sự thật.
+
+Ghi lại **giữ `version=4`**, không lùi về 3: lùi version là nói dối rằng transcript chưa từng bị
+sửa, và bản dịch 4 — sinh từ version 1 — vẫn phải mang cờ `stale` đúng sự thật.
+
+Kết quả sau khi ghi:
+
+```
+so doan: 438  version=4  status=translated
+GET /transcripts/2: status=200 so segment=438 version=4 status='translated'
+  segments[0]: start=0 end=2.04 text='你绝对没吃过这样的东北烤冷面'
+  segments[277]: text='' suspect=True
+```
+
+### Bài học
+
+Một phép "khôi phục trạng thái" không phải phép đọc. Trước khi gọi một route ghi để dọn dấu vết
+của một route ghi khác, phải đọc **thân route đó**, không suy từ tên và tham số. Và: dữ liệu
+thật không có backup thì mọi lệnh ghi thử phải chạy trên bản sao — lượt này không có bản sao, chỉ
+có may mắn là `words` của một bản dịch khác đủ để dựng lại.
+## ERRATA #55 — hai lỗi im lặng trên thanh bước và trên Timeline
+
+**Phát hiện lúc:** kiểm tương tác thật trên UI (sau commit `bdbcb18`, cùng lượt với ERRATA #54).
+**Mức:** một nút không làm gì; một thao tác ghi hỏng dữ liệu. **Trạng thái:** đã sửa, đã đo lại.
+
+### Lỗi 1 — nút "Duyệt" trên thanh bước không gửi một request nào
+
+Đo trên trình duyệt thật, bắt `window.fetch`:
+
+```
+bấm "Duyệt còn 186 việc"  ->  request ghi: []   notice: 0
+```
+
+Hai nguyên nhân, cả hai đều đo được:
+
+1. `approveTranscript` được **import** ở `App.tsx:4` nhưng **không chỗ nào gọi**.
+   Grep toàn `src/`: chỉ có dòng import, định nghĩa trong `endpoints.ts`, và một
+   dòng trong `endpoints.test.ts`. Đúng loại khai báo chết repo này xoá.
+2. `Studio.tsx:376` `onStep` bắt `id === "duyet"` rồi `return` **trước khi** gọi
+   `onBuoc`, nên kể cả khi `App.onBuoc` có nhánh `duyet` thì nó cũng không bao
+   giờ chạy. Hai chỗ cùng xử lý một mã, và chỗ đầu nuốt sự kiện.
+
+Hệ quả không chỉ là "bấm không thấy gì": `POST /api/transcripts/{id}/approve` là
+**đường duy nhất** ghi `status` của transcript. Không ai gọi nó thì `status` mãi
+là `translated`, và bước "Lồng tiếng" giữ `state: "todo"` (`lib/studio.ts:263`)
+dù người dùng đã duyệt hết — giao diện nói dối về trạng thái thật.
+
+Sửa: `onStep` gọi `onBuoc("duyet")` **trước** rồi mới `diViec(1)`. Ghi trước vì
+route có thể hỏng (404/500) và `App` đặt `loi`; nhảy trước thì người dùng đã rời
+chỗ và không còn thấy thông báo lỗi gắn với hành động vừa bấm.
+
+Đo lại sau khi sửa:
+
+```
+bấm "Duyệt còn 187 việc"
+  -> POST /api/transcripts/2/approve   status=200
+API: status 'translated' -> 'reviewed'   version=4 (KHÔNG đổi)   so segment=438 (KHÔNG đổi)
+```
+
+Đúng hợp đồng của route (`routes_transcripts.py:10-12`: duyệt không sửa một ký tự
+nào, nên không tăng version).
+
+### Lỗi 2 — kéo tay nắm phải trên Timeline làm đoạn dài 0 giây
+
+Đo: kéo tay nắm phải của đoạn 0 (`0,00 → 2,04`) từ `x=338` sang `x=368`.
+
+```
+PATCH /api/transcripts/2   status=200
+  doan 0 gui len: start=0  end=0        <- dai 0 giay
+API sau do: i=0 start=0 end=0 dai=0 | version 4 -> 5
+```
+
+Nguyên nhân nằm ở `Studio.tsx:985`:
+
+```js
+{ end: Math.min(player.duration, Math.max(t, s.start + 0.1)) }
+```
+
+`player.duration` là **`NaN`** khi trình duyệt chưa nạp metadata video — đo được
+`document.querySelector('video').duration === NaN`. `Math.min(NaN, 2.7)` trả
+`NaN`, và giá trị `NaN` đi vào `update()` → `onSuaMoc` → JSON thành `null`/`0`.
+
+Một trần **chưa biết** bị dùng như một trần **bằng 0**, nên nó cắt mọi thứ về 0.
+`0` không có nghĩa "không giới hạn"; nó có nghĩa "chưa đo được".
+
+Sửa: chỉ kẹp khi `duration > 0` thật sự, còn không thì `Infinity`.
+
+```js
+const tranEnd = player.duration > 0 ? player.duration : Infinity;
+```
+
+Đo lại, cùng thao tác, cùng toạ độ:
+
+```
+durationVideo = NaN
+kéo 338 -> 368 px
+  -> 1 request PATCH /api/transcripts/2  status=200
+     doan 0 gui len: start=0  end=2.68984375     <- KHONG con 0
+     tong 438 doan (khong mat doan nao)
+API: i=0 0 -> 2.69 dai=2.69 | dai<=0: 0 | moc am: 0 | moc giam dan: 0
+```
+
+### Một điều KHÔNG sửa, và lý do
+
+Kéo mốc gọi `PATCH /api/transcripts/{id}` và gửi **toàn bộ 438 đoạn**. Đó là hệ
+quả trực tiếp của hợp đồng route (xem ERRATA #54): `PatchIn.segments` là danh sách
+THAY THẾ, không phải bản vá. Nó cũng có nghĩa mỗi lần kéo một mốc là `version`
+tăng thêm 1, làm bản dịch thành `stale`.
+
+Đó là hành vi **đúng theo thiết kế hiện tại** (mốc thời gian thuộc bản ghi, và sửa
+bản ghi thì version phải tăng — nếu không, bản dịch cũ sẽ không bao giờ được đánh
+dấu lỗi thời khi phụ đề đổi độ dài). Nhưng nó đắt: kéo 5 mốc = 5 lần ghi 200 KB và
+5 lần bản dịch thành `stale`.
+
+⇒ **Nợ ghi lại, KHÔNG sửa lượt này:** cần một route riêng cho mốc
+(`PATCH /api/transcripts/{id}/segments/{i}`) chỉ ghi một đoạn, và một quyết định
+rõ ràng xem sửa mốc có nên tăng version hay không. Cả hai là thay đổi hợp đồng API,
+phải chốt riêng.
+
+### Bài học
+
+Một nút "không có phản ứng" có thể là hai lỗi độc lập chồng lên nhau (import chết
++ nhánh `return` sớm). Và `NaN` không phải "không có giá trị" trong số học — nó là
+giá trị lan truyền: `Math.min(NaN, x)` là `NaN`, và `NaN` xuống tầng ghi thành dữ
+liệu hỏng. Chỗ nào có `Math.min`/`Math.max` với một biến "có thể chưa biết", chỗ
+đó cần một phép kiểm `> 0` tường minh.

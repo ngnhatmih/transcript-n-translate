@@ -376,6 +376,28 @@ export function Studio(props: StudioProps) {
   const onStep = useCallback(
     (id: string) => {
       if (id === "duyet") {
+        // ─────────────────────────────────────────────────────────────────────
+        // DO DUOC: nhanh nay TUNG NUOT su kien, nen `duyet` khong bao gio toi
+        // route that.
+        //
+        // Bam nut "Duyet con 187 viec" tren thanh buoc: `request ghi: []`,
+        // `notice: 0`. Nguyen nhan: `return` ngay duoi day, truoc khi goi
+        // `onBuoc`. Trong khi do `App.onBuoc` CO nhanh `duyet` goi
+        // `POST /api/transcripts/{id}/approve`.
+        //
+        // Hai viec KHAC NHAU, va ca hai deu can:
+        //   1. `diViec(1)` — nhay toi viec dau tien con lai. Day la hanh vi ma
+        //      nguoi dung mong doi khi bam "Duyet": duoc dua toi cho can sua.
+        //   2. `onBuoc("duyet")` — ghi `status` cua CA BAN GHI qua route that.
+        //      Khong goi thi `status` khong bao gio doi, va buoc "Long tieng"
+        //      giu nguyen `state: "todo"` (`lib/studio.ts:263`) du nguoi dung da
+        //      duyet het — giao dien noi doi.
+        //
+        // Thu tu: ghi TRUOC roi moi nhay. Ghi co the hong (route 404/500) va
+        // `App` se dat `loi`; nhay truoc thi nguoi dung da roi khoi cho, khong
+        // con thay thong bao loi gan voi hanh dong vua bam.
+        // ─────────────────────────────────────────────────────────────────────
+        onBuoc("duyet");
         if (issues.length > 0) diViec(1);
         else setNotice("Da duyet het");
         return;
@@ -957,11 +979,29 @@ export function Studio(props: StudioProps) {
             onSeek={player.seek}
             onSelect={(id) => select(id)}
             onResize={(id, edge, t) =>
-              update(id, (s) =>
-                edge === "start"
+              update(id, (s) => {
+                // ─────────────────────────────────────────────────────────────
+                // DO DUOC: keo tay nam PHAI cua doan 0 (0,00 -> 2,04) lam `end`
+                // THANH 0, tuc doan dai 0 giay, va `version` cua transcript tang
+                // 4 -> 5.
+                //
+                // Nguyen nhan: `Math.min(player.duration, ...)`. Trong trinh
+                // duyet chua nap metadata video (hoac khi chua chon kenh),
+                // `player.duration` la **0** — va `Math.min(0, 2,7)` = 0. Mot
+                // tran chua BIET gia tri lai duoc dung nhu mot tran bang 0, nen
+                // no cat moi thu ve 0.
+                //
+                // `duration` chua biet thi KHONG DUOC lam tran. `0` khong phai
+                // "khong co gioi han" theo nghia "bang 0" — no la "chua do duoc".
+                // Chi kep khi `duration > 0` that su.
+                //
+                // San `s.start + 0.1` giu nguyen: doan khong duoc dai <= 0.
+                // ─────────────────────────────────────────────────────────────
+                const tranEnd = player.duration > 0 ? player.duration : Infinity;
+                return edge === "start"
                   ? { start: Math.max(0, Math.min(t, s.end - 0.1)) }
-                  : { end: Math.min(player.duration, Math.max(t, s.start + 0.1)) },
-              )
+                  : { end: Math.min(tranEnd, Math.max(t, s.start + 0.1)) };
+              })
             }
           />
 

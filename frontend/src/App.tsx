@@ -325,6 +325,41 @@ export function App() {
         })();
         return;
       }
+      // ───────────────────────────────────────────────────────────────────────
+      // BUOC `duyet` — DO DUOC LA NO TUNG KHONG LAM GI.
+      //
+      // Bam nut "Duyet con 186 viec" tren thanh buoc: `request ghi: []`,
+      // `notice: 0`. Nguyen nhan: `onBuoc` chi co nhanh cho `asr`/`dich`/`long`,
+      // con `duyet` roi xuong cuoi ham va khong lam gi. Trong khi do
+      // `approveTranscript` duoc IMPORT o dong 4 nhung KHONG CO CHO NAO GOI —
+      // dung loai khai bao chet ma repo nay xoa.
+      //
+      // ⚠️ PHAI PHAN BIET HAI THU TRUNG TEN "duyet":
+      //   · `onDuyet(i)` (dong 218) — tap CUC BO cua giao dien, danh dau MOT
+      //     dong da xem. KHONG goi route, va CO Y nhu vay: backend khong co
+      //     khai niem duyet tung dong.
+      //   · buoc `duyet` o day — duyet CA BAN GHI, `POST /api/transcripts/{id}/
+      //     approve`, doi `status` thanh `reviewed`.
+      // Day chinh la ly do nut thanh buoc phai goi route that: no la duong DUY
+      // NHAT de `status` cua transcript duoc ghi.
+      //
+      // Route KHONG tang `version` (docstring `routes_transcripts.py:10-12`:
+      // duyet khong sua mot ky tu nao), nen sau khi goi chi can doc lai
+      // transcript de lay `status` moi — khong phai nap lai ban dich.
+      // ───────────────────────────────────────────────────────────────────────
+      if (id === "duyet") {
+        void (async () => {
+          try {
+            const moi = await approveTranscript(transcript.id);
+            // `approveTranscript` tra `TranscriptSummary` (KHONG co `segments`),
+            // nen giu nguyen mang doan dang co va chi thay phan tom tat.
+            setTranscript((cu) => (cu === null ? cu : { ...cu, ...moi }));
+          } catch (e) {
+            setLoi(e instanceof Error ? e.message : String(e));
+          }
+        })();
+        return;
+      }
       // `ghep`/`xuat` la hanh dong cua nut Xuat, khong phai job rieng.
     },
     [transcript, banDich],
