@@ -8,7 +8,8 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
-    "test": "node --import ./test/swc-loader.mjs --test --test-isolation=none \"src/**/*.test.{ts,tsx}\""
+    "test": "node --import ./test/swc-loader.mjs --test --test-isolation=none \"src/**/*.test.{ts,tsx}\"",
+    "e2e": "node e2e/session.mjs e2e/plans/hat-tang-song.json --out ../_shots/e2e"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.3.3",

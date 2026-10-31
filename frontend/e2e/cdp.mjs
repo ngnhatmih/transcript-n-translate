@@ -338,13 +338,33 @@ export async function chayKeHoach(driver, plan, { outDir }) {
       case "waitFor": {
         const ok = await cho(driver, { chon: buoc.selector, timeout: buoc.timeout });
         ghi(buoc, { selector: buoc.selector, thay: ok });
-        if (!ok && buoc.required !== false) console.log(`  ⚠️ KHONG thay ${buoc.selector} trong han chot`);
+        // 🔴 ĐO ĐƯỢC: bản cũ chỉ `console.log("⚠️ KHONG thay …")` rồi đi tiếp, nên một
+        // bước chờ TRƯỢT vẫn cho `EXIT=0`. Đo được thật: plan `hat-tang-song.json` chạy
+        // tới `[waitText] {"text":"Phòng thu biên tập","thay":false}` mà lượt chạy vẫn
+        // XANH — một phép "xanh giả" đúng lớp lỗi mà bước `khangDinh` sinh ra để chống.
+        //
+        // Cảnh báo không làm đỏ được lượt chạy thì không phải cổng kiểm. Muốn chỉ ghi
+        // nhận mà không chặn thì đặt `"required": false` NGAY TRONG PLAN — đó là quyết
+        // định viết ra được, không phải một dấu ⚠️ trôi qua log.
+        if (!ok && buoc.required !== false) {
+          throw new Error(
+            `KHONG thay ${JSON.stringify(buoc.selector)} trong ${buoc.timeout ?? "?"} ms`
+            + (buoc.log ? ` — ${buoc.log}` : ""),
+          );
+        }
+        if (!ok) console.log(`  (bo qua, required=false) khong thay ${buoc.selector}`);
         break;
       }
       case "waitText": {
         const ok = await cho(driver, { chu: buoc.text, timeout: buoc.timeout });
         ghi(buoc, { text: buoc.text, thay: ok });
-        if (!ok && buoc.required !== false) console.log(`  ⚠️ KHONG thay chu ${JSON.stringify(buoc.text)}`);
+        if (!ok && buoc.required !== false) {
+          throw new Error(
+            `KHONG thay chu ${JSON.stringify(buoc.text)} trong ${buoc.timeout ?? "?"} ms`
+            + (buoc.log ? ` — ${buoc.log}` : ""),
+          );
+        }
+        if (!ok) console.log(`  (bo qua, required=false) khong thay chu ${JSON.stringify(buoc.text)}`);
         break;
       }
       case "url": {

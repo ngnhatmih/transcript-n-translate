@@ -1,0 +1,71 @@
+{
+  "ghiChu": "PLAN TOI THIEU — chi de chung minh HA TANG e2e song lai sau khi doi stack. KHONG phai plan kiem giao dien: no chi mo trang va do bon thu co that tren DOM moi, dung aria-label (khong dung lop CSS cua giao dien cu da bi xoa).",
+  "_khoa": "chayKeHoach (e2e/cdp.mjs) doc plan.steps. Ban dau toi viet 'buoc' => plan.steps ?? [] tra MANG RONG, khong buoc nao chay, ket-qua.json 2 byte va EXIT=0 — mot phep XANH GIA.",
+  "_tenAnh": "Buoc shot doc khoa 'name' (cdp.mjs, case 'shot' -> chup(driver, buoc.name, ...)), KHONG phai 'ten'. Ban dau toi viet 'ten' nen anh ra ten 'undefined.png'.",
+  "_waitText": "Ban dau toi doi chu 'Phòng thu biên tập' bang waitText — no KHONG co trong body, chi co trong <title>. Ten app tren header nam trong the h1 (Studio.tsx:688). Doi sang waitFor h1 + khangDinh tren textContent.",
+  "steps": [
+    {
+      "do": "nav",
+      "url": "http://127.0.0.1:3100/",
+      "log": "mo app qua vite dev 3100"
+    },
+    {
+      "do": "waitFor",
+      "selector": "[aria-label=\"Các bước xử lý\"]",
+      "timeout": 20000,
+      "log": "thanh buoc duong ong phai dung xong (du lieu tu backend 8631)"
+    },
+    {
+      "do": "khangDinh",
+      "js": "document.querySelector('[aria-label=\"Các bước xử lý\"]') !== null",
+      "thongDiep": "thanh buoc duong ong (aria-label='Các bước xử lý') phai co tren DOM"
+    },
+    {
+      "do": "eval",
+      "js": "(() => { const t = document.title; const r = document.querySelector('#root'); return JSON.stringify({ title: t, rootCon: r === null ? -1 : r.children.length }); })()",
+      "log": "tieu de + so con cua #root"
+    },
+    {
+      "do": "khangDinh",
+      "js": "(() => { const r = document.querySelector('#root'); return r !== null && r.children.length > 0; })()",
+      "thongDiep": "#root phai co it nhat mot con (React da render)"
+    },
+    {
+      "do": "waitFor",
+      "selector": "h1",
+      "timeout": 20000,
+      "log": "the h1 cua header phai co"
+    },
+    {
+      "do": "khangDinh",
+      "js": "(() => { const h = document.querySelector('h1'); return h !== null && h.textContent.includes('Phòng thu biên tập'); })()",
+      "thongDiep": "h1 phai chua 'Phòng thu biên tập' (Studio.tsx:688)"
+    },
+    {
+      "do": "eval",
+      "js": "(() => { const ds = document.querySelectorAll('[aria-label^=\"Phụ đề đoạn\"]'); return JSON.stringify({ soOThat: ds.length, dau: ds.length > 0 ? ds[0].getAttribute('aria-label') : null }); })()",
+      "log": "so o phu de NGAY sau khi h1 hien (co the con 0 — day la do RACE, khong phai ket luan)"
+    },
+    {
+      "do": "waitFor",
+      "selector": "[aria-label^=\"Phụ đề đoạn\"]",
+      "timeout": 25000,
+      "log": "CHO o phu de that su xuat hien. KHONG do ngay: `App` nap theo chuoi sources -> transcripts -> transcripts/{id} -> translations/{id}, nen o phu de chi co SAU KHI ca bon request xong. Do ngay sau h1 la do QUA SOM — do duoc that: luot chay truoc cho soOThat=0 roi KHANG DINH THAT BAI, trong khi DB gieo co du 5 doan."
+    },
+    {
+      "do": "eval",
+      "js": "(() => { const ds = document.querySelectorAll('[aria-label^=\"Phụ đề đoạn\"]'); const d = ds.length > 0 ? ds[0] : null; return JSON.stringify({ soOThat: ds.length, dau: d === null ? null : d.getAttribute('aria-label'), chu: d === null ? null : d.value }); })()",
+      "log": "so o phu de + chu cua o dau (bang chung backend 8631 da noi xong)"
+    },
+    {
+      "do": "khangDinh",
+      "js": "document.querySelectorAll('[aria-label^=\"Phụ đề đoạn\"]').length > 0",
+      "thongDiep": "phai co it nhat mot o phu de (du lieu THAT tu backend 8631, khong phai gia)"
+    },
+    {
+      "do": "shot",
+      "name": "01-app-mo-duoc",
+      "log": "anh chup toan trang. ⚠️ Ten KHONG kem duoi: `chup()` (e2e/cdp.mjs:278) tu ghep `${ten}.png` — viet '01-app-mo-duoc.png' thi ra '01-app-mo-duoc.png.png'."
+    }
+  ]
+}

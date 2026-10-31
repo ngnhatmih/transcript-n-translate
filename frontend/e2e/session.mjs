@@ -193,12 +193,38 @@ async function main() {
     cwd: BACKEND_DIR, stdio: "ignore", windowsHide: true, env: backendEnv,
   });
 
-  const dev = spawn(process.execPath, ["dev-server.mjs"], {
-    cwd: FRONTEND_DIR,
-    stdio: ["ignore", "ignore", "pipe"],
-    windowsHide: true,
-    env: { ...process.env, PHUDE_BACKEND_PORT: String(BACKEND_PORT) },
-  });
+  // ── DEV SERVER: `vite dev`, KHÔNG còn `dev-server.mjs` ──────────────────────────────
+  //
+  // 🔴 ĐO ĐƯỢC, ĐÂY LÀ LỖI ĐÃ SỬA: bản cũ spawn `["dev-server.mjs"]`, nhưng tệp đó ĐÃ BỊ
+  // XOÁ ở commit đổi stack (`15d0646` — `delete mode 100644 frontend/dev-server.mjs`).
+  // Lượt chạy chết ngay tại đây với `dev-server khong len: ...`. Tầng e2e đã hỏng từ lúc
+  // đó, và không ai thấy vì `package.json` không có script nào gọi nó.
+  //
+  // Vì sao `vite dev` thay được: `vite.config.ts` đã có `server.proxy` cho `/api` (đúng
+  // khuôn `location /api/` của `nginx.conf`), và tệp đó nay đọc HAI biến môi trường:
+  // `PHUDE_DEV_PORT` (cổng web) và `PHUDE_BACKEND_PORT` (đích proxy).
+  //
+  // Hai giá trị dưới đây là RÀNG BUỘC, không phải lựa chọn:
+  //   · `DEV_PORT = 3100` — `backend/app/api/app.py:19` chỉ whitelist CORS
+  //     `http://localhost:3100` / `http://127.0.0.1:3100`. Đổi cổng là hỏng CORS.
+  //   · `BACKEND_PORT = 8631` — xem mục 1 của docblock: 8620 là cổng CÓ CHỦ của
+  //     `src/api/contract.test.ts`.
+  //
+  // `stdio: "pipe"` cho stderr giữ nguyên: `devErr` là bằng chứng khi Vite không lên.
+  const dev = spawn(
+    process.execPath,
+    [path.join(FRONTEND_DIR, "node_modules", "vite", "bin", "vite.js"), "dev"],
+    {
+      cwd: FRONTEND_DIR,
+      stdio: ["ignore", "ignore", "pipe"],
+      windowsHide: true,
+      env: {
+        ...process.env,
+        PHUDE_DEV_PORT: String(DEV_PORT),
+        PHUDE_BACKEND_PORT: String(BACKEND_PORT),
+      },
+    },
+  );
   const devErr = [];
   dev.stderr.on("data", (b) => devErr.push(String(b)));
 
