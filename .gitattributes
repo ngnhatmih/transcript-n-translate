@@ -1,0 +1,57 @@
+# Chuẩn hoá dấu xuống dòng cho TOÀN repo.
+#
+# 🔴 VÌ SAO TỆP NÀY TỒN TẠI — ĐO ĐƯỢC, KHÔNG PHẢI THẨM MỸ:
+#
+# Máy chủ này có `core.autocrlf=true`, repo thì KHÔNG có `.gitattributes`. Hệ quả đo được:
+# sau MỖI lượt `vite build`, git báo một tệp bị sửa dù nội dung không đổi một byte:
+#
+#     $ git status --short
+#      M frontend/src/routeTree.gen.ts
+#
+#     $ git diff --ignore-all-space --stat -- frontend/src/routeTree.gen.ts
+#     (rong — khong co thay doi noi dung)
+#
+#     $ so byte khi chuan hoa ve LF roi so voi ban trong HEAD
+#     giong nhau = True
+#
+# `routeTree.gen.ts` do `TanStackRouterVite` sinh lại ở mỗi lượt build. Nội dung y hệt,
+# nhưng tệp trên đĩa dùng LF còn bản git ghi ra theo `autocrlf` dùng CRLF, nên git coi là
+# thay đổi. Đó là nhiễu LẶP LẠI: mỗi lần build lại phải tự tay `git checkout --` một tệp
+# không hề đổi, và một diff rỗng có thể bị commit nhầm.
+#
+# Cách sửa đúng là KHAI BÁO chuẩn ở đây thay vì dựa vào cấu hình git của từng máy:
+# mọi tệp văn bản lưu bằng LF trong repo, và `text=auto` để git tự nhận dạng.
+#
+# ⚠️ Đây là thay đổi chạm TOÀN repo: lần `git add` đầu tiên sau tệp này có thể báo nhiều
+# tệp "modified" (chỉ đổi dấu xuống dòng). Đó là một lần duy nhất, không phải nội dung.
+
+* text=auto eol=lf
+
+# Tệp NHỊ PHÂN — không bao giờ đụng vào. Liệt kê đích danh thay vì tin `text=auto`:
+# một tệp nhị phân bị coi là văn bản sẽ bị đổi byte và hỏng im lặng.
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.gif   binary
+*.ico   binary
+*.webp  binary
+*.woff  binary
+*.woff2 binary
+*.ttf   binary
+*.otf   binary
+*.mp3   binary
+*.mp4   binary
+*.wav   binary
+*.ogg   binary
+*.m4a   binary
+*.pdf   binary
+*.zip   binary
+*.db    binary
+
+# Tệp do công cụ sinh ra: không hiện trong diff để một lượt build lại không tạo ra
+# "thay đổi" giả trong review. Vẫn được track — nó là đầu vào của `tsc`.
+frontend/src/routeTree.gen.ts linguist-generated=true
+
+# Script phải giữ LF kể cả khi checkout trên Windows: shebang `#!/bin/sh` mà có CRLF thì
+# kernel đọc `sh\r` và báo "bad interpreter". Đây là lỗi thật, không phải nhiễu.
+*.sh text eol=lf
