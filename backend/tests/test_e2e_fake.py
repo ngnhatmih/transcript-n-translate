@@ -220,8 +220,12 @@ def wired(tmp_path, monkeypatch):
     # WQ-02/F3: composition root nay đối chiếu `default_mt` với chính `specs` và
     # hỏng NGAY lúc dựng khi không khớp, nên registry GIẢ ở trên phải đi kèm một
     # mặc định GIẢ trỏ vào id CÓ THẬT trong đó — `registry.json` thật khai báo
-    # `opus-mt`, id không có trong danh sách rút gọn này.
+    # `deepseek-web`, id không có trong danh sách rút gọn này.
     monkeypatch.setattr(main, "load_default_mt", lambda: MT_SPEC.id)
+    # Cùng lý do cho ASR: `default_asr` thật (`fw-large-v3`) không có trong
+    # `[ASR_SPEC, MT_SPEC]`, nên composition root TỪ CHỐI dựng. Ghim về đúng id
+    # CÓ trong danh sách giả để fixture không phụ thuộc mặc định đã ship.
+    monkeypatch.setattr(main, "load_default_asr", lambda: ASR_SPEC.id)
     monkeypatch.setattr(main, "_engine_factory", factory)
     monkeypatch.setattr(main, "SingleGpuGovernor", TracingGovernor)
     # Task 12: `MT_SPEC` là runtime `ollama`, nên `available` của nó do phép dò

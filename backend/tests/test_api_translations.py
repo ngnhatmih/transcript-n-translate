@@ -705,22 +705,29 @@ def test_build_components_refuses_an_mt_default_that_is_not_available(
 
 
 def test_build_components_still_accepts_an_available_mt_default(wired):
-    """Nửa ĐỐI CHỨNG của correction C: mặc định đã ship (`opus-mt`, in-process)
-    vẫn phải dựng được — nếu không thì phép kiểm mới chặn luôn khởi động bình
-    thường, và mọi bài khác ở đây đỏ vì một lý do không liên quan.
+    """Nửa ĐỐI CHỨNG của correction C: mặc định đã ship vẫn phải dựng được — nếu
+    không thì phép kiểm mới chặn luôn khởi động bình thường, và mọi bài khác ở
+    đây đỏ vì một lý do không liên quan.
 
     `wired` dựng xong ở trên chính là bằng chứng đó; bài này ghim THÊM chủ thể:
     mặc định thật của `registry.json` phải có mặt trong `mt_engines`.
+
+    🔴 Vì sao KHÔNG còn ghim cứng `opus-mt`: mặc định đã đổi sang `deepseek-web`
+    (engine `http`), nên vế "mặc định phải là engine IN-PROCESS" không còn là
+    điều đúng. Vế còn đúng — và là điều bài này thật sự muốn kiểm — là mặc định
+    ĐÃ SHIP phải dựng được và phải có mặt trong `mt_engines`. Ghim cứng id cũ
+    sẽ biến một quyết định sản phẩm thành một bài đỏ giả.
     """
     _c, _repos, specs, _worker, _broker, mt_engines = wired
     from app.adapters.registry_file import load_default_mt
 
     declared = load_default_mt()
-    assert declared == INPROCESS_ENGINE_ID, (
-        f"registry.json đổi mặc định? Bài này ghim {INPROCESS_ENGINE_ID!r}, "
-        f"nhận {declared!r}"
+    assert declared in {s.id for s in specs if s.kind == "mt"}, (
+        f"mặc định {declared!r} phải có trong registry"
     )
-    assert by_id(specs, declared).capabilities["available"] is True
+    assert by_id(specs, declared).capabilities["available"] is True, (
+        f"mặc định đã ship {declared!r} phải available để app dựng được"
+    )
     assert declared in mt_engines
 
 

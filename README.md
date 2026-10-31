@@ -1126,3 +1126,88 @@ job dub that (tron_nen=True)       76,1 s -> dub-1.mp4 246 482 157 B, EXIT_DUB=0
 ```
 
 Năm bài mới trong `backend/tests/test_export.py` ghim hệ toạ độ, và **đã chứng minh không xanh giả**: phá `if khung is not None:` thành `if False:` ⇒ `3 failed, 40 passed` (đúng ba bài về khung), khôi phục ⇒ `43 passed`.
+
+## Đổi mặc định: ASR sang `fw-large-v3`, dịch sang `deepseek-web`
+
+Hai khoá trong `backend/registry.json` là **DỮ LIỆU**, không phải literal trong code — đổi chúng là đổi mặc định của cả pipeline mà không sửa một dòng Python nào:
+
+```json
+"default_asr": "fw-large-v3",     // trước: fw-large-v3-turbo
+"default_mt":  "deepseek-web",    // trước: opus-mt
+```
+
+Cả hai engine đều đã có sẵn trên máy này: `models--Systran--faster-whisper-large-v3` **3 203 MB** (khác `turbo` 1 547 MB), và gateway `whalegate` nghe ở `127.0.0.1:8790` với `GET /v1/models` → `200`, `deepseek-web` `available: true`.
+
+### 🔴 `docker compose restart` KHÔNG nạp lại `registry.json`
+
+Đây là cái bẫy đã đo được, và nó suýt làm tôi kết luận sai. Sau khi sửa `registry.json` trên máy và `docker compose restart api`, job dịch tự sinh vẫn chạy **`opus-mt`**:
+
+```
+id= 41 ws=2 type=translate engine=opus-mt  state=done
+```
+
+Nguyên nhân: container `COPY` code vào image **lúc build**, không mount. Đo hai nơi:
+
+```
+registry.json BEN TRONG container:  default_asr = fw-large-v3-turbo   default_mt = opus-mt
+registry.json TREN MAY (đã sửa):    default_asr = fw-large-v3         default_mt = deepseek-web
+```
+
+Sửa bằng `docker cp backend\registry.json phu-de-lab-api-1:/app/registry.json`, rồi **đo lại để phát hiện 0 byte** (bẫy `docker compose cp` đã gặp trước đây):
+
+```
+size = 14179
+default_asr = fw-large-v3
+default_mt  = deepseek-web
+```
+
+Sau `restart`, job dịch tự sinh đổi đúng sang `deepseek-web` — đó là phép đo chứng minh, không phải suy luận.
+
+### Tổng thời gian pipeline, đo trên video thật
+
+Video `8f4b5304daf42569.mp4`: **278,546 s**, `1080×1920`, `h264 + aac 48 kHz`. Chạy trọn qua API thật (`POST /api/sources/upload` → `ingest` → `asr` → `translate`), mốc thời gian đọc từ `jobs.started_at`/`finished_at` trong DB của container:
+
+| giai đoạn | engine | thời gian |
+|---|---|---|
+| upload (88,7 MB qua HTTP) | — | **0,5 s** |
+| ingest (tách wav 16 kHz) | — | **≈ 0–2 s** |
+| ASR | `fw-large-v3` | **25 s** / **13 s** (hai lượt, xem dưới) |
+| dịch | `deepseek-web` | **14 s** / **12 s** |
+| **TỔNG từ ingest bắt đầu đến dịch xong** | | **64,0 s = 1,1 phút** |
+
+Hệ số: **0,230× thời gian thực** — video 4 phút 38 giây xử lý xong trong 64 giây.
+
+⚠️ Vì sao có **hai** lượt ASR và hai lượt dịch: lượt chạy đầu (`upload` → job 42) tự sinh job ASR 43, và tôi lại `POST` thêm một job ASR 44 trên cùng source để chắc chắn engine mới được dùng. Cả hai đều `fw-large-v3` và cùng cho ra transcript, nên mỗi giai đoạn có hai số. Con số 64 s là của chuỗi **42 → 43 → 45** (một lượt trọn vẹn), không phải tổng của cả bốn job.
+
+Đo riêng lẻ để đối chiếu (cùng video, cùng máy):
+
+```
+ASR  fw-large-v3, source 2   -> 21,1 s   (job 40, 103 đoạn)
+dịch deepseek-web            -> 6,1 s và 12,1 s (job 45, 46; 103 đoạn)
+ingest + ASR (lượt sạch)     -> 2,0 s + 38,4 s = 41,0 s tích luỹ
+```
+
+Con số ASR giao động **13–38 s** giữa các lượt là do lần đầu một engine phải **nạp model 3,2 GB vào VRAM** (`large-v3` nặng gấp đôi `turbo`); lượt sau model còn trong bộ nhớ nên nhanh hơn. Đây là lý do dòng "nạp engine" xuất hiện trong log job, và là thứ `SingleGpuGovernor` quản lý.
+
+### Sáu bài test đã sửa vì đổi mặc định — và vì sao sửa đúng
+
+Đổi hai khoá làm **8 bài đỏ + 11 lỗi setup**. Không bài nào là hồi quy; tất cả đều là test ghim mặc định cũ hoặc fixture thay registry rồi để mặc định thật đọc từ đĩa:
+
+| bài | sửa gì |
+|---|---|
+| `test_registry.py` (2 bài) | ghim id mới `fw-large-v3` / `deepseek-web` |
+| `test_mt_wiring.py` (2 bài) | ghim `default_mt` mới; bài "available là dò sống" nay kiểm **phép dò** (`_mark_availability`) thay vì đòi app dựng xong khi cả hai nguồn dò đều tắt |
+| `test_api_sources.py` (3 chỗ) | fixture thay registry giả ⇒ phải thay **cả** `load_default_asr`; thêm ghim `openai_models_available` để suite không đọc môi trường (máy có whalegate hay không) |
+| `test_api_translations.py` (1 bài) | bỏ ghim cứng `== "opus-mt"`, giữ vế đúng: mặc định đã ship phải **available** và có trong `mt_engines` |
+| `test_e2e_fake.py` (1 chỗ) | fixture registry rút gọn ⇒ thêm `load_default_asr` |
+
+Nguyên tắc rút ra: **một fixture thay `load_registry` bằng danh sách rút gọn thì phải thay luôn `load_default_*`**. Trước đây điều đó tình cờ đúng vì mặc định thật nằm trong danh sách; đổi mặc định là lộ ra chỗ dựa ngầm.
+
+### Đo cuối (sau khi đổi mặc định)
+
+```
+npx tsc --noEmit                   EXIT_TS=0
+npm test (frontend)                148 tests, 148 pass, 0 fail, EXIT_TEST=0
+pytest (venv, Windows)             1424 passed, 15 deselected, EXIT_PYTEST=0
+pipeline that (upload->dich xong)  64,0 s cho video 278,546 s = 0,230x thoi gian thuc
+```

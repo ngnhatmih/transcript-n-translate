@@ -825,6 +825,18 @@ def built(tmp_path, monkeypatch):
     # là "không engine ollama nào phục vụ được" — cùng kết quả như bản cũ trả
     # `False`, nên Ý NGHĨA của fixture này không đổi, chỉ kiểu giá trị đổi.
     monkeypatch.setattr(main, "ollama_available", lambda *a, **k: set())
+    # 🔴 Registry giả ở trên chỉ có `[ASR_SPEC, MT_SPEC]`, nên mặc định ASR THẬT
+    # (`fw-large-v3`) không có trong danh sách và composition root TỪ CHỐI dựng —
+    # đúng hành vi đúng, nhưng làm cả fixture đỏ vì lý do không liên quan tới bài
+    # nào dùng nó. Ghim mặc định về đúng spec CÓ trong danh sách giả.
+    monkeypatch.setattr(main, "load_default_asr", lambda: ASR_SPEC.id)
+    # Engine mặc định dịch đã ship là `deepseek-web` (runtime `http`), nên `available`
+    # của nó do phép dò MẠNG `openai_models_available` quyết. Ghim nó "sống" để
+    # fixture không đọc môi trường của máy chạy test (có whalegate hay không).
+    from app.adapters.registry_file import load_registry as _load_registry_thật
+
+    _http_models = {s.model_ref for s in _load_registry_thật() if s.runtime == "http"}
+    monkeypatch.setattr(main, "openai_models_available", lambda *a, **k: set(_http_models))
     repos, specs, worker, broker, mt_engines = main.build_components()
     _assert_repo_data_dirs_untouched(repo_data_before)
     return main, repos, specs, worker, engine, broker, mt_engines
@@ -848,15 +860,23 @@ def test_build_components_refuses_a_registry_that_cannot_satisfy_the_default_asr
     monkeypatch.setattr(main, "MEDIA_DIR", data / "media")
     monkeypatch.setattr(main, "OUTPUT_DIR", data / "output")
     monkeypatch.setattr(main, "LOG_DIR", data / "logs")
-    # Registry THẬT khai báo `default_asr = fw-large-v3-turbo`; danh sách dưới
+    # Registry THẬT khai báo `default_asr = fw-large-v3`; danh sách dưới
     # đây không có nó -> dựng app phải hỏng kèm chỉ dẫn.
+    #
+    # 🔴 Phải THAY `load_default_asr` TƯỜNG MINH, không để nó đọc
+    # `registry.json` thật: bài này kiểm "mặc định khai báo không có trong
+    # danh sách thì hỏng", nên nó phải tự quyết định mặc định là gì. Trước
+    # đây nó dựa vào việc registry thật tình cờ khai `fw-large-v3-turbo`;
+    # đổi mặc định ASR là bài này đỏ vì lý do CHẲNG LIÊN QUAN gì tới điều
+    # nó muốn kiểm.
     monkeypatch.setattr(main, "load_registry", lambda: [MT_SPEC])
+    monkeypatch.setattr(main, "load_default_asr", lambda: "fw-khong-co-trong-danh-sach")
 
     with pytest.raises(RuntimeError) as excinfo:
         main.build_components()
 
     message = str(excinfo.value)
-    assert "fw-large-v3-turbo" in message, message
+    assert "fw-khong-co-trong-danh-sach" in message, message
     assert "default_asr" in message, f"lỗi phải chỉ đúng khoá cần sửa: {message!r}"
 
 
@@ -882,6 +902,11 @@ def test_build_components_refuses_a_registry_that_cannot_satisfy_the_default_mt(
     monkeypatch.setattr(main, "load_registry", lambda: [ASR_SPEC, MT_SPEC])
     # Registry THẬT trỏ tới một id CÓ THẬT; ở đây giả lập một lần gõ sai khoá
     # `default_mt` trong registry.json.
+    #
+    # Thay CẢ `default_asr` để bài này không phụ thuộc mặc định ASR đang là gì:
+    # nó kiểm đường `default_mt`, và một mặc định ASR không có trong danh sách
+    # `[ASR_SPEC, MT_SPEC]` sẽ làm app hỏng vì lý do SAI BÀI.
+    monkeypatch.setattr(main, "load_default_asr", lambda: ASR_SPEC.id)
     monkeypatch.setattr(main, "load_default_mt", lambda: "opus-mt-go-nham")
 
     with pytest.raises(RuntimeError) as excinfo:
@@ -1034,11 +1059,24 @@ def test_build_components_registers_only_available_mt_engines(monkeypatch, tmp_p
     monkeypatch.setattr(config, "OUTPUT_DIR", data / "output")
     monkeypatch.setattr(main, "load_registry",
                         lambda: _registry_with_the_shipped_mt_default([ASR_SPEC, MT_SPEC]))
+    # Registry giả chỉ có `[ASR_SPEC, MT_SPEC]`; ghim mặc định ASR về id CÓ trong đó
+    # để bài này không đỏ vì mặc định đã ship đổi sang `fw-large-v3`.
+    monkeypatch.setattr(main, "load_default_asr", lambda: ASR_SPEC.id)
     monkeypatch.setattr(main, "DB_PATH", data / "app.db")
     monkeypatch.setattr(main, "MEDIA_DIR", data / "media")
     monkeypatch.setattr(main, "OUTPUT_DIR", data / "output")
     monkeypatch.setattr(main, "LOG_DIR", data / "logs")
+    # 🔴 Engine mặc định đã ship là `deepseek-web` (runtime `http`), nên `available`
+    # của nó KHÔNG do Ollama quyết mà do `_http_engine_ready` — một phép dò MẠNG
+    # tới `127.0.0.1:8790`. Ghim `ollama_available` = `set()` không còn đủ: mặc
+    # định sẽ thành `available=False` và `build_components()` ném RuntimeError,
+    # biến bài này thành phép kiểm "máy có whalegate hay không".
+    #
+    # Bài này kiểm QUAN HỆ (mọi engine `available` đều được đăng ký, mọi engine
+    # không `available` đều vắng), không kiểm mạng. Ghim cả hai phép dò để kết
+    # quả là hằng số mà bài tự quyết định.
     monkeypatch.setattr(main, "ollama_available", lambda *a, **k: set())
+    monkeypatch.setattr(main, "_http_engine_ready", lambda *a, **k: True)
     repos, specs, worker, broker, mt_engines = main.build_components()
     _assert_repo_data_dirs_untouched(repo_data_before)
 

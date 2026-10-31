@@ -87,11 +87,14 @@ def test_shipped_registry_declares_the_default_asr_engine():
     `ingest.py` từng có `DEFAULT_ASR_ENGINE = "fw-large-v3-turbo"` là thứ DUY NHẤT
     quyết định engine của mọi job ASR do upload sinh ra, nên một registry không có
     id đó vẫn tạo ra job chết (`KeyError` tận worker). Bài này ghim nguồn dữ liệu.
+
+    Đổi `fw-large-v3-turbo` -> `fw-large-v3` là quyết định SẢN PHẨM (chính xác hơn
+    turbo, đổi 1600 MB VRAM lấy 3200 MB), nên bài này ghim đúng id đã ship.
     """
     from app.adapters.registry_file import load_default_asr
 
     declared = load_default_asr()
-    assert declared == "fw-large-v3-turbo"
+    assert declared == "fw-large-v3"
     assert declared in {s.id for s in load_registry()}, (
         "registry.json phải khai báo một engine asr CÓ THẬT trong danh sách"
     )
@@ -193,7 +196,7 @@ def test_shipped_registry_declares_the_default_mt_engine():
     from app.registry import default_mt_engine
 
     declared = load_default_mt()
-    assert declared == "opus-mt"
+    assert declared == "deepseek-web"
     assert declared in {s.id for s in load_registry()}, (
         "registry.json phải khai báo một engine mt CÓ THẬT trong danh sách"
     )
@@ -207,7 +210,7 @@ def test_shipped_registry_declares_the_default_mt_engine():
     assert reordered[len(asr)].id != mt[0].id, (
         "mutation tự kiểm của chính test: thứ tự mảng `mt` phải đã đổi"
     )
-    assert default_mt_engine(reordered, declared=declared) == "opus-mt", (
+    assert default_mt_engine(reordered, declared=declared) == "deepseek-web", (
         "mặc định phải đến từ khoá `default_mt`, không từ vị trí dòng"
     )
 

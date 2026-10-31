@@ -306,17 +306,34 @@ def test_ollama_availability_is_probed_here_and_now_not_hardcoded(harness):
     # `runtime: "http"` cũng chết: `deepseek-web` không nằm dưới Ollama. Tắt cả hai nguồn dò
     # ở đây để câu khẳng định nói về ĐÚNG thứ nó muốn nói (Ollama), không phải về cái máy
     # đang chạy test. Nửa "http sống thì dựng" nằm ngay dưới.
+    #
+    # 🔴 Ở đây CẢ HAI phép dò đều tắt, nên `default_mt` (nay là `deepseek-web`, runtime
+    # `http`) KHÔNG sẵn sàng — và `build_components()` đúng là phải TỪ CHỐI dựng. Bài này
+    # kiểm "available là dữ liệu dò sống", không kiểm "app luôn dựng được"; muốn kiểm vế
+    # sau thì phải có ít nhất một nguồn dò sống. Vì thế `harness.build()` được gọi trong
+    # `pytest.raises`, và câu khẳng định chuyển sang PHÉP DÒ (specs) — thứ vẫn dựng được
+    # trước khi composition root đối chiếu mặc định.
     harness.http_alive = False
-    _repos, specs_down, _worker, _broker, engines_down = harness.build()
-    assert set(engines_down) == {"opus-mt"}, (
-        f"Ollama tắt (và endpoint http tắt) thì chỉ engine in-process được dựng: "
-        f"{sorted(engines_down)}"
-    )
+    with pytest.raises(RuntimeError, match="default_mt"):
+        harness.build()
+    # Câu khẳng định chuyển sang PHÉP DÒ: dựng thẳng danh sách spec rồi gọi
+    # `_mark_availability` — đúng hàm mà `build_components()` gọi để điền `available`.
+    # Nhờ vậy bài vẫn kiểm được "dò sống, không hardcode" mà không đòi app dựng xong
+    # (app KHÔNG dựng được khi mặc định không sẵn sàng — đó là hành vi đúng, và bài
+    # `test_build_components_refuses_...` đã ghim riêng).
+    from app.adapters.registry_file import load_registry as _load_registry
+
+    specs_down = list(_load_registry())
+    harness.main._mark_availability(specs_down)
     for spec in of_kind(specs_down, "mt"):
         assert spec.capabilities.get("available") is (spec.runtime == "inprocess"), (
             f"{spec.id} ({spec.runtime}) khai available sai khi Ollama tắt"
         )
+    assert {s.id for s in of_kind(specs_down, "mt") if s.capabilities.get("available")} \
+        == {"opus-mt"}, "chỉ engine in-process phải available khi cả hai nguồn dò tắt"
 
+    # Http sống trở lại ⇒ `default_mt` sẵn sàng ⇒ dựng được, và engine `http` phải có mặt
+    # CẠNH engine in-process.
     harness.http_alive = True
     _repos, specs_http, _worker, _broker, engines_http = harness.build()
     assert set(engines_http) == {"opus-mt", "deepseek-web"}, (
@@ -784,14 +801,19 @@ def test_a_forwarded_translation_records_the_glossary_version(harness):
 def test_shipped_registry_already_declares_every_mt_engine_this_wiring_needs():
     """Correction C: `registry.json` không có khoá `engines`, nó có `asr`/`mt`.
 
-    Mảng `mt` đã đủ bốn engine kèm `capabilities`, và `default_mt` đã là
-    `opus-mt` — nên Step 3 của brief là NHÂN BẢN ENTRY, không được làm.
+    Mảng `mt` đã đủ năm engine kèm `capabilities`, và `default_mt` đã là
+    `deepseek-web` — nên Step 3 của brief là NHÂN BẢN ENTRY, không được làm.
+
+    🔴 Mặc định đã ĐỔI từ `opus-mt` sang `deepseek-web` (quyết định sản phẩm: dịch
+    bằng DeepSeek web chất lượng hơn hẳn OPUS-MT). Bài này ghim đúng id đã ship —
+    nó kiểm "mặc định có trong danh sách và danh sách không bị nhân bản", KHÔNG
+    kiểm mặc định phải là engine in-process.
     """
     from app import config
 
     raw = json.loads(pathlib.Path(config.REGISTRY_PATH).read_text(encoding="utf-8"))
     assert "engines" not in raw, "registry.json không có khoá `engines` (correction C)"
-    assert raw["default_mt"] == "opus-mt"
+    assert raw["default_mt"] == "deepseek-web"
     ids = [entry["id"] for entry in raw["mt"]]
     # `deepseek-web` là hàng `runtime: "http"` ĐẦU TIÊN được khai, và chỉ được khai SAU KHI
     # đo trên endpoint thật (`data/experiments/accuracy-pipelines/20261026-spike-deepseek-web`:
