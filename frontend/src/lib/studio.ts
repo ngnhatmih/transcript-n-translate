@@ -226,9 +226,20 @@ export interface DauVaoDuongOng {
 /**
  * Sáu bước của đường ống, suy từ dữ liệu máy chủ.
  *
- * ⚠️ THỨ TỰ CỦA `if` LÀ NGHĨA: `duyet` đứng TRƯỚC `long`/`ghep`/`xuat` vì ba bước sau bị
- * chặn khi còn việc chưa duyệt. Đảo thứ tự là để một bước "xong" nói dối khi thật ra nó
- * chưa được phép chạy.
+ * 🔴 DUYỆT LÀ TUỲ CHỌN, KHÔNG PHẢI CỬA CHẶN (đổi hành vi, có chủ).
+ *
+ * Bản cũ để `soViec > 0` KHOÁ cả ba bước `long`/`ghep`/`xuat`: còn việc chưa duyệt thì
+ * không được lồng tiếng, không được ghép nền, không được xuất. Chủ dự án bác bỏ: duyệt là
+ * bước KIỂM TRA CHẤT LƯỢNG ai muốn làm thì làm, không phải giấy phép. Đã có bản dịch trong
+ * tay thì nghe thử và xuất video là quyền của người dùng — bắt họ bấm "duyệt" cho có chỉ
+ * làm chữ "duyệt" mất nghĩa.
+ *
+ * Nên `duyet` VẪN là một bước (hiện `còn N việc` như GỢI Ý) nhưng KHÔNG tham gia điều kiện
+ * của ba bước sau. Điều kiện thật của từng bước là QUAN HỆ DỮ LIỆU, không phải quyền:
+ *  - `long` cần có BẢN DỊCH — không có dòng nào thì TTS không có gì để đọc;
+ *  - `ghep` cần `dubState === "done"` — không có bản lồng thì không có gì để trộn;
+ *  - `xuat` cần `ghepState === "done"` — tệp cuối do chính bước ghép sinh ra.
+ * Thiếu ba thứ đó thì bước sau KHÔNG CÓ ĐẦU VÀO, khác hẳn "chưa được phép".
  */
 export function duongOng(d: DauVaoDuongOng): BuocDuongOng[] {
   const buocAsr: BuocDuongOng = d.coBanGhi
@@ -239,6 +250,8 @@ export function duongOng(d: DauVaoDuongOng): BuocDuongOng[] {
     ? { id: "dich", name: "Dịch", note: d.engineMt ?? "", state: "done" }
     : { id: "dich", name: "Dịch", note: d.coBanGhi ? "chưa dịch" : "chờ phiên âm", state: d.coBanGhi ? "blocked" : "todo" };
 
+  // GỢI Ý, không phải cổng: `blocked` ở đây chỉ nói "còn việc nên xem", và
+  // `lyDoChuaXuatDuoc` KHÔNG đọc bước này (xem dưới).
   const buocDuyet: BuocDuongOng =
     !d.coBanDich
       ? { id: "duyet", name: "Duyệt", note: "chờ bản dịch", state: "todo" }
@@ -257,23 +270,25 @@ export function duongOng(d: DauVaoDuongOng): BuocDuongOng[] {
     return { id, name, note: "đã huỷ", state: "todo" };
   };
 
-  // Lồng tiếng chỉ ĐƯỢC PHÉP chạy khi đã duyệt xong — cùng luật với bản đã duyệt.
-  const buocLong: BuocDuongOng =
-    d.soViec > 0 && d.dubState === null
-      ? { id: "long", name: "Lồng tiếng", note: "cần duyệt xong", state: "todo" }
-      : tuJob("long", "Lồng tiếng", "đã lồng", d.dubState);
+  // Lồng tiếng KHÔNG cần duyệt — nó cần có bản dịch. Chưa có bản dịch thì nói đúng
+  // lý do đó ("chờ bản dịch"), đừng mượn chữ "duyệt" để giải thích một chuyện khác.
+  const buocLong: BuocDuongOng = !d.coBanDich
+    ? { id: "long", name: "Lồng tiếng", note: "chờ bản dịch", state: "todo" }
+    : tuJob("long", "Lồng tiếng", "đã lồng", d.dubState);
 
   const buocGhep: BuocDuongOng =
     d.dubState !== "done" && d.ghepState === null
       ? { id: "ghep", name: "Ghép nền", note: "cần lồng tiếng xong", state: "todo" }
       : tuJob("ghep", "Ghép nền", "đã ghép", d.ghepState);
 
+  // Xuất KHÔNG đọc `soViec`. Lý do chưa xuất được chỉ còn hai: chưa ghép nền xong, hoặc
+  // đã ghép xong nhưng chưa có tệp (job xuất chưa chạy / chưa ghi ra đĩa).
   const buocXuat: BuocDuongOng = d.coFileXuat
     ? { id: "xuat", name: "Xuất", note: "sẵn sàng", state: "done" }
     : {
         id: "xuat",
         name: "Xuất",
-        note: d.soViec > 0 ? "cần duyệt xong" : d.ghepState !== "done" ? "cần ghép nền" : "chưa có tệp",
+        note: d.ghepState !== "done" ? "cần ghép nền" : "chưa có tệp",
         state: "todo",
       };
 

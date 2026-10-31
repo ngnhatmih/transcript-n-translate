@@ -320,10 +320,13 @@ describe("duongOng: sau buoc, bon trang thai", () => {
     assert.equal(b[2].note, "hết việc");
   });
 
-  it("con viec va CHUA long: buoc long 'can duyet xong'", () => {
+  // 🔴 LUẬT MỚI: duyệt là TUỲ CHỌN, không phải cửa chặn. Bài cũ ở đây ghim
+  // `"cần duyệt xong"` — hành vi chủ dự án bác bỏ. Giữ nó là giữ một cửa chặn
+  // không ai muốn, và tệ hơn: nó khiến chữ "duyệt" thành một thủ tục bấm cho có.
+  it("con viec va CHUA long: buoc long VAN chay duoc, khong doi duyet", () => {
     const b = duongOng(vao({ coBanGhi: true, coBanDich: true, soViec: 5, dubState: null }));
     assert.equal(b[3].state, "todo");
-    assert.equal(b[3].note, "cần duyệt xong");
+    assert.equal(b[3].note, "chưa chạy");
   });
 
   it("dub failed KHAC cancelled: failed la bi-chan, cancelled la todo", () => {
@@ -364,9 +367,36 @@ describe("duongOng: sau buoc, bon trang thai", () => {
     assert.equal(co[5].note, "sẵn sàng");
   });
 
-  it("xuat: 'can duyet xong' uu tien hon 'can ghep nen'", () => {
+  it("xuat: 'can ghep nen' vi duyet KHONG con chan xuat", () => {
     const b = duongOng(vao({ coBanGhi: true, coBanDich: true, soViec: 3, ghepState: null }));
-    assert.equal(b[5].note, "cần duyệt xong");
+    assert.equal(b[5].note, "cần ghép nền");
+  });
+
+  // 🔴 Ba bài dưới ghim LUẬT MỚI: duyệt là tuỳ chọn, không phải cửa chặn.
+  // Bài cũ ghim `"cần duyệt xong"` ở bước lồng và ở lý do chưa xuất được — đó là
+  // hành vi chủ dự án bác bỏ. Giữ chúng là giữ một cửa chặn không ai muốn.
+  it("con viec CHUA duyet: long tieng VAN chay duoc (khong bi chan)", () => {
+    const b = duongOng(vao({ coBanGhi: true, coBanDich: true, soViec: 5, dubState: null }));
+    assert.equal(b[3].state, "todo");
+    assert.equal(b[3].note, "chưa chạy");
+  });
+
+  it("con viec CHUA duyet: long tieng da xong thi bao 'da long', khong doi duyet", () => {
+    const b = duongOng(vao({ coBanGhi: true, coBanDich: true, soViec: 5, dubState: "done" }));
+    assert.equal(b[3].state, "done");
+    assert.equal(b[3].note, "đã lồng");
+  });
+
+  it("chua co ban dich: long tieng noi dung ly do THAT (cho ban dich, khong phai cho duyet)", () => {
+    const b = duongOng(vao({ coBanGhi: true, coBanDich: false, soViec: 0, dubState: null }));
+    assert.equal(b[3].state, "todo");
+    assert.equal(b[3].note, "chờ bản dịch");
+  });
+
+  it("con viec CHUA duyet nhung da ghep xong: xuat VAN san sang", () => {
+    const b = duongOng(vao({ coBanGhi: true, coBanDich: true, soViec: 9, dubState: "done", ghepState: "done", coFileXuat: true }));
+    assert.equal(b[5].state, "done");
+    assert.equal(b[5].note, "sẵn sàng");
   });
 });
 
@@ -378,7 +408,7 @@ describe("lyDoChuaXuatDuoc: tra CAU, khong tra co", () => {
 
   it("xuat chua done ⇒ tra note cua buoc xuat", () => {
     const b = duongOng({ coBanGhi: true, engineAsr: "w", coBanDich: true, engineMt: "m", soViec: 2, dubState: null, ghepState: null, coFileXuat: false });
-    assert.equal(lyDoChuaXuatDuoc(b), "cần duyệt xong");
+    assert.equal(lyDoChuaXuatDuoc(b), "cần ghép nền");
   });
 
   it("khong co buoc xuat trong danh sach ⇒ null", () => {
