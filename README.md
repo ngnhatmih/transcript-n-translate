@@ -1211,3 +1211,83 @@ npm test (frontend)                148 tests, 148 pass, 0 fail, EXIT_TEST=0
 pytest (venv, Windows)             1424 passed, 15 deselected, EXIT_PYTEST=0
 pipeline that (upload->dich xong)  64,0 s cho video 278,546 s = 0,230x thoi gian thuc
 ```
+
+## 🔴 Pipeline ĐẦY ĐỦ gồm cả lồng tiếng: 158,1 s cho video 278,546 s
+
+Con số `64,0 s` ở trên **chỉ đến `translate`** — nó KHÔNG phải pipeline đầy đủ. Chặng còn lại là lồng tiếng (TTS + tách nền `htdemucs` + trộn + remux + burn phụ đề), và nó tốn nhiều hơn cả ba chặng trước cộng lại.
+
+Đo một lượt **liền mạch** trong một script (không thao tác chen giữa), trên `8f4b5304daf42569.mp4` 278,546 s:
+
+| chặng | engine | thời gian |
+|---|---|---|
+| upload 88,7 MB + ingest | — | **2,0 s** |
+| ASR | `fw-large-v3` | **32,3 s** |
+| dịch | `deepseek-web` | **14,1 s** |
+| **lồng tiếng** (TTS + `htdemucs` + trộn + remux + burn) | `vieneu-v3-turbo` | **108,8 s** |
+| **TỔNG** | | **158,1 s = 2,6 phút** |
+
+Hệ số **0,568× thời gian thực**. Lồng tiếng chiếm **69 %** tổng thời gian.
+
+Tệp giao được (`dub-9.*`):
+
+```
+dub-9.mp4   252 169 196 B
+  video: h264 1080x1920
+  audio: aac 48000 Hz 2 kenh
+  duration: 278.500000 s   (nguon 278,546 s)
+  track phu de mem: 0      (chu nam trong PIXEL)
+```
+
+### ⚠️ Một con số 38,4 phút SAI, và vì sao nó sai
+
+Lần đo đầu tiên tôi lấy hiệu `jobs.finished_at` của job dub trừ `jobs.started_at` của job ingest, ra **2 304 s = 38,4 phút**. Sai. Khoảng đó có:
+- **400,7 s** rebuild image `api` (bắt buộc, xem mục dưới);
+- thời gian tôi sửa 6 tệp test giữa các job.
+
+Bài học: `finished_at(job cuối) − started_at(job đầu)` chỉ là thời gian pipeline khi **không có gì chen giữa**. Muốn đo pipeline thì phải chạy nó trong MỘT script liền mạch — đó là cách con số 158,1 s ra đời.
+
+### 🔴 Container chạy code CŨ, và `grep` là cách phát hiện
+
+Job dub đầu tiên (`#47`, `#48`) **không sinh `dub-*.mp4`** dù payload gửi `tron_nen: true`. Đo:
+
+```
+payload job 47 = {"translation_id": 7, "voice": null, "so_dong": null}   ← THIEU tron_nen
+grep -n 'tron_nen' /app/app/api/routes_dubs.py   →  RONG, EXIT=0
+wc -c /app/app/api/routes_dubs.py                →  8511     (tren may: 9219)
+```
+
+Container `COPY` code vào image **lúc build**. `docker compose restart` không nạp lại; `docker cp` từng tệp chỉ chữa được một tệp. Phải `docker compose build api` (**400,7 s**), rồi `docker compose up -d api`:
+
+```
+grep -c 'tron_nen' /app/app/api/routes_dubs.py  →  4
+wc -c /app/app/api/routes_dubs.py               →  9219   (khớp máy)
+default_asr = fw-large-v3   default_mt = deepseek-web
+```
+
+Sau đó `payload = {..., "tron_nen": true}` và log có `tách nền khỏi tiếng gốc (htdemucs)` → `remux vào video gốc` → `video lồng tiếng: dub-7.mp4 (246353 kB)`.
+
+### Ràng buộc "không bao giờ chồng" — đo bằng số, không bằng lời
+
+`dub-9.plan.json` có 103 dòng, mỗi dòng ghi `take`, `slot`, `avail`, `speed`. Đo chồng thật = `take/speed − avail` (thời lượng thật trừ cửa sổ từ `start` dòng này tới `start` dòng sau):
+
+```
+dem = {'vua': 41, 'nen': 62, 'nen_manh': 9}   trung_vi_toc_do = 1.077
+so dong CHONG that: 2 / 103
+  i=68  that=2.921 avail=2.920 du=0.001
+  i=89  that=2.321 avail=2.320 du=0.001
+tong thoi gian chong: 0.002 s
+```
+
+**2 ms tổng cộng trên 103 dòng** = sai số làm tròn (`speed` lưu 3 chữ số). Không nghe được, nhưng là **không phải 0 tuyệt đối** — và ràng buộc này bạn đặt là tuyệt đối nên nó được ghi đúng như đo được, không làm tròn thành "0".
+
+Không dòng nào bị cắt chữ: `nen_manh` chỉ là nhãn CHẨN ĐOÁN (`speed > 1,5`, khó nghe), không phải trần chặn.
+
+### Một cảnh báo trong log là của code CŨ
+
+Job 47 in `19 dòng vượt trần 1.35× (nén tới trần, vẫn đè dòng sau)`. Chuỗi đó **không tồn tại** trong `dub.py` hiện tại — dòng 312 dùng ngưỡng `s > 1.5` và câu `đã nén đủ để không chồng, không cắt chữ`. Log của job 49 (code mới):
+
+```
+xong · 8 dòng phải nén trên 1,5× (đã nén đủ để không chồng, không cắt chữ): 12, 16, 21, 23, 32, 35, 58, 71
+```
+
+Khớp đúng `nen_manh: 8` trong `plan.json`. Đọc log cũ mà không đối chiếu mã là đọc một phiên bản phần mềm đã chết.
