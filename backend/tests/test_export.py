@@ -218,6 +218,83 @@ def test_empty_segment_list_gives_valid_empty_documents():
 
 
 # --------------------------------------------------------------------------
+# ERRATA #60: `.ass` phải khai ĐÚNG hệ toạ độ của khung hình được burn lên
+#
+# Đo được trên máy: video trong repo là DỌC 1080×1920, còn `_ASS_HEADER` khai cứng
+# 1920×1080. libass lấy `PlayRes` làm hệ toạ độ rồi CO GIÃN theo khung thật, nên chữ
+# Việt trong `dub-1.mp4` hiện đúng nhưng TRÀN ra ngoài mép: dòng dài nhất của bản dịch
+# #1 là 693 ký tự, và `MarginL/R` 60 px theo hệ 1920 chỉ còn ~34 px thật trên khung
+# 1080. Cắt chữ ở mép là đúng thứ bị cấm ("không bao giờ cắt chữ").
+#
+# Hai vế, và vế THỨ NHẤT quan trọng ngang vế thứ hai: `khung=None` phải giữ NGUYÊN
+# từng byte bản cũ, vì đường xuất tệp rời không biết video nào và đổi mặc định là đổi
+# kết quả của mọi lượt xuất cũ mà không ai yêu cầu.
+# --------------------------------------------------------------------------
+
+
+def test_ass_without_a_frame_keeps_the_original_coordinate_system_byte_for_byte():
+    """`khung=None` ⇒ `1920×1080`, cỡ 54, lề 60, `WrapStyle: 2` — y như trước."""
+    out = to_ass([Segment(i=0, start=0.0, end=1.0, text="x")])
+    assert "PlayResX: 1920" in out
+    assert "PlayResY: 1080" in out
+    assert "WrapStyle: 2" in out
+    assert "Style: Default,Archivo,54,&H00DCE4E8" in out
+    assert ",0,0,0,0,100,100,0,0,1,2,1,2,60,60,48,1" in out
+
+
+def test_ass_for_a_vertical_frame_declares_that_frame_and_shrinks_the_style():
+    """`khung=(1080, 1920)` ⇒ `PlayRes` đúng khung dọc, chữ và lề co theo, tự bẻ dòng.
+
+    `WrapStyle: 0` là vế KHÔNG được bỏ: `2` nghĩa là "chỉ xuống dòng ở `\\N`", nên một
+    dòng 693 ký tự sẽ không bao giờ được bẻ và chắc chắn tràn — đúng lỗi đã đo.
+    """
+    out = to_ass([Segment(i=0, start=0.0, end=1.0, text="x")], khung=(1080, 1920))
+    assert "PlayResX: 1080" in out
+    assert "PlayResY: 1920" in out
+    assert "WrapStyle: 0" in out
+    # ti_le = min(1080/1920, 1920/1080) = 0,5625  =>  co 54*0,5625 = 30,375 -> 30
+    #                                              le 60*0,5625 = 33,75    -> 34
+    assert "Style: Default,Archivo,30,&H00DCE4E8" in out
+    assert ",1,1,1,2,34,34,27,1" in out
+
+
+def test_ass_frame_scales_by_the_SHORT_side_so_text_fits_the_narrow_axis():
+    """Khung NGANG 1920×1080 giữ tỉ lệ 1,0; khung VUÔNG 1080×1080 lấy trục ngắn.
+
+    Phép đo phải phân biệt hai trục: nếu ai đó lấy `cao/1080` cho khung dọc thì
+    `ti_le` = 1,78 và chữ phình TO ra — bài này bắt đúng lỗi đó.
+    """
+    ngang = to_ass([Segment(i=0, start=0.0, end=1.0, text="x")], khung=(1920, 1080))
+    assert "Style: Default,Archivo,54,&H00DCE4E8" in ngang
+    assert "PlayResY: 1080" in ngang
+
+    vuong = to_ass([Segment(i=0, start=0.0, end=1.0, text="x")], khung=(1080, 1080))
+    assert "PlayResX: 1080" in vuong and "PlayResY: 1080" in vuong
+    assert "Style: Default,Archivo,30,&H00DCE4E8" in vuong
+
+
+def test_ass_rejects_a_nonsense_frame_by_falling_back_to_the_default():
+    """`khung=(0, 0)` không được chia cho 0 — lùi về hệ mặc định, không ném."""
+    out = to_ass([Segment(i=0, start=0.0, end=1.0, text="x")], khung=(0, 0))
+    assert "PlayResX: 1920" in out
+    assert "PlayResY: 1080" in out
+
+
+def test_render_passes_the_frame_only_to_ass():
+    """`render("ass", ..., khung=…)` chuyển tiếp; `srt`/`vtt` nhận cùng tham số vẫn chạy.
+
+    Vì sao ghim ở `render` chứ không chỉ ở `to_ass`: `dub.py` gọi `render`, nên nếu
+    `render` nuốt `khung` thì `to_ass` đúng mà video vẫn sai hệ — đúng kiểu lỗi đã đo
+    (chữ tràn) mà bài test ở tầng `to_ass` không thấy.
+    """
+    segs = [Segment(i=0, start=0.0, end=1.0, text="你好")]
+    assert "PlayResX: 1080" in render("ass", segs, khung=(1080, 1920))
+    # Không phải `ass`: `khung` bị bỏ qua, không được ném vì tham số lạ.
+    assert "WEBVTT" in render("vtt", segs, khung=(1080, 1920))
+    assert render("srt", segs, khung=(1080, 1920)).startswith("1\n")
+
+
+# --------------------------------------------------------------------------
 # R65: bản dịch là danh sách SONG SONG -> tra theo VỊ TRÍ, không theo `seg.i`
 # --------------------------------------------------------------------------
 

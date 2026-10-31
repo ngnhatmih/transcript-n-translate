@@ -210,7 +210,8 @@ def _resample(mau: np.ndarray, tu: int, den: int) -> np.ndarray:
     return np.ascontiguousarray(lai, dtype=np.float32)
 
 
-def remux(video: pathlib.Path, audio: pathlib.Path, ra: pathlib.Path) -> None:
+def remux(video: pathlib.Path, audio: pathlib.Path, ra: pathlib.Path,
+          phu_de: pathlib.Path | None = None) -> None:
     """Video COPY (không re-encode), audio `aac 192k` ở `SR_RA`, đệm im lặng cho đủ dài.
 
     🔴 `-af apad` là BẮT BUỘC, không phải trang trí. Đo được: thiếu nó, `-shortest` cắt theo
@@ -220,12 +221,44 @@ def remux(video: pathlib.Path, audio: pathlib.Path, ra: pathlib.Path) -> None:
 
     `-ar` đặt tường minh: audio đã resample về `SR_RA` từ trước, nhưng để encoder tự quyết thì
     kết quả phụ thuộc phiên bản ffmpeg — đo được một lần ra 44,1 kHz dù đầu vào 48 kHz.
+
+    `phu_de` — BURN CỨNG phụ đề vào hình. `None` (mặc định) giữ NGUYÊN hành vi cũ từng byte:
+    `-c:v copy`, không re-encode, không đọc tệp phụ đề nào. Có tệp thì bắt buộc re-encode video
+    (`-c:v libx264`), vì chữ phải được VẼ vào từng khung hình — không có cách nào copy được.
+
+    ⚠️ Vì sao `-vf ass=` chứ không `-vf subtitles=`: `ass` nhận `.ass`/`.ssa` và giữ nguyên
+    style/karaoke đã sinh ở `pipeline/export.py`; `subtitles=` gọi libavformat và ĐO ĐƯỢC là
+    nó cần `-fix_sub_duration` cho một số `.srt`, còn `ass` thì không. Cả hai đều cần libass,
+    nên đây là chọn đường ngắn hơn chứ không phải né một phụ thuộc.
+
+    ⚠️ `-map 0:v:0` + re-encode: video gốc có thể có phụ đề CỨNG nằm sẵn trong hình. Burn
+    chồng lên thì hai lớp chữ đè nhau, và không có cờ nào tách được chữ đã nằm trong pixel —
+    đó là việc của OCR + xoá, không phải của `remux`. Trường hợp đó phải do người gọi quyết.
+
+    Đường dẫn tệp phụ đề được THOÁT cho bộ lọc: `:` và `\\` là ký tự có nghĩa trong chuỗi
+    `-vf`, nên một đường dẫn Windows không thoát sẽ bị cắt và ffmpeg báo "No such file".
     """
+    if phu_de is None:
+        subprocess.run(
+            ["ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
+             "-i", str(video), "-i", str(audio),
+             "-map", "0:v:0", "-map", "1:a:0",
+             "-c:v", "copy", "-c:a", "aac", "-b:a", "192k", "-ar", str(SR_RA),
+             "-af", "apad", "-shortest", str(ra)],
+            check=True, capture_output=True)
+        return
+
+    # Thoat cho bo loc: `\` -> `/` truoc, roi moi thoat `:` va `'`.
+    duong = str(pathlib.Path(phu_de).resolve()).replace("\\", "/")
+    duong = duong.replace(":", r"\:").replace("'", r"\'")
     subprocess.run(
         ["ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
          "-i", str(video), "-i", str(audio),
          "-map", "0:v:0", "-map", "1:a:0",
-         "-c:v", "copy", "-c:a", "aac", "-b:a", "192k", "-ar", str(SR_RA),
+         "-vf", f"ass='{duong}'",
+         "-c:v", "libx264", "-preset", "medium", "-crf", "18",
+         "-pix_fmt", "yuv420p",
+         "-c:a", "aac", "-b:a", "192k", "-ar", str(SR_RA),
          "-af", "apad", "-shortest", str(ra)],
         check=True, capture_output=True)
 
@@ -237,3 +270,36 @@ def do_dai(path: pathlib.Path) -> float:
          "-of", "csv=p=0", str(path)],
         capture_output=True, text=True, check=True).stdout.strip()
     return float(ra)
+
+
+def kich_thuoc(path: pathlib.Path) -> tuple[int, int] | None:
+    """`(rộng, cao)` của stream VIDEO đầu tiên, bằng `ffprobe`. `None` khi không đọc được.
+
+    🔴 VÌ SAO CẦN (đo được): phụ đề `.ass` được burn bằng `ass=` phải khai `PlayResX/Y`
+    đúng hệ của khung hình, nếu không libass co giãn cả hệ toạ độ và chữ TRÀN ra ngoài
+    mép. Đo trên `dub-1.mp4` (1080×1920) với `.ass` hệ 1920×1080: chữ Việt hiện đúng
+    nhưng bị cắt hai đầu, vì `MarginL/R` 60 px tính theo hệ 1920 chỉ còn ~34 px thật.
+
+    Trả `None` thay vì ném: người gọi rơi về hệ mặc định và GHI RA là đã rơi — một
+    phụ đề hơi lệch hệ vẫn xem được, còn một job `dub` chết vì `ffprobe` thì không.
+    Cũng trả `None` khi tệp không có stream video (nguồn audio thuần).
+    """
+    r = subprocess.run(
+        ["ffprobe", "-v", "error", "-select_streams", "v:0",
+         "-show_entries", "stream=width,height", "-of", "csv=p=0", str(path)],
+        capture_output=True, text=True)
+    if r.returncode != 0:
+        return None
+    dong = r.stdout.strip().splitlines()
+    if not dong:
+        return None
+    phan = dong[0].split(",")
+    if len(phan) < 2:
+        return None
+    try:
+        rong, cao = int(phan[0]), int(phan[1])
+    except ValueError:
+        return None
+    if rong <= 0 or cao <= 0:
+        return None
+    return rong, cao

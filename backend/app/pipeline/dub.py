@@ -294,7 +294,18 @@ class DubHandler:
         self._ghi_ke_hoach(tid, dung, takes, slots, avails, toc_do, need)
 
         if tron_nen:
-            self._tron_va_remux(tid, ban.transcript_id, master_path, report)
+            # `chu_dich` = chữ của BẢN DỊCH, truyền XUỐNG thay vì để `_tron_va_remux`
+            # tự đọc lại: `run()` đã có `ban` trong tay (`ban.segments`), đọc lại là
+            # một truy vấn thừa và một cơ hội để hai chỗ lệch nhau — cùng lý do
+            # `transcript_id` được truyền vào chứ không tra lại.
+            #
+            # 🔴 ĐO ĐƯỢC, đây là lỗi đã có thật: bản đầu tôi viết `_tron_va_remux`
+            # dùng thẳng biến `ban` của `run()`, nhưng nó KHÔNG nằm trong tầm với
+            # (`NameError: name 'ban' is not defined`). Job vẫn xong nhờ `try/except`
+            # quanh bước burn, nhưng `dub-1.mp4` ra 88,9 MB mà KHÔNG có chữ nào —
+            # đúng kiểu hỏng im lặng mà một `except` rộng che mất.
+            self._tron_va_remux(tid, ban.transcript_id, master_path, report,
+                                chu_dich=[s.text for s in (ban.segments or [])])
 
         report(0.92, f"xuất {len(self._dinh_dangs)} định dạng")
         xuat_dinh_dang(master_path, self._out_dir, self._dinh_dangs)
@@ -306,7 +317,8 @@ class DubHandler:
             report(1.0, "xong")
 
     def _tron_va_remux(self, tid: int, transcript_id: int,
-                       master: pathlib.Path, report) -> None:
+                       master: pathlib.Path, report,
+                       chu_dich: list[str] | None = None) -> None:
         """Trộn nền của VIDEO GỐC với bản lồng, rồi remux vào video.
 
         Chuỗi lấy video: `translation` -> `transcript` -> `source`. `transcript_id` được
@@ -349,8 +361,57 @@ class DubHandler:
 
             report(0.95, "remux vào video gốc")
             ra = self._out_dir / f"dub-{tid}.mp4"
-            tach_nen.remux(video, tron_path, ra)
-            report(0.96, f"video lồng tiếng: {ra.name} ({ra.stat().st_size // 1024} kB)")
+
+            # 🔴 BURN CỨNG phụ đề của BẢN DỊCH vào hình — yêu cầu sản phẩm: "video cuối
+            # phải có phụ đề + lồng tiếng + nền đã tách". Trước bước này, `remux` chỉ
+            # `-c:v copy` và `dub-<tid>.mp4` KHÔNG có chữ nào; phụ đề chỉ tồn tại dưới
+            # dạng `.srt`/`.ass` RỜI, nên "video cuối có phụ đề" là một lời hứa không có
+            # đường thực hiện.
+            #
+            # Sinh `.ass` bằng ĐÚNG `export.render()` mà ba nút xuất của giao diện dùng
+            # — không tự ghép chuỗi ASS ở đây. Hai đường sinh phụ đề là hai chỗ để style,
+            # thời điểm và cách thoát chữ trôi khỏi nhau; `render` đã là "cửa vào duy
+            # nhất" theo docblock của nó.
+            #
+            # Chọn `.ass` chứ không `.srt`: `ass` giữ được style/karaoke mà `export.py`
+            # đã sinh, còn `.srt` chỉ có chữ trần. Đây là bản BURN vào pixel, nên style
+            # là thứ người xem thấy.
+            #
+            # ⚠️ `chu_dich` là chữ của BẢN DỊCH (tiếng Việt) — đúng thứ cần hiện.
+            # Truyền vào từ `run()`, KHÔNG đọc lại ở đây: bản đầu tôi dùng thẳng biến
+            # `ban` và đo được `NameError: name 'ban' is not defined` — nó không nằm
+            # trong tầm với của hàm này.
+            #
+            # Nếu bản dịch `stale` thì chữ vẫn là chữ đã dịch; nói thẳng điều đó ở log
+            # thay vì im lặng, vì người dùng có thể đang xem một bản dịch cũ.
+            phu_de = tam / f"dub-{tid}.ass"
+            try:
+                from app.pipeline import export as _export
+
+                # Kích thước khung THẬT của video gốc — `.ass` phải khai đúng hệ này,
+                # nếu không libass co giãn và chữ tràn ra ngoài mép. Đo được trên
+                # `dub-1.mp4` (1080×1920) với `.ass` hệ 1920×1080: chữ Việt hiện đúng
+                # nhưng bị cắt hai đầu. Xem `tach_nen.kich_thuoc`.
+                khung = tach_nen.kich_thuoc(video)
+                if khung is None:
+                    report(0.94, "không đọc được kích thước video — phụ đề dùng hệ "
+                                 "1920×1080, có thể lệch trên khung dọc")
+                phu_de.write_text(
+                    _export.render("ass", transcript.segments,
+                                   translations=list(chu_dich or []), khung=khung),
+                    encoding="utf-8",
+                )
+            except Exception as exc:  # noqa: BLE001 — xem lý do ngay dưới
+                # KHÔNG nuốt im lặng, nhưng cũng KHÔNG làm hỏng cả job: bản lồng sạch
+                # và master vẫn là thành quả có thật. Nói ra và đi tiếp là hành vi đúng
+                # — người dùng nhận được video có tiếng, và biết vì sao thiếu chữ.
+                phu_de = None
+                report(0.94, f"không burn được phụ đề ({type(exc).__name__}: {exc}) — "
+                             f"video vẫn có tiếng lồng, thiếu chữ")
+
+            tach_nen.remux(video, tron_path, ra, phu_de=phu_de)
+            report(0.96, f"video lồng tiếng: {ra.name} ({ra.stat().st_size // 1024} kB)"
+                         + ("" if phu_de is not None else " · KHÔNG có phụ đề"))
 
     def _ghi_ke_hoach(self, tid: int, dung, takes, slots, avails, toc_do, need) -> None:
         """Ghi `dub-<tid>.plan.json`: số đo của TỪNG dòng cho bảng ở màn Lồng tiếng.

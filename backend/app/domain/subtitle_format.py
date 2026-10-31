@@ -89,18 +89,33 @@ def to_vtt(segments: list[Segment], *, translations: list[str] | None = None,
 _ASS_HEADER = """[Script Info]
 Title: {title}
 ScriptType: v4.00+
-WrapStyle: 2
+WrapStyle: {wrap}
 ScaledBorderAndShadow: yes
-PlayResX: 1920
-PlayResY: 1080
+PlayResX: {rx}
+PlayResY: {ry}
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default,Archivo,54,&H00DCE4E8,&H0000B0FF,&H00201F1E,&H80000000,0,0,0,0,100,100,0,0,1,2,1,2,60,60,48,1
+Style: Default,Archivo,{co},&H00DCE4E8,&H0000B0FF,&H00201F1E,&H80000000,0,0,0,0,100,100,0,0,1,{vien},1,2,{le},{le},{duoi},1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """
+
+#: Hệ toạ độ MẶC ĐỊNH của `.ass` — giữ nguyên từng byte so với bản trước khi có `khung`.
+#:
+#: 🔴 VÌ SAO PHẢI THAM SỐ HOÁ (đo được, không phải phòng xa): `PlayRes` là hệ toạ độ mà
+#: libass dùng để ĐẶT chữ và tính lề, rồi nó CO GIÃN cả hệ đó theo khung hình thật. Video
+#: trong repo là **dọc 1080×1920**, còn hằng cũ khai **ngang 1920×1080** — hai hệ lệch
+#: nhau 3,56× theo một trục và 0,56× theo trục kia. Đo được trên `dub-1.mp4` (1080×1920,
+#: 278,5 s): chữ Việt burn đúng nhưng **TRÀN RA NGOÀI khung** — dòng dài nhất trong bản
+#: dịch #1 là **693 ký tự** (`Bố! Bố! …`), và với `MarginL/R` 60 px tính theo hệ 1920
+#: thì lề thật chỉ còn ~34 px trên khung 1080. Cắt chữ ở hai đầu mép là đúng thứ bị cấm.
+#:
+#: `WrapStyle: 2` (hằng cũ) nghĩa là "không tự xuống dòng, chỉ xuống ở `\N`" — nên một
+#: dòng 693 ký tự KHÔNG được bẻ. `WrapStyle: 0` để libass tự bẻ theo lề.
+_ASS_KHUNG_MAC_DINH = {"rx": 1920, "ry": 1080, "co": 54, "vien": 2, "le": 60,
+                       "duoi": 48, "wrap": 2}
 
 
 def _ass_escape(text: str) -> str:
@@ -108,9 +123,36 @@ def _ass_escape(text: str) -> str:
 
 
 def to_ass(segments: list[Segment], *, translations: list[str] | None = None,
-           bilingual: bool = False, title: str = "phu-de-lab") -> str:
+           bilingual: bool = False, title: str = "phu-de-lab",
+           khung: tuple[int, int] | None = None) -> str:
+    """Sinh `.ass`. `khung=(rong, cao)` là kích thước VIDEO THẬT mà chữ sẽ nằm lên.
+
+    `khung=None` giữ nguyên hệ `1920×1080` từng byte — đường xuất tệp rời không biết
+    video nào, và đổi mặc định là đổi kết quả của mọi lượt xuất cũ mà không ai yêu cầu.
+
+    Có `khung` thì hệ toạ độ, cỡ chữ, viền và lề đều được suy theo khung đó:
+      · `PlayResX/Y` = khung thật, nên libass KHÔNG co giãn chữ;
+      · cỡ chữ và lề tính theo TỈ LỆ so với hệ 1920×1080 gốc (cùng một tỉ lệ cho cả hai
+        trục, lấy trục NGẮN hơn làm chuẩn — chữ phải vừa cả hai chiều);
+      · `WrapStyle: 0` để libass TỰ BẺ dòng theo lề, thay vì để một dòng 693 ký tự tràn
+        ra ngoài mép (đo được, xem `_ASS_KHUNG_MAC_DINH`).
+    """
     _assert_lengths(segments, translations)
-    lines = [_ASS_HEADER.format(title=title)]
+    tham_so = dict(_ASS_KHUNG_MAC_DINH)
+    if khung is not None:
+        rong, cao = int(khung[0]), int(khung[1])
+        if rong > 0 and cao > 0:
+            # Tỉ lệ theo trục NGẮN: khung dọc 1080×1920 có trục ngắn 1080, nên chữ nhỏ
+            # lại đúng bằng 1080/1920 so với hệ gốc — vừa bề ngang, không tràn.
+            ti_le = min(rong / 1920, cao / 1080)
+            tham_so.update(
+                rx=rong, ry=cao, wrap=0,
+                co=max(12, round(_ASS_KHUNG_MAC_DINH["co"] * ti_le)),
+                vien=max(1, round(_ASS_KHUNG_MAC_DINH["vien"] * ti_le)),
+                le=max(8, round(_ASS_KHUNG_MAC_DINH["le"] * ti_le)),
+                duoi=max(8, round(_ASS_KHUNG_MAC_DINH["duoi"] * ti_le)),
+            )
+    lines = [_ASS_HEADER.format(title=title, **tham_so)]
     for position, seg in enumerate(segments):
         translated = translations[position] if translations is not None else None
         parts = _lines(seg, translated, bilingual)

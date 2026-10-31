@@ -36,7 +36,8 @@ META_FORMATS = frozenset({"json"})
 
 
 def render(fmt: str, segments, *, translations: list[str] | None = None,
-           bilingual: bool = False, meta: dict | None = None) -> str:
+           bilingual: bool = False, meta: dict | None = None,
+           khung: tuple[int, int] | None = None) -> str:
     """Sinh nội dung của MỘT định dạng — cửa vào duy nhất của cả hai đường export.
 
     Ba định dạng phụ đề nhận `bilingual`; `json` bỏ qua nó (định dạng đó LUÔN có
@@ -44,9 +45,18 @@ def render(fmt: str, segments, *, translations: list[str] | None = None,
     `meta=None` cho `json` là `{}` chứ không phải lỗi: đường cũ (job) không có
     hàng `translations` để đọc `translation_id`, và "không biết" phải ra `null`/
     vắng mặt chứ không được bịa.
+
+    `khung=(rong, cao)` chỉ có nghĩa với `ass` và chỉ có nghĩa khi chữ sẽ được BURN
+    vào một video có kích thước đó. Đường xuất tệp rời để `None` (giữ hệ 1920×1080
+    cũ từng byte) vì nó không biết video nào. Đo được vì sao cần: burn `.ass` hệ
+    1920×1080 lên video dọc 1080×1920 thì libass co giãn sai và chữ TRÀN ra ngoài
+    khung — xem `subtitle_format._ASS_KHUNG_MAC_DINH`.
     """
     if fmt in META_FORMATS:
         return FORMATS[fmt](segments, translations=translations, meta=meta or {})
+    if fmt == "ass" and khung is not None:
+        return FORMATS[fmt](segments, translations=translations, bilingual=bilingual,
+                            khung=khung)
     return FORMATS[fmt](segments, translations=translations, bilingual=bilingual)
 
 

@@ -1035,3 +1035,94 @@ npm run e2e (Chrome that)          EXIT_E2E=0
 ```
 
 `npm test` chỉ xanh khi **cổng 8620 trống**: `frontend/src/api/contract.test.ts` tự `spawn` backend thật, nên container `phu-de-lab-api-1` đang giữ 8620 sẽ làm 11 bài contract timeout sau 30 s. Đó là điều kiện MÔI TRƯỜNG, không phải hồi quy — và nó đã được ghi ở `frontend/e2e/README.md` trước lượt này.
+
+## ERRATA #60 — video lồng tiếng KHÔNG có phụ đề, và `.ass` khai sai hệ toạ độ
+
+**Phát hiện lúc:** người dùng hỏi thẳng "video cuối có phụ đề + lồng tiếng + tách giọng ra khỏi vid là được". Trước đó tôi đã trả lời "tách âm: mã đủ nhưng chưa đo được lần sinh `dub-*.mp4` nào" — đúng, và khi đo thì lộ hai lỗi.
+**Mức:** `dub-<id>.mp4` **không có chữ nào**; và sau khi thêm bước burn thì chữ **tràn ra ngoài khung**. **Trạng thái:** đã sửa, đã đo bằng ảnh chụp khung hình thật.
+
+### Lỗi 1 — pipeline không có bước burn phụ đề
+
+`grep` cả `backend/app/pipeline/dub.py` cho `srt|ass|subtitle|drawtext|burn` ra **rỗng** (ngoài phần xuất tệp rời). Nghĩa là:
+
+| Việc | Trước |
+|---|---|
+| tách nền `htdemucs` | ✅ `dub.py:336` |
+| trộn tiếng lồng + nền, remux video | ✅ `remux()` |
+| **phụ đề nằm trong MP4** | ❌ **không có đường nào** |
+
+Phụ đề chỉ tồn tại dưới dạng `.srt`/`.ass` **rời**. "Video cuối có phụ đề" là một lời hứa không có đường thực hiện.
+
+### Sửa
+
+`tach_nen.remux()` nhận thêm `phu_de: Path | None`. `None` (mặc định) giữ **nguyên từng byte** hành vi cũ (`-c:v copy`, không re-encode, không đọc tệp phụ đề). Có tệp thì bắt buộc re-encode (`-c:v libx264 -crf 18 -pix_fmt yuv420p`) vì chữ phải được VẼ vào từng khung hình — không có cách nào copy được.
+
+`dub.py` sinh `.ass` bằng **đúng** `export.render()` mà ba nút xuất của giao diện dùng — không tự ghép chuỗi ASS (hai đường sinh phụ đề là hai chỗ để style và thời điểm trôi khỏi nhau).
+
+### Lỗi 2 — `.ass` khai cứng `1920×1080` cho video DỌC
+
+Bản burn đầu tiên chạy xong, `dub-1.mp4` ra 88,9 MB. Nhìn ảnh mới biết sai:
+
+```
+...n công trình của mình đáng g...        ← cắt cả hai đầu
+```
+
+Đo được nguyên nhân:
+
+| Số đo | Hậu quả |
+|---|---|
+| `PlayResX: 1920` / `PlayResY: 1080` (hằng cứng) | video là **1080×1920** → libass co giãn cả hệ toạ độ |
+| `Style ... 54` cỡ chữ, `MarginL/R: 60` | 60 px theo hệ 1920 chỉ còn ~34 px thật trên khung 1080 |
+| `WrapStyle: 2` | "chỉ xuống dòng ở `\N`" ⇒ dòng **693 ký tự** (`Bố! Bố! …`) KHÔNG được bẻ |
+
+Sửa: `to_ass(..., khung=(rong, cao))`. `khung=None` giữ nguyên `1920×1080`/cỡ `54`/`WrapStyle: 2` **từng byte** (đường xuất tệp rời không biết video nào — đổi mặc định là đổi kết quả của mọi lượt xuất cũ mà không ai yêu cầu). Có `khung` thì `PlayRes` = khung thật, cỡ chữ/viền/lề co theo `min(rong/1920, cao/1080)` (trục NGẮN — chữ phải vừa cả hai chiều), và `WrapStyle: 0` để libass tự bẻ dòng.
+
+### Đo cuối — ảnh chụp khung hình thật, không phải suy luận
+
+Bốn mốc thời gian, bốn câu, **tất cả trọn vẹn trong khung**:
+
+| t | Phụ đề Việt |
+|---|---|
+| 1 s | `Như một tác phẩm nghệ thuật.` |
+| 20 s | `Đây là cốt lõi của tiểu nhi.` |
+| 45 s | `Nó có thể đạt đến 2.000.` |
+| 60 s | `Cả thiên đường lẫn thiên đường.` |
+
+Tệp giao được:
+
+```
+dub-1.mp4   246,482,157 B   2026-10-31 18:14
+  video : h264 1080x1920 yuv420p
+  audio : aac 2 kenh 48000 Hz
+  do dai: 278.5 s
+  phu de mem: 0        ← chữ nằm trong PIXEL, đúng ý "burn cứng"
+```
+
+`278,5 s` khớp nguồn `278,546 s`. Không có track phụ đề mềm, đúng thiết kế.
+
+### Một lỗi nữa, do chính tôi tạo và `try/except` che mất
+
+Bản đầu của bước burn dùng thẳng biến `ban` của `run()` bên trong `_tron_va_remux` — nó **không nằm trong tầm với**:
+
+```
+[0.94] không burn được phụ đề (NameError: name 'ban' is not defined) — video vẫn có tiếng lồng, thiếu chữ
+[0.96] video lồng tiếng: dub-1.mp4 (86899 kB) · KHÔNG có phụ đề
+EXIT_DUB=0
+```
+
+`EXIT=0`, job "xong", tệp 88,9 MB — và **không có một chữ nào**. Đây đúng là kiểu hỏng im lặng mà một `except` rộng che mất. Sửa bằng cách truyền `chu_dich` xuống từ `run()` (nơi đã có `ban`), và giữ `except` — nhưng câu log phải nói **đúng thứ thiếu**, kèm `type(exc).__name__` và `str(exc)`, để lần sau đọc log là biết ngay.
+
+### Một giới hạn phải nói thẳng, không phải lỗi bỏ sót
+
+Phụ đề cứng tiếng Trung của video gốc (`压在2,000以内`) và logo `bilibili` **vẫn nằm nguyên** trong hình, và ở một số khung chúng **đè lên vùng chữ Việt**. Chúng đã ở trong pixel từ trước khi ta có tệp; không có cờ ffmpeg nào tách được chữ đã burn. Muốn xoá phải OCR + inpaint từng khung — việc khác hẳn, và không nằm trong yêu cầu.
+
+### Đo cuối (sau ERRATA #60)
+
+```
+npx tsc --noEmit                   EXIT_TS=0
+npm test (frontend)                148 tests, 148 pass, 0 fail, EXIT_TEST=0
+pytest (venv, Windows)             1424 passed, 15 deselected, EXIT_PYTEST=0
+job dub that (tron_nen=True)       76,1 s -> dub-1.mp4 246 482 157 B, EXIT_DUB=0
+```
+
+Năm bài mới trong `backend/tests/test_export.py` ghim hệ toạ độ, và **đã chứng minh không xanh giả**: phá `if khung is not None:` thành `if False:` ⇒ `3 failed, 40 passed` (đúng ba bài về khung), khôi phục ⇒ `43 passed`.
