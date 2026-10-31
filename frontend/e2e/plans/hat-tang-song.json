@@ -66,6 +66,106 @@
       "do": "shot",
       "name": "01-app-mo-duoc",
       "log": "anh chup toan trang. ⚠️ Ten KHONG kem duoi: `chup()` (e2e/cdp.mjs:278) tu ghep `${ten}.png` — viet '01-app-mo-duoc.png' thi ra '01-app-mo-duoc.png.png'."
+    },
+    {
+      "do": "eval",
+      "js": "(() => { window.__truoc = null; fetch('/api/transcripts/2').then((r) => r.json()).then((j) => { window.__truoc = { version: j.version, soDoan: j.segments.length, chiSo: j.segments.map((s) => s.i).slice(0, 3), start1: j.segments[0].start, end1: j.segments[0].end }; }).catch((e) => { window.__truoc = { loi: String(e) }; }); return 'da gui'; })()",
+      "log": "doc TRANG THAI TRUOC khi doi moc: version + so doan + chi so cua 3 doan dau. Can ban TRUOC de ve sau so version co TANG khong, chu khong phai doan mot con so."
+    },
+    {
+      "do": "cho",
+      "ms": 2000,
+      "log": "doi fetch doc trang thai truoc"
+    },
+    {
+      "do": "eval",
+      "js": "JSON.stringify(window.__truoc)",
+      "log": "trang thai TRUOC khi doi moc"
+    },
+    {
+      "do": "khangDinh",
+      "js": "(() => { const t = window.__truoc; return t !== null && t !== undefined && Array.isArray(t.chiSo) && t.chiSo.length === 3; })()",
+      "thongDiep": "phai doc duoc ban ghi 2 va danh sach chi so doan TRUOC khi ghi"
+    },
+    {
+      "do": "eval",
+      "js": "(() => { window.__moc = null; const i = String(window.__truoc.chiSo[0]); fetch('/api/transcripts/2/segments/' + i, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ start: 0.5, end: 2.5 }) }).then(async (r) => { const j = await r.json().catch(() => null); window.__moc = { status: r.status, i: i, khoaThan: j === null ? null : Object.keys(j).sort(), soDoan: j === null || j.segments === undefined ? null : j.segments.length, start: j === null || j.segments === undefined ? null : j.segments[0].start, end: j === null || j.segments === undefined ? null : j.segments[0].end, version: j === null ? null : j.version, detail: j === null ? null : j.detail }; }).catch((e) => { window.__moc = { loi: String(e) }; }); return 'da gui i=' + i; })()",
+      "log": "⚠️ DOAN CO THAT la `i=1` chu KHONG phai `i=0`: `seed-dai.py:48` dung `range(1, SO_DOAN + 1)`, nen transcript 2 co `i = 1..600` va KHONG co doan 0. Ban dau toi viet cung 'segments/0' va do duoc `{\"status\":422,\"khoa\":[\"detail\"]}` — do la route tra DUNG (doan 0 khong thuoc transcript 2), khong phai route hong. Vi vay buoc nay doc chi so THAT tu ban ghi truoc khi ghi, thay vi doan mot con so."
+    },
+    {
+      "do": "cho",
+      "ms": 2500,
+      "log": "doi fetch trong trang tra ve"
+    },
+    {
+      "do": "eval",
+      "js": "JSON.stringify(window.__moc)",
+      "log": "ket qua PATCH that (kem `detail` khi that bai, de doc duoc LY DO chu khong chi thay ma loi)"
+    },
+    {
+      "do": "khangDinh",
+      "js": "(() => { const m = window.__moc; return m !== null && m !== undefined && m.status === 200; })()",
+      "thongDiep": "PATCH /api/transcripts/2/segments/{i co that} phai tra 200 (route MOT DOAN song ngoai jsdom)"
+    },
+    {
+      "do": "khangDinh",
+      "js": "(() => { const m = window.__moc; return m !== null && m !== undefined && m.start === 0.5 && m.end === 2.5; })()",
+      "thongDiep": "ca HAI moc phai duoc GHI THAT (0.5 / 2.5), khong phai chi tra 200 rong"
+    },
+    {
+      "do": "khangDinh",
+      "js": "(() => { const m = window.__moc; return m !== null && m !== undefined && m.soDoan === 600; })()",
+      "thongDiep": "response phai con DU 600 doan — route MOT DOAN khong duoc cat danh sach"
+    },
+    {
+      "do": "eval",
+      "js": "(() => { window.__sau = null; fetch('/api/transcripts/2').then((r) => r.json()).then((j) => { window.__sau = { version: j.version, soDoan: j.segments.length, start: j.segments[0].start, end: j.segments[0].end }; }).catch((e) => { window.__sau = { loi: String(e) }; }); return 'da gui'; })()",
+      "log": "doc LAI tu SQLite (request thu hai, khong dung response cua PATCH) — bang chung duy nhat rang moc da nam trong DB"
+    },
+    {
+      "do": "cho",
+      "ms": 2000,
+      "log": "doi fetch doc lai"
+    },
+    {
+      "do": "eval",
+      "js": "JSON.stringify(window.__sau)",
+      "log": "trang thai SAU khi doi moc"
+    },
+    {
+      "do": "khangDinh",
+      "js": "(() => { const s = window.__sau; return s !== null && s !== undefined && s.start === 0.5 && s.end === 2.5; })()",
+      "thongDiep": "moc phai doc lai duoc tu SQLite (0.5 / 2.5), khong chi co trong response cua chinh PATCH"
+    },
+    {
+      "do": "khangDinh",
+      "js": "(() => { const t = window.__truoc; const s = window.__sau; return t !== null && s !== null && t !== undefined && s !== undefined && s.version === t.version; })()",
+      "thongDiep": "`version` KHONG duoc tang khi doi mot moc — day la loi ERRATA #55 (tang version => moi ban dich thanh stale). Doi chieu TRUOC/SAU chu khong so mot hang so."
+    },
+    {
+      "do": "khangDinh",
+      "js": "(() => { const t = window.__truoc; const s = window.__sau; return t !== null && s !== null && t !== undefined && s !== undefined && s.soDoan === t.soDoan; })()",
+      "thongDiep": "so doan phai NGUYEN VEN truoc/sau — route MOT DOAN khong duoc dung lai ca danh sach"
+    },
+    {
+      "do": "eval",
+      "js": "(() => { window.__am = null; fetch('/api/transcripts/2/segments/99999', { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ start: 0.5, end: 2.5 }) }).then(async (r) => { window.__am = { status: r.status }; }).catch((e) => { window.__am = { loi: String(e) }; }); return 'da gui'; })()",
+      "log": "VE AM BAN: doan KHONG ton tai phai bi tu choi. Khong co ve nay thi mot route chap nhan MOI i (ke ca bia) van xanh."
+    },
+    {
+      "do": "cho",
+      "ms": 1500,
+      "log": "doi fetch ve am ban"
+    },
+    {
+      "do": "eval",
+      "js": "JSON.stringify(window.__am)",
+      "log": "ma loi cua doan khong ton tai"
+    },
+    {
+      "do": "khangDinh",
+      "js": "(() => { const a = window.__am; return a !== null && a !== undefined && a.status === 422; })()",
+      "thongDiep": "doan KHONG ton tai phai tra 422 (loi dau vao), khong duoc 200 — neu khong thi route dang bia ra phu de"
     }
   ]
 }

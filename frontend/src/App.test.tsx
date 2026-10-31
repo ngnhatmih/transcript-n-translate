@@ -130,6 +130,27 @@ function traMacDinh(duong: string, method: string): unknown {
   if (duong === "/jobs" && method === "GET") return [];
   if (duong === "/registry" && method === "GET") return { asr: [], mt: [] };
   if (duong.startsWith("/dubs/") && duong.endsWith("/plan") && method === "GET") return null;
+  // 🔴 PHAI CO, khong phai cho dep. `Studio.tsx:242` goi `getPeaks(source.id, 200000)`
+  // trong mot effect `async`. De `/peaks` roi vao `null` (⇒ 404 ⇒ `client.ts` nem)
+  // thi nhanh `catch` chay `setBao` + `setNotice` SAU `await` — tuc SAU khi bai test
+  // da ket thuc va `teardownDom()` da go `window`. Do duoc, nguyen van:
+  //
+  //   ℹ Error: Test "PATCH /api/transcripts/2/segments/0 …" generated asynchronous
+  //     activity after the test ended. This activity created the error
+  //     "ReferenceError: window is not defined" …
+  //
+  // Stack trace that (bat bang `process.on("uncaughtException")`):
+  //   at react-dom-client.development.js:19555:13   ← `schedulerEvent = window.event`
+  //   at Immediate.performWorkUntilDeadline (scheduler.development.js:45:48)
+  //
+  // Tra mot hinh dang RONG nhung HOP LE (dung shape `Peaks` cua route that: hai
+  // mang song) thi khong co promise that bai nao song sot, va khong phai sua
+  // `Studio` chi de test chay duoc. Song am rong la trang thai THAT: `peaks` la
+  // duong `best-effort`, that bai thi dai thoi gian de trong (xem docblock
+  // `Studio.tsx:230-241`).
+  if (duong.startsWith("/media/") && duong.includes("/peaks") && method === "GET") {
+    return { tren: [], duoi: [], so_dinh: 0, giay: 0 };
+  }
   return null;
 }
 
@@ -222,6 +243,110 @@ describe("App: nạp dữ liệu thật qua fetch và dựng Studio", () => {
           "không thấy thông báo lỗi trên màn hình",
         );
       });
+    } finally {
+      cleanup();
+      traFetch();
+    }
+  });
+});
+
+/**
+ * `onSuaMoc` — dời mốc của MỘT dòng.
+ *
+ * 🔴 BÀI NÀY GHIM ĐÚNG LỖI ERRATA #55. Bản cũ gọi
+ * `patchTranscript(transcript.id, { segments: [...TOÀN BỘ...] })`: gửi 438 đoạn
+ * (đo trên bản ghi thật) chỉ để dời MỘT mốc, `version` tăng, và mọi bản dịch
+ * thành `stale`. Hai vế dưới đây khoá cả hai hậu quả đó, và vế nào cũng đo được
+ * bằng số chứ không bằng lời hứa:
+ *
+ *   1. đường dẫn PHẢI là `/transcripts/2/segments/0` (route MỘT đoạn), thân chỉ
+ *      có `start`/`end` — không có `segments`;
+ *   2. KHÔNG được có lời gọi nào tới `PATCH /api/transcripts/2` (route gửi cả
+ *      danh sách và tăng `version`).
+ *
+ * ⚠️ CÁCH KÍCH HOẠT — đo được, không phải chọn cho tiện:
+ *
+ *   · Kéo handle trên `Timeline` KHÔNG đo được ở tầng này. `startDrag`
+ *     (`Timeline.tsx:316`) gọi `toTime(ev.clientX)` =
+ *     `(clientX - rect.left + scrollLeft) / pxPerSec` (`Timeline.tsx:311`), mà
+ *     jsdom trả `getBoundingClientRect()` toàn số 0 và không có `PointerEvent`
+ *     ⇒ phép đo ra `NaN`/`0` và bài test sẽ nói dối về lý do nó đỏ. Phép đo kéo
+ *     tay thuộc tầng Chrome thật (`frontend/e2e/`).
+ *   · Đường ĐO ĐƯỢC ở đây là nút `Đặt vào` / `Đặt ra` (`Studio.tsx:947/950`) —
+ *     cùng gọi `setEdge` → `onSuaMoc` như phím `I`/`O` (`Studio.tsx:495-501`),
+ *     và không đi qua hình học.
+ *   · Ô phụ đề KHÔNG dùng được: `onChange` của nó là `onSuaChu`
+ *     (`PATCH /api/translations/{id}`, sửa CHỮ) — route khác, ý nghĩa khác.
+ *
+ * ⚠️ Đoạn 0 của `BAN_GHI` là `0 → 2.04`. `setEdge("start")` lấy
+ * `t = round(player.time * 100)/100`; `usePlayer` khởi tạo `time = 0`
+ * (`use-player.ts:33`) ⇒ `start = min(0, 2.04 - 0.1) = 0`. Vẫn là một lời gọi
+ * PATCH thật, và mốc ra giữ nguyên `2.04` — đúng thứ cần đo (đường dẫn + thân).
+ */
+describe("App: dời một mốc gửi MỘT đoạn, không gửi cả danh sách", () => {
+  /** Bấm nút theo tên hiển thị; `Đặt vào` mang thêm `<span class="kbd">I</span>`. */
+  function bamNut(nhan: RegExp): void {
+    q().getByRole("button", { name: nhan }).click();
+  }
+
+  it("PATCH /api/transcripts/2/segments/0 với thân chỉ có start/end", async () => {
+    const bang = chanFetch((duong, method) => {
+      // Route MỘT ĐOẠN trả lại bản ghi đã sửa mốc — đúng hình dạng route thật.
+      if (duong === "/transcripts/2/segments/0" && method === "PATCH") {
+        return { ...BAN_GHI, segments: [{ ...DOAN_GOC, start: 0.5, end: 2.5 }] };
+      }
+      return traMacDinh(duong, method);
+    });
+    try {
+      render(<App />);
+      await doiNapXong();
+
+      bamNut(/Đặt vào/);
+
+      await waitFor(() => {
+        const patch = bang.goi.filter((g) => g.method === "PATCH");
+        assert.equal(patch.length, 1, `phải có ĐÚNG MỘT PATCH, đo được ${patch.length}`);
+      });
+
+      const patch = bang.goi.filter((g) => g.method === "PATCH")[0]!;
+      // Vế 1: route MỘT ĐOẠN, không phải `/transcripts/2`.
+      assert.equal(patch.url, "/api/transcripts/2/segments/0");
+      // Vế 2: thân chỉ có start/end. `segments` xuất hiện ở đây là tái phạm #55.
+      const than = JSON.parse(patch.body ?? "{}") as Record<string, unknown>;
+      assert.deepEqual(Object.keys(than).sort(), ["end", "start"]);
+      assert.equal(than.segments, undefined, "thân request KHÔNG được mang cả danh sách đoạn");
+      // Vế 3: mốc RA không bị đụng — `setEdge("start")` chỉ đổi `start`.
+      assert.equal(than.end, DOAN_GOC.end);
+    } finally {
+      cleanup();
+      traFetch();
+    }
+  });
+
+  it("KHÔNG gọi PATCH /api/transcripts/2 (route gửi cả danh sách, tăng version)", async () => {
+    const bang = chanFetch((duong, method) => {
+      if (duong === "/transcripts/2/segments/0" && method === "PATCH") {
+        return { ...BAN_GHI, segments: [{ ...DOAN_GOC, start: 0.5, end: 2.5 }] };
+      }
+      return traMacDinh(duong, method);
+    });
+    try {
+      render(<App />);
+      await doiNapXong();
+      bamNut(/Đặt ra/);
+
+      await waitFor(() => {
+        assert.equal(bang.goi.filter((g) => g.method === "PATCH").length, 1);
+      });
+
+      const caDanhSach = bang.goi.filter(
+        (g) => g.method === "PATCH" && g.url === "/api/transcripts/2",
+      );
+      assert.deepEqual(
+        caDanhSach, [],
+        "PATCH /api/transcripts/2 gửi TOÀN BỘ đoạn và TĂNG version ⇒ mọi bản dịch "
+        + "thành stale (ERRATA #55). Phải dùng route MỘT ĐOẠN.",
+      );
     } finally {
       cleanup();
       traFetch();

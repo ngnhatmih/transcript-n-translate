@@ -939,3 +939,99 @@ npm test (frontend)      145 pass, 0 fail, EXIT=0
 npx tsc --noEmit         EXIT_TS=0
 npx vite build           EXIT_BUILD=0
 ```
+## ERRATA #59 — kéo MỘT mốc từng gửi cả 438 đoạn và làm mọi bản dịch thành `stale`
+
+**Phát hiện lúc:** rà các khoản nợ còn lại; `onSuaMoc` trong `frontend/src/App.tsx` gọi `patchTranscript(id, { segments: [...TOÀN BỘ...] })`.
+**Mức:** mỗi lần người dùng dời một mốc 0,1 giây, `version` của bản phiên âm tăng ⇒ `is_stale()` biến **mọi** bản dịch thành `stale` ⇒ giao diện mời dịch lại từ đầu. **Trạng thái:** đã sửa, đã đo trong jsdom **và** trong Chrome thật.
+
+### Số đo
+
+Bản ghi thật trong DB: transcript `2`, `version=8`, **438 đoạn**. Đường cũ gửi toàn bộ 438 đoạn cho một thao tác chỉ đổi hai số thực.
+
+Đường mới — `PATCH /api/transcripts/{id}/segments/{i}`, thân chỉ `{start, end}`:
+
+```
+[khangDinh] PATCH /api/transcripts/2/segments/{i co that} phai tra 200           dung=true
+[eval]      {"status":200,"i":"1","soDoan":600,"start":0.5,"end":2.5,"version":1}
+[khangDinh] ca HAI moc phai duoc GHI THAT (0.5 / 2.5)                            dung=true
+[khangDinh] response phai con DU 600 doan                                        dung=true
+[eval]      doc LAI tu SQLite: {"version":1,"soDoan":600,"start":0.5,"end":2.5}
+[khangDinh] moc phai doc lai duoc tu SQLite                                      dung=true
+[khangDinh] `version` KHONG duoc tang khi doi mot moc                            dung=true
+[khangDinh] so doan phai NGUYEN VEN truoc/sau                                    dung=true
+[eval]      doan KHONG ton tai: {"status":422}
+[khangDinh] doan KHONG ton tai phai tra 422                                      dung=true
+EXIT_E2E=0
+```
+
+Vế "`version` không tăng" được đo bằng **đối chiếu TRƯỚC/SAU** hai request độc lập, không so với một hằng số: `{"version":1,...}` trước, `{"version":1,...}` sau.
+
+### Vì sao KHÔNG tăng `version`
+
+`version` nghĩa là "**nội dung CHỮ** của bản phiên âm đã đổi"; nó tồn tại để `is_stale(transcript_version, translated_from_version)` biết bản dịch đã dịch từ bản ghi cũ. Dời một mốc không làm câu chữ đổi, nên bản dịch vẫn đúng nghĩa — chỉ đổi thời điểm. Tăng version ở đây biến một thao tác vô hại thành "dịch lại từ đầu".
+
+Hệ quả nói thẳng: một bản dịch **đã** `stale` từ trước vẫn `stale` sau khi dời mốc. Đúng — nó vẫn dịch từ bản ghi cũ.
+
+### Ba tầng đã sửa
+
+| tầng | tệp | thay đổi |
+|---|---|---|
+| cổng | `backend/app/ports/repos.py` | `update_transcript_segment_timing(transcript_id, i, start, end)`; ném `LookupError`, **không** `NotFound` |
+| adapter | `backend/app/adapters/persist/sqlite_repos.py` | `dataclasses.replace` đúng đoạn khớp `seg.i`, `UPDATE transcripts SET segments=?` — **cột `version` vắng mặt có chủ ý** |
+| route | `backend/app/api/routes_transcripts.py` | `@router.patch("/{transcript_id}/segments/{i}")`; `_require_transcript` trước ⇒ 404, `LookupError` còn lại ⇒ 422 |
+| client | `frontend/src/api/endpoints.ts`, `types.ts`, `App.tsx` | `patchSegmentTiming()`; **xoá** `patchTranscript`/`TranscriptPatch` (khai báo chết) |
+
+Route chỉ biết **cổng**: nó bắt `LookupError`, không import `NotFound` của SQLite — kéo lớp adapter vào tầng HTTP là vi phạm chính docblock của `_require_transcript`.
+
+### Bài học về CÁCH ĐO — lần này là một phép XANH GIẢ tự tạo
+
+Sau khi viết xong route, tôi thêm hai bài vào `frontend/src/App.test.tsx` và chúng **đỏ** với `0 !== 1` (không có PATCH nào). Nguyên nhân: tôi kích hoạt qua ô phụ đề, mà `onChange` của ô đó là `onSuaChu` (`PATCH /api/translations/{id}`, sửa **chữ**) — route khác, ý nghĩa khác. Tôi đã viết một bài test đo sai đường rồi tưởng sản phẩm hỏng.
+
+Đường kích hoạt **đo được** là nút `Đặt vào` / `Đặt ra` (`Studio.tsx:947/950`) — cùng gọi `setEdge` → `onSuaMoc` như phím `I`/`O`, và không đi qua hình học. Kéo handle `Timeline` **không** đo được ở tầng jsdom: `toTime()` (`Timeline.tsx:311`) cần `getBoundingClientRect().left` mà jsdom trả toàn số 0 ⇒ phép đo ra `NaN`. Phép đo kéo tay thuộc tầng Chrome thật.
+
+Và bài test đó lộ ra một lỗi **thứ hai**, chỉ trong harness:
+
+```
+ℹ Error: Test "PATCH /api/transcripts/2/segments/0 ..." generated asynchronous
+  activity after the test ended. This activity created the error
+  "ReferenceError: window is not defined" ...
+```
+
+Bắt bằng `process.on("uncaughtException")` thì ra stack thật:
+
+```
+ReferenceError: window is not defined
+  at react-dom-client.development.js:19555:13     ← schedulerEvent = window.event
+  at Immediate.performWorkUntilDeadline (scheduler.development.js:45:48)
+```
+
+Hai giả thuyết đầu của tôi **đều sai**, và cả hai đều bị phép đo bác bỏ:
+
+1. *`requestAnimationFrame` còn treo* — probe in ra `0 raf` ở **mọi** lượt teardown.
+2. *promise `getPeaks` setState sau `await`* — `Studio.tsx:253` và `:255` đều nằm trong `if (!huy)`, tức sản phẩm **đã** đúng.
+
+Sự thật: trong `commitRoot`, nếu `finishedWork.subtreeFlags & 10256` khác 0 thì React gọi `scheduleCallback$1(...)`, và thân callback đó mở đầu bằng `schedulerEvent = window.event`. Đó là việc xả **passive effect** đã xếp lịch từ lúc commit; nó chạy ở macrotask sau, **sau** khi `teardownDom()` đã gỡ `globalThis.window`. `act()` không xả được nó (đã thử: `act` có mặt, `window` còn sống, lỗi vẫn còn).
+
+Cách sửa đúng — và đây là chỗ dễ hỏng nhất — phải **tách đôi** việc trả global:
+
+- nhóm **không-DOM** (`fetch`, `IS_REACT_ACT_ENVIRONMENT`, `requestAnimationFrame`, …) trả **ĐỒNG BỘ**, vì `--test-isolation=none` nghĩa là tệp test kế tiếp chạy ngay sau đó và phải thấy `fetch` thật;
+- nhóm **DOM** (`window`, `document`, `HTMLElement`, `Node`, `Event`, `MouseEvent`, `getComputedStyle`, `navigator`) trả ở nhịp `setImmediate` sau, để scheduler có `window` mà đọc.
+
+Hai lần thử sai, mỗi lần đều đo được hậu quả cụ thể:
+
+| thử | hậu quả đo được |
+|---|---|
+| hoãn **cả** `fetch` | `App.test.tsx` → `api/contract.test.ts` cùng tiến trình: contract chết với `backend 8620 khong len sau 30s` (probe: `fetch.name=""`, `window=object`), dù chạy một mình thì 11/11 xanh |
+| hoãn DOM **và** `requestAnimationFrame` | `App.test.tsx` đỏ 4 bài: `ReferenceError: requestAnimationFrame is not defined` |
+| lọc nhóm DOM ở đường **hoãn** mà quên đường **đồng bộ** | probe: `[probe] setImmediate cua toi CHAY, window=undefined` — bản hoãn chẳng hoãn được gì |
+
+### Đo cuối (sau ERRATA #59)
+
+```
+npx tsc --noEmit                   EXIT_TS=0
+npm test (frontend)                148 tests, 148 pass, 0 fail, EXIT_TEST=0
+pytest (venv, Windows)             1419 passed, 15 deselected, EXIT_PYTEST=0
+npm run e2e (Chrome that)          EXIT_E2E=0
+```
+
+`npm test` chỉ xanh khi **cổng 8620 trống**: `frontend/src/api/contract.test.ts` tự `spawn` backend thật, nên container `phu-de-lab-api-1` đang giữ 8620 sẽ làm 11 bài contract timeout sau 30 s. Đó là điều kiện MÔI TRƯỜNG, không phải hồi quy — và nó đã được ghi ở `frontend/e2e/README.md` trước lượt này.

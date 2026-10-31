@@ -122,6 +122,63 @@ def patch_transcript(transcript_id: int, payload: PatchIn, repos=Depends(get_rep
                            prices=prices)
 
 
+class TimingIn(BaseModel):
+    """Mốc mới của MỘT đoạn.
+
+    Không có trường `i`: id đoạn nằm trên ĐƯỜNG DẪN
+    (`/api/transcripts/{id}/segments/{i}`), nên không thể có chuyện `i` trên
+    đường dẫn khác `i` trong thân — một mâu thuẫn phải kiểm rồi mới báo lỗi,
+    thay vì một mâu thuẫn không thể tồn tại.
+    """
+
+    start: float
+    end: float
+
+
+@router.patch("/{transcript_id}/segments/{i}")
+def patch_segment_timing(transcript_id: int, i: int, payload: TimingIn,
+                         repos=Depends(get_repos), prices=Depends(get_prices)):
+    """Dời mốc của MỘT đoạn. **KHÔNG** tăng `version`, nên **KHÔNG** làm `stale`.
+
+    Vì sao route này tồn tại (ERRATA #55): trước nó, giao diện kéo một mốc bằng
+    `PATCH /api/transcripts/{id}` — gửi TOÀN BỘ danh sách đoạn. Đo được trên bản
+    ghi thật: 438 đoạn mỗi lần kéo, `version` tăng, mọi bản dịch thành `stale`
+    chỉ vì người dùng dời một mốc 0,1 giây.
+
+    Vì sao KHÔNG tăng `version`: `version` là "bản phiên âm đã đổi NỘI DUNG CHỮ".
+    Nó tồn tại để `is_stale` biết bản dịch đã dịch từ bản ghi cũ. Dời một mốc
+    không làm câu chữ đổi, nên bản dịch vẫn đúng nghĩa — chỉ đổi thời điểm. Tăng
+    version ở đây là biến một thao tác vô hại thành "dịch lại từ đầu".
+
+    ⚠️ Hệ quả nói thẳng: một bản dịch ĐÃ `stale` từ trước vẫn `stale` sau khi dời
+    mốc. Đúng — nó vẫn dịch từ bản ghi cũ.
+
+    Hai lỗi đầu vào, hai mã khác nhau:
+
+    * **404** — `transcript_id` không tồn tại. Tài nguyên không có.
+    * **422** — transcript có thật nhưng không có đoạn `i`. Đây là lỗi ĐẦU VÀO:
+      dời mốc một đoạn không tồn tại là bịa ra phụ đề.
+
+    Phân biệt hai ca mà KHÔNG cần biết lớp `NotFound` của adapter: `_require_transcript`
+    kiểm transcript TRƯỚC và ném 404 nếu nó không có. Nên `LookupError` còn lại
+    trong `try` dưới đây chỉ có thể là "đoạn `i` không thuộc transcript này" ⇒ 422.
+    Đó cũng là lý do docblock của `_require_transcript` nói route CHỈ được biết
+    cổng: import `NotFound` vào đây là kéo lớp của SQLite vào tầng HTTP.
+
+    Không kiểm `end > start` ở đây: một đoạn có thời lượng `<= 0` là dữ liệu hỏng
+    đã được `readability` báo riêng (`cps: None`), và chặn ở route ghi sẽ khiến
+    người dùng không sửa được chính cái dòng hỏng đó.
+    """
+    _require_transcript(repos, transcript_id)
+    try:
+        repos.update_transcript_segment_timing(transcript_id, i, payload.start, payload.end)
+    except LookupError as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+    return _transcript_json(repos, _require_transcript(repos, transcript_id),
+                           prices=prices)
+
+
 @router.get("/{transcript_id}/readability")
 def readability(transcript_id: int, threshold: float = CPS_WARN,
                 repos=Depends(get_repos)):

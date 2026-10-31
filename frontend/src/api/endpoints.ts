@@ -28,7 +28,7 @@ import type {
   TermPatch,
   TermWithAffected,
   Transcript,
-  TranscriptPatch,
+  SegmentTimingPatch,
   TranscriptSummary,
   Translation,
   TranslationCreate,
@@ -176,9 +176,24 @@ export function getTranscript(transcriptId: number): Promise<Transcript> {
   return api.get<Transcript>(`/transcripts/${transcriptId}`);
 }
 
-/** Sửa nội dung là TĂNG `version` ⇒ mọi bản dịch cũ thành `stale`. */
-export function patchTranscript(transcriptId: number, body: TranscriptPatch): Promise<Transcript> {
-  return api.patch<Transcript>(`/transcripts/${transcriptId}`, body);
+/**
+ * Dời mốc của MỘT đoạn — **KHÔNG** tăng `version`, nên **KHÔNG** làm `stale`.
+ *
+ * Vì sao có hàm này (ERRATA #55): trước nó, `onSuaMoc` gọi `patchTranscript` với
+ * TOÀN BỘ danh sách đoạn. Đo được trên bản ghi thật: kéo một mốc ⇒ 438 đoạn đi
+ * qua dây, `version` tăng, và MỌI bản dịch thành `stale` chỉ vì người dùng dời
+ * một mốc 0,1 giây.
+ *
+ * Mốc thuộc BẢN GHI (không thuộc bản dịch) nên đường dẫn nằm dưới `/transcripts`.
+ * `start`/`end` là hai trường duy nhất sửa được: `text` đi qua `patchTranslation`,
+ * còn `speaker`/`words` vẫn là dữ liệu của bản gốc.
+ */
+export function patchSegmentTiming(
+  transcriptId: number,
+  i: number,
+  body: SegmentTimingPatch,
+): Promise<Transcript> {
+  return api.patch<Transcript>(`/transcripts/${transcriptId}/segments/${i}`, body);
 }
 
 /** Duyệt KHÔNG tăng version — nó chỉ đổi `status` sang `reviewed`. */
@@ -441,7 +456,7 @@ export const endpoints = {
   createJob,
   listTranscripts,
   getTranscript,
-  patchTranscript,
+  patchSegmentTiming,
   approveTranscript,
   createTranslation,
   listTranslations,

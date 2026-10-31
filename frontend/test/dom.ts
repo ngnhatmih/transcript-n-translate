@@ -96,14 +96,26 @@ function luuGlobal(): void {
 
 /** Tra tung global ve dung trang thai da ghi: co truoc ⇒ dat lai, khong co truoc ⇒ XOA. */
 function traGlobal(): void {
-  for (const { key, descriptor } of daLuu) {
+  traGlobalTheoAnh(daLuu);
+  daLuu = [];
+}
+
+/**
+ * `traGlobal` trên MỘT ảnh chụp cho trước.
+ *
+ * Tách ra vì `teardownDom()` trả nhóm DOM ở nhịp `setImmediate` sau (xem
+ * `NHOM_DOM_HOAN`): lúc đó `daLuu` đã bị `traGlobal()` đặt rỗng, nên bản hoãn phải
+ * giữ ảnh chụp của chính nó. Gộp hai đường làm một thì một trong hai sẽ đọc `daLuu`
+ * rỗng và trả hu không.
+ */
+function traGlobalTheoAnh(anh: DaLuu[]): void {
+  for (const { key, descriptor } of anh) {
     if (descriptor === undefined) {
       delete (globalThis as unknown as Record<string, unknown>)[key];
     } else {
       Object.defineProperty(globalThis, key, descriptor);
     }
   }
-  daLuu = [];
 }
 
 /** Dat mot global bang `defineProperty`: an toan voi global chi-co-getter cua Node. */
@@ -117,6 +129,10 @@ function datGlobal(key: string, value: unknown): void {
 }
 
 export function setupDom(origin: string): void {
+  // 🔴 HUY việc trả nhóm DOM đã hẹn (xem `NHOM_DOM_HOAN`). Lượt `teardownDom` trước
+  // có thể còn chờ `setImmediate`; nếu lần này cài jsdom mới rồi mới để bản hoãn cũ
+  // chạy, nó sẽ trả global về trạng thái CŨ và xoá mất jsdom vừa dựng.
+  huyTraDom();
   if (dom !== null) {
     // Cung origin: cau noi da tro dung cho ⇒ khong co gi phai lam (idempotent, CO CHU Y).
     if (origin === bridgeOrigin) return;
@@ -232,13 +248,96 @@ export function setupDom(origin: string): void {
   datGlobal("fetch", cauNoi);
 }
 
-export function teardownDom(): void {
-  if (dom !== null) {
-    dom.window.close();
-    dom = null;
+/**
+ * Nhóm global phải sống thêm MỘT nhịp scheduler, không phải trả ngay.
+ *
+ * 🔴 VÌ SAO — đo được, có stack trace, và hai giả thuyết đầu của tôi đều SAI:
+ *
+ * Triệu chứng (chỉ xuất hiện sau khi `App.test.tsx` có nhóm "dời một mốc"):
+ *
+ *   ℹ Error: Test "PATCH /api/transcripts/2/segments/0 ..." generated asynchronous
+ *     activity after the test ended. This activity created the error
+ *     "ReferenceError: window is not defined" and would have caused the test to
+ *     fail, but instead triggered an uncaughtException event.
+ *
+ * Bắt bằng `process.on("uncaughtException")` thì ra stack THẬT:
+ *
+ *   ReferenceError: window is not defined
+ *     at react-dom-client.development.js:19555:13
+ *     at Immediate.performWorkUntilDeadline (scheduler.development.js:45:48)
+ *     at process.processImmediate (node:internal/timers:504:21)
+ *
+ * Giả thuyết 1 — `requestAnimationFrame` — SAI: probe đo được `0 raf` treo ở MỌI
+ * lượt teardown.
+ * Giả thuyết 2 — promise `getPeaks` setState sau `await` — SAI: `Studio.tsx:253`
+ * và `:255` đều nằm trong `if (!huy)`, tức sản phẩm ĐÃ đúng, và stub `/peaks`
+ * vẫn không hết lỗi.
+ *
+ * Sự thật, đọc ở `react-dom-client.development.js:19549-19560`: trong `commitRoot`,
+ * nếu `finishedWork.subtreeFlags & 10256` (hoặc `flags & 10256`) khác 0 thì React
+ * gọi `scheduleCallback$1(NormalPriority$1, …)`, và THÂN callback đó mở đầu bằng
+ * `schedulerEvent = window.event`. Đó là việc xả **passive effect**: nó đã được
+ * XẾP LỊCH trong lúc commit, chạy ở macrotask sau qua `scheduler`, và `act()`
+ * KHÔNG xả nó (đã thử: `act` có mặt, `window` còn sống, lỗi vẫn còn).
+ *
+ * Sửa: trả `fetch` NGAY (bất biến của harness — tệp kế tiếp phải thấy `fetch`
+ * thật, xem docblock dưới), nhưng hoãn nhóm DOM đúng một nhịp `setImmediate` để
+ * scheduler có `window` mà đọc.
+ *
+ * ⚠️ VÌ SAO KHÔNG HOÃN TẤT CẢ: đã thử và đo được — hoãn cả `fetch` thì
+ * `App.test.tsx` rồi `api/contract.test.ts` trong cùng tiến trình làm contract
+ * chết với "backend 8620 khong len sau 30s" (probe: `fetch.name=""`,
+ * `window=object`), vì `fetch` còn là cầu nối trỏ `bridgeOrigin` cũ đã chết.
+ *
+ * ⚠️ VÌ SAO KHÔNG HOÃN `requestAnimationFrame`: đã thử và đo được — `App.test.tsx`
+ * đỏ 4 bài với `ReferenceError: requestAnimationFrame is not defined`, vì
+ * `Timeline` gọi nó trong `useEffect` của lượt `setupDom` kế tiếp.
+ */
+const NHOM_DOM_HOAN = [
+  "window",
+  "document",
+  "HTMLElement",
+  "Node",
+  "Event",
+  "MouseEvent",
+  "getComputedStyle",
+  "navigator",
+] as const;
+
+/** Việc trả nhóm DOM đã hẹn; `setupDom`/`teardownDom` sau huỷ nó (xem `huyTraDom`). */
+let traDomHoan: ReturnType<typeof setImmediate> | null = null;
+
+/** Huỷ việc trả nhóm DOM đã hẹn. Gọi ở đầu `setupDom()` và đầu `teardownDom()`. */
+function huyTraDom(): void {
+  if (traDomHoan !== null) {
+    clearImmediate(traDomHoan);
+    traDomHoan = null;
   }
+}
+
+export function teardownDom(): void {
+  // Lượt teardown TRƯỚC có thể còn đang chờ nhịp `setImmediate`. Không huỷ thì bản
+  // hoãn cũ sẽ trả global về trạng thái CŨ và xoá mất jsdom vừa dựng — lỗi phụ
+  // thuộc thời điểm, đúng loại khó tái hiện nhất.
+  huyTraDom();
+  // Chụp ảnh TRƯỚC khi `traGlobal()` xoá `daLuu`; bản hoãn cần đúng ảnh này.
+  const anhDeTra = daLuu;
+  const domDeDong = dom;
+  dom = null;
   bridgeOrigin = "";
-  traGlobal();
+  // 🔴 TRẢ NGAY nhóm KHÔNG-DOM (`fetch`, `IS_REACT_ACT_ENVIRONMENT`, `rAF`, …) — bất
+  // biến của harness: tệp kế tiếp phải thấy `fetch` THẬT. Nhóm DOM thì để nhịp sau.
+  // Bản đầu tôi gọi `traGlobal()` ở đây, mà nó trả CẢ nhóm DOM ⇒ `window` biến mất
+  // NGAY; probe đo được `[probe] setImmediate cua toi CHAY, window=undefined`, tức
+  // bản hoãn chẳng hoãn được gì. Lọc phải làm ở CẢ HAI đường.
+  traGlobalTheoAnh(anhDeTra.filter((m) => !(NHOM_DOM_HOAN as readonly string[]).includes(m.key)));
+  daLuu = [];
+  // Nhóm DOM: trả ở nhịp sau, để scheduler React xả nốt passive effect.
+  traDomHoan = setImmediate(() => {
+    traDomHoan = null;
+    if (domDeDong !== null) domDeDong.window.close();
+    traGlobalTheoAnh(anhDeTra.filter((m) => (NHOM_DOM_HOAN as readonly string[]).includes(m.key)));
+  });
   // ───────────────────────────────────────────────────────────────────────────
   // DO DUOC: hai bien module nay PHAI duoc dat lai, khong chi `traGlobal()`.
   //

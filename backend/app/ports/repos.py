@@ -55,6 +55,27 @@ class Repos(Protocol):
     def list_transcripts(self) -> list[Transcript]: ...
     def update_transcript_segments(self, transcript_id: int,
                                    segments: list[Segment]) -> int: ...
+    def update_transcript_segment_timing(self, transcript_id: int, i: int,
+                                         start: float, end: float) -> None:
+        """Đổi MỐC của ĐÚNG MỘT đoạn. **KHÔNG** tăng `version`.
+
+        Vì sao không tăng version — đây là quyết định hợp đồng, không phải tối ưu:
+
+        `version` là "bản phiên âm này đã đổi NỘI DUNG CHỮ". Nó tồn tại để
+        `is_stale(transcript_version, translated_from_version)` biết một bản dịch
+        đã dịch từ bản ghi cũ. Sửa `start`/`end` KHÔNG làm bản dịch sai nghĩa:
+        câu chữ vẫn là câu đó, bản dịch vẫn đúng. Chỉ có thời điểm đổi.
+
+        Trước phương thức này, mọi lần kéo một mốc đi qua
+        `PATCH /api/transcripts/{id}`, tức gửi TOÀN BỘ danh sách đoạn và
+        `update_transcript_segments` tăng version ⇒ MỌI bản dịch thành `stale`
+        chỉ vì người dùng dời một mốc 0,1 giây (ERRATA #55).
+
+        ⚠️ Hệ quả phải nói ra: sửa mốc KHÔNG làm bản dịch lỗi thời, nên một bản
+        dịch đã `stale` từ trước vẫn `stale` sau khi sửa mốc — đúng, vì nó vẫn
+        dịch từ bản ghi cũ.
+        """
+        ...
     def set_transcript_status(self, transcript_id: int, status: str) -> None: ...
 
     # translations

@@ -99,6 +99,7 @@ const HAM_GOI_MANG: [string, () => Promise<unknown>][] = [
   ["retryJob", () => endpoints.retryJob(1)],
   ["listTranscripts", () => endpoints.listTranscripts()],
   ["getTranscript", () => endpoints.getTranscript(1)],
+  ["patchSegmentTiming", () => endpoints.patchSegmentTiming(1, 7, { start: 0, end: 1 })],
   ["approveTranscript", () => endpoints.approveTranscript(1)],
   ["listTranslations", () => endpoints.listTranslations(1)],
   ["getTranslation", () => endpoints.getTranslation(1)],

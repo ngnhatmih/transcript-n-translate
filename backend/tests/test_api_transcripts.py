@@ -78,6 +78,133 @@ def test_patch_rejects_malformed_segment(client):
     assert resp.status_code == 422
 
 
+# ---------------------------------------------------------------------------
+# Route MOT DOAN: `PATCH /api/transcripts/{id}/segments/{i}` — dời mốc (ERRATA #55)
+#
+# Trước route này, giao diện kéo một mốc bằng `PATCH /api/transcripts/{id}`: gửi
+# TOÀN BỘ danh sách đoạn, `update_transcript_segments` tăng `version`, và
+# `is_stale(transcript_version, translated_from_version)` biến MỌI bản dịch thành
+# `stale`. Đo được trên bản ghi thật: 438 đoạn mỗi lần kéo.
+#
+# Ba bất biến được ghim dưới đây, mỗi cái một bài:
+#   1. mốc ĐỔI đúng đoạn được chỉ, các đoạn khác không chạm;
+#   2. `version` KHÔNG đổi  =>  bản dịch KHÔNG thành `stale`;
+#   3. hai lỗi đầu vào khác nhau: 404 (transcript lạ) và 422 (đoạn lạ).
+# ---------------------------------------------------------------------------
+
+
+def test_patch_segment_timing_moves_only_that_segment(client):
+    """Đổi mốc đoạn 1; đoạn 0 và 2 phải NGUYÊN VẸN từng byte.
+
+    So cả danh sách chứ không chỉ `start`/`end` của đoạn vừa sửa: một hiện thực
+    ghi đè cả mảng bằng bản dựng lại từ request sẽ làm rơi `text`/`suspect`/
+    `no_speech_prob` của các đoạn khác — và bài này bắt được đúng lỗi đó.
+    """
+    truoc = client.get(f"/api/transcripts/{client.tid}").json()["segments"]
+
+    resp = client.patch(f"/api/transcripts/{client.tid}/segments/1",
+                        json={"start": 3.25, "end": 5.75})
+    assert resp.status_code == 200, resp.text
+
+    sau = resp.json()["segments"]
+    # Đoạn được chỉ: mốc mới, CHỮ không đổi (mốc không phải nội dung).
+    assert (sau[1]["start"], sau[1]["end"]) == (3.25, 5.75)
+    assert sau[1]["text"] == truoc[1]["text"]
+    # Hai đoạn còn lại: y nguyên, kể cả các trường không liên quan tới mốc.
+    assert sau[0] == truoc[0]
+    assert sau[2] == truoc[2]
+    # Và `suspect` của đoạn 2 vẫn còn — nó là dữ liệu của bản GỐC.
+    assert sau[2]["suspect"] is True
+
+
+def test_patch_segment_timing_does_not_bump_version(client):
+    """Dời mốc KHÔNG tăng `version` — đây là điều làm nó không gây `stale`.
+
+    `version` là "nội dung CHỮ đã đổi". Dời một mốc không làm câu chữ đổi, nên
+    bản dịch vẫn đúng nghĩa. Tăng version ở đây là biến một thao tác vô hại thành
+    "dịch lại từ đầu" — đúng lỗi ERRATA #55.
+    """
+    truoc = client.get(f"/api/transcripts/{client.tid}").json()
+    assert truoc["version"] == 1
+
+    resp = client.patch(f"/api/transcripts/{client.tid}/segments/0",
+                        json={"start": 0.5, "end": 2.5})
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["version"] == 1, "dời mốc KHÔNG được tăng version"
+
+    # Đọc lại từ DB: version vẫn 1 (không chỉ response nói thế).
+    assert client.get(f"/api/transcripts/{client.tid}").json()["version"] == 1
+
+
+def test_patch_segment_timing_keeps_translation_fresh(client):
+    """Bản dịch đã `done` KHÔNG thành `stale` sau khi dời một mốc.
+
+    Đây là bài đo HẬU QUẢ thật, không phải bài đo `version`: `stale` được TÍNH
+    mỗi lần đọc bằng `is_stale(version_hiện_tại, version_đã_dịch)`, nên chỉ khi
+    version không đổi thì cờ mới không bật. Bài này đi qua đúng đường mà giao
+    diện đi: tạo bản dịch trên cổng, dời mốc, rồi đọc `/api/translations`.
+    """
+    tid = client.tid
+    trid = client.repos.add_translation(
+        transcript_id=tid, transcript_version=1, engine="fake-mt", target_lang="vi",
+        segments=[Segment(i=0, start=0.0, end=3.0, text="Chào mọi người")],
+        prompt_version="p1", status="done")
+
+    truoc = [t for t in client.get(f"/api/translations?transcript_id={tid}").json()
+             if t["id"] == trid][0]
+    assert truoc["stale"] is False
+
+    resp = client.patch(f"/api/transcripts/{tid}/segments/2",
+                        json={"start": 5.25, "end": 7.75})
+    assert resp.status_code == 200, resp.text
+
+    sau = [t for t in client.get(f"/api/translations?transcript_id={tid}").json()
+           if t["id"] == trid][0]
+    assert sau["stale"] is False, (
+        "dời một mốc làm bản dịch thành lỗi thời — đúng lỗi ERRATA #55"
+    )
+
+
+def test_patch_segment_timing_unknown_transcript_is_404(client):
+    """Transcript lạ là TÀI NGUYÊN KHÔNG CÓ -> 404, không phải 422."""
+    resp = client.patch("/api/transcripts/9999/segments/0",
+                        json={"start": 0.0, "end": 1.0})
+    assert resp.status_code == 404
+
+
+def test_patch_segment_timing_unknown_segment_is_422(client):
+    """Đoạn lạ trong transcript CÓ THẬT là lỗi ĐẦU VÀO -> 422.
+
+    Fixture có 3 đoạn (i = 0,1,2). `i=99` không thuộc bản ghi này; nhận nó là
+    bịa ra phụ đề không tồn tại.
+    """
+    resp = client.patch(f"/api/transcripts/{client.tid}/segments/99",
+                        json={"start": 0.0, "end": 1.0})
+    assert resp.status_code == 422, resp.text
+    assert "99" in resp.json()["detail"]
+
+
+def test_patch_segment_timing_rejects_a_missing_field(client):
+    """Thiếu `end` là lỗi ĐẦU VÀO của Pydantic -> 422, không phải 500."""
+    resp = client.patch(f"/api/transcripts/{client.tid}/segments/0",
+                        json={"start": 0.0})
+    assert resp.status_code == 422
+
+
+def test_patch_segment_timing_accepts_a_zero_duration_segment(client):
+    """`end == start` phải NHẬN: đó là cách duy nhất sửa một dòng hỏng.
+
+    `readability` báo một đoạn có thời lượng `<= 0` bằng `cps: None` — tức dữ
+    liệu hỏng ĐÃ được báo riêng. Chặn `end > start` ở route ghi thì người dùng
+    không sửa được chính cái dòng mà giao diện đang gắn cờ.
+    """
+    resp = client.patch(f"/api/transcripts/{client.tid}/segments/0",
+                        json={"start": 1.0, "end": 1.0})
+    assert resp.status_code == 200, resp.text
+    seg = resp.json()["segments"][0]
+    assert (seg["start"], seg["end"]) == (1.0, 1.0)
+
+
 def test_readability_endpoint_flags_long_line(client):
     """Số đo THẬT của fixture, tính bằng `reading_cps` (không đoán):
 

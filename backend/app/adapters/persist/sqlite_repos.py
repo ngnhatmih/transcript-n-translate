@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import contextlib
+import dataclasses
 import json
 import pathlib
 import sqlite3
@@ -252,6 +253,44 @@ class SqliteRepos:
                 conn.execute("UPDATE transcripts SET segments=?, version=? WHERE id=?",
                              (segments_to_json(segments), new_version, transcript_id))
             return new_version
+
+    def update_transcript_segment_timing(self, transcript_id: int, i: int,
+                                         start: float, end: float) -> None:
+        """Đổi mốc của ĐÚNG MỘT đoạn. **KHÔNG** tăng `version`.
+
+        Vì sao không tăng version: xem docblock cùng tên trên cổng
+        (`ports/repos.py`) — `version` là "nội dung CHỮ đã đổi", còn dời một mốc
+        không làm bản dịch sai nghĩa. Tăng version ở đây là biến một thao tác
+        chỉnh sửa vô hại thành "mọi bản dịch lỗi thời" (ERRATA #55).
+
+        Đọc-sửa-ghi nằm trong MỘT giao dịch `BEGIN IMMEDIATE`: hai người kéo hai
+        mốc khác nhau cùng lúc phải nối tiếp nhau, không được ghi đè lên nhau.
+
+        Id đoạn lạ ném `LookupError` (KHÔNG phải 404): transcript có thật, đoạn
+        không có trong nó là lỗi ĐẦU VÀO. Route dịch nó thành 422.
+        """
+        with self._connect() as conn:
+            with self._tx(conn):
+                row = conn.execute("SELECT segments FROM transcripts WHERE id=?",
+                                   (transcript_id,)).fetchone()
+                if row is None:
+                    raise NotFound(f"transcript {transcript_id} không tồn tại")
+                segments = segments_from_json(row["segments"])
+                # So theo `i`, KHÔNG theo vị trí trong danh sách: `i` là id ổn định
+                # của đoạn, còn thứ tự lưu có thể không phải thứ tự `i`.
+                for idx, seg in enumerate(segments):
+                    if seg.i == i:
+                        segments[idx] = dataclasses.replace(seg, start=start, end=end)
+                        break
+                else:
+                    raise LookupError(
+                        f"segment {i} không thuộc transcript {transcript_id}")
+                # Cột `version` KHÔNG có trong câu UPDATE này — đó chính là điều
+                # làm thao tác không gây `stale`. Đừng thêm nó vào: bài
+                # `test_patch_segment_timing_does_not_bump_version` ghim đúng chỗ này
+                # (đã đo: tiêm `version=version+1` làm 2 bài đỏ).
+                conn.execute("UPDATE transcripts SET segments=? WHERE id=?",
+                             (segments_to_json(segments), transcript_id))
 
     def set_transcript_status(self, transcript_id: int, status: str) -> None:
         with self._connect() as conn:

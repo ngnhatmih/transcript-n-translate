@@ -8,7 +8,7 @@ import {
   getTranscript,
   getTranslation,
   listSources,
-  patchTranscript,
+  patchSegmentTiming,
   patchTranslation,
   registry,
 } from "@/api/endpoints";
@@ -253,14 +253,27 @@ export function App() {
     [banDich],
   );
 
-  /** Sua MOC cua mot dong — `PATCH /api/transcripts/{id}` (moc thuoc BAN GHI, khong thuoc ban dich). */
+  /**
+   * Sua MOC cua mot dong — `PATCH /api/transcripts/{id}/segments/{i}`.
+   *
+   * 🔴 ERRATA #55: ban cu goi `patchTranscript(transcript.id, {segments: [...438
+   * dong...]})`, tuc gui TOAN BO danh sach chi de doi mot moc. Ba hau qua do duoc:
+   *
+   *   1. 438 doan di qua day cho mot thao tac 0,1 giay;
+   *   2. `update_transcript_segments` TANG `version`;
+   *   3. `is_stale = translated_from_version < transcript_version` ⇒ MOI ban dich
+   *      thanh `stale` — nguoi dung chi doi mot moc mà mat ca ban dich da duyet.
+   *
+   * Moc thuoc BAN GHI (khong thuoc ban dich) nen duong dan van duoi `/transcripts`,
+   * nhung la route MOT DOAN, va route do CO Y khong tang `version`: doi moc khong
+   * lam cau chu doi, nen ban dich van dung nghia (xem docblock route trong
+   * `backend/app/api/routes_transcripts.py`).
+   */
   const onSuaMoc = useCallback(
     async (i: number, start: number, end: number) => {
       if (transcript === null) return;
       try {
-        const moi = await patchTranscript(transcript.id, {
-          segments: transcript.segments.map((s) => (s.i === i ? { ...s, start, end } : s)),
-        });
+        const moi = await patchSegmentTiming(transcript.id, i, { start, end });
         setTranscript(moi);
       } catch (e) {
         setLoi(e instanceof Error ? e.message : String(e));

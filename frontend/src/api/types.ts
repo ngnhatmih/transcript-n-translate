@@ -486,11 +486,22 @@ export interface Transcript extends TranscriptSummary {
   segments: Segment[];
 }
 
-/** `PATCH /api/transcripts/{id}` (`routes_transcripts.PatchIn`). */
-export interface TranscriptPatch {
-  /** Backend từ chối mảng rỗng (`min_length=1`): không đoạn nào là dữ liệu hỏng. */
-  segments: Segment[];
-  status?: TranscriptStatus;
+/**
+ * `PATCH /api/transcripts/{id}/segments/{i}` (`routes_transcripts.TimingIn`).
+ *
+ * 🔴 ĐÃ XOÁ `TranscriptPatch` (ERRATA #55): nó mô tả `PATCH /api/transcripts/{id}` —
+ * route gửi TOÀN BỘ danh sách đoạn. Hàm `patchTranscript` là người gọi duy nhất,
+ * và nó bị xoá cùng lúc `onSuaMoc` chuyển sang route MỘT ĐOẠN bên dưới. Giữ lại
+ * một interface cho một route không còn ai gọi là giữ một hợp đồng phải bảo trì mà
+ * không ai kiểm.
+ *
+ * Route cũ vẫn tồn tại ở backend (nó là đường sửa NỘI DUNG CHỮ, tăng `version`);
+ * chỉ là giao diện hiện không có màn hình nào dùng nó — và luật của tệp
+ * `endpoints.ts` là không viết wrapper cho endpoint chưa màn hình nào dùng.
+ */
+export interface SegmentTimingPatch {
+  start: number;
+  end: number;
 }
 
 /** `PATCH /api/translations/{id}` (`routes_translations.SegmentIn` + `PatchIn`). */
