@@ -302,11 +302,41 @@ export function Studio(props: StudioProps) {
     return ds.length === 0 ? null : ds[ds.length - 1];
   }, [jobs, banDich]);
 
+  /**
+   * JOB `ingest`/`asr` của NGUỒN đang mở — nguồn của trạng thái bước "Phiên âm".
+   *
+   * 🔴 VÌ SAO CẦN (lỗi thật, người dùng báo "phần phiên âm cũng ghi là chưa nạp chứ ko
+   * ghi là đang chạy"): bước `asr` trước đây chỉ suy từ `transcript !== null`, nên suốt
+   * 20 phút bóc băng thanh bước vẫn ghi "chưa nạp" và vẽ ô tròn RỖNG — không phân biệt
+   * được "đang chạy" với "đã chết".
+   *
+   * Đọc CẢ `ingest` LẪN `asr` vì bấm "Phiên âm" trên video vừa nạp thì việc thật đang
+   * chạy là `ingest` (bóc âm thanh); người dùng không phân biệt hai job nội bộ đó, họ
+   * chỉ thấy một bước "Phiên âm" và cần biết nó đang chạy.
+   *
+   * Lấy job MỚI NHẤT theo `id` (danh sách đã `ORDER BY id`), không theo `created_at`:
+   * hai job tạo trong cùng một giây sẽ so chuỗi thời gian cho kết quả tuỳ ý.
+   */
+  const jobAsr = useMemo(() => {
+    if (source === null) return null;
+    const ds = jobs.filter(
+      (j) =>
+        (j.type === "asr" || j.type === "ingest") &&
+        // `j.payload` là `Record<string, unknown>` nhưng dữ liệu qua JSON có thể thiếu
+        // hẳn trường này (job cũ, hoặc nguồn khác ghi). Đọc thẳng `j.payload["source_id"]`
+        // ném `Cannot read properties of undefined` — đo được: cả 174 bài test đỏ vì một
+        // job mẫu không có `payload`.
+        (j.payload?.["source_id"] as number | undefined) === source.id,
+    );
+    return ds.length === 0 ? null : ds.reduce((a, b) => (b.id > a.id ? b : a));
+  }, [jobs, source]);
+
   const cacBuoc: BuocDuongOng[] = useMemo(
     () =>
       duongOng({
         coBanGhi: transcript !== null,
         engineAsr: transcript === null ? null : transcript.engine,
+        asrState: jobAsr === null ? null : jobAsr.state,
         coBanDich: banDich !== null,
         engineMt: banDich === null ? null : banDich.engine,
         soViec: issues.length,
@@ -314,7 +344,7 @@ export function Studio(props: StudioProps) {
         ghepState: jobGhep === null ? null : jobGhep.state,
         coFileXuat: jobGhep !== null && jobGhep.state === "done",
       }),
-    [transcript, banDich, issues.length, jobDub, jobGhep],
+    [transcript, banDich, issues.length, jobDub, jobGhep, jobAsr],
   );
 
   const lyDoXuat = useMemo(() => lyDoChuaXuatDuoc(cacBuoc), [cacBuoc]);

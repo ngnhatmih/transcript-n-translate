@@ -271,6 +271,7 @@ describe("duongOng: sau buoc, bon trang thai", () => {
     return {
       coBanGhi: false,
       engineAsr: null,
+      asrState: null,
       coBanDich: false,
       engineMt: null,
       soViec: 0,
@@ -280,6 +281,55 @@ describe("duongOng: sau buoc, bon trang thai", () => {
       ...p,
     };
   }
+
+  /**
+   * BƯỚC "PHIÊN ÂM" PHẢI NÓI ĐANG CHẠY, KHÔNG NÓI "CHƯA NẠP".
+   *
+   * 🔴 LỖI THẬT, ĐO ĐƯỢC (người dùng báo: "phần phiên âm cũng ghi là chưa nạp chứ ko
+   * ghi là đang chạy"). Bản cũ chỉ có hai nhánh theo `coBanGhi`, nên suốt 20 phút bóc
+   * băng một video dài thanh bước ghi "chưa nạp" và vẽ ô tròn RỖNG — y như chưa bấm gì.
+   * Người dùng không phân biệt được "đang chạy" với "đã chết".
+   *
+   * `queued` KHÔNG được vẽ như `todo`: job đã nằm trong hàng đợi, bấm lại không được, nên
+   * hiện "chưa nạp" là nói sai và mời người dùng bấm một nút không có tác dụng.
+   */
+  it("asr dang chay: 'dang phien am', state running — KHONG phai 'chua nap'", () => {
+    const b = duongOng(vao({ asrState: "running" }));
+    assert.equal(b[0].state, "running", `state phải là running, đo được ${b[0].state}`);
+    assert.equal(b[0].note, "đang phiên âm…");
+  });
+
+  it("asr dang CHO: 'cho toi luot' nhung VAN la running, khong phai todo", () => {
+    const b = duongOng(vao({ asrState: "queued" }));
+    assert.equal(b[0].state, "running");
+    assert.equal(b[0].note, "chờ tới lượt");
+  });
+
+  it("asr done ma chua kip co ban ghi: 'dang nap lai', khong noi doi la chua nap", () => {
+    const b = duongOng(vao({ asrState: "done" }));
+    assert.equal(b[0].state, "running");
+    assert.equal(b[0].note, "đang nạp lại…");
+  });
+
+  it("asr loi: blocked va ly do doc duoc", () => {
+    const b = duongOng(vao({ asrState: "failed" }));
+    assert.equal(b[0].state, "blocked");
+    assert.equal(b[0].note, "lỗi — xem hàng đợi");
+  });
+
+  it("asr bi ngat: blocked, va noi ro chay lai duoc", () => {
+    const b = duongOng(vao({ asrState: "interrupted" }));
+    assert.equal(b[0].state, "blocked");
+    assert.equal(b[0].note, "bị ngắt — chạy lại được");
+  });
+
+  it("DA CO BAN GHI thi thang moi trang thai job — ban ghi la bang chung manh nhat", () => {
+    // Người dùng bấm "Phiên âm" hai lần: job thứ hai còn `queued` trong khi bản ghi của
+    // job thứ nhất đã có. Bước đã xong KHÔNG được trông như đang chạy lại.
+    const b = duongOng(vao({ coBanGhi: true, engineAsr: "fw-large-v3", asrState: "queued" }));
+    assert.equal(b[0].state, "done");
+    assert.equal(b[0].note, "fw-large-v3");
+  });
 
   it("luon tra dung sau buoc, dung thu tu", () => {
     const b = duongOng(vao({}));

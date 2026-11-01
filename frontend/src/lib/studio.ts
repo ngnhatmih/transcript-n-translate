@@ -209,6 +209,20 @@ export interface DauVaoDuongOng {
   coBanGhi: boolean;
   /** Engine ASR da sinh ra ban ghi — `null` khi chua co. */
   engineAsr: string | null;
+  /**
+   * Trạng thái job `ingest`/`asr` của NGUỒN đang mở — `null` khi không có job nào.
+   *
+   * 🔴 VÌ SAO PHẢI CÓ (lỗi thật, người dùng báo "phần phiên âm cũng ghi là chưa nạp
+   * chứ ko ghi là đang chạy"): bước `asr` trước đây chỉ suy từ `coBanGhi`, nên suốt
+   * quá trình job chạy — hàng chục phút với video 20 phút — thanh bước ghi "chưa nạp"
+   * và vẽ ô tròn RỖNG. Người dùng không có cách nào biết sản phẩm đang làm việc hay
+   * đã chết; chỉ hàng đợi ở chỗ khác mới nói.
+   *
+   * `queued`/`running` ⇒ bước đang chạy. `done` mà chưa có bản ghi là trạng thái
+   * thoáng qua (worker ghi xong job trước khi giao diện kịp nạp lại) — hiện "đang nạp
+   * lại" chứ không nói dối là "chưa nạp".
+   */
+  asrState: "queued" | "running" | "done" | "failed" | "interrupted" | "cancelled" | null;
   /** Có bản dịch nào `done` chưa. */
   coBanDich: boolean;
   /** Engine của bản dịch đang xem — `null` khi chưa có. */
@@ -242,9 +256,42 @@ export interface DauVaoDuongOng {
  * Thiếu ba thứ đó thì bước sau KHÔNG CÓ ĐẦU VÀO, khác hẳn "chưa được phép".
  */
 export function duongOng(d: DauVaoDuongOng): BuocDuongOng[] {
+  /**
+   * 🔴 BƯỚC `asr` PHẢI ĐỌC TRẠNG THÁI JOB, KHÔNG CHỈ `coBanGhi`.
+   *
+   * Lỗi thật, người dùng báo: *"phần phiên âm cũng ghi là chưa nạp chứ ko ghi là đang
+   * chạy"*. Bản cũ chỉ có hai nhánh:
+   *
+   *     coBanGhi ? {note: engineAsr, state: "done"} : {note: "chưa nạp", state: "todo"}
+   *
+   * nên suốt 20 phút bóc băng một video dài, thanh bước ghi "chưa nạp" và vẽ ô tròn
+   * RỖNG — y như chưa bấm gì. Người dùng không phân biệt được "đang chạy" với "đã chết".
+   *
+   * Thứ tự xét, và vì sao đúng thứ tự này:
+   *
+   *   1. ĐÃ CÓ BẢN GHI ⇒ `done`. Bản ghi là bằng chứng mạnh nhất; một job `asr` cũ còn
+   *      `queued` trong hàng đợi (người dùng bấm hai lần) không được làm bước đã xong
+   *      trông như đang chạy lại.
+   *   2. ĐANG CHẠY/ĐANG CHỜ ⇒ `running`. Đây là nhánh thiếu, và là toàn bộ lỗi.
+   *   3. `done` MÀ CHƯA CÓ BẢN GHI ⇒ "đang nạp lại". Trạng thái thoáng qua: worker ghi
+   *      xong job trước khi giao diện kịp `GET /api/transcripts`. Nói "chưa nạp" ở đây
+   *      là nói dối ngược lại — job vừa xong mà giao diện bảo chưa làm gì.
+   *   4. `failed`/`interrupted` ⇒ `blocked`, kèm lý do đọc được.
+   *   5. Còn lại (`null`, `cancelled`) ⇒ "chưa nạp".
+   */
   const buocAsr: BuocDuongOng = d.coBanGhi
     ? { id: "asr", name: "Phiên âm", note: d.engineAsr ?? "", state: "done" }
-    : { id: "asr", name: "Phiên âm", note: "chưa nạp", state: "todo" };
+    : d.asrState === "running"
+      ? { id: "asr", name: "Phiên âm", note: "đang phiên âm…", state: "running" }
+      : d.asrState === "queued"
+        ? { id: "asr", name: "Phiên âm", note: "chờ tới lượt", state: "running" }
+        : d.asrState === "done"
+          ? { id: "asr", name: "Phiên âm", note: "đang nạp lại…", state: "running" }
+          : d.asrState === "failed"
+            ? { id: "asr", name: "Phiên âm", note: "lỗi — xem hàng đợi", state: "blocked" }
+            : d.asrState === "interrupted"
+              ? { id: "asr", name: "Phiên âm", note: "bị ngắt — chạy lại được", state: "blocked" }
+              : { id: "asr", name: "Phiên âm", note: "chưa nạp", state: "todo" };
 
   const buocDich: BuocDuongOng = d.coBanDich
     ? { id: "dich", name: "Dịch", note: d.engineMt ?? "", state: "done" }
