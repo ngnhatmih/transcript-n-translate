@@ -462,6 +462,29 @@ export function App() {
           setLoi("chưa đọc được danh mục engine ASR — thử lại sau khi trang nạp xong");
           return;
         }
+        // 🔴 NGUỒN CHƯA CÓ AUDIO THÌ CHƯA BÓC BĂNG ĐƯỢC.
+        //
+        // DO DUOC (nguoi dung bao "mo mot video khac thi hang doi ko thay gi"): nap
+        // video moi -> `ingest` xep hang -> bam "Phien am" NGAY -> job `asr` duoc tao
+        // cho mot nguon CHUA co audio, va `transcribe.py:212` nem
+        // `FileNotFoundError: source 6 chua co audio; job ingest phai chay truoc`.
+        // Hang doi that luc do: #94 ingest source 6, #95 va #96 asr source 6 — hai job
+        // CHAC CHAN HONG dang cho, va chung con lam `ingest` phai cho lau hon vi
+        // worker chay het job cua GIAI DOAN hien tai truoc khi doi giai doan.
+        //
+        // Backend nay cung chan (409, xem `routes_jobs.create_job`), nhung chan o day
+        // de nguoi dung doc duoc cau giai thich NGAY thay vi mot ma loi, va de khong
+        // sinh ra mot request chac chan bi tu choi.
+        //
+        // `audio_path === null` la dieu kien DUNG (chinh `TranscribeHandler` doc no de
+        // mo tep). Kiem `duration` se chan nham mot nguon co audio hop le ma ffprobe
+        // khong doc duoc do dai.
+        if (source.audio_path === null) {
+          setLoi(
+            "video này chưa bóc xong âm thanh — chờ job “Nạp” trong hàng đợi xong rồi bấm lại",
+          );
+          return;
+        }
         void (async () => {
           try {
             await endpoints.createJob({

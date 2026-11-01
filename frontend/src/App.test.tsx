@@ -104,7 +104,15 @@ const KENH = {
   kind: "file",
   origin: "phude.mp4",
   media_path: "/data/media/phude.mp4",
-  audio_path: null,
+  // 🔴 KHÁC `null`: nguồn này ĐÃ bóc xong âm thanh, nên bấm "Phiên âm" mới hợp lệ.
+  //
+  // Bản trước để `audio_path: null` và bài "bấm Phiên âm khi chưa có bản ghi phải tạo
+  // job" vẫn XANH — vì lúc đó chưa có guard nào kiểm `audio_path`. Nay có (cả ở
+  // `App.onBuoc` lẫn `POST /api/jobs` → 409), nên fixture phải mô phỏng đúng trạng
+  // thái mà thao tác đó đòi: một video đã nạp xong.
+  //
+  // Nhánh "chưa có audio" có bài riêng bên dưới (`audio_path: null`).
+  audio_path: "/data/media/phude.wav",
   lang: "zh",
   duration: 10,
   // Backend LUÔN trả khoá này (`_source_json`), kể cả khi chưa ai chọn vùng.
@@ -631,6 +639,60 @@ describe("App: bấm 'Phiên âm' khi CHƯA có bản ghi vẫn tạo job", () =
         bang.goi.filter((g) => g.method === "POST" && g.url === "/api/jobs").length,
         0,
         "chưa chọn kênh thì KHÔNG được gửi job nào",
+      );
+    } finally {
+      cleanup();
+      traFetch();
+    }
+  });
+
+  /**
+   * NGUỒN CHƯA BÓC XONG ÂM THANH — bấm "Phiên âm" phải bị chặn KÈM CÂU GIẢI THÍCH.
+   *
+   * 🔴 LỖI THẬT, ĐO ĐƯỢC (người dùng báo: "tôi vừa thử mở một video khác thì hàng đợi
+   * ko thấy gì"). Nạp video mới → job `ingest` xếp hàng → bấm "Phiên âm" NGAY → job
+   * `asr` được tạo cho một nguồn CHƯA có `audio_path`, và `transcribe.py:212` ném:
+   *
+   *     FileNotFoundError: source 6 chưa có audio; job ingest phải chạy trước
+   *
+   * Hàng đợi thật lúc đó: `#94 ingest` source 6, `#95` và `#96 asr` source 6 — hai job
+   * CHẮC CHẮN HỎNG đang chờ. Tệ hơn: `worker.tick()` chạy hết job của GIAI ĐOẠN hiện
+   * tại trước khi đổi giai đoạn, nên hai job chết kia còn nằm TRƯỚC `ingest` và làm
+   * nó chờ lâu hơn — người dùng thấy hàng đợi như đứng im.
+   *
+   * Bài này ghim vế GIAO DIỆN (không gửi request chắc chắn bị từ chối + nói rõ lý do).
+   * Vế backend (409) ghim ở `backend/tests/test_api_jobs_sse.py`.
+   */
+  it("nguồn chưa có audio thì KHÔNG gửi job, và nói rõ đang chờ bóc âm thanh", async () => {
+    const bang = chanFetch((duong, method) => {
+      if (duong === "/sources" && method === "GET") {
+        return [{ ...KENH, audio_path: null, duration: null }];
+      }
+      if (duong === "/transcripts" && method === "GET") return [];
+      return traMacDinh(duong, method);
+    });
+    try {
+      render(<App />);
+      await waitFor(
+        () => {
+          assert.ok(q().queryAllByText(/phude\.mp4/).length > 0, "chưa nạp xong kênh");
+        },
+        { timeout: 3000 },
+      );
+
+      q().getByRole("button", { name: /Phiên âm/ }).click();
+
+      await waitFor(() => {
+        assert.match(
+          document.body.textContent ?? "",
+          /chưa bóc xong âm thanh/,
+          "phải nói rõ đang chờ bóc âm thanh, không im lặng",
+        );
+      });
+      assert.equal(
+        bang.goi.filter((g) => g.method === "POST" && g.url === "/api/jobs").length,
+        0,
+        "nguồn chưa có audio thì KHÔNG được gửi job asr — backend sẽ trả 409",
       );
     } finally {
       cleanup();

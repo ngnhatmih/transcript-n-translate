@@ -33,6 +33,23 @@ _MT_SPEC = EngineSpec(id="opus-mt", label="OPUS-MT", kind="mt", runtime="inproce
 def env(tmp_path):
     repos = SqliteRepos(tmp_path / "t.db", clock=SystemClock())
     repos.init_schema()
+    # Nguồn id=1 ĐÃ CÓ `audio_path` — điều kiện của mọi job `asr`.
+    #
+    # 🔴 VÌ SAO FIXTURE PHẢI TẠO NGUỒN (đo được, không phải cho đủ): bản trước fixture
+    # để bảng `sources` RỖNG mà các bài vẫn gửi `payload: {"source_id": 1}` và nhận
+    # 201 — vì route chưa từng hỏi nguồn có tồn tại hay chưa. Đo trên sản phẩm: nạp
+    # video mới rồi bấm "Phiên âm" ngay tạo ra job `asr` cho một nguồn CHƯA có audio,
+    # và `transcribe.py:212` ném `FileNotFoundError: source 6 chưa có audio`. Route
+    # nay kiểm điều kiện đó ở cửa (409), nên fixture rỗng làm 6 bài đỏ — đúng như nó
+    # phải đỏ, vì chúng đang mô phỏng một request mà sản phẩm phải TỪ CHỐI.
+    #
+    # `audio_path` trỏ tới tệp CÓ THẬT: bài test nào chạy tới `TranscribeHandler` sẽ
+    # không chết vì lý do khác với lý do nó định đo.
+    audio = tmp_path / "m" / "a.wav"
+    audio.parent.mkdir(parents=True, exist_ok=True)
+    audio.write_bytes(b"\x00" * 64)
+    repos.add_source(kind="file", origin="a.mp4", media_path=str(tmp_path / "m" / "a.mp4"),
+                     audio_path=str(audio), duration=1.0, lang="zh")
     broker = JobEventBroker()
     app = create_app(repos=repos, specs=[_ASR_SPEC, _MT_SPEC], media_dir=tmp_path / "m",
                      out_dir=tmp_path / "o", broker=broker)
@@ -763,3 +780,79 @@ def test_broker_forwards_a_dict_without_handing_out_live_objects(env):
             env.broker.unsubscribe(sub)
 
     assert asyncio.run(drive()) == {"id": 1, "state": "done"}
+
+
+# ---------------------------------------------------------------------------
+# JOB `asr` CẦN NGUỒN ĐÃ CÓ AUDIO — chặn ở cửa, không để chết ở worker.
+#
+# ĐO ĐƯỢC (người dùng báo "mở một video khác thì hàng đợi ko thấy gì"): nạp video
+# mới -> `ingest` xếp hàng -> bấm "Phiên âm" NGAY -> giao diện gửi `POST /api/jobs`
+# luôn. Route cũ trả **201** và job vào hàng đợi, rồi `transcribe.py:212` ném:
+#
+#     FileNotFoundError: source 6 chưa có audio; job ingest phải chạy trước
+#
+# Hàng đợi thật lúc đó: #94 `ingest` source 6, #95 và #96 `asr` source 6 — hai job
+# CHẮC CHẮN HỎNG đang chờ. Nặng hơn: `worker.tick()` chạy hết job của GIAI ĐOẠN hiện
+# tại trước khi đổi giai đoạn, nên hai job chết kia còn nằm TRƯỚC `ingest` và làm nó
+# chờ lâu hơn — người dùng thấy hàng đợi như đứng im.
+#
+# Vì sao chặn ở ROUTE chứ không chỉ ở giao diện: bất kỳ client nào (script, curl, lần
+# sửa giao diện sau) cũng tạo được job chết. Cửa nhận thứ mà nhà từ chối là đúng lớp
+# lỗi đã sửa ba lần ở nhánh OCR.
+# ---------------------------------------------------------------------------
+
+
+def test_asr_job_bi_tu_choi_khi_nguon_chua_co_audio(env):
+    """Nguồn chưa `ingest` ⇒ 409, KHÔNG tạo job, và câu giải thích phải đọc được.
+
+    Mã 409 (Conflict) chứ không 422: request đúng hình dạng, chỉ là trạng thái của
+    nguồn chưa cho phép. Client phân biệt được "gõ sai" với "chờ đã".
+    """
+    moi = env.repos.add_source(kind="file", origin="moi.mp4",
+                               media_path="/tmp/moi.mp4", lang="zh")
+    truoc = len(env.repos.list_jobs())
+
+    resp = env.post("/api/jobs", json={"workspace": 1, "type": "asr",
+                                       "engine": "fw-large-v3-turbo",
+                                       "payload": {"source_id": moi}})
+
+    assert resp.status_code == 409, f"mong 409, nhận {resp.status_code} — {resp.text}"
+    chi_tiet = resp.json()["detail"]
+    assert f"source {moi}" in chi_tiet
+    assert "ingest" in chi_tiet, (
+        f"câu lỗi phải nói job nào cần chạy trước, nhận được: {chi_tiet!r}")
+    assert "chưa có âm thanh" in chi_tiet
+    assert len(env.repos.list_jobs()) == truoc, (
+        "409 mà vẫn ghi job vào hàng đợi thì job chết vẫn chiếm chỗ")
+
+
+def test_asr_job_qua_duoc_khi_nguon_da_co_audio(env):
+    """Nguồn đã có `audio_path` ⇒ 201 như cũ — guard không được chặn nhầm."""
+    resp = env.post("/api/jobs", json={"workspace": 1, "type": "asr",
+                                       "engine": "fw-large-v3-turbo",
+                                       "payload": {"source_id": 1}})
+    assert resp.status_code == 201, resp.text
+    assert resp.json()["state"] == js.QUEUED
+
+
+def test_asr_job_cho_nguon_khong_ton_tai_tra_404(env):
+    """Nguồn không có ⇒ 404, không phải 409 và không phải 500."""
+    resp = env.post("/api/jobs", json={"workspace": 1, "type": "asr",
+                                       "engine": "fw-large-v3-turbo",
+                                       "payload": {"source_id": 999}})
+    assert resp.status_code == 404, resp.text
+    assert "999" in resp.json()["detail"]
+
+
+def test_ingest_job_khong_bi_guard_audio_chan(env):
+    """`ingest` CHÍNH LÀ job tạo ra `audio_path`, nên nó không được kiểm điều kiện đó.
+
+    Nếu guard đặt sai (kiểm mọi loại job) thì `ingest` bị chặn và nguồn không bao giờ
+    có audio — hàng đợi tự khoá mình, im lặng hoàn toàn.
+    """
+    moi = env.repos.add_source(kind="file", origin="moi.mp4",
+                               media_path="/tmp/moi.mp4", lang="zh")
+    resp = env.post("/api/jobs", json={"workspace": 1, "type": "ingest",
+                                       "payload": {"source_id": moi}})
+    assert resp.status_code == 201, resp.text
+    assert resp.json()["type"] == "ingest"

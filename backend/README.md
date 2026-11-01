@@ -340,6 +340,76 @@ về "bấm Phiên âm phải tạo job" xanh trong khi sản phẩm 422, vì n�
 bài test assert `than.engine === "fw-large-v3"`.
 
 
+### "Mở video khác thì hàng đợi không thấy gì" — hai nguyên nhân, một lỗi thật
+
+Người dùng báo: *"tôi vừa thử mở một video khác thì hàng đợi ko thấy gì"*. Hàng đợi
+**không trống** — đo được 4 job đang chờ. Có hai chuyện, và chỉ một là lỗi.
+
+**Không phải lỗi: `worker.tick()` chạy hết GIAI ĐOẠN hiện tại trước khi đổi giai đoạn.**
+Giai đoạn = `(loại job, engine)` (`worker.py:3-5`), để số lần nạp/đổ model là O(số giai
+đoạn) thay vì O(số job). Hàng đợi thật lúc đó:
+
+    #92  asr    source 5 (ac5df767b9e0c878.mp4, 1249 s)   RUNNING
+    #93  asr    source 5                                   queued
+    #94  ingest source 6 (video1.mp4)                      queued
+    #95  asr    source 6                                   queued
+    #96  asr    source 6                                   queued
+
+`#94 ingest` đứng sau bốn job `asr` cùng giai đoạn, và video 20,8 phút × 4 = hàng đợi
+đứng im rất lâu. Đó là thiết kế, và `tick()` ghi rõ ở dòng 160-162: hàng đợi là FIFO
+TOÀN CỤC, không lọc theo `workspace`, vì hai workspace dùng chung một worker và một GPU.
+Đừng "sửa" chỗ này khi chưa đọc chú thích đó.
+
+**Lỗi thật: job `asr` được tạo cho một nguồn CHƯA có âm thanh.** Nguồn 6 lúc đó có
+`audio_path = None`, `duration = None` — `ingest` chưa chạy lần nào. Bấm "Phiên âm" ngay
+sau khi nạp thì giao diện gửi `POST /api/jobs` luôn, route trả **201**, job vào hàng đợi,
+rồi `transcribe.py:212` ném:
+
+    FileNotFoundError: source 6 chưa có audio; job ingest phải chạy trước
+
+Đo trên hàng đợi thật: `#96`, `#98`, `#99` đều `asr` source 6 và đều **failed** vì đúng
+lý do đó. Ba job chết ấy còn nằm TRƯỚC `ingest` và làm nó chờ lâu hơn.
+
+**Sửa ở hai tầng, vì một tầng là không đủ:**
+
+* `POST /api/jobs` (`routes_jobs.create_job`) trả **409** khi `type == "asr"` mà nguồn
+  chưa có `audio_path`; 404 nếu nguồn không tồn tại. Vì sao 409 chứ không 422: request
+  đúng hình dạng, chỉ là trạng thái nguồn chưa cho phép — client phân biệt được "gõ sai"
+  với "chờ đã". Vì sao kiểm `audio_path` chứ không `duration`: chính
+  `TranscribeHandler` đọc `audio_path` để mở tệp, còn `duration` có thể NULL trên một
+  nguồn có audio hợp lệ mà `ffprobe` không đọc được độ dài.
+* `App.onBuoc` chặn trước khi gửi, và nói bằng tiếng Việt: *"video này chưa bóc xong âm
+  thanh — chờ job "Nạp" trong hàng đợi xong rồi bấm lại"*.
+
+Chặn ở **route** chứ không chỉ ở giao diện là điều bắt buộc: bất kỳ client nào (script,
+curl, lần sửa giao diện sau) cũng tạo được job chết. Cửa nhận thứ mà nhà từ chối là đúng
+lớp lỗi đã sửa ba lần ở nhánh OCR.
+
+`ingest` KHÔNG bị guard này chạm — nó chính là job tạo ra `audio_path`. Có bài test riêng
+ghim điều đó, vì nếu guard đặt sai (kiểm mọi loại job) thì `ingest` bị chặn và nguồn
+không bao giờ có audio: hàng đợi tự khoá mình, im lặng hoàn toàn.
+
+Đo trên container (`PHUDE_DB=/data/app.db`):
+
+    nguon id=7  audio_path=None  duration=None
+    POST /api/jobs {"type":"asr","engine":"fw-large-v3-turbo","payload":{"source_id":7}}
+      -> HTTP 409
+      -> {"detail":"source 7 chưa có âm thanh — job `ingest` phải chạy trước. …"}
+    so job cua nguon 7 = 0                      (khong ghi gi vao hang doi)
+    POST asr cho nguon 2 (DA co audio)  -> HTTP 201, job=103, state=queued
+
+**Fixture lại che mất lỗi, lần thứ hai.** `KENH` trong `App.test.tsx` có
+`audio_path: null`, và bài "bấm Phiên âm phải tạo job" vẫn XANH — vì lúc đó chưa guard
+nào kiểm `audio_path`. Nay fixture để `audio_path` là một đường dẫn thật (nguồn đã nạp
+xong, đúng trạng thái mà thao tác đó đòi), và nhánh "chưa có audio" có bài riêng với
+`audio_path: null`. Sáu bài trong `tests/test_api_jobs_sse.py` cũng đỏ khi thêm guard, vì
+fixture `env` để bảng `sources` RỖNG mà các bài vẫn gửi `source_id: 1` và nhận 201 —
+nay fixture tạo một nguồn có audio thật.
+
+Test mới: `tests/test_api_jobs_sse.py` +4 (409 chưa audio và không ghi job / 201 khi đã
+có audio / 404 nguồn không tồn tại / `ingest` không bị guard chặn), `App.test.tsx` +1.
+
+
 ### Bốn bài test mới, và hai lần chúng suýt là test GIẢ
 
 `tests/test_requirements_docker.py` (+3) đọc `main.py` tìm mọi `import` trong khối
@@ -394,32 +464,32 @@ GPU. Nó tự ép UTF-8 cho stdout (console Windows mặc định cp1252, còn s
 tiếng Trung/Việt) và tự đặt cache model trước khi nạp `faster_whisper`.
 
 Con số nền của lần chạy mặc định, đo sau khi xoá `__pycache__` (lệnh ở mục
-"Kiểm thử" trên, chạy từ trong `backend\`). Thứ có nghĩa là **1447 / 15**, không
+"Kiểm thử" trên, chạy từ trong `backend\`). Thứ có nghĩa là **1451 / 15**, không
 phải số giây — thời gian trôi giữa các lần chạy (đã thấy 24,00–30,94 s) còn con
 số bài thì không:
 
 ```
-1447 passed, 15 deselected, 3 warnings
+1451 passed, 15 deselected, 3 warnings
 ```
 
 Hai con số đó là SỐ BÀI ĐƯỢC CHỌN, và chúng khớp với số mà `--collect-only` báo
-(`1447/1462`, 15 bài `live` bị bỏ;
+(`1451/1466`, 15 bài `live` bị bỏ;
 `tests/test_backend_readme.py::test_readme_baseline_matches_the_tests_actually_
 collected` đối chiếu mỗi lần chạy).
 
 
-Máy này **CÓ** `ffmpeg 8.1.1` + `ffprobe` trên PATH (đã đo), nên `1447/15` ở trên
+Máy này **CÓ** `ffmpeg 8.1.1` + `ffprobe` trên PATH (đã đo), nên `1451/15` ở trên
 là số THẬT của nó. Máy **không có** `ffmpeg`/`ffprobe` cho một kết quả KHÁC: cả
 `tests/test_ingest.py` bị `skipif` ở cấp module — **9** bài cùng skip một lượt —
-nên dòng tổng kết của máy đó là **`1438 passed, 9 skipped, 15 deselected`** (=
-`1447 − 9`; con số này TỪNG ghi `978`, tức một baseline rất cũ, và nó lệch phép
+nên dòng tổng kết của máy đó là **`1442 passed, 9 skipped, 15 deselected`** (=
+`1451 − 9`; con số này TỪNG ghi `978`, tức một baseline rất cũ, và nó lệch phép
 trừ của chính khối nền ngay trên nó). Đó là
 con số của máy thiếu ffmpeg, **không phải** con số máy này từng in ra; đừng chép
 nó vào khối nền ở trên, và đừng "sửa" số nền xuống chỉ vì thiếu ffmpeg.
 
 ⚠️ Con số `856` ở đây TỪNG không khớp phép trừ của chính nó: `865 − 9 = 856`, tức
 nó là số của lượt TRƯỚC `V1` (+3 bài) còn sót lại. Phép trừ của khối nền hiện tại
-là `1447 − 9` = `1438`.
+là `1451 − 9` = `1442`.
 
 
 (Con số này từng bị ghi là `798`: bài `test_a_failed_translation_leaves_the_

@@ -179,6 +179,42 @@ def create_job(payload: JobIn, request: Request, repos=Depends(get_repos),
         raise HTTPException(
             422, f"payload của job {payload.type!r} không hợp lệ: "
                  f"{_payload_errors(exc)}") from exc
+    # ───────────────────────────────────────────────────────────────────────
+    # JOB `asr` CẦN NGUỒN ĐÃ CÓ AUDIO — chặn Ở CỬA, không để nó chết ở worker.
+    #
+    # ĐO ĐƯỢC (lỗi thật, người dùng báo "mở một video khác thì hàng đợi ko thấy gì"):
+    # nạp video mới -> `ingest` xếp hàng -> bấm "Phiên âm" NGAY -> giao diện gửi
+    # `POST /api/jobs` luôn, không chờ `ingest` xong. Route trả **201**, job vào hàng
+    # đợi, rồi `transcribe.py:212` ném:
+    #
+    #     FileNotFoundError: source 6 chưa có audio; job ingest phải chạy trước
+    #
+    # Đo trên hàng đợi thật: #94 `ingest` source 6, #95 và #96 `asr` source 6 — hai
+    # job CHẮC CHẮN HỎNG đang chờ. Tệ hơn: `worker.tick()` chạy hết job của GIAI ĐOẠN
+    # hiện tại trước khi đổi giai đoạn, nên hai job asr chết kia còn nằm TRƯỚC `ingest`
+    # và làm nó chờ lâu hơn. Người dùng thấy hàng đợi như đứng im.
+    #
+    # Vì sao chặn ở ROUTE chứ không chỉ ở giao diện: bất kỳ client nào (script, curl,
+    # lần sửa giao diện sau) cũng tạo được job chết. Cửa nhận thứ mà nhà từ chối là
+    # đúng lớp lỗi đã sửa ba lần ở nhánh OCR.
+    #
+    # `duration` cũng do `ingest` đặt, nhưng điều kiện ĐÚNG là `audio_path`: chính
+    # `TranscribeHandler` đọc nó để mở tệp. Kiểm `duration` sẽ chặn nhầm một nguồn có
+    # audio hợp lệ mà ffprobe không đọc được độ dài.
+    # ───────────────────────────────────────────────────────────────────────
+    if payload.type == "asr":
+        source_id = payload.payload["source_id"]
+        try:
+            nguon = repos.get_source(int(source_id))
+        except LookupError as exc:
+            raise HTTPException(404, f"source {source_id} không tồn tại") from exc
+        if not nguon.audio_path:
+            raise HTTPException(
+                409,
+                f"source {source_id} chưa có âm thanh — job `ingest` phải chạy trước. "
+                "Video vừa nạp cần được bóc âm thanh xong mới bóc băng được; "
+                "xem hàng đợi để biết job ingest đang ở đâu.",
+            )
     if payload.type in ENGINE_REQUIRED:
         if not payload.engine:
             raise HTTPException(422, f"job loại {payload.type} phải có engine")
