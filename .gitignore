@@ -74,3 +74,8 @@ tach-giong/
 _frontend-cu/
 # Ma nguon Lovable TAI VE (17 tep, 71 442 B) — nguon doi chieu cua ban da duyet, khong phai ma cua app.
 _lovable-code/
+# Tep NEN tai ve (rar/zip/7z) — khong phai ma nguon, va mot lan `git add frontend` da
+# nuot `frontend/frontend.rar` (998 012 B) vao commit. Khong bao gio commit chung.
+*.rar
+*.7z
+*.zip

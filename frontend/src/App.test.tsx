@@ -18,6 +18,7 @@ import assert from "node:assert/strict";
 import { cleanup, render, waitFor, within } from "@testing-library/react";
 
 import { App } from "./App.tsx";
+import type { Source } from "@/api/types";
 import { setupDom, teardownDom } from "../test/dom.ts";
 
 const ORIGIN = "http://127.0.0.1:8620";
@@ -83,20 +84,35 @@ function traFetch(): void {
 // Dữ liệu giả — hình dạng ĐỌC TỪ `api/types.ts`, không bịa thêm khoá.
 // ---------------------------------------------------------------------------
 
+/**
+ * Một hàng `sources` — hình dạng ĐỌC TỪ `api/types.ts::Source`, không bịa khoá.
+ *
+ * 🔴 FIXTURE NÀY TỪNG SAI, VÀ NÓ LÀM MỘT BÀI TEST ĐỎ VÌ LÝ DO SAI. Bản trước khai
+ * `name: "phude.mp4"` + `path: "/data/media/phude.mp4"` + `size: 1024` — ba khoá
+ * KHÔNG có trong `Source`. Backend trả `origin` và `media_path`
+ * (`routes_sources._source_json`), và `Studio.tsx:538` đọc `source.origin`. Với
+ * fixture cũ, `fileName` là `undefined` nên KHÔNG có chữ `phude.mp4` nào trên màn
+ * hình, và bài "bấm Phiên âm khi chưa có bản ghi" đỏ với "chưa nạp xong kênh" —
+ * tôi đã tưởng là đợi quá ngắn, nâng timeout 1000 → 3000 ms, vẫn đỏ, vì lý do thật
+ * là tên tệp không bao giờ được vẽ.
+ *
+ * Các bài cũ không lộ ra vì chúng đợi Ô PHỤ ĐỀ (`doiNapXong`), không đợi tên tệp.
+ * Một fixture sai chỉ lộ ra khi có bài đầu tiên chạm đúng chỗ nó sai.
+ */
 const KENH = {
   id: 1,
   kind: "file",
-  name: "phude.mp4",
-  path: "/data/media/phude.mp4",
+  origin: "phude.mp4",
+  media_path: "/data/media/phude.mp4",
+  audio_path: null,
   lang: "zh",
-  size: 1024,
   duration: 10,
   // Backend LUÔN trả khoá này (`_source_json`), kể cả khi chưa ai chọn vùng.
   // `null` = chưa chọn ⇒ giao diện dùng `VUNG_DOC_MAC_DINH`. Thiếu khoá ở fixture
   // thì test không bao giờ chạm nhánh thật của nó.
   vung_doc: null,
   created_at: "2026-01-01T00:00:00Z",
-};
+} satisfies Source;
 
 const TOM_TAT_BAN_DICH = {
   id: 4,
@@ -483,6 +499,115 @@ describe("App: vùng đọc OCR đọc từ nguồn, ghi qua PATCH", () => {
       // Hai mode này KHÁC NHAU: "tat" = đọc cả khung, "mac_dinh" = quay lại vùng của
       // registry. Gửi nhầm thì nút × chỉ có tác dụng cho tới lần chạy sau.
       assert.deepEqual(JSON.parse(patch.body ?? "{}"), { mode: "tat" });
+    } finally {
+      cleanup();
+      traFetch();
+    }
+  });
+});
+
+/**
+ * BẤM "PHIÊN ÂM" KHI CHƯA CÓ BẢN GHI — phải tạo job, không được im lặng.
+ *
+ * 🔴 LỖI THẬT, ĐO ĐƯỢC (người dùng báo: "ko ấn được"): `onBuoc` mở đầu bằng
+ *
+ *     if (transcript === null) { setLoi("chua co ban ghi …"); return; }
+ *
+ * nên kênh MỚI NẠP, chưa bóc băng lần nào, bấm "Phiên âm" thì KHÔNG có gì xảy ra:
+ * không job, không loading, không hàng đợi. Nhưng bước `asr` không cần `transcript`
+ * — nó cần `source_id`, và `POST /api/jobs` chỉ đọc `payload.source_id`. Guard kia
+ * đã dùng điều kiện của BƯỚC SAU (`dich`/`duyet` cần bản ghi) để chặn BƯỚC TRƯỚC.
+ *
+ * Một job `asr` trên kênh chưa có bản ghi là trường hợp BÌNH THƯỜNG: đó là đường
+ * đầu tiên của mọi kênh.
+ */
+describe("App: bấm 'Phiên âm' khi CHƯA có bản ghi vẫn tạo job", () => {
+  it("gửi POST /api/jobs với source_id của kênh đang chọn", async () => {
+    const bang = chanFetch((duong, method) => {
+      // Chưa bóc băng: danh sách bản ghi RỖNG.
+      if (duong === "/transcripts" && method === "GET") return [];
+      // Route tạo job trả về một job `queued` — hình dạng của `routes_jobs._job_json`.
+      if (duong === "/jobs" && method === "POST") {
+        return {
+          id: 91, workspace: 1, type: "asr", engine: "fw-large-v3",
+          phase: "asr:fw-large-v3", state: "queued",
+        };
+      }
+      return traMacDinh(duong, method);
+    });
+    try {
+      render(<App />);
+      // KHÔNG `doiNapXong()`: nó đợi ô phụ đề có chữ, mà chưa có bản ghi thì không
+      // có ô phụ đề nào. Đợi đúng thứ cần: kênh đã nạp (tên tệp hiện trên màn).
+      //
+      // ⚠️ `timeout: 3000` là BẮT BUỘC, không phải cho chắc: `waitFor` mặc định
+      // 1000 ms, còn lượt nạp đầu chạy `sources` → `transcripts` → `registry` →
+      // `peaks` qua `fetch` giả trong `jsdom`. Đo được: để mặc định thì bài này đỏ
+      // với "chưa nạp xong kênh" — tức đỏ vì ĐỢI QUÁ NGẮN, không phải vì sản phẩm
+      // sai. `doiNapXong()` ở các bài khác cũng dùng 3000 vì cùng lý do.
+      await waitFor(
+        () => {
+          assert.ok(
+            q().queryAllByText(/phude\.mp4/).length > 0,
+            "chưa nạp xong kênh",
+          );
+        },
+        { timeout: 3000 },
+      );
+
+      q().getByRole("button", { name: /Phiên âm/ }).click();
+
+      await waitFor(() => {
+        const tao = bang.goi.filter((g) => g.method === "POST" && g.url === "/api/jobs");
+        assert.equal(
+          tao.length, 1,
+          `bấm "Phiên âm" phải tạo ĐÚNG MỘT job, đo được ${tao.length}. ` +
+          `0 nghĩa là guard \`transcript === null\` đang chặn cả bước asr — ` +
+          `người dùng bấm mà sản phẩm im lặng.`,
+        );
+      });
+
+      const tao = bang.goi.filter((g) => g.method === "POST" && g.url === "/api/jobs")[0]!;
+      const than = JSON.parse(tao.body ?? "{}") as Record<string, unknown>;
+      assert.equal(than.type, "asr");
+      // `source_id` lấy từ KÊNH, không từ bản ghi (chưa có bản ghi nào).
+      assert.deepEqual(than.payload, { source_id: 1 });
+      // Job bóc băng thuộc workspace 1 — cùng con số `IngestHandler` dùng khi tự xếp job.
+      assert.equal(than.workspace, 1);
+    } finally {
+      cleanup();
+      traFetch();
+    }
+  });
+
+  it("KHÔNG chọn kênh nào thì báo lỗi bằng tiếng Việt, không gửi job", async () => {
+    const bang = chanFetch((duong, method) => {
+      if (duong === "/sources" && method === "GET") return [];
+      if (duong === "/transcripts" && method === "GET") return [];
+      return traMacDinh(duong, method);
+    });
+    try {
+      render(<App />);
+      await waitFor(() => {
+        assert.ok(q().queryAllByText(/Bấm để mở video của bạn/).length > 0);
+      });
+
+      // Chưa chọn kênh: nút "Phiên âm" vẫn phải bấm được (không bị vô hiệu hoá im
+      // lặng), và phản hồi phải là một CÂU TIẾNG VIỆT đọc được.
+      q().getByRole("button", { name: /Phiên âm/ }).click();
+
+      await waitFor(() => {
+        assert.match(
+          document.body.textContent ?? "",
+          /chưa chọn kênh/,
+          "phải nói rõ vì sao không chạy được, không im lặng",
+        );
+      });
+      assert.equal(
+        bang.goi.filter((g) => g.method === "POST" && g.url === "/api/jobs").length,
+        0,
+        "chưa chọn kênh thì KHÔNG được gửi job nào",
+      );
     } finally {
       cleanup();
       traFetch();

@@ -218,6 +218,62 @@ role button and name Tắt lọc vùng đọc"* — vì khung đã bị đổi v
 nút × nào trong DOM**. Đã xoá effect, xoá luôn prop `sourceId` (nó chỉ tồn tại để phục vụ
 effect đó). Bài học: một effect thừa không chỉ vô dụng, nó ghi đè dữ liệu người dùng.
 
+### Nút "Phiên âm" KHÔNG BẤM ĐƯỢC — hai lỗi chồng lên nhau
+
+Người dùng báo: *"ko ấn được. Nếu ấn thì nó cx lên hiện loading hoặc ghi lại task trong
+hàng đợi chứ"*. Đúng cả hai vế, và có **hai** lỗi độc lập cùng chặn một cái nút.
+
+**Lỗi 1 — guard đặt sai tầng.** `App.onBuoc` mở đầu bằng:
+
+    if (transcript === null) {
+      setLoi("chua co ban ghi — khong chay duoc buoc nao");
+      return;
+    }
+
+Kênh mới nạp, chưa bóc băng lần nào ⇒ `transcript === null` ⇒ bấm "Phiên âm" **không có
+gì xảy ra**: không job, không loading, không hàng đợi. Nhưng bước `asr` không cần
+`transcript` — nó cần `source_id`, và `POST /api/jobs` chỉ đọc `payload.source_id`. Guard
+kia đã dùng điều kiện của **bước sau** (`dich`/`duyet` cần bản ghi) để chặn **bước trước**.
+Một job `asr` trên kênh chưa có bản ghi là trường hợp BÌNH THƯỜNG: đó là đường đầu tiên
+của mọi kênh. Nay mỗi bước tự kiểm điều kiện của nó (`asr` → `source`; `dich`/`duyet` →
+`transcript`; `long`/`export` → `banDich`).
+
+**Lỗi 2 — `source` thiếu trong deps của `useCallback`.** Sau khi sửa lỗi 1, bài test vẫn
+đỏ: bấm nút **không phát sinh một request nào**, và màn hình hiện *"chưa chọn kênh"* — dù
+tên tệp `phude.mp4` đã hiện. Đo nguyên văn bằng một bài test tạm in ra mọi lệnh `fetch`:
+
+    GOI TRUOC KHI BAM: 5  SAU: 5
+    CO THONG BAO 'chua chon kenh': true
+
+Deps của `onBuoc` là `[transcript, banDich]` — **thiếu `source`**. Nên `onBuoc` được tạo
+một lần với `source = null` (lần render đầu, `sources` còn rỗng) và không bao giờ được tạo
+lại khi `sources` nạp xong. `Studio` nhận `source` qua prop nên nó luôn tươi và vẽ đúng tên
+tệp; handler thì vẫn tin "chưa chọn kênh". Giao diện và handler bất đồng bộ, không lỗi nào
+nổi lên. Đã thêm `source` vào deps.
+
+**Một fixture sai làm bài test đỏ vì lý do sai.** Trên đường truy lỗi 2, bài test đỏ với
+*"chưa nạp xong kênh"*; tôi tưởng đợi quá ngắn, nâng `timeout` 1000 → 3000 ms, **vẫn đỏ**.
+Lý do thật: `KENH` trong `App.test.tsx` khai `name`/`path`/`size` — ba khoá **không tồn
+tại** trong `Source`. Backend trả `origin`/`media_path`, và `Studio.tsx:538` đọc
+`source.origin`, nên `fileName` là `undefined` và không có chữ `phude.mp4` nào trên màn
+hình. Các bài cũ không lộ ra vì chúng đợi **ô phụ đề**, không đợi tên tệp. Fixture nay có
+`origin`/`media_path`/`audio_path` và `satisfies Source` để `tsc` bắt được khoá lạ.
+
+Hai bài ghim mới trong `App.test.tsx`:
+
+    bấm "Phiên âm" khi chưa có bản ghi  ->  ĐÚNG MỘT POST /api/jobs, payload {source_id: 1},
+                                            workspace 1, type "asr"
+    chưa chọn kênh                      ->  0 POST, và câu "chưa chọn kênh" hiện trên màn
+
+Đo trên container sau khi build lại `web` (bundle `index-C7wjA3Aw.js`):
+
+    grep -c 'khong duoc buoc nao'  ->  0     (cau CU da bi xoa)
+    grep -c 'chua chon kenh'       ->  1     (cau MOI co mat)
+    POST /api/jobs {"workspace":1,"type":"asr","engine":"fw-large-v3",
+                    "payload":{"source_id":2}}
+      -> HTTP 201, job=86, state=queued
+      -> running: "chọn nguồn chữ cho 8f4b5304daf42569.mp4 (lang=zh)"
+
 
 ### Bốn bài test mới, và hai lần chúng suýt là test GIẢ
 

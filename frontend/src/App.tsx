@@ -373,19 +373,48 @@ export function App() {
     a.click();
   }, [banDich]);
 
-  /** Chay lai mot buoc — chi bon buoc CO route that. */
+  /**
+   * Chay lai mot buoc — chi bon buoc CO route that.
+   *
+   * 🔴 GUARD PHAI THEO TUNG BUOC, KHONG CHAN CA HAM (loi that, do duoc).
+   *
+   * Ban truoc mo dau bang:
+   *
+   *     if (transcript === null) {
+   *       setLoi("chua co ban ghi — khong chay duoc buoc nao");
+   *       return;
+   *     }
+   *
+   * Nghia la kenh MOI NAP, chua boc bang lan nao, bam "Phien am" thi KHONG CO GI
+   * xay ra: khong job, khong loading, khong hang doi. Nguoi dung bam ma san pham
+   * im lang — dung kieu hong ma ca nhanh OCR vua phai sua ba lan.
+   *
+   * Nhung buoc `asr` KHONG CAN `transcript`: no can `source_id`, va `POST /api/jobs`
+   * chi doi `payload.source_id`. Chinh nhanh ben duoi doc `transcript.source_id`,
+   * tuc guard kia da dung mot dieu kien cua BUOC SAU de chan BUOC TRUOC. Mot job
+   * `asr` chay tren mot kenh chua co ban ghi la truong hop BINH THUONG — do la
+   * duong dau tien cua moi kenh.
+   *
+   * Nen moi buoc tu kiem dieu kien cua no:
+   *   `asr`           -> can `source` (kenh dang chon), KHONG can `transcript`
+   *   `dich`,`duyet`  -> can `transcript`
+   *   `long`          -> can `banDich`
+   *   `export`        -> can `banDich` (va `onXuatVideo` lo phan con lai)
+   */
   const onBuoc = useCallback(
     (id: string) => {
-      if (transcript === null) {
-        setLoi("chua co ban ghi — khong chay duoc buoc nao");
-        return;
-      }
       if (id === "asr") {
+        // Kenh dang chon, khong phai ban ghi. `workspace` la 1 vi job `asr` thuoc
+        // workspace boc bang — cung con so `IngestHandler` dung khi no tu xep job.
+        if (source === null) {
+          setLoi("chưa chọn kênh — không chạy được bước Phiên âm");
+          return;
+        }
         void (async () => {
           try {
             await endpoints.createJob({
               type: "asr",
-              workspace: transcript.id,
+              workspace: 1,
               // KHÔNG gửi `vung_doc` ở đây nữa — vùng đã lưu ở CHÍNH NGUỒN
               // (`sources.vung_doc`, ghi qua `PATCH /api/sources/{id}/vung-doc` mỗi
               // lần người dùng thả chuột), và `TranscribeHandler.run` đọc nó làm tầng
@@ -396,12 +425,18 @@ export function App() {
               // bản sao của cùng một con số, và khi chúng lệch nhau (người dùng kéo
               // khung rồi bấm "Phiên âm" trước khi PATCH xong) thì không ai biết bản
               // nào đúng. Một nguồn sự thật, đọc từ nguồn.
-              payload: { source_id: transcript.source_id },
+              payload: { source_id: source.id },
             });
           } catch (e) {
             setLoi(e instanceof Error ? e.message : String(e));
           }
         })();
+        return;
+      }
+      // Ba buoc con lai deu chay TREN mot ban ghi da co, nen guard dat o day —
+      // sau nhanh `asr`, khong phai truoc ca ham.
+      if (transcript === null) {
+        setLoi("chưa có bản ghi — bước này cần bóc băng trước");
         return;
       }
       if (id === "dich") {
@@ -465,7 +500,25 @@ export function App() {
       }
       // `ghep`/`xuat` la hanh dong cua nut Xuat, khong phai job rieng.
     },
-    [transcript, banDich],
+    // 🔴 `source` PHAI co trong deps — thieu no la closure dong bang.
+    //
+    // Do duoc: deps cu la `[transcript, banDich]`, nen `onBuoc` duoc tao mot lan voi
+    // `source = null` (lan render dau, `sources` con rong) va KHONG BAO GIO duoc tao
+    // lai khi `sources` nap xong. Hau qua: bam "Phien am" tren mot kenh DA HIEN TEN
+    // van roi vao `if (source === null)` -> thong bao "chua chon kenh" -> khong job
+    // nao duoc tao. Do nguyen van:
+    //
+    //   GOI TRUOC KHI BAM: 5  SAU: 5      <- khong mot request nao
+    //   CO THONG BAO 'chua chon kenh': true
+    //
+    // Man hinh hien `phude.mp4` (vi `Studio` nhan `source` qua prop, luon tuoi) trong
+    // khi handler van tin "chua chon kenh" — giao dien va handler bat dong bo, va
+    // khong co loi nao noi len.
+    //
+    // Bai hoc chung: bat ky gia tri nao doc TRONG callback deu phai co trong deps cua
+    // no. `transcript`/`banDich` da co; `source` bi bo sot vi luc viet ban dau no
+    // khong duoc dung trong than ham.
+    [source, transcript, banDich],
   );
 
   /** Long lai MOT doan — backend long ca ban dich, nen day la long lai CA BAN. */
