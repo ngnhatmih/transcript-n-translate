@@ -141,12 +141,24 @@ class RapidOCREngine:
         return hops
 
     def doc_phu_de(self, video_path: str, *, fps: float = 2.0,
-                   khoang_asr: list[tuple[float, float]] | None = None
+                   khoang_asr: list[tuple[float, float]] | None = None,
+                   vung_doc: tuple[float, float, float, float] | None = None
                    ) -> list[Segment]:
         """Xem `OCREngine.doc_phu_de`. Bốn tầng lọc chạy SAU khi đọc hết khung.
 
         Vì sao đọc hết rồi mới lọc: tầng 1 cần histogram `y` trên toàn video, tầng 2 cần
         biết khung TRƯỚC của cùng dòng. Lọc dòng-bởi-dòng sẽ không làm được cả hai.
+
+        🔴 `vung_doc` LỌC Ở TẦNG HỘP, TRƯỚC MỌI TẦNG KHÁC (đo được). Watermark của video
+        1080×1920 nằm ở `y=35-102`, `x=697-1051`; phụ đề thật ở `y=532-619` và
+        `y=1435-1495`. Đo được trước khi có tham số này: 30/32 dòng watermark LỌT qua tầng
+        lọc 4, vì tầng 4 chỉ bỏ hộp nằm NGOÀI khoảng có tiếng nói, mà watermark hiện CÙNG
+        LÚC với lời thoại — nên `dau <= h.t <= cuoi` đúng và nó được giữ.
+
+        Vì sao lọc trước tầng 1 chứ không sau: `tim_dai_phu_de` tìm dải `y` của phụ đề
+        bằng histogram. Để watermark trong tập đầu vào thì histogram có thêm một đỉnh ở
+        `y≈3 %` chiều cao, và dải chọn ra có thể bám vào đỉnh đó — cắt trước thì tầng 1
+        chỉ thấy phụ đề thật.
         """
         if not pathlib.Path(video_path).is_file():
             raise FileNotFoundError(f"không thấy video: {video_path}")
@@ -189,6 +201,23 @@ class RapidOCREngine:
 
         if not hops:
             return []
+
+        # Tầng 0 (mới): bỏ hộp NGOÀI `vung_doc`. Chạy TRƯỚC tầng 1 để histogram `y` của
+        # tầng 1 chỉ còn phụ đề thật — xem docstring. Toạ độ tính theo tỉ lệ khung nên
+        # cùng một cấu hình dùng được cho mọi độ phân giải.
+        if vung_doc is not None:
+            vx0, vy0, vx1, vy1 = (float(v) for v in vung_doc)
+            # Kẹp về [0, 1] và sắp lại: người gọi truyền sai thứ tự thì vẫn ra vùng đúng,
+            # thay vì lặng lẽ lọc sạch mọi thứ (vùng rỗng = mất toàn bộ phụ đề).
+            vx0, vx1 = sorted((min(1.0, max(0.0, vx0)), min(1.0, max(0.0, vx1))))
+            vy0, vy1 = sorted((min(1.0, max(0.0, vy0)), min(1.0, max(0.0, vy1))))
+            tam_x0, tam_x1 = vx0 * rong, vx1 * rong
+            tam_y0, tam_y1 = vy0 * cao, vy1 * cao
+            hops = [h for h in hops
+                    if tam_x0 <= (h.x0 + h.x1) / 2 <= tam_x1
+                    and tam_y0 <= (h.y0 + h.y1) / 2 <= tam_y1]
+            if not hops:
+                return []
 
         # Tầng 1: tìm dải y. Chạy trên TOÀN BỘ hộp (rẻ, và chính xác hơn mẫu 50 khung).
         y0, y1 = tim_dai_phu_de(hops, chieu_cao=cao)

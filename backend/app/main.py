@@ -365,6 +365,53 @@ def _prompt_version_of(spec) -> str:
     return PROMPT_VERSION.get(spec.id, "unknown")
 
 
+def _vung_doc_cua_ocr(specs) -> tuple[float, float, float, float] | None:
+    """Vùng đọc của OCR, từ `ocr[].opts.vung_doc` của registry. `None` = đọc cả khung.
+
+    🔴 VÌ SAO LÀ HÀM RIÊNG, KHÔNG PHẢI MỘT DÒNG TRONG `build_components`: giá trị này
+    đi thẳng vào vòng lặp đọc khung của adapter. Một `opts` sai hình dạng mà lọt qua
+    đây thì hoặc ném `TypeError` ở tận trong `doc_phu_de` (sau khi đã trích hàng trăm
+    khung hình), hoặc tệ hơn — lọc sạch mọi hộp và OCR trả `[]` "hợp lệ", pipeline
+    lặng lẽ rơi về ASR. Đó đúng là kiểu hỏng mà cả nhánh OCR vừa phải sửa hai lần.
+
+    Nên mọi sai hình dạng đều thành câu lỗi tiếng Việt NÊU TÊN khoá, ngay lúc dựng
+    handler — trước khi job nào chạy.
+
+    Trả `None` khi không khai (mặc định cũ, đọc cả khung). Bốn số phải thoả
+    `0 <= x0 < x1 <= 1` và `0 <= y0 < y1 <= 1`; đảo thứ tự là LỖI chứ không tự sắp lại,
+    vì tự sắp lại sẽ che mất việc người viết registry hiểu sai ý nghĩa bốn số.
+    """
+    spec = next((s for s in specs if getattr(s, "kind", None) == "ocr"), None)
+    if spec is None:
+        return None
+    opts = spec.opts if isinstance(spec.opts, dict) else {}
+    tho = opts.get("vung_doc")
+    if tho is None:
+        return None
+    if not isinstance(tho, (list, tuple)) or len(tho) != 4:
+        raise ValueError(
+            f"registry: `ocr` id={spec.id!r} có `opts.vung_doc` phải là danh sách "
+            f"4 số [x0, y0, x1, y1] theo tỉ lệ khung (0..1), đo được {tho!r}"
+        )
+    try:
+        x0, y0, x1, y1 = (float(v) for v in tho)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            f"registry: `ocr` id={spec.id!r} có `opts.vung_doc` chứa giá trị không "
+            f"phải số: {tho!r}"
+        ) from exc
+    if not all(0.0 <= v <= 1.0 for v in (x0, y0, x1, y1)):
+        raise ValueError(
+            f"registry: `ocr` id={spec.id!r} có `opts.vung_doc` ngoài [0, 1]: {tho!r}"
+        )
+    if not (x0 < x1 and y0 < y1):
+        raise ValueError(
+            f"registry: `ocr` id={spec.id!r} có `opts.vung_doc` phải thoả x0 < x1 và "
+            f"y0 < y1 (thứ tự [x0, y0, x1, y1]), đo được {tho!r}"
+        )
+    return (x0, y0, x1, y1)
+
+
 def build_components():
     """Dựng repos, specs, worker, MỘT broker và `mt_engines` đã nối dây.
 
@@ -491,6 +538,13 @@ def build_components():
         # OCR là TUỲ CHỌN: `None` nghĩa là image không có thư viện OCR, và đường ASR
         # thuần chạy y bản cũ.
         ocr_engine=ocr_engine,
+        # Vùng đọc của OCR — DỮ LIỆU của registry (`ocr[].opts.vung_doc`), không phải
+        # hằng số trong adapter. ĐO ĐƯỢC trên video 1080×1920: watermark
+        # `想想工作室` + `bilibili` ở y=35-102 (tức 1,8-5,3 % chiều cao), phụ đề thật ở
+        # y=532-619 và y=1435-1495. Bỏ 10 % trên cùng là đủ tách mà không cắt phụ đề
+        # nào. Đọc qua `_vung_doc_cua_ocr` để một `opts` hỏng thành câu lỗi rõ ràng
+        # thay vì `TypeError` ở tận trong vòng lặp đọc khung.
+        vung_doc=_vung_doc_cua_ocr(specs),
     )
     handlers = {
         # I-3 + I-6: handler thật nhận registry và gốc media; thiếu chúng thì nó

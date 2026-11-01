@@ -735,7 +735,7 @@ def test_run_dung_ocr_khi_handler_co_ocr_engine(repos, specs, tmp_path):
     class OcrGia:
         engine_id = "rapidocr"
 
-        def doc_phu_de(self, video_path, *, fps=2.0, khoang_asr=None):
+        def doc_phu_de(self, video_path, *, fps=2.0, khoang_asr=None, vung_doc=None):
             return [Segment(i=0, start=0.0, end=2.0, text="từ phụ đề")]
 
         def release(self):

@@ -218,7 +218,7 @@ def test_shipped_registry_declares_the_default_mt_engine():
 # Loại job THẬT của từng kind (plan §"JOB_TYPES"): job dịch tên là `translate`,
 # KHÔNG phải `mt`. Bảng này cố ý viết lại tại đây thay vì import từ app.registry,
 # để test bắt được cả trường hợp bảng ánh xạ trong code bị đổi sai.
-_JOB_TYPE_OF_KIND = {"asr": "asr", "mt": "translate"}
+_JOB_TYPE_OF_KIND = {"asr": "asr", "mt": "translate", "ocr": "asr"}
 
 
 def test_phase_key_matches_job_state_phase_of_for_every_shipped_engine():
@@ -256,4 +256,9 @@ def test_shipped_registry_pins_every_engine_and_its_vram():
         "qwen2.5-7b": 5200,
         "hy-mt-1.5-7b": 5200,
         "deepseek-web": 0,
+        # `rapidocr` là engine `inprocess` chạy ONNX trên CPU (PP-OCRv4 det+rec,
+        # đóng gói trong `rapidocr-onnxruntime`) — đo được `vram_mb: 0` là con số
+        # ĐÚNG: nó không chiếm VRAM của card, nên bộ điều phối không được đổ model
+        # nào cho nó. Cùng lý do đã ghi cho `deepseek-web`.
+        "rapidocr": 0,
     }

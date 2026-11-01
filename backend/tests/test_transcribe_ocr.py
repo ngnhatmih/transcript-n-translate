@@ -13,7 +13,7 @@ import soundfile as sf
 
 from app.adapters.clock_system import SystemClock
 from app.adapters.persist.sqlite_repos import SqliteRepos
-from app.domain.models import Segment
+from app.domain.models import Job, Segment
 from app.pipeline.transcribe import TranscribeHandler
 from app.registry import EngineSpec
 
@@ -25,10 +25,17 @@ class OcrGia:
         self._doan = doan
         self.duoc_goi = 0
         self.khoang_asr_nhan = "chua-goi"
+        #: Đường dẫn THẬT mà handler đưa cho OCR — xem
+        #: `test_run_dua_VIDEO_cho_ocr_chu_khong_phai_wav`.
+        self.video_path_nhan = None
+        #: `vung_doc` handler truyền — xem `test_run_truyen_vung_doc_tu_handler`.
+        self.vung_doc_nhan = "chua-goi"
 
-    def doc_phu_de(self, video_path, *, fps=2.0, khoang_asr=None):
+    def doc_phu_de(self, video_path, *, fps=2.0, khoang_asr=None, vung_doc=None):
         self.duoc_goi += 1
+        self.video_path_nhan = str(video_path)
         self.khoang_asr_nhan = khoang_asr
+        self.vung_doc_nhan = vung_doc
         return list(self._doan)
 
     def release(self):
@@ -165,3 +172,55 @@ def test_dung_ocr_lam_goc_false_thi_bo_qua_ocr(tmp_path):
     doan, _ = h.chon_doan(str(_media(tmp_path)), "zh", dung_ocr_lam_goc=False)
     assert [s.text for s in doan] == ["từ ASR"]
     assert ocr.duoc_goi == 0, "cờ TẮT thì KHÔNG được đọc khung"
+
+
+# ---------------------------------------------------------------------------
+# Lỗi đã ĐO ĐƯỢC (2026-11-01): `run` đưa WAV cho OCR, nên nhánh OCR KHÔNG BAO GIỜ thắng.
+#
+# Mọi bài phía trên gọi `chon_doan` TRỰC TIẾP, nên chúng không đi qua chỗ chọn đường dẫn
+# trong `run` — và vì thế cả bảy bài đều xanh trong khi sản phẩm chạy sai đường. Đó là
+# giới hạn của test đơn vị trên một hàm thuần: nó kiểm hàm, không kiểm người gọi hàm.
+#
+# Đo được trên `8f4b5304daf42569.mp4` (video DỌC có phụ đề Trung cứng):
+#   OCR tren .wav -> 0 Hop sau 0.1 s      (ffmpeg không có khung nào để trích)
+#   OCR tren .mp4 -> 71 Hop sau 169.1 s   (đọc được thật)
+# Log job 67 vì thế nói đúng sự thật của thời điểm đó: "dùng ASR: không đọc được phụ đề
+# cứng nào" — trên một video CÓ phụ đề cứng.
+# ---------------------------------------------------------------------------
+
+
+def test_run_dua_VIDEO_cho_ocr_chu_khong_phai_wav(tmp_path):
+    """`run` phải đưa `source.media_path` (VIDEO) cho OCR, không phải `.wav` đã tách.
+
+    Đây là bài duy nhất đi qua `run`, nên nó là bài duy nhất bắt được lỗi này. Nó ghim
+    ĐÚNG hợp đồng của `OCREngine.doc_phu_de`: tham số tên `video_path`, và một tệp âm
+    thanh thì không có khung hình nào — OCR trả `[]` một cách "hợp lệ", rồi pipeline
+    lặng lẽ rơi về ASR. Không lỗi nào nổi lên, chỉ có chất lượng tụt mà không ai biết.
+
+    Cách ghim: hai tệp KHÁC TÊN trong cùng `workdir`, và khẳng định đường dẫn OCR nhận
+    là tệp `.mp4`. Nếu ai đó đổi lại thành `str(audio)`, bài này đỏ ngay.
+    """
+    video = tmp_path / "video.mp4"
+    video.write_bytes(b"\x00" * 64)          # nội dung không quan trọng: OCR là engine GIẢ
+    wav = tmp_path / "video.wav"
+    sf.write(str(wav), np.zeros(48_000, dtype=np.float32), 48_000)
+
+    ocr = OcrGia([Segment(i=0, start=0.0, end=1.0, text="từ OCR")])
+    asr = AsrGia([Segment(i=0, start=0.0, end=1.0, text="từ ASR")])
+    h = _handler(tmp_path, ocr=ocr, asr=asr)
+
+    r = h._repos
+    source_id = r.add_source(kind="file", origin="video.mp4",
+                             media_path=str(video), audio_path=str(wav),
+                             duration=1.0, lang="zh")
+    job = Job(id=None, workspace=1, type="asr", engine="asr-gia",
+              phase="asr:asr-gia", payload={"source_id": source_id})
+    h.run(job, lambda *_: None)
+
+    assert ocr.duoc_goi == 1, "OCR phải được gọi"
+    assert ocr.video_path_nhan is not None
+    assert ocr.video_path_nhan.endswith("video.mp4"), (
+        f"OCR nhận {ocr.video_path_nhan!r} — phải là VIDEO. "
+        f"Nếu là '.wav' thì không có khung hình nào để đọc, OCR trả [] 'hợp lệ', "
+        f"và cả chính sách 'OCR là chính' lặng lẽ thành 'ASR là chính'."
+    )

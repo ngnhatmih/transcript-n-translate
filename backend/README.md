@@ -39,6 +39,98 @@ pip chậm một cách bệnh hoạn trên máy này.
 .\.venv\Scripts\python.exe run_api.py      # http://127.0.0.1:8620
 ```
 
+## OCR là nguồn chữ CHÍNH — và nó chỉ thật sự chạy sau ba lỗi im lặng
+
+`app/domain/nguon_chu.py` tuyên bố từ lâu: **OCR là chính, ASR là dự phòng**. Đo được trên
+máy này (2026-11-01): chính sách đó **chưa từng chạy**. Ba lỗi độc lập, cả ba đều không
+ném exception nào, và cả ba đều để test xanh.
+
+**Lỗi 1 — image thiếu thư viện.** `requirements-docker.txt` không khai
+`rapidocr-onnxruntime`, nên trong container `import rapidocr_onnxruntime` ném `ImportError`
+⇒ `main.py` đặt `ocr_engine = None` (đúng thiết kế "image thiếu thư viện tuỳ chọn thì tính
+năng tự tắt") ⇒ `TranscribeHandler._ocr is None` ⇒ nhánh OCR bị bỏ hẳn. Đo được:
+
+    rapidocr_onnxruntime: THIEU — No module named 'rapidocr_onnxruntime'
+    handler = TranscribeHandler    _ocr = None    ocr engine id = None
+
+Host venv **có** gói này, image thì không — nên test xanh, mã có tính năng, sản phẩm chạy
+đường khác. Cùng khuôn hỏng đã ghi ở mục `demucs` của chính tệp requirements đó: *mất tính
+năng mà không có lỗi*.
+
+**Lỗi 2 — OCR nhận WAV thay vì video.** `transcribe.py` truyền `str(audio)` (tệp `.wav` do
+ingest tách ra) vào `chon_doan`, mà `chon_doan` đưa thẳng cho `doc_phu_de`. Một tệp âm
+thanh không có khung hình nào để trích. Đo trực tiếp:
+
+    OCR tren .wav -> 0 Hop sau 0.1 s      (luôn rỗng)
+    OCR tren .mp4 -> 71 Hop sau 169.1 s   (đọc được thật)
+
+Log job 67 nói đúng sự thật của thời điểm đó — `dùng ASR: không đọc được phụ đề cứng nào`
+— trên một video **CÓ** phụ đề cứng.
+
+**Lỗi 3 — khối `ocr` không được nạp.** `registry_file._KINDS = ("asr", "mt")` bỏ qua khối
+`ocr` hoàn toàn, nên `load_registry()` không trả về spec nào `kind="ocr"` và mọi cấu hình
+`opts` của OCR là chữ chết. Thêm `"ocr"` vào `_KINDS` lộ thêm hai chỗ: `model_ref` là khoá
+BẮT BUỘC trong khi entry `ocr` không có (model ONNX đi kèm gói), và `_JOB_TYPE_OF_KIND`
+thiếu `ocr` ⇒ `phase_key` ném `KeyError`. OCR chạy **bên trong** job `asr`, nên ánh xạ
+đúng là `"ocr": "asr"`.
+
+### `vung_doc`: cắt watermark bằng VÙNG ĐỌC, không bằng tầng lọc
+
+Tầng lọc 4 (`loc_theo_asr`) chỉ bỏ hộp nằm **ngoài** khoảng có tiếng nói. Watermark hiện
+**cùng lúc** với lời thoại, nên `dau <= h.t <= cuoi` đúng và nó được giữ. Đo được trên
+`8f4b5304daf42569.mp4` (1080×1920): **30/32** dòng watermark lọt qua tầng 4.
+
+`opts.vung_doc` (tỉ lệ khung) cắt trước cả tầng 1:
+
+    watermark `想想工作室` + `bilibili`: y=35-102, x=697-1051   (1,8-5,3 % chiều cao)
+    phụ đề thật:                        y=532-619 và y=1435-1495
+    => vung_doc = [0.0, 0.1, 1.0, 1.0]   (bỏ 10 % trên cùng)
+
+Vì sao lọc **trước** tầng 1 chứ không sau: `tim_dai_phu_de` tìm dải `y` bằng histogram, và
+watermark tạo một **đỉnh thứ hai** ở `y≈3 %` làm dải chọn ra bị lệch. Cắt trước thì
+histogram chỉ còn phụ đề thật.
+
+### Ba lần chạy, cùng một video, đo được
+
+    job 67  OCR nhận WAV (lỗi 2)          -> dùng ASR: 103 đoạn, engine fw-large-v3
+    job 69  OCR nhận video, không lọc     -> dùng OCR:  48 dòng, 32 dòng watermark
+    job 71  + vung_doc = [0, 0.1, 1, 1]   -> dùng OCR:  77 dòng,  0 dòng watermark
+
+**77 > 48 không phải lọc kém đi** — đó là tầng 1 hoạt động đúng lần đầu, vì histogram
+không còn đỉnh watermark để bám vào. Nội dung job 71 là lời thoại liền mạch
+(`作为一个搞艺术的` / `最苦恼的事就是` / `自己的作品是有价值的`), còn job 69 chỉ có 2 dòng
+thoại đúng trong 48.
+
+### Bốn bài test mới, và hai lần chúng suýt là test GIẢ
+
+`tests/test_requirements_docker.py` (+3) đọc `main.py` tìm mọi `import` trong khối
+`try/except ImportError` rồi đối chiếu `requirements-docker.txt`. Phá thử để chứng minh nó
+không xanh giả:
+
+    xoa dong khai that (5237 -> 5208)   ->  2 failed, 1 passed
+    doi ten goi thanh sai               ->  2 failed
+    khoi phuc                           ->  3 passed
+
+Hai lần đầu tôi tưởng test yếu, thực ra **phép thử của tôi sai**:
+`Replace("...==1.4.4`n", ...)` dùng LF trần trong khi tệp là CRLF, nên không xoá gì
+(`5237 → 5237`). Và bản đầu của `_goi_trong_docker_reqs` cắt `#` chỉ khi `#` đứng ĐẦU
+dòng, nên tên gói nằm trong chú thích giữa dòng vẫn được tính — xoá hẳn dòng khai mà bài
+test vẫn xanh.
+
+`tests/test_transcribe_ocr.py` (+1) là bài **duy nhất** đi qua `run`, nên là bài duy nhất
+bắt được lỗi 2: bảy bài cũ gọi `chon_doan` trực tiếp và vì thế cả bảy đều xanh trong khi
+sản phẩm chạy sai đường. Đó là giới hạn của test đơn vị trên một hàm thuần — nó kiểm hàm,
+không kiểm người gọi hàm. Phá thử: trả lại `str(audio)` ⇒ `1 failed, 7 passed`.
+
+`tests/test_e2e_fake.py` đỏ vì fixture upload `b"x" * 64` đặt tên `.mp4` — 64 byte rác.
+Đường ASR cũ chỉ mở `.wav` nên không ai chạm `.mp4`; khi OCR chạy, nó gọi `ffprobe` trên
+chính tệp đó và job `asr` chết:
+
+    job 2 asr: failed — ffprobe ... clip.mp4 returned non-zero exit status 1
+
+Nay `StubIngest` ghi một video thật tối thiểu bằng `ffmpeg`, và lùi an toàn khi máy chạy
+test không có `ffmpeg` (lúc đó fixture đã tắt OCR nên không ai đọc tệp).
+
 ## Kiểm thử
 
 ```powershell
@@ -63,32 +155,32 @@ GPU. Nó tự ép UTF-8 cho stdout (console Windows mặc định cp1252, còn s
 tiếng Trung/Việt) và tự đặt cache model trước khi nạp `faster_whisper`.
 
 Con số nền của lần chạy mặc định, đo sau khi xoá `__pycache__` (lệnh ở mục
-"Kiểm thử" trên, chạy từ trong `backend\`). Thứ có nghĩa là **1428 / 15**, không
+"Kiểm thử" trên, chạy từ trong `backend\`). Thứ có nghĩa là **1432 / 15**, không
 phải số giây — thời gian trôi giữa các lần chạy (đã thấy 24,00–30,94 s) còn con
 số bài thì không:
 
 ```
-1428 passed, 15 deselected, 3 warnings
+1432 passed, 15 deselected, 3 warnings
 ```
 
 Hai con số đó là SỐ BÀI ĐƯỢC CHỌN, và chúng khớp với số mà `--collect-only` báo
-(`1428/1443`, 15 bài `live` bị bỏ;
+(`1432/1447`, 15 bài `live` bị bỏ;
 `tests/test_backend_readme.py::test_readme_baseline_matches_the_tests_actually_
 collected` đối chiếu mỗi lần chạy).
 
 
-Máy này **CÓ** `ffmpeg 8.1.1` + `ffprobe` trên PATH (đã đo), nên `1428/15` ở trên
+Máy này **CÓ** `ffmpeg 8.1.1` + `ffprobe` trên PATH (đã đo), nên `1432/15` ở trên
 là số THẬT của nó. Máy **không có** `ffmpeg`/`ffprobe` cho một kết quả KHÁC: cả
 `tests/test_ingest.py` bị `skipif` ở cấp module — **9** bài cùng skip một lượt —
-nên dòng tổng kết của máy đó là **`1415 passed, 9 skipped, 15 deselected`** (=
-`1428 − 9`; con số này TỪNG ghi `978`, tức một baseline rất cũ, và nó lệch phép
+nên dòng tổng kết của máy đó là **`1423 passed, 9 skipped, 15 deselected`** (=
+`1432 − 9`; con số này TỪNG ghi `978`, tức một baseline rất cũ, và nó lệch phép
 trừ của chính khối nền ngay trên nó). Đó là
 con số của máy thiếu ffmpeg, **không phải** con số máy này từng in ra; đừng chép
 nó vào khối nền ở trên, và đừng "sửa" số nền xuống chỉ vì thiếu ffmpeg.
 
 ⚠️ Con số `856` ở đây TỪNG không khớp phép trừ của chính nó: `865 − 9 = 856`, tức
 nó là số của lượt TRƯỚC `V1` (+3 bài) còn sót lại. Phép trừ của khối nền hiện tại
-là `1428 − 9` = `1419`.
+là `1432 − 9` = `1423`.
 
 
 (Con số này từng bị ghi là `798`: bài `test_a_failed_translation_leaves_the_

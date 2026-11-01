@@ -19,7 +19,8 @@ class OCREngine(Protocol):
     engine_id: str
 
     def doc_phu_de(self, video_path: str, *, fps: float = 2.0,
-                   khoang_asr: list[tuple[float, float]] | None = None
+                   khoang_asr: list[tuple[float, float]] | None = None,
+                   vung_doc: tuple[float, float, float, float] | None = None
                    ) -> list[Segment]:
         """Đọc phụ đề CỨNG của `video_path`.
 
@@ -28,6 +29,13 @@ class OCREngine(Protocol):
 
         `khoang_asr` = các khoảng CÓ tiếng nói, để bật tầng lọc 4. `None`/rỗng ⇒ TẮT tầng 4,
         và đó là mặc định: pipeline phải chạy được khi không có ASR.
+
+        `vung_doc` = `(x0, y0, x1, y1)` theo TỈ LỆ khung (0..1) — chỉ đọc chữ nằm trong
+        vùng này. `None` = đọc cả khung (mặc định cũ). Dùng để LOẠI WATERMARK/LOGO nằm ở
+        một góc cố định: đo được trên video 1080×1920, watermark `想想工作室` + `bilibili`
+        ở `y=35-102`, `x=697-1051`, tách hẳn khỏi phụ đề thật ở `y=532-619` và
+        `y=1435-1495`. Không có tham số này thì OCR đọc watermark như chữ và 30/32 dòng
+        watermark lọt qua tầng lọc 4, vì chúng hiện CÙNG LÚC với lời thoại.
         """
         ...
 

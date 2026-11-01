@@ -58,13 +58,13 @@
       "opts": { "use_itn": true }
     }
   ],
-  "_ghi_chu_ocr": "OCR đọc phụ đề CỨNG của video. Cùng khuôn `asr`: id phải TRÙNG `engine_id` của adapter (ghim bằng test_registry_ocr.py). `opts.fps` là DỮ LIỆU: đo được trên video 20,8 phút, 2 fps đủ (dòng phụ đề ngắn nhất 0,5 s) và tốn 372,8 s; 10 fps sẽ tốn ~31 phút mà chỉ đổi ±0,5 s thành ±0,1 s. Tầng lọc 4 (đối chiếu ASR) KHÔNG khai ở đây vì nó là tham số của LƯỢT GỌI, và mặc định TẮT — pipeline phải chạy được khi không có ASR.",
+  "_ghi_chu_ocr": "OCR đọc phụ đề CỨNG của video. Cùng khuôn `asr`: id phải TRÙNG `engine_id` của adapter (ghim bằng test_registry_ocr.py). `opts.fps` là DỮ LIỆU: đo được trên video 20,8 phút, 2 fps đủ (dòng phụ đề ngắn nhất 0,5 s) và tốn 372,8 s; 10 fps sẽ tốn ~31 phút mà chỉ đổi ±0,5 s thành ±0,1 s. Tầng lọc 4 (đối chiếu ASR) KHÔNG khai ở đây vì nó là tham số của LƯỢT GỌI, và mặc định TẮT — pipeline phải chạy được khi không có ASR. `opts.vung_doc` = [x0, y0, x1, y1] theo TỈ LỆ khung, chỉ đọc chữ trong vùng đó; [0.0, 0.1, 1.0, 1.0] = bỏ 10 % trên cùng, nơi watermark nằm. ĐO ĐƯỢC trên video 1080×1920 (8f4b5304daf42569.mp4): watermark `想想工作室` + `bilibili` ở y=35-102, x=697-1051; phụ đề thật ở y=532-619 và y=1435-1495. Không có vùng này thì OCR đọc watermark như chữ, và 30/32 dòng watermark LỌT qua tầng lọc 4 vì chúng hiện CÙNG LÚC với lời thoại (tầng 4 chỉ bỏ hộp ngoài khoảng có tiếng nói).",
   "ocr": [
     {
       "id": "rapidocr",
       "label": "RapidOCR (PP-OCRv4, đọc phụ đề cứng)",
       "runtime": "inprocess",
-      "opts": { "fps": 2.0 }
+      "opts": { "fps": 2.0, "vung_doc": [0.0, 0.1, 1.0, 1.0] }
     }
   ],
   "mt": [

@@ -67,6 +67,30 @@ sacremoses==0.1.1
 # Nó là extra lượng tử hoá của demucs, không phải phụ thuộc bắt buộc.
 demucs==4.1.0
 
+# --- OCR: đọc phụ đề CỨNG của video (nguồn chữ CHÍNH của pipeline lồng tiếng) ---
+#
+# 🔴 DÒNG NÀY TỪNG THIẾU, VÀ ĐÓ LÀ MỘT LỖI IM LẶNG ĐÃ ĐO ĐƯỢC (2026-11-01).
+#
+# `main.py:470` dò OCR bằng `import rapidocr_onnxruntime`, và `ImportError` nghĩa là
+# "image này không có OCR" -> `ocr_engine = None` -> `TranscribeHandler._ocr is None`
+# -> `transcribe.chon_doan` bỏ hẳn nhánh OCR và đi thẳng ASR. Đo được trong container:
+#
+#   rapidocr_onnxruntime: THIEU — No module named 'rapidocr_onnxruntime'
+#   handler = TranscribeHandler    _ocr = None    ocr engine id = None
+#
+# Nghĩa là toàn bộ chính sách "OCR là CHÍNH, ASR là dự phòng" (`domain/nguon_chu.py`)
+# KHÔNG HỀ CHẠY trên máy này: mọi job âm thầm dùng ASR, dù ASR chỉ đúng 66,27 % ký tự
+# và dừng ở 1186,4 s trong khi OCR phủ tới 1243 s. Host venv CÓ gói này, image thì
+# không — nên test xanh, tính năng có, mà sản phẩm chạy đường khác.
+#
+# Đây đúng kiểu hỏng đã ghi ở mục `demucs` ngay trên: mất tính năng mà không có lỗi.
+#
+# `rapidocr-onnxruntime` KHÔNG cần `torch` — đo được `pip show`: Requires là numpy,
+# onnxruntime, opencv-python, Pillow, pyclipper, PyYAML, Shapely, six, tqdm. Nên nó
+# KHÔNG phá lý do tách tệp này khỏi `requirements.txt` (lý do đó là `funasr`/`modelscope`
+# kéo torch ~800 MB cho SenseVoice, engine KHÔNG phải mặc định).
+rapidocr-onnxruntime==1.4.4
+
 # --- Tiện ích ---
 httpx==0.28.1
 yt-dlp==2025.1.15

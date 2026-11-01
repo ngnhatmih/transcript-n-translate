@@ -6,7 +6,7 @@ import pathlib
 from app.config import REGISTRY_PATH
 from app.registry import DEFAULT_ASR_KEY, DEFAULT_MT_KEY, EngineSpec
 
-_KINDS = ("asr", "mt")
+_KINDS = ("asr", "mt", "ocr")
 
 
 def load_registry(path: str | pathlib.Path | None = None) -> list[EngineSpec]:
@@ -20,7 +20,15 @@ def load_registry(path: str | pathlib.Path | None = None) -> list[EngineSpec]:
                 label=entry.get("label", entry["id"]),
                 kind=kind,
                 runtime=entry["runtime"],
-                model_ref=entry["model_ref"],
+                # `model_ref` là BẮT BUỘC với `asr`/`mt` (chúng phải chỉ ra model
+                # nào để nạp), nhưng KHÔNG có với `ocr`: model ONNX đi kèm trong
+                # gói `rapidocr-onnxruntime`, không có tên để trỏ tới. Đòi khoá
+                # này ở mọi kind thì khối `ocr` ném `KeyError` ngay lúc nạp —
+                # đúng lỗi đo được khi thêm `"ocr"` vào `_KINDS`. Rơi về `""` cho
+                # kind không khai, và vẫn GIỮ phép kiểm cho `asr`/`mt` để một
+                # registry thiếu `model_ref` ở đó vẫn hỏng ồn ào.
+                model_ref=(entry["model_ref"] if kind in ("asr", "mt")
+                           else entry.get("model_ref", "")),
                 vram_mb=int(entry.get("vram_mb", 0)),
                 langs=tuple(entry.get("langs", ())),
                 capabilities=dict(entry.get("capabilities", {})),

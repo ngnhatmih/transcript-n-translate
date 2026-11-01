@@ -131,7 +131,35 @@ class StubIngest:
         audio = pathlib.Path(source.media_path).with_suffix(".wav")
         import numpy as np
         import soundfile as sf
+
         sf.write(str(audio), np.zeros(16_000, dtype=np.float32), 16_000)
+        # 🔴 VA TEP `.mp4` CUNG PHAI LA VIDEO THAT — cung lop loi, phat hien lan hai.
+        #
+        # Bai test upload `b"x" * 64` voi ten `clip.mp4`, tuc 64 byte rac. Duong ASR
+        # cu chi mo tep `.wav` nen khong ai cham vao `.mp4`; nhung khi OCR chay, no
+        # goi `ffprobe` tren CHINH `source.media_path` va chet:
+        #   job 2 asr: failed — ffprobe ... clip.mp4 returned non-zero exit status 1
+        # => 0 transcript, va test do vi mot ly do KHONG LIEN QUAN toi thu no dinh kiem.
+        #
+        # Ghi mot video that toi thieu bang ffmpeg (1 khung hinh, 1 giay). Neu may
+        # chay test KHONG co ffmpeg thi khong the lam gia — luc do fixture da tat OCR
+        # (`ocr_engine=None`, xem `wired`), nen `media_path` khong bi ai doc va tep
+        # rac giu nguyen la du. Do la ly do phai bat ca `FileNotFoundError`: mot may
+        # khong co ffmpeg van phai chay duoc bai e2e nay.
+        media = pathlib.Path(source.media_path)
+        if not media.exists() or media.stat().st_size < 1024:
+            try:
+                import subprocess
+
+                subprocess.run(
+                    ["ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
+                     "-f", "lavfi", "-i", "color=c=black:s=320x240:d=1",
+                     "-frames:v", "1", str(media)],
+                    check=True, capture_output=True,
+                )
+            except (FileNotFoundError, subprocess.CalledProcessError):
+                # Khong co ffmpeg => fixture da tat OCR, nen khong ai doc tep nay.
+                pass
         self._repos.set_source_audio(sid, str(audio), 8.0)
         # R7: và phải TẠO JOB ASR — không có nó thì không có gì chạy bóc băng.
         self._repos.add_job(Job(id=None, workspace=1, type="asr",

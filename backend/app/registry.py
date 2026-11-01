@@ -31,7 +31,13 @@ from app.domain.job_state import phase_of
 # này KHÁC nhau: engine dịch có kind "mt" nhưng job của nó là "translate"
 # (plan §JOB_TYPES: ingest | asr | translate | export). Ánh xạ tường minh ở đây
 # để `phase_key` không bao giờ tự bịa ra một tiền tố thứ ba.
-_JOB_TYPE_OF_KIND = {"asr": "asr", "mt": "translate"}
+#
+# `ocr` -> `asr` là ánh xạ ĐÚNG, không phải mẹo: OCR không có job riêng, nó là một
+# bước BÊN TRONG job `asr` (`TranscribeHandler.chon_doan` gọi nó trước khi quyết định
+# nguồn chữ). Nên `rapidocr` không bao giờ có hàng đợi riêng, và `phase_key` của nó
+# trỏ về `asr:rapidocr` nếu có ai hỏi — thay vì ném `KeyError` như trước khi thêm khoá
+# này (đo được: `app/registry.py:69 KeyError: 'ocr'` sau khi `_KINDS` có `ocr`).
+_JOB_TYPE_OF_KIND = {"asr": "asr", "mt": "translate", "ocr": "asr"}
 
 
 @dataclass(frozen=True)

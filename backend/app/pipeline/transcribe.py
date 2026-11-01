@@ -62,6 +62,7 @@ class TranscribeHandler:
         declared_default_mt: str | None = None,
         prompt_versions: Mapping[str, str] | None = None,
         ocr_engine: OCREngine | None = None,
+        vung_doc: tuple[float, float, float, float] | None = None,
     ) -> None:
         self._repos = repos
         self._specs = list(specs)
@@ -83,6 +84,18 @@ class TranscribeHandler:
         #: nay, nen chung ghim dung hanh vi cu — do la ly do no la tham so keyword co
         #: mac dinh.
         self._ocr = ocr_engine
+        #: Vùng đọc của OCR, tính theo TỈ LỆ khung — `None` = đọc cả khung.
+        #:
+        #: 🔴 VÌ SAO LÀ THAM SỐ CỦA HANDLER, KHÔNG PHẢI HẰNG SỐ TRONG ADAPTER: vùng
+        #: watermark phụ thuộc VIDEO (góc nào, cao bao nhiêu), không phụ thuộc engine.
+        #: Đo được trên `8f4b5304daf42569.mp4` (1080×1920): watermark `想想工作室` +
+        #: `bilibili` ở `y=35-102`, `x=697-1051` — tức dải trên cùng bên phải, cao
+        #: 5,3 % khung. Phụ đề thật ở `y=532-619` (giữa) và `y=1435-1495` (dưới), nên
+        #: một vùng `y >= 0.10` là đủ tách mà không cắt mất phụ đề nào.
+        #:
+        #: Mặc định `None` (đọc cả khung) để không đổi hành vi của mọi video khác: chỉ
+        #: video nào biết có watermark mới truyền vùng.
+        self._vung_doc = vung_doc
 
     def handles(self) -> str:
         return "asr"
@@ -106,7 +119,9 @@ class TranscribeHandler:
 
     def chon_doan(self, media_path: str, lang: str, *,
                   dung_ocr_lam_goc: bool = True,
-                  asr_engine_id: str | None = None) -> tuple[list[Segment], str]:
+                  asr_engine_id: str | None = None,
+                  vung_doc: tuple[float, float, float, float] | None = None
+                  ) -> tuple[list[Segment], str]:
         """Chọn nguồn chữ cho MỘT media. Trả `(đoạn, lý do tiếng Việt)`.
 
         Thứ tự: OCR (nếu có engine VÀ `dung_ocr_lam_goc`) -> ASR -> lỗi.
@@ -119,6 +134,13 @@ class TranscribeHandler:
 
         ASR LUÔN chạy trước khi gọi OCR, vì tầng lọc 4 cần `khoang_asr`. Đó là chi phí đã
         biết: muốn dùng tầng 4 thì phải trả tiền ASR.
+
+        `vung_doc` = `(x0, y0, x1, y1)` theo tỉ lệ khung, chỉ đọc chữ trong vùng đó —
+        dùng để loại watermark/logo ở góc cố định. Đo được trên video 1080×1920:
+        watermark `想想工作室` + `bilibili` ở `y=35-102`, `x=697-1051`, tách hẳn khỏi phụ
+        đề thật ở `y=532-619` và `y=1435-1495`. Trước khi có tham số này, 30/32 dòng
+        watermark LỌT qua tầng lọc 4 vì chúng hiện CÙNG LÚC với lời thoại, và tầng 4 chỉ
+        bỏ hộp nằm ngoài khoảng có tiếng nói.
         """
         engine_id = asr_engine_id or self._engine_id
         doan_asr: list[Segment] = []
@@ -128,7 +150,8 @@ class TranscribeHandler:
             doan_asr = self._engine_for(engine_id).transcribe(media_path, lang)
         if self._ocr is not None and dung_ocr_lam_goc:
             khoang = khoang_co_tieng(doan_asr)
-            doan_ocr = self._ocr.doc_phu_de(media_path, khoang_asr=khoang or None)
+            doan_ocr = self._ocr.doc_phu_de(media_path, khoang_asr=khoang or None,
+                                            vung_doc=vung_doc)
             if doan_ocr:
                 return chon_nguon(doan_ocr, doan_asr)
         if not doan_asr and engine_id:
@@ -198,9 +221,35 @@ class TranscribeHandler:
             segments = _boc_bang(engine, str(audio), lang, bao_tien_do)
             ly_do = f"dùng ASR: {len(segments)} đoạn lời nói"
         else:
-            report(0.05, f"chọn nguồn chữ cho {audio.name} (lang={lang})")
-            segments, ly_do = self.chon_doan(str(audio), lang,
-                                            asr_engine_id=job.engine or None)
+            # 🔴 OCR ĐỌC KHUNG HÌNH, KHÔNG ĐỌC WAV (đo được, đây là lỗi thật đã sửa).
+            #
+            # Bản trước truyền `str(audio)` — tệp `.wav` do ingest tách ra — vào
+            # `chon_doan`, mà `chon_doan` đưa thẳng nó cho `doc_phu_de`. Ở đó ffmpeg
+            # không trích được khung nào từ một tệp âm thanh, nên `doan_ocr` LUÔN rỗng
+            # và `chon_nguon` rơi về ASR. Đo được trên `8f4b5304daf42569.mp4`:
+            #
+            #   OCR tren .wav -> 0 Hop sau 0.1 s      (luôn rỗng)
+            #   OCR tren .mp4 -> 71 Hop sau 169.1 s   (đọc được thật)
+            #
+            # Log job 67 nói đúng sự thật của thời điểm đó: "dùng ASR: không đọc được
+            # phụ đề cứng nào" — trên một video CÓ phụ đề cứng. Nghĩa là chính sách
+            # "OCR là chính" chỉ đúng trên giấy: nhánh OCR chạy nhưng không bao giờ
+            # thắng. Sửa bằng cách đưa VIDEO cho OCR, và giữ WAV cho ASR.
+            #
+            # `media_path` là dữ liệu đọc từ DB, cùng lớp rủi ro với `audio_path` ở
+            # trên, nên phải qua `resolve_within` trước khi mở.
+            media = pathlib.Path(source.media_path)
+            try:
+                media = resolve_within(self._workdir, media)
+            except PathOutsideRoot as exc:
+                raise FileNotFoundError(
+                    f"tệp media nằm ngoài gốc media ({self._workdir}): {exc}") from exc
+            if not media.is_file():
+                raise FileNotFoundError(f"tệp media không tồn tại: {media}")
+            report(0.05, f"chọn nguồn chữ cho {media.name} (lang={lang})")
+            segments, ly_do = self.chon_doan(str(media), lang,
+                                            asr_engine_id=job.engine or None,
+                                            vung_doc=self._vung_doc)
             # Tiến độ ĐÃ báo trong `chon_doan`/ASR; không gắn `on_progress` cho OCR vì đọc
             # khung không phát tiến độ theo đoạn, thanh sẽ đứng ở 15 % suốt 6 phút.
             report(0.30, ly_do)

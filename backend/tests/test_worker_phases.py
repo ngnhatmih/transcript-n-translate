@@ -377,7 +377,7 @@ def test_two_consecutive_batches_release_the_model_once_each(repos):
 # Bảng ánh xạ kind -> loại JOB, cố ý viết lại TẠI ĐÂY thay vì import từ
 # app.registry: import thì test chạy cùng nhịp với chính code under test và
 # không bao giờ bắt được một ánh xạ sai. test_registry.py đã lập tiền lệ này.
-_JOB_TYPE_OF_KIND = {"asr": "asr", "mt": "translate"}
+_JOB_TYPE_OF_KIND = {"asr": "asr", "mt": "translate", "ocr": "asr"}
 
 
 def test_every_shipped_engine_phase_key_finds_the_stored_job_phase(repos):
@@ -391,10 +391,15 @@ def test_every_shipped_engine_phase_key_finds_the_stored_job_phase(repos):
     đợi đứng im mà không ném exception, nên phải khoá lại bằng 9/9.
     """
     specs = load_registry()
-    # 10 = 5 ASR + 5 MT, kể cả `deepseek-web` (`runtime: "http"`): engine chạy ở MÁY KHÁC
-    # vẫn đi qua CÙNG hàng đợi và CÙNG `PhaseQueueWorker`, nên `phase_key` của nó cũng phải
-    # tra ra được — một hàng `http` không phải ngoại lệ của bộ điều phối.
-    assert len(specs) == 10, f"registry phải có 10 engine, thấy {len(specs)}"
+    # 11 = 5 ASR + 5 MT + 1 OCR, kể cả `deepseek-web` (`runtime: "http"`): engine chạy ở
+    # MÁY KHÁC vẫn đi qua CÙNG hàng đợi và CÙNG `PhaseQueueWorker`, nên `phase_key` của nó
+    # cũng phải tra ra được — một hàng `http` không phải ngoại lệ của bộ điều phối.
+    #
+    # `rapidocr` vào danh sách này từ khi `load_registry` nạp cả khối `ocr`
+    # (`registry_file._KINDS`). Nó là bước BÊN TRONG job `asr`, nên `phase_key` của nó là
+    # `asr:rapidocr` — xem `_JOB_TYPE_OF_KIND`. Con số ở đây là hằng số CHÉP TAY có chủ ý:
+    # nó bắt việc thêm/bớt engine mà không cập nhật chỗ này, đúng thứ đã xảy ra với `ocr`.
+    assert len(specs) == 11, f"registry phải có 11 engine, thấy {len(specs)}"
 
     not_found: list[str] = []
     for spec in specs:
@@ -411,7 +416,7 @@ def test_every_shipped_engine_phase_key_finds_the_stored_job_phase(repos):
         "phase_key không khớp phase đã lưu nên hàng đợi sẽ đứng im cho: "
         + ", ".join(not_found)
     )
-    assert len(specs) - len(not_found) == 10, "phải là 10/10, không được sót engine nào"
+    assert len(specs) - len(not_found) == 11, "phải là 11/11, không được sót engine nào"
 
 
 # ---------------------------------------------------------------------------
