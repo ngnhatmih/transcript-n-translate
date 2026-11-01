@@ -374,6 +374,47 @@ export function App() {
   }, [banDich]);
 
   /**
+   * Du lieu may chu cho o "He thong" — `GET /api/registry`.
+   *
+   * Nap MOT lan: registry la danh muc engine, no khong doi trong mot phien.
+   *
+   * 🔴 `engineAsr` KHONG chi de hien thi: `POST /api/jobs` voi `type: "asr"` BAT BUOC
+   * co `engine` (`routes_jobs.ENGINE_REQUIRED = {"asr"}`), va thieu no thi route tra
+   * **422 "job loại asr phải có engine"**. Do duoc tren san pham: bam "Phien am" ->
+   * 422, khong job nao duoc tao. Ban dau toi chi giu `engineCount` (mot con so de
+   * hien "N engine") nen khong co ten engine nao de gui.
+   *
+   * Lay engine ASR DAU TIEN cua registry chu KHONG hard-code `fw-large-v3`: danh muc
+   * la du lieu (`backend/registry.json`), va mot ten viet cung trong giao dien se
+   * 422 ngay khi ai do doi registry — dung loai loi chi lo ra luc chay.
+   *
+   * ⚠️ KHOI NAY PHAI KHAI BAO TRUOC `onBuoc`. Ban sua dau tien dat no o CUOI ham
+   * (canh cho `return`), va `onBuoc` o tren doc `engineAsr` -> `tsc` chan:
+   *
+   *   src/App.tsx(531,14): error TS2448: Block-scoped variable 'engineAsr' used
+   *   before its declaration.
+   *
+   * Va vi module khong bien dich duoc, CA 172 bai test do — khong phai vi hanh vi sai
+   * ma vi khong co gi chay. Tri hieu ung "TDZ" cua `const`.
+   */
+  const [engineCount, setEngineCount] = useState<number | null>(null);
+  const [engineAsr, setEngineAsr] = useState<string | null>(null);
+  useEffect(() => {
+    void (async () => {
+      try {
+        const r = await registry();
+        // `Registry` co hai mang theo KIND: `asr` va `mt`. Khong co truong `engines`.
+        setEngineCount(r.asr.length + r.mt.length);
+        setEngineAsr(r.asr.length > 0 ? r.asr[0].id : null);
+      } catch {
+        // Doc khong duoc thi `null` = CHUA DOC DUOC, khac 0 engine.
+        setEngineCount(null);
+        setEngineAsr(null);
+      }
+    })();
+  }, []);
+
+  /**
    * Chay lai mot buoc — chi bon buoc CO route that.
    *
    * 🔴 GUARD PHAI THEO TUNG BUOC, KHONG CHAN CA HAM (loi that, do duoc).
@@ -410,10 +451,22 @@ export function App() {
           setLoi("chưa chọn kênh — không chạy được bước Phiên âm");
           return;
         }
+        // `engine` BAT BUOC cho job `asr` (`routes_jobs.ENGINE_REQUIRED`). Thieu no
+        // thi route tra 422 "job loại asr phải có engine" — do duoc tren san pham
+        // truoc khi co dong nay.
+        //
+        // `engineAsr === null` nghia la CHUA DOC DUOC registry (dang nap, hoac
+        // `GET /api/registry` hong). Khong gui job trong trang thai do: gui mot
+        // `engine` rong thi nhan 422, con doan mot ten thi co the sai. Noi ro rang.
+        if (engineAsr === null) {
+          setLoi("chưa đọc được danh mục engine ASR — thử lại sau khi trang nạp xong");
+          return;
+        }
         void (async () => {
           try {
             await endpoints.createJob({
               type: "asr",
+              engine: engineAsr,
               workspace: 1,
               // KHÔNG gửi `vung_doc` ở đây nữa — vùng đã lưu ở CHÍNH NGUỒN
               // (`sources.vung_doc`, ghi qua `PATCH /api/sources/{id}/vung-doc` mỗi
@@ -500,25 +553,23 @@ export function App() {
       }
       // `ghep`/`xuat` la hanh dong cua nut Xuat, khong phai job rieng.
     },
-    // 🔴 `source` PHAI co trong deps — thieu no la closure dong bang.
+    // 🔴 `source` VA `engineAsr` PHAI co trong deps — thieu mot cai la closure dong bang.
     //
-    // Do duoc: deps cu la `[transcript, banDich]`, nen `onBuoc` duoc tao mot lan voi
-    // `source = null` (lan render dau, `sources` con rong) va KHONG BAO GIO duoc tao
-    // lai khi `sources` nap xong. Hau qua: bam "Phien am" tren mot kenh DA HIEN TEN
-    // van roi vao `if (source === null)` -> thong bao "chua chon kenh" -> khong job
-    // nao duoc tao. Do nguyen van:
+    // Do duoc (lan 1): deps cu la `[transcript, banDich]`, nen `onBuoc` duoc tao mot lan
+    // voi `source = null` (lan render dau, `sources` con rong) va KHONG BAO GIO duoc tao
+    // lai khi `sources` nap xong. Hau qua: bam "Phien am" tren mot kenh DA HIEN TEN van
+    // roi vao `if (source === null)` -> "chua chon kenh" -> khong job nao. Do nguyen van:
     //
-    //   GOI TRUOC KHI BAM: 5  SAU: 5      <- khong mot request nao
+    //   GOI TRUOC KHI BAM: 5  SAU: 5
     //   CO THONG BAO 'chua chon kenh': true
     //
-    // Man hinh hien `phude.mp4` (vi `Studio` nhan `source` qua prop, luon tuoi) trong
-    // khi handler van tin "chua chon kenh" — giao dien va handler bat dong bo, va
-    // khong co loi nao noi len.
+    // Do duoc (lan 2, cung loai loi): `engineAsr` duoc doc trong than ham nhung khong co
+    // trong deps, nen no giu `null` tu lan render dau va bam "Phien am" bao "chua doc
+    // duoc danh muc engine ASR" du registry da ve. Sua ca hai cung luc — sua mot cai roi
+    // de cai kia la lap lai dung loi vua sua.
     //
-    // Bai hoc chung: bat ky gia tri nao doc TRONG callback deu phai co trong deps cua
-    // no. `transcript`/`banDich` da co; `source` bi bo sot vi luc viet ban dau no
-    // khong duoc dung trong than ham.
-    [source, transcript, banDich],
+    // Luat: bat ky gia tri nao doc TRONG callback deu phai co trong deps cua no.
+    [source, engineAsr, transcript, banDich],
   );
 
   /** Long lai MOT doan — backend long ca ban dich, nen day la long lai CA BAN. */
@@ -551,25 +602,6 @@ export function App() {
     },
     [napKenh],
   );
-
-  /**
-   * Du lieu may chu cho o "He thong" — `GET /api/registry`.
-   *
-   * Nap MOT lan: registry la danh muc engine, no khong doi trong mot phien.
-   */
-  const [engineCount, setEngineCount] = useState<number | null>(null);
-  useEffect(() => {
-    void (async () => {
-      try {
-        const r = await registry();
-        // `Registry` co hai mang theo KIND: `asr` va `mt`. Khong co truong `engines`.
-        setEngineCount(r.asr.length + r.mt.length);
-      } catch {
-        // Doc khong duoc thi `null` = CHUA DOC DUOC, khac 0 engine.
-        setEngineCount(null);
-      }
-    })();
-  }, []);
 
   return (
     <Studio

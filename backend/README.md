@@ -274,6 +274,71 @@ Hai bài ghim mới trong `App.test.tsx`:
       -> HTTP 201, job=86, state=queued
       -> running: "chọn nguồn chữ cho 8f4b5304daf42569.mp4 (lang=zh)"
 
+### 422 "job loại asr phải có engine" — và ba phép đo sai liên tiếp
+
+Bấm "Phiên âm" hiện **422: job loại asr phải có engine**. Đúng: `routes_jobs.py` có
+
+    ENGINE_REQUIRED = {"asr"}
+
+và route trả 422 khi thiếu `engine`. Giao diện thì không gửi `engine` nào — nó chỉ giữ
+`engineCount` (một con số để hiện "N engine"), không giữ **tên** engine. Tái hiện và
+chứng minh sửa, đo trên container:
+
+    A  thieu engine  ->  HTTP 422  {"detail":"job loại asr phải có engine"}
+    B  co engine     ->  HTTP 201  job=88  state=queued  engine=fw-large-v3-turbo
+
+Cách sửa: `App` giữ thêm `engineAsr` = `r.asr[0].id` từ `GET /api/registry`, và job `asr`
+gửi `engine: engineAsr`. **Không hard-code `fw-large-v3`** — registry là dữ liệu
+(`backend/registry.json`), và một cái tên viết cứng sẽ 422 ngay khi ai đó đổi registry.
+Khi `engineAsr === null` (registry chưa nạp xong / đọc hỏng) thì **không gửi job**, báo
+*"chưa đọc được danh mục engine ASR"* — gửi engine rỗng thì nhận 422, đoán một tên thì có
+thể sai.
+
+**Ba phép đo sai, ghi lại vì chúng suýt dẫn tới kết luận ngược:**
+
+1. **Thiếu `engineAsr` trong deps.** Đây là lần thứ HAI cùng một lỗi: `onBuoc` đọc
+   `engineAsr` nhưng deps là `[source, transcript, banDich]`. Closure đóng băng ở `null`,
+   nên bấm nút báo "chưa đọc được danh mục" dù registry đã về. Sửa cả `source` lẫn
+   `engineAsr` trong cùng một lần — sửa một cái rồi để cái kia là lặp lại đúng lỗi vừa sửa.
+
+2. **`TS2448: Block-scoped variable 'engineAsr' used before its declaration`.** Tôi đặt
+   khối `useState`/`useEffect` của registry ở cuối hàm (cạnh `return`), mà `onBuoc` ở trên
+   đọc nó. `tsc` chặn, và vì module không biên dịch được nên **cả 172 bài test đỏ** — không
+   phải vì hành vi sai mà vì không có gì chạy. Đã dời khối khai báo lên trước `onBuoc`.
+
+3. **Đếm chuỗi trong SAI file bundle.** Tôi `grep` chuỗi `chua chon kenh` trong
+   `index-CvKagIQd.js` (328 kB) và thấy 0, rồi kết luận "code mới không vào build". Sai:
+   `vite.config.ts` bật `autoCodeSplitting: true`, nên app bị tách thành nhiều chunk.
+   328 kB là **vendor** (React + router); app thật nằm ở `index-GqQKU97p.js` (79 kB) và
+   được nạp bằng `import()` động — file lớn có nhắc tên file nhỏ đúng **1** lần. Đo đúng
+   file nhỏ thì thấy `createJob` ×2, `/jobs` ×5, `engine` ×10, `chua chon kenh` ×1, và
+   nguyên văn đoạn mã:
+
+       if(s==="asr"){if(V===null){L("chưa chọn kênh — …");return}
+       if(q===null){L("chưa đọc được danh mục engine ASR — …");return}
+       (async()=>{try{await ze.createJob({type:"asr",engine:q,workspace:1,
+                                          payload:{source_id:V.id}})}…
+
+   (`q` = `engineAsr`, gán ngay phía trên bằng `F(s.asr.length>0?s.asr[0].id:null)`.)
+
+   Bài học: **hỏi bundle nhiều chunk thì phải hỏi đúng chunk**, và một `grep` trả 0 không
+   tự chứng minh được gì cho tới khi biết mình đang grep cái gì. Trên Windows cũng không có
+   `grep`/`file` — hai lệnh đó fail chứ không trả 0, nên phải đọc `[exit code]`.
+
+Sau khi build lại `web`:
+
+    docker compose exec -T web sh -c 'grep -o "engine:q" …/index-GqQKU97p.js | head -1'
+      -> engine:q                                    (container DA co ban sua)
+    POST /api/jobs {"workspace":1,"type":"asr","engine":"fw-large-v3-turbo",
+                    "payload":{"source_id":2}}
+      -> HTTP 201, job=89, state=queued
+
+**Fixture rỗng làm cả một lớp lỗi không thể lộ.** `traMacDinh` trong `App.test.tsx` trả
+`{asr: [], mt: []}`, nên không bài test nào từng có engine để gửi — và bài test mới của tôi
+về "bấm Phiên âm phải tạo job" xanh trong khi sản phẩm 422, vì nó chỉ kiểm
+`type`/`payload`/`workspace`, không kiểm `engine`. Nay fixture trả một engine ASR thật và
+bài test assert `than.engine === "fw-large-v3"`.
+
 
 ### Bốn bài test mới, và hai lần chúng suýt là test GIẢ
 

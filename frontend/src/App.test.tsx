@@ -148,7 +148,23 @@ function traMacDinh(duong: string, method: string): unknown {
   if (duong === "/transcripts/2" && method === "GET") return BAN_GHI;
   if (duong === "/translations/4" && method === "GET") return BAN_DICH;
   if (duong === "/jobs" && method === "GET") return [];
-  if (duong === "/registry" && method === "GET") return { asr: [], mt: [] };
+  // 🔴 `asr` PHAI khac RONG, khong phai cho dep. `POST /api/jobs` voi `type: "asr"`
+  // BAT BUOC co `engine` (`routes_jobs.ENGINE_REQUIRED`), va giao dien lay ten engine
+  // tu chinh response nay. Ban dau fixture tra `asr: []`, nen khong bai test nao tung
+  // co engine de gui — va loi that tren san pham la **422 "job loại asr phải có
+  // engine"** khi bam "Phien am". Mot fixture rong lam mot lop loi khong the lo ra.
+  if (duong === "/registry" && method === "GET") {
+    return {
+      asr: [
+        {
+          id: "fw-large-v3", label: "Faster-Whisper large-v3", kind: "asr",
+          runtime: "inprocess", model_ref: "large-v3", vram_mb: 3200, langs: ["zh"],
+          capabilities: {}, opts: {},
+        },
+      ],
+      mt: [],
+    };
+  }
   if (duong.startsWith("/dubs/") && duong.endsWith("/plan") && method === "GET") return null;
   // 🔴 PHAI CO, khong phai cho dep. `Studio.tsx:242` goi `getPeaks(source.id, 200000)`
   // trong mot effect `async`. De `/peaks` roi vao `null` (⇒ 404 ⇒ `client.ts` nem)
@@ -570,6 +586,14 @@ describe("App: bấm 'Phiên âm' khi CHƯA có bản ghi vẫn tạo job", () =
       const tao = bang.goi.filter((g) => g.method === "POST" && g.url === "/api/jobs")[0]!;
       const than = JSON.parse(tao.body ?? "{}") as Record<string, unknown>;
       assert.equal(than.type, "asr");
+      // 🔴 `engine` BAT BUOC. Thieu no thi route tra 422 "job loại asr phải có engine"
+      // — đo được trên sản phẩm: bấm "Phiên âm", hiện 422, không job nào được tạo.
+      // Đây là vế mà bản test đầu tiên của tôi THIẾU, nên nó xanh trong khi sản phẩm
+      // hỏng: nó chỉ kiểm `type`/`payload`/`workspace`, không kiểm thứ route đòi.
+      assert.equal(
+        than.engine, "fw-large-v3",
+        `job asr phải mang engine lấy từ GET /api/registry, đo được ${JSON.stringify(than.engine)}`,
+      );
       // `source_id` lấy từ KÊNH, không từ bản ghi (chưa có bản ghi nào).
       assert.deepEqual(than.payload, { source_id: 1 });
       // Job bóc băng thuộc workspace 1 — cùng con số `IngestHandler` dùng khi tự xếp job.
