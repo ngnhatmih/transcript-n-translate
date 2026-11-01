@@ -700,3 +700,111 @@ describe("App: bấm 'Phiên âm' khi CHƯA có bản ghi vẫn tạo job", () =
     }
   });
 });
+
+/**
+ * HÀNG ĐỢI ĐỔI TRẠNG THÁI ⇒ DỮ LIỆU PHẢI TỰ NẠP LẠI, KHÔNG CẦN F5.
+ *
+ * 🔴 LỖI THẬT, ĐO ĐƯỢC (người dùng báo: "khi mở một video mới thì phải refresh trang nó
+ * mới refresh state"). `jobs` được làm mới mỗi `NHIP_JOB_MS` = 2000 ms, nhưng `sources`
+ * và `transcript` chỉ nạp MỘT LẦN:
+ *
+ *     useEffect(() => { void napKenh() }, [napKenh])        // napKenh co deps []
+ *     useEffect(() => { … getTranscript … }, [sourceId])    // chi khi doi kenh
+ *
+ * Nên khi job `ingest` chạy xong và ghi `audio_path`/`duration` vào nguồn, giao diện
+ * vẫn giữ bản `source` chụp lúc mở trang với `audio_path: null` — nó tưởng video chưa
+ * bóc xong âm thanh. Bản ghi do job `asr` tạo ra cũng không hiện. Chỉ F5 mới thấy.
+ *
+ * Vì sao KHÔNG đưa `jobs` thẳng vào deps: `setJobs` tạo MẢNG MỚI mỗi 2 giây kể cả khi
+ * không có gì đổi, nên deps `[jobs]` sẽ gọi lại ba route mỗi 2 giây, mãi mãi. Dùng
+ * `dauVanTay(jobs)` = chuỗi `id:state` — so sánh GIÁ TRỊ, chỉ đổi khi có job chuyển
+ * trạng thái thật.
+ *
+ * Bài này đo đúng chuỗi đó: `/sources` trả `audio_path: null` ở lần gọi ĐẦU, rồi (sau
+ * khi một job `ingest` xuất hiện ở `done`) trả `audio_path` thật. Không có dấu vân tay
+ * thì giao diện mãi mãi thấy `null`.
+ */
+describe("App: hàng đợi đổi trạng thái thì tự nạp lại, không cần F5", () => {
+  it("nguồn chuyển từ chưa-có-audio sang có-audio khi job ingest xong", async () => {
+    let lanSources = 0;
+    let lanJobs = 0;
+    const bang = chanFetch((duong, method) => {
+      if (duong === "/sources" && method === "GET") {
+        lanSources += 1;
+        // Lần đầu: ingest chưa xong. Từ lần sau: đã xong.
+        return lanSources === 1
+          ? [{ ...KENH, audio_path: null, duration: null }]
+          : [KENH];
+      }
+      if (duong === "/transcripts" && method === "GET") return [];
+      if (duong === "/jobs" && method === "GET") {
+        // 🔴 ĐẾM RIÊNG, KHÔNG buộc vào `lanSources`: hai route chạy SONG SONG, nên
+        // điều kiện `lanSources === 1` phụ thuộc THỨ TỰ hai promise — đo được là nó
+        // làm bài test đỏ sai ("đo được 1 lần") dù sản phẩm đúng. Đếm riêng thì phép
+        // đo chỉ nói về chính route này.
+        //
+        // Job `ingest` xuất hiện từ lần gọi `/jobs` THỨ HAI, ở trạng thái `done` —
+        // đúng cái làm `dauVanTay` đổi từ "" sang "5:done".
+        lanJobs += 1;
+        return lanJobs === 1
+          ? []
+          : [{ id: 5, workspace: 1, type: "ingest", engine: null,
+               phase: "ingest:-", state: "done" }];
+      }
+      return traMacDinh(duong, method);
+    });
+    try {
+      render(<App />);
+
+      // Bước 1: trạng thái ĐẦU là chưa có audio — bấm "Phiên âm" phải bị chặn.
+      await waitFor(
+        () => {
+          assert.ok(q().queryAllByText(/phude\.mp4/).length > 0, "chưa nạp xong kênh");
+        },
+        { timeout: 3000 },
+      );
+      q().getByRole("button", { name: /Phiên âm/ }).click();
+      await waitFor(() => {
+        assert.match(
+          document.body.textContent ?? "",
+          /chưa bóc xong âm thanh/,
+          "trước khi ingest xong phải báo chưa có âm thanh",
+        );
+      });
+
+      // Bước 2: KHÔNG bấm gì, KHÔNG F5. Chỉ chờ nhịp `GET /api/jobs` kế tiếp mang về
+      // job `ingest` đã `done` — và `sources` phải được nạp LẠI.
+      //
+      // `timeout: 8000` vì nhịp là 2000 ms và còn phải chờ hai lượt: một lượt thấy job,
+      // một lượt nạp lại nguồn. Đo được: để mặc định 1000 ms thì bài này đỏ vì đợi quá
+      // ngắn, không phải vì sản phẩm sai.
+      await waitFor(
+        () => {
+          assert.ok(
+            lanSources >= 2,
+            `GET /api/sources phải được gọi lại khi hàng đợi đổi (đo được ${lanSources} lần). ` +
+            `1 lần nghĩa là effect còn deps cũ — phải F5 mới thấy video mới.`,
+          );
+        },
+        { timeout: 8000 },
+      );
+
+      // Và bằng chứng người dùng thấy được: guard "chưa bóc xong âm thanh" không còn
+      // chặn nữa, nên bấm "Phiên âm" lần này gửi ĐÚNG MỘT job.
+      q().getByRole("button", { name: /Phiên âm/ }).click();
+      await waitFor(
+        () => {
+          const tao = bang.goi.filter((g) => g.method === "POST" && g.url === "/api/jobs");
+          assert.equal(
+            tao.length, 1,
+            `sau khi ingest xong phải gửi được job, đo được ${tao.length}`,
+          );
+        },
+        { timeout: 3000 },
+      );
+    } finally {
+      cleanup();
+      traFetch();
+    }
+  });
+});

@@ -55,6 +55,29 @@ import { VUNG_DOC_MAC_DINH, type VungDoc } from "@/components/studio/VungDoc";
 /** Nhip lam moi cua `GET /api/jobs` — du job chay lau, khong can SSE o day. */
 const NHIP_JOB_MS = 2000;
 
+/**
+ * DẤU VÂN TAY của hàng đợi: chỉ đổi khi có job ĐỔI TRẠNG THÁI.
+ *
+ * 🔴 VÌ SAO CẦN (lỗi thật, người dùng báo "khi mở một video mới thì phải refresh trang
+ * nó mới refresh state"): `jobs` được làm mới mỗi 2 giây, nhưng `sources` và
+ * `transcript` chỉ nạp MỘT LẦN. Nên khi job `ingest` xong và ghi `audio_path`/
+ * `duration` vào nguồn, giao diện vẫn giữ bản `source` cũ với `audio_path: null` — nó
+ * tưởng video chưa bóc xong âm thanh, và bản ghi mới do job `asr` tạo ra không bao giờ
+ * hiện. Chỉ F5 mới thấy.
+ *
+ * Vì sao KHÔNG đưa `jobs` vào deps của hai effect đó: `setJobs` tạo một MẢNG MỚI mỗi
+ * 2 giây kể cả khi không có gì đổi, nên deps `[jobs]` sẽ gọi `GET /api/sources` +
+ * `GET /api/transcripts` + `GET /api/transcripts/{id}` mỗi 2 giây, mãi mãi. Dấu vân
+ * tay chỉ đổi khi một job thật sự chuyển trạng thái.
+ *
+ * KHÔNG gồm `progress`: nó đổi liên tục trong lúc chạy (mỗi checkpoint), nên dấu vân
+ * tay sẽ đổi suốt một job dài — đúng thứ cần tránh. Chỉ `state` quyết định "job này đã
+ * sinh ra dữ liệu mới hay chưa".
+ */
+function dauVanTay(jobs: readonly Job[]): string {
+  return jobs.map((j) => `${j.id}:${j.state}`).join(",");
+}
+
 export function App() {
   const [sources, setSources] = useState<Source[]>([]);
   const [sourcesLoading, setSourcesLoading] = useState(true);
@@ -121,9 +144,22 @@ export function App() {
     }
   }, []);
 
+  /**
+   * Danh sách kênh — nạp khi mở trang VÀ mỗi khi hàng đợi đổi trạng thái.
+   *
+   * 🔴 `soJob` trong deps chính là bản sửa cho "phải refresh trang nó mới refresh
+   * state". Không có nó thì `ingest` chạy xong (ghi `audio_path`/`duration`) mà
+   * `sources` vẫn là bản chụp lúc mở trang: `source.audio_path` còn `null`, nên guard
+   * "chưa bóc xong âm thanh" báo sai và người dùng tưởng video chưa nạp.
+   *
+   * `soJob` là CHUỖI (xem `dauVanTay`), nên phép so sánh của React là so GIÁ TRỊ: hai
+   * chuỗi giống nhau thì effect không chạy lại, dù `jobs` là mảng mới mỗi 2 giây.
+   */
+  const soJob = useMemo(() => dauVanTay(jobs), [jobs]);
+
   useEffect(() => {
     void napKenh();
-  }, [napKenh]);
+  }, [napKenh, soJob]);
 
   /**
    * BAN GHI cua kenh dang chon.
@@ -131,6 +167,11 @@ export function App() {
    * `GET /api/transcripts` tra TOM TAT (khong co `segments`), nen phai di tiep mot
    * buoc `getTranscript`. Chon ban ghi MOI NHAT (`version` lon nhat) — do la ban
    * backend vua ghi, khong phai mot ban cu con `stale`.
+   *
+   * 🔴 `soJob` CUNG phai co trong deps: job `asr` xong là lúc một bản ghi MỚI xuất hiện,
+   * và không có gì khác báo cho effect này biết. Thiếu nó thì bản ghi mới chỉ hiện sau
+   * khi F5 — đúng triệu chứng người dùng báo ("mở video mới phải refresh trang").
+   * Không dùng `jobs` trực tiếp: mảng mới mỗi 2 giây sẽ nạp lại liên tục.
    */
   useEffect(() => {
     if (sourceId === null) {
@@ -156,7 +197,9 @@ export function App() {
     return () => {
       huy = true;
     };
-  }, [sourceId]);
+    // `soJob` — job `asr` xong là lúc một bản ghi MỚI xuất hiện, và không có gì khác
+    // báo cho effect này biết. Thiếu nó thì bản ghi mới chỉ hiện sau khi F5.
+  }, [sourceId, soJob]);
 
   /**
    * BAN DICH dang xem cua ban ghi — `done` va MOI NHAT.
