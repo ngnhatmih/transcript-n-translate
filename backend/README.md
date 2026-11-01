@@ -101,6 +101,56 @@ không còn đỉnh watermark để bám vào. Nội dung job 71 là lời tho�
 (`作为一个搞艺术的` / `最苦恼的事就是` / `自己的作品是有价值的`), còn job 69 chỉ có 2 dòng
 thoại đúng trong 48.
 
+### `vung_doc` đi theo TỪNG JOB, và giao diện kéo-thả nó trên video
+
+Một con số trong `registry.json` chỉ đúng cho MỘT video. Đo được: `8f4b5304daf42569.mp4`
+(1080×1920) có watermark ở `y=35-102` (góc trên phải), còn `ac5df767b9e0c878.mp4`
+(1280×720) ở chỗ khác. Nên `vung_doc` trở thành trường của **payload job `asr`**
+(`AsrPayload.vung_doc`), và `run` ưu tiên payload hơn `opts.vung_doc` của registry.
+
+Ba trạng thái, và chúng PHẢI phân biệt được:
+
+| payload | nghĩa | đo được |
+|---|---|---|
+| không có khoá | dùng `opts.vung_doc` của registry | job 71: 77 dòng, 0 watermark |
+| `[]` | **TẮT** lọc vùng — nút × trên giao diện | job 80: 48 dòng, **32** watermark |
+| `[x0,y0,x1,y1]` | payload thắng registry | job 78 (`[0,0.25,1,1]`): 77 dòng, 0 watermark |
+
+**Job 80 là phép đo quan trọng nhất**: `vung_doc: []` cho ra **đúng** 48 dòng và 32
+watermark — bằng chính job 69, tức hành vi trước khi có tính năng. Nghĩa là nút × tương
+đương chính xác "tắt", không phải "một cái gì đó gần giống".
+
+🔴 Cái bẫy đã tránh: `payload.get("vung_doc") or self._vung_doc` biến `[]` (falsy) thành
+"dùng mặc định registry" — nút × trông như đã bấm mà watermark vẫn bị lọc theo vùng cũ.
+`run` kiểm bằng `"vung_doc" in job.payload`, và `tests/test_transcribe_ocr.py` (+4 bài)
+ghim cả ba nhánh đó.
+
+**Kiểm ngữ nghĩa Ở CỬA, không ở worker.** Bản đầu `AsrPayload` khai
+`min_length=0, max_length=4` — chỉ chặn số phần tử. Đo trên container:
+`POST /api/jobs` với `vung_doc: [0, 0, 1]` (ba số) trả **201**, job vào hàng đợi, rồi
+`_vung_doc_tu_payload` mới ném `ValueError` ở worker ⇒ job `failed`. Tệ hơn: `[1, 0.1, 0, 1]`
+(đảo) cũng `201`, và một vùng đảo lọc sạch mọi hộp ⇒ OCR trả `[]` "hợp lệ" ⇒ pipeline lặng
+lẽ rơi về ASR. Nay `field_validator` chặn ngay tại route, đo lại:
+
+    vung_doc: [0,0,1]        -> HTTP 422  "... phải có đúng 4 số ..."
+    vung_doc: [0,0,1,1,0]    -> HTTP 422  "... phải có đúng 4 số ..."
+    vung_doc: [-0.1,0.1,1,1] -> HTTP 422  "... phải nằm trong [0, 1] ..."
+    vung_doc: [1,0.1,0,1]    -> HTTP 422  "... phải thoả x0 < x1 và y0 < y1 ..."
+
+**Giao diện: khung kéo-thả trên chính khung hình** (`frontend/src/components/studio/VungDoc.tsx`).
+Vì sao ở trên video chứ không phải bốn ô số ở cột phải: người dùng phải THẤY watermark để
+kéo khung tới nó. Bốn ô số bắt họ quy đổi vị trí nhìn thấy sang toạ độ tỉ lệ trong đầu —
+đoán sai thì hoặc watermark lọt, hoặc phụ đề thật bị cắt, cả hai đều im lặng.
+
+Toạ độ là TỈ LỆ `0..1` của hộp hiển thị (không phải pixel), vì `<video>` hiển thị nhỏ hơn
+khung gốc và đổi theo cửa sổ, còn `ffmpeg` trích khung ở độ phân giải gốc. Nút × đặt trong
+khung (đi theo vùng đang chỉnh); khi tắt, khung biến thành nút "Vùng đọc: tắt · bật lại".
+`keoVung` là hàm THUẦN nên `VungDoc.test.tsx` (+12 bài) kiểm được số học mà không cần
+trình duyệt — ba lỗi nó tồn tại để chặn: kẹp từng cạnh khi `move` làm khung CO LẠI khi đập
+mép, cho `x0 >= x1` (backend từ chối, lỗi hiện ở tận lúc chạy job), và không có sàn kích
+thước (khung co về 0, không bắt lại được bằng chuột).
+
+
 ### Bốn bài test mới, và hai lần chúng suýt là test GIẢ
 
 `tests/test_requirements_docker.py` (+3) đọc `main.py` tìm mọi `import` trong khối
@@ -155,32 +205,32 @@ GPU. Nó tự ép UTF-8 cho stdout (console Windows mặc định cp1252, còn s
 tiếng Trung/Việt) và tự đặt cache model trước khi nạp `faster_whisper`.
 
 Con số nền của lần chạy mặc định, đo sau khi xoá `__pycache__` (lệnh ở mục
-"Kiểm thử" trên, chạy từ trong `backend\`). Thứ có nghĩa là **1432 / 15**, không
+"Kiểm thử" trên, chạy từ trong `backend\`). Thứ có nghĩa là **1436 / 15**, không
 phải số giây — thời gian trôi giữa các lần chạy (đã thấy 24,00–30,94 s) còn con
 số bài thì không:
 
 ```
-1432 passed, 15 deselected, 3 warnings
+1436 passed, 15 deselected, 3 warnings
 ```
 
 Hai con số đó là SỐ BÀI ĐƯỢC CHỌN, và chúng khớp với số mà `--collect-only` báo
-(`1432/1447`, 15 bài `live` bị bỏ;
+(`1436/1451`, 15 bài `live` bị bỏ;
 `tests/test_backend_readme.py::test_readme_baseline_matches_the_tests_actually_
 collected` đối chiếu mỗi lần chạy).
 
 
-Máy này **CÓ** `ffmpeg 8.1.1` + `ffprobe` trên PATH (đã đo), nên `1432/15` ở trên
+Máy này **CÓ** `ffmpeg 8.1.1` + `ffprobe` trên PATH (đã đo), nên `1436/15` ở trên
 là số THẬT của nó. Máy **không có** `ffmpeg`/`ffprobe` cho một kết quả KHÁC: cả
 `tests/test_ingest.py` bị `skipif` ở cấp module — **9** bài cùng skip một lượt —
-nên dòng tổng kết của máy đó là **`1423 passed, 9 skipped, 15 deselected`** (=
-`1432 − 9`; con số này TỪNG ghi `978`, tức một baseline rất cũ, và nó lệch phép
+nên dòng tổng kết của máy đó là **`1427 passed, 9 skipped, 15 deselected`** (=
+`1436 − 9`; con số này TỪNG ghi `978`, tức một baseline rất cũ, và nó lệch phép
 trừ của chính khối nền ngay trên nó). Đó là
 con số của máy thiếu ffmpeg, **không phải** con số máy này từng in ra; đừng chép
 nó vào khối nền ở trên, và đừng "sửa" số nền xuống chỉ vì thiếu ffmpeg.
 
 ⚠️ Con số `856` ở đây TỪNG không khớp phép trừ của chính nó: `865 − 9 = 856`, tức
 nó là số của lượt TRƯỚC `V1` (+3 bài) còn sót lại. Phép trừ của khối nền hiện tại
-là `1432 − 9` = `1423`.
+là `1436 − 9` = `1427`.
 
 
 (Con số này từng bị ghi là `798`: bài `test_a_failed_translation_leaves_the_

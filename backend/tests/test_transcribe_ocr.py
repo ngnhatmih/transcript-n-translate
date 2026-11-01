@@ -224,3 +224,83 @@ def test_run_dua_VIDEO_cho_ocr_chu_khong_phai_wav(tmp_path):
         f"Nếu là '.wav' thì không có khung hình nào để đọc, OCR trả [] 'hợp lệ', "
         f"và cả chính sách 'OCR là chính' lặng lẽ thành 'ASR là chính'."
     )
+
+
+# ---------------------------------------------------------------------------
+# `payload.vung_doc` — vùng đọc do GIAO DIỆN gửi, thắng mặc định của registry.
+#
+# 🔴 BA TRẠNG THÁI PHẢI PHÂN BIỆT ĐƯỢC, và đây là toàn bộ lý do nhóm test này tồn tại:
+#
+#   không có khoá `vung_doc`  -> dùng `opts.vung_doc` của registry (mặc định)
+#   `[]`                      -> TẮT lọc vùng, đọc cả khung (nút × trên giao diện)
+#   `[x0, y0, x1, y1]`        -> payload THẮNG registry
+#
+# Cái bẫy: `payload.get("vung_doc") or self._vung_doc` sẽ biến `[]` (falsy) thành "dùng
+# mặc định" — nút × trông như đã bấm mà watermark vẫn bị lọc theo vùng cũ. Nên `run`
+# kiểm bằng `"vung_doc" in job.payload`, và các bài dưới ghim đúng ba nhánh đó.
+#
+# Vì sao vùng phải đi theo TỪNG JOB chứ không chỉ nằm trong registry: vùng watermark
+# phụ thuộc VIDEO. Đo được `8f4b5304daf42569.mp4` (1080×1920) có watermark ở
+# `y=35-102`, còn `ac5df767b9e0c878.mp4` (1280×720) ở chỗ khác — một con số chung đúng
+# cho video này và SAI cho video kia, và cái sai đó im lặng.
+# ---------------------------------------------------------------------------
+
+
+def _chay_voi_vung(tmp_path, payload_them, *, mac_dinh=(0.0, 0.1, 1.0, 1.0)):
+    """Chạy `run` với `payload_them`, trả `vung_doc` mà OCR nhận.
+
+    `mac_dinh` đặt vào `h._vung_doc` để mô phỏng `opts.vung_doc` của registry — nếu để
+    `None` thì nhánh "không khai" và nhánh "`[]`" cho CÙNG kết quả, và bài test sẽ
+    xanh trong khi nút × không có tác dụng gì.
+    """
+    video = tmp_path / "video.mp4"
+    video.write_bytes(b"\x00" * 64)
+    wav = tmp_path / "video.wav"
+    sf.write(str(wav), np.zeros(8_000, dtype=np.float32), 8_000)
+
+    ocr = OcrGia([Segment(i=0, start=0.0, end=1.0, text="từ OCR")])
+    asr = AsrGia([Segment(i=0, start=0.0, end=1.0, text="từ ASR")])
+    h = _handler(tmp_path, ocr=ocr, asr=asr)
+    h._vung_doc = mac_dinh
+
+    sid = h._repos.add_source(kind="file", origin="video.mp4", media_path=str(video),
+                              audio_path=str(wav), duration=1.0, lang="zh")
+    h.run(Job(id=None, workspace=1, type="asr", engine="asr-gia",
+              phase="asr:asr-gia", payload={"source_id": sid, **payload_them}),
+          lambda *_: None)
+    return ocr.vung_doc_nhan
+
+
+def test_khong_khai_vung_doc_thi_dung_mac_dinh_registry(tmp_path):
+    """Không có khoá ⇒ handler dùng `self._vung_doc` (từ `opts.vung_doc`)."""
+    assert _chay_voi_vung(tmp_path, {}) == (0.0, 0.1, 1.0, 1.0)
+
+
+def test_vung_doc_rong_la_TAT_chu_khong_phai_dung_mac_dinh(tmp_path):
+    """`[]` (nút ×) ⇒ OCR đọc CẢ khung, dù registry có mặc định.
+
+    Đây là bài chặn đúng cái bẫy `or`: `[]` là falsy, nên `payload.get(...) or mac_dinh`
+    biến "người dùng đã tắt" thành "dùng lại vùng cũ". Triệu chứng sẽ là watermark vẫn
+    bị lọc theo vùng cũ trong khi giao diện đã hiện trạng thái tắt — không lỗi nào nổi
+    lên, chỉ có kết quả sai.
+    """
+    assert _chay_voi_vung(tmp_path, {"vung_doc": []}) is None
+
+
+def test_vung_doc_trong_payload_thang_mac_dinh_registry(tmp_path):
+    """Bốn số trong payload THẮNG `opts.vung_doc` — vùng thuộc về video, không registry."""
+    ra = _chay_voi_vung(tmp_path, {"vung_doc": [0.2, 0.3, 0.8, 0.9]})
+    assert ra == (0.2, 0.3, 0.8, 0.9), ra
+
+
+def test_vung_doc_sai_hinh_dang_thi_job_hong_ON_AO(tmp_path):
+    """`x0 >= x1` phải NÉM, không lặng lẽ lọc sạch.
+
+    Vì sao không "tự sắp lại cho đúng": người viết gửi `[1, 0.1, 0, 1]` đã hiểu sai ý
+    nghĩa bốn số, và tự sửa giúp họ sẽ che mất việc đó. Nặng hơn: một vùng bị đảo có
+    thể lọc sạch mọi hộp, OCR trả `[]` "hợp lệ", và pipeline lặng lẽ rơi về ASR.
+    """
+    import pytest
+
+    with pytest.raises(ValueError, match="x0 < x1"):
+        _chay_voi_vung(tmp_path, {"vung_doc": [1, 0.1, 0, 1]})

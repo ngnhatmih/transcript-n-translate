@@ -28,6 +28,7 @@ import { Timeline, type BaoSong } from "./Timeline";
 import { SegmentRow, type ViewMode } from "./SegmentRow";
 import { PipelineBar } from "./PipelineBar";
 import { CommandPalette, type Command } from "./CommandPalette";
+import { VungDocKhung, type VungDoc } from "./VungDoc";
 
 /**
  * BAN LAM VIEC — man hinh chinh cua Phong thu bien tap.
@@ -114,6 +115,9 @@ export interface StudioProps {
   loi?: string | null;
   /** So engine trong `GET /api/registry` — `null` khi chua doc duoc. */
   soEngine?: number | null;
+  /** Vùng đọc OCR của nguồn đang mở; `null` = TẮT (đọc cả khung). */
+  vungDoc: VungDoc | null;
+  onVungDoc: (v: VungDoc | null) => void;
 }
 
 export function Studio(props: StudioProps) {
@@ -136,6 +140,8 @@ export function Studio(props: StudioProps) {
     onNapTep,
     loi,
     soEngine,
+    vungDoc,
+    onVungDoc,
   } = props;
 
   const [currentId, setCurrentId] = useState<number | null>(null);
@@ -927,9 +933,24 @@ export function Studio(props: StudioProps) {
                 </button>
               )}
               {playingSeg && (
-                <p className="pointer-events-none absolute inset-x-4 bottom-3 text-center text-[14px] leading-5 text-ink-0 [text-shadow:0_1px_3px_var(--panel-0),0_0_8px_var(--panel-0)]">
+                <p className="pointer-events-none absolute inset-x-4 bottom-3 z-30 text-center text-[14px] leading-5 text-ink-0 [text-shadow:0_1px_3px_var(--panel-0),0_0_8px_var(--panel-0)]">
                   {playingSeg.dich === "" ? playingSeg.text : playingSeg.dich}
                 </p>
+              )}
+              {/*
+                KHUNG VÙNG ĐỌC OCR — đè lên chính khung hình.
+                Vì sao ở đây chứ không ở panel bên cạnh: người dùng phải THẤY watermark
+                để kéo khung tới nó. Một ô số ở cột phải bắt họ quy đổi vị trí nhìn
+                thấy sang toạ độ tỉ lệ trong đầu — và đoán sai thì hoặc watermark lọt,
+                hoặc phụ đề thật bị cắt, cả hai đều im lặng.
+                Chỉ hiện khi ĐÃ có video: chưa có hình thì không có gì để chọn vùng.
+              */}
+              {player.src !== null && (
+                <VungDocKhung
+                  vung={vungDoc}
+                  onChange={onVungDoc}
+                  sourceId={source === null ? null : source.id}
+                />
               )}
             </div>
             <div className="flex min-w-0 flex-1 flex-col justify-between py-1">

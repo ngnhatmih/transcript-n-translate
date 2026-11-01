@@ -51,6 +51,54 @@ def _boc_bang(engine: ASREngine, audio: str, lang: str,
     return engine.transcribe(audio, lang, on_progress=bao_tien_do)
 
 
+def _vung_doc_tu_payload(tho) -> tuple[float, float, float, float] | None:
+    """`payload["vung_doc"]` → vùng đọc, hoặc `None` khi payload nói "đọc cả khung".
+
+    Ba trạng thái phải phân biệt được, và đó là toàn bộ lý do hàm này tồn tại:
+
+      · không có khoá `vung_doc`  ⇒ `run` KHÔNG gọi hàm này (dùng mặc định registry)
+      · `[]` hoặc `None`          ⇒ `None` — TẮT lọc vùng, đọc cả khung (nút ×)
+      · `[x0, y0, x1, y1]`        ⇒ bốn số, đã kiểm
+
+    Vì sao KHÔNG `payload.get("vung_doc") or self._vung_doc`: `[]` là falsy, nên phép
+    `or` biến "người dùng bấm × để tắt" thành "dùng lại mặc định registry" — nút ×
+    trông như đã bấm mà watermark vẫn bị lọc theo vùng cũ. Đó là kiểu hỏng im lặng mà
+    cả nhánh OCR vừa phải sửa ba lần.
+
+    Bốn số phải thoả `0 <= x0 < x1 <= 1`, `0 <= y0 < y1 <= 1`. Sai hình dạng thì NÉM
+    kèm câu tiếng Việt nêu giá trị — thà job `failed` ồn ào còn hơn lọc sạch mọi hộp
+    rồi OCR trả `[]` "hợp lệ" và pipeline lặng lẽ rơi về ASR.
+    """
+    if tho is None:
+        return None
+    if not isinstance(tho, (list, tuple)):
+        raise ValueError(
+            f"payload.vung_doc phải là danh sách [x0, y0, x1, y1] theo tỉ lệ khung "
+            f"(0..1), đo được {tho!r}"
+        )
+    if len(tho) == 0:
+        return None
+    if len(tho) != 4:
+        raise ValueError(
+            f"payload.vung_doc phải có đúng 4 số [x0, y0, x1, y1], đo được {len(tho)}: "
+            f"{tho!r}"
+        )
+    try:
+        x0, y0, x1, y1 = (float(v) for v in tho)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            f"payload.vung_doc chứa giá trị không phải số: {tho!r}"
+        ) from exc
+    if not all(0.0 <= v <= 1.0 for v in (x0, y0, x1, y1)):
+        raise ValueError(f"payload.vung_doc ngoài [0, 1]: {tho!r}")
+    if not (x0 < x1 and y0 < y1):
+        raise ValueError(
+            f"payload.vung_doc phải thoả x0 < x1 và y0 < y1 (thứ tự [x0, y0, x1, y1]), "
+            f"đo được {tho!r}"
+        )
+    return (x0, y0, x1, y1)
+
+
 class TranscribeHandler:
     def __init__(
         self,
@@ -247,9 +295,26 @@ class TranscribeHandler:
             if not media.is_file():
                 raise FileNotFoundError(f"tệp media không tồn tại: {media}")
             report(0.05, f"chọn nguồn chữ cho {media.name} (lang={lang})")
+            # Vùng đọc: ƯU TIÊN payload của CHÍNH job này, rồi mới tới registry.
+            #
+            # 🔴 VÌ SAO THỨ TỰ ĐÓ (đo được): vùng watermark phụ thuộc VIDEO, không phụ
+            # thuộc engine. `8f4b5304daf42569.mp4` (1080×1920) có watermark ở
+            # `y=35-102`, còn `ac5df767b9e0c878.mp4` (1280×720) ở chỗ khác. Một con số
+            # chung trong registry đúng cho video này và SAI cho video kia — và cái sai
+            # đó im lặng: hoặc watermark lọt, hoặc phụ đề thật bị cắt mất.
+            #
+            # Nên giao diện gửi vùng nó đã chọn cho từng video; registry chỉ là mặc
+            # định khi không ai chọn. `[]` (rỗng) là TẮT — nút × trên giao diện — và
+            # phải phân biệt được với `None` ("không gửi gì"): `[]` nghĩa là "đọc cả
+            # khung", `None` nghĩa là "dùng mặc định". `payload.get` trả `None` cho cả
+            # hai nếu dùng `or`, nên phải kiểm bằng `in`.
+            vung = self._vung_doc
+            if "vung_doc" in job.payload:
+                tho = job.payload["vung_doc"]
+                vung = _vung_doc_tu_payload(tho)
             segments, ly_do = self.chon_doan(str(media), lang,
                                             asr_engine_id=job.engine or None,
-                                            vung_doc=self._vung_doc)
+                                            vung_doc=vung)
             # Tiến độ ĐÃ báo trong `chon_doan`/ASR; không gắn `on_progress` cho OCR vì đọc
             # khung không phát tiến độ theo đoạn, thanh sẽ đứng ở 15 % suốt 6 phút.
             report(0.30, ly_do)

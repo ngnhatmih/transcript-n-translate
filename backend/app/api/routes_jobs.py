@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, Field, ValidationError, field_validator
 
 from app.api.deps import get_repos, get_specs
 from app.api.sse import JobEventBroker, stream_events
@@ -30,10 +30,53 @@ class IngestPayload(BaseModel):
 
 
 class AsrPayload(BaseModel):
-    """`TranscribeHandler.run` đọc `payload["source_id"]` (transcribe.py)."""
+    """`TranscribeHandler.run` đọc `payload["source_id"]` (transcribe.py).
+
+    `vung_doc` = `[x0, y0, x1, y1]` theo TỈ LỆ khung (0..1), vùng OCR được đọc. Đây là
+    tham số của LƯỢT GỌI chứ không phải của registry, vì vùng watermark phụ thuộc VIDEO:
+    đo được `8f4b5304daf42569.mp4` (1080×1920) có watermark ở `y=35-102` còn
+    `ac5df767b9e0c878.mp4` (1280×720) ở chỗ khác. Một con số chung trong registry đúng
+    cho video này và sai cho video kia.
+
+    `None` = dùng `opts.vung_doc` của registry (mặc định hiện tại `[0, 0.1, 1, 1]`).
+    `[]` = TẮT lọc vùng, đọc cả khung — đó là cách giao diện biểu diễn nút ×.
+    """
 
     source_id: int = Field(ge=1)
     lang: str | None = None
+    vung_doc: list[float] | None = None
+
+    @field_validator("vung_doc")
+    @classmethod
+    def _kiem_vung_doc(cls, v: list[float] | None) -> list[float] | None:
+        """Ba trạng thái hợp lệ: `None` (mặc định), `[]` (TẮT), bốn số đúng thứ tự.
+
+        🔴 VÌ SAO KIỂM NGỮ NGHĨA Ở ĐÂY (đo được, đây là lỗi thật đã sửa): bản đầu khai
+        `min_length=0, max_length=4` — chỉ chặn SỐ PHẦN TỬ. Đo trên container:
+        `POST /api/jobs` với `vung_doc: [0, 0, 1]` (BA số) trả **201**, job vào hàng đợi,
+        rồi `_vung_doc_tu_payload` mới ném `ValueError` ở worker ⇒ job `failed`. Hai tầng
+        không khớp nhau: cửa nhận thứ mà nhà từ chối.
+
+        Nặng hơn là trường hợp ĐẢO: `[1, 0.1, 0, 1]` cũng trả 201. Một vùng đảo lọc sạch
+        mọi hộp ⇒ OCR trả `[]` "hợp lệ" ⇒ pipeline lặng lẽ rơi về ASR mà không ai biết
+        vì sao. Đó đúng là kiểu hỏng mà cả nhánh OCR vừa phải sửa ba lần, nên nó phải
+        bị chặn Ở CỬA.
+        """
+        if v is None or len(v) == 0:
+            return v
+        if len(v) != 4:
+            raise ValueError(
+                f"vung_doc phải có đúng 4 số [x0, y0, x1, y1] theo tỉ lệ khung, "
+                f"hoặc [] để tắt lọc vùng; nhận được {len(v)} số: {v!r}"
+            )
+        if not all(0.0 <= x <= 1.0 for x in v):
+            raise ValueError(f"vung_doc phải nằm trong [0, 1] (tỉ lệ khung): {v!r}")
+        x0, y0, x1, y1 = v
+        if not (x0 < x1 and y0 < y1):
+            raise ValueError(
+                f"vung_doc phải thoả x0 < x1 và y0 < y1 (thứ tự [x0, y0, x1, y1]): {v!r}"
+            )
+        return v
 
 
 class DubPayload(BaseModel):

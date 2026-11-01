@@ -31,6 +31,7 @@ import type {
 } from "../../api/types.ts";
 import { cleanup, fireEvent, render, within } from "@testing-library/react";
 import { Studio, type StudioProps } from "./Studio.tsx";
+import { VUNG_DOC_MAC_DINH } from "./VungDoc.tsx";
 import { setupDom, teardownDom } from "../../../test/dom.ts";
 
 const ORIGIN = "http://127.0.0.1:8620";
@@ -150,6 +151,8 @@ function dungThu(p: Partial<StudioProps> = {}): { props: StudioProps; goi: LoiGo
     onLongLai: ghi("onLongLai"),
     loi: null,
     soEngine: 3,
+    vungDoc: VUNG_DOC_MAC_DINH,
+    onVungDoc: ghi("onVungDoc"),
     ...p,
   };
   return { props, goi };

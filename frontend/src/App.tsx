@@ -21,6 +21,7 @@ import type {
   Transcript,
 } from "@/api/types";
 import { Studio } from "@/components/studio/Studio";
+import { VUNG_DOC_MAC_DINH, type VungDoc } from "@/components/studio/VungDoc";
 
 /**
  * TANG NOI API — CHO DUY NHAT doc/ghi backend.
@@ -65,6 +66,19 @@ export function App() {
   const [keHoach, setKeHoach] = useState<ReadonlyMap<number, DubPlanRow>>(new Map());
   const [daDuyet, setDaDuyet] = useState<ReadonlySet<number>>(new Set());
   const [loi, setLoi] = useState<string | null>(null);
+  /**
+   * VÙNG ĐỌC OCR của nguồn đang mở — `null` = TẮT (OCR đọc cả khung).
+   *
+   * Vì sao thuộc `App` chứ không thuộc `Studio`: nó đi vào PAYLOAD của job `asr`, mà
+   * `Studio` không được biết `fetch` là gì (xem docstring đầu tệp này). `Studio` vẽ
+   * khung và báo thay đổi lên đây; `App` giữ giá trị và gửi nó khi tạo job.
+   *
+   * Vì sao KHÔNG lưu xuống máy chủ: đây là tham số của MỘT LƯỢT bóc băng, không phải
+   * thuộc tính của nguồn. Lưu vào DB thì phải thêm cột, thêm route, và trả lời câu hỏi
+   * "vùng nào đúng khi người dùng đã kéo lại lần thứ ba" — trong khi payload của job
+   * đã ghi lại chính xác vùng đã dùng cho lần chạy đó (nó nằm trong `job.payload`).
+   */
+  const [vungDoc, setVungDoc] = useState<VungDoc | null>(VUNG_DOC_MAC_DINH);
 
   const source = useMemo(
     () => (sourceId === null ? null : (sources.find((s) => s.id === sourceId) ?? null)),
@@ -306,7 +320,17 @@ export function App() {
             await endpoints.createJob({
               type: "asr",
               workspace: transcript.id,
-              payload: { source_id: transcript.source_id },
+              // `vung_doc: []` = TẮT lọc vùng (nút ×) — đọc cả khung, đúng hành vi
+              // trước khi có tính năng này. `null` ở state nghĩa là TẮT, nên phải gửi
+              // mảng rỗng chứ KHÔNG bỏ khoá: bỏ khoá là "dùng mặc định registry", và
+              // backend phân biệt hai thứ đó bằng `"vung_doc" in payload`
+              // (xem `_vung_doc_tu_payload`). Gửi `null` cũng sai: payload schema khai
+              // `list[float] | None` nên nó nhận, nhưng `null` mang nghĩa "không khai"
+              // — dùng `[]` cho rõ ràng.
+              payload: {
+                source_id: transcript.source_id,
+                ...(vungDoc === null ? { vung_doc: [] } : { vung_doc: [...vungDoc] }),
+              },
             });
           } catch (e) {
             setLoi(e instanceof Error ? e.message : String(e));
@@ -450,6 +474,8 @@ export function App() {
       onNapTep={onNapTep}
       loi={loi}
       soEngine={engineCount}
+      vungDoc={vungDoc}
+      onVungDoc={setVungDoc}
     />
   );
 }
