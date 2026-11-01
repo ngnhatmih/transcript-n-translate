@@ -763,4 +763,63 @@ def test_run_dung_ocr_khi_handler_co_ocr_engine(repos, specs, tmp_path):
 
     t = repos.list_transcripts()[0]
     assert [s.text for s in t.segments] == ["từ phụ đề"], [s.text for s in t.segments]
-    assert t.engine == "rapidocr", f"cột engine phải nói ĐÚNG nguồn, đo được {t.engine!r}"
+    # 🔴 ĐỔI KỲ VỌNG, có lý do — không phải nới test cho xanh.
+    #
+    # Bài này ghim "cột `engine` phải nói ĐÚNG nguồn". Kỳ vọng cũ là `"rapidocr"`, đúng
+    # vào lúc viết vì chính sách cũ để OCR thắng TUYỆT ĐỐI: có OCR là bỏ sạch ASR, nên
+    # nguồn duy nhất là OCR.
+    #
+    # Từ khi có hợp nhất theo từng đoạn, fixture này (`OcrGia` và `AsrGia` cùng trả đoạn
+    # `0.0-2.0`) đi qua nhánh hợp nhất: chữ lấy từ OCR, nhưng ASR CÓ chạy và có đoạn. Nguồn
+    # thật của transcript là CẢ HAI, nên `"ocr+asr"` mới là sự thật — ghi `"rapidocr"` là
+    # lịch sử nói dối đúng kiểu mà chính bài test này canh.
+    assert t.engine == "ocr+asr", f"cột engine phải nói ĐÚNG nguồn, đo được {t.engine!r}"
+
+
+def test_run_ghi_engine_rapidocr_khi_chi_co_ocr(repos, specs, tmp_path):
+    """Vế còn lại: ASR KHÔNG có đoạn nào ⇒ nguồn duy nhất là OCR, cột `engine` là `rapidocr`.
+
+    Cần bài này vì bài trên không phân biệt được "OCR thắng" với "hợp nhất": nếu ai đó làm
+    hỏng nhánh `if doan_ocr and doan_asr` thành luôn-đúng, bài trên vẫn xanh còn nhánh
+    OCR-thuần thì sai. Ở đây ASR trả `[]`, nên hợp nhất không thể chạy.
+    """
+    import numpy as np
+    import soundfile as sf
+
+    from app.domain.models import Segment
+    from app.pipeline.transcribe import TranscribeHandler
+
+    class OcrGia:
+        engine_id = "rapidocr"
+
+        def doc_phu_de(self, video_path, *, fps=2.0, khoang_asr=None, vung_doc=None):
+            return [Segment(i=0, start=0.0, end=0.5, text="từ phụ đề")]
+
+        def release(self):
+            pass
+
+    class AsrRong:
+        engine_id = "fw-large-v3-turbo"
+
+        def transcribe(self, audio_path, lang):
+            return []
+
+        def release(self):
+            pass
+
+    media = tmp_path / "m.wav"
+    sf.write(str(media), np.zeros(48_000, dtype=np.float32), 48_000)
+    sid = repos.add_source(kind="file", origin="a", media_path=str(media),
+                           audio_path=str(media), lang="zh")
+    h = TranscribeHandler(repos, specs, lambda spec: AsrRong(),
+                          workdir=tmp_path, ocr_engine=OcrGia())
+    job_id = repos.add_job(Job(id=None, workspace=1, type="asr",
+                               engine="fw-large-v3-turbo", phase="asr:fw-large-v3-turbo",
+                               payload={"source_id": sid}))
+    h.run(repos.get_job(job_id), lambda p, line: None)
+
+    t = repos.list_transcripts()[0]
+    assert [s.text for s in t.segments] == ["từ phụ đề"], [s.text for s in t.segments]
+    assert t.engine == "rapidocr", f"đo được {t.engine!r}"
+    # Không có ASR ⇒ không có bằng chứng nào nói dòng OCR sai ⇒ KHÔNG đánh dấu nghi ngờ.
+    assert [s.suspect for s in t.segments] == [False], [s.suspect for s in t.segments]

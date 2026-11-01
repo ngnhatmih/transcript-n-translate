@@ -333,8 +333,18 @@ class TranscribeHandler:
         # `ly_do` được `chon_doan` đặt cho MỌI nhánh (OCR, ASR, và cả nhánh ASR
         # thuần khi không có OCR). Tiền tố là hợp đồng đã ghim ở `test_nguon_chu.py`,
         # nên đọc nó ở đây không phải đoán chuỗi tự do.
-        engine_ghi = ("rapidocr" if ly_do.startswith("dùng OCR")
-                      else (job.engine or ""))
+        #
+        # 🔴 BA nhánh, không phải hai: từ khi có hợp nhất theo từng đoạn, một transcript có
+        # thể mang chữ của CẢ HAI nguồn. Trước đây chỉ kiểm `"dùng OCR"`, nên nhánh hợp nhất
+        # (`"hợp nhất OCR + ASR: …"`) rơi vào `else` và ghi engine ASR cho một bản mà phần
+        # lớn chữ đọc từ HÌNH — lịch sử nói dối đúng kiểu mà comment trên vừa cảnh báo.
+        # Ghi `ocr+asr` cho nhánh đó: nó là sự thật, và đọc được bằng mắt trong DB.
+        if ly_do.startswith("dùng OCR"):
+            engine_ghi = "rapidocr"
+        elif ly_do.startswith("hợp nhất OCR + ASR"):
+            engine_ghi = "ocr+asr"
+        else:
+            engine_ghi = (job.engine or "")
 
         # R68, và cố ý đặt ở ĐÂY chứ không trong từng adapter: guard này phải
         # đúng cho MỌI engine. `SenseVoiceEngine` đã có guard riêng của nó

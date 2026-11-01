@@ -1291,3 +1291,109 @@ xong · 8 dòng phải nén trên 1,5× (đã nén đủ để không chồng, k
 ```
 
 Khớp đúng `nen_manh: 8` trong `plan.json`. Đọc log cũ mà không đối chiếu mã là đọc một phiên bản phần mềm đã chết.
+
+## ERRATA #61 — "OCR là chính" đã lỗi thời: nó XOÁ IM LẶNG lời nói mà OCR không đọc ra
+
+**Phát hiện lúc:** chủ dự án đặt lại chính sách sau khi `ea0a78e` xong (dấu tích "Ghép nền").
+
+### Giả định bị bác bỏ
+
+`domain/nguon_chu.py` mở đầu bằng hợp đồng:
+
+```python
+if doan_ocr:
+    return list(doan_ocr), f"dùng OCR: {len(doan_ocr)} dòng phụ đề đọc được từ hình"
+```
+
+Tức **OCR thắng TUYỆT ĐỐI**: chỉ cần đọc được MỘT dòng phụ đề cứng là bỏ toàn bộ ASR. Docblock
+biện luận bằng số đo thật (OCR đúng 66,27 % so với ASR cùng đoạn; OCR phủ tới 1243 s còn ASR
+dừng ở 1186,4 s) — những con số đó **vẫn đúng**, nhưng kết luận rút ra từ chúng thì sai.
+
+### Vì sao sai
+
+"Số dòng OCR nhiều hơn và chính xác hơn" là sự thật về **tổng thể**, không phải về **từng
+đoạn**. Một video có phụ đề cứng ở 90 % thời lượng vẫn có những đoạn:
+
+* phụ đề nằm NGOÀI `vung_doc` (người dùng kéo vùng đọc để loại watermark, và cắt mất phụ đề
+  thật ở mép);
+* khung bị mờ/nhoè vì chuyển động, OCR không nhận ra chữ;
+* phụ đề cứng xuất hiện muộn hơn lời nói vài giây, nên một đoạn ASR rơi vào khoảng trống.
+
+Ở cả ba ca, ASR **nghe được lời nói thật** mà OCR không đọc ra. Chính sách cũ xoá nó, và
+không để lại dấu vết nào: transcript chỉ còn các dòng OCR, `engine = "rapidocr"`, job `done`.
+Người dùng mất lời thoại mà không có cách nào biết đã mất gì — đúng lớp lỗi mà repo này gọi
+là "im lặng".
+
+### Chính sách mới (chủ dự án đặt)
+
+> "kết hợp asr nghe trước để biết đoạn nào nói. Sau đó duyệt qua ocr. Nếu đoạn nào tách từ
+> asr mà có cả ocr rồi thì đè ocr lên dùng. Kể cả 1 đoạn asr có 2 đoạn ocr thì ưu tiên dùng
+> 2 đoạn ocr đó mà bỏ đoạn 1 đoạn asr kia. Còn nếu đoạn nào mà có asr nhưng ko có ocr thì
+> đoạn đấy có thể thuộc diện nghi ngờ (Nhưng đó là chỉ nếu đang bật ocr)"
+
+Hiện thực ở `hop_nhat_theo_doan` (`domain/nguon_chu.py`):
+
+| tình huống | kết quả |
+|---|---|
+| đoạn ASR có ≥1 dòng OCR đè lên | dùng **chữ OCR**, bỏ chữ ASR |
+| một đoạn ASR chứa **hai** dòng OCR | giữ **cả hai** dòng OCR, bỏ đoạn ASR |
+| đoạn ASR **không** có OCR nào đè lên | giữ đoạn ASR, đặt **`suspect = True`** |
+| dòng OCR không đè lên ASR nào | **vẫn giữ** (ASR dừng sớm — 1186,4 s so với 1243 s) |
+
+Đoạn nghi ngờ **được GIỮ**, không bị xoá: xoá là mất lời nói thật và người dùng không biết.
+`suspect` đã có sẵn trong `Segment`, `to_json` ghi nó ra, và `viecCuaDong`
+(`frontend/src/lib/studio.ts:169`) biến nó thành việc **"nghi ngờ phiên âm"** trong cột việc
+— người dùng tự xem và tự quyết. Chuỗi này đã khép sẵn từ trước; ERRATA này chỉ làm cho nó
+được dùng đúng.
+
+### Hai cái bẫy đo được khi làm
+
+**(1) Mốc thời gian OCR là mốc KHUNG HÌNH, không phải mốc lời nói.** In toàn bộ 77 dòng của
+transcript #13: **mọi dòng dài đúng `0,50 s`**.
+
+```
+i=0   0.00 -> 0.50  '作为一个搞艺术的'
+i=1   1.50 -> 2.00  '最苦恼的事就是'
+i=4  29.50 -> 30.00  '有时为了给作品上价值'
+```
+
+Vì `gop_thanh_dong` (`domain/phu_de.py:276-291`) đặt `end = t_hộp_cuối + 1/fps`, fps = 2.
+OCR chỉ biết "dòng này hiện ở khung nào", sai số ±0,5 s ở **mỗi** đầu; ASR có mốc ~0,1 s. So
+khít hai bên là so hai đơn vị khác nhau. Nên phép so dùng `DUNG_SAI_OCR = 0,5` — đúng một
+nhịp khung, tức độ phân giải THẬT của OCR, không phải số tuỳ ý.
+
+**(2) Nhánh thứ BA của cột `engine`.** `transcribe.py` trước đây chỉ kiểm
+`ly_do.startswith("dùng OCR")`, nên chuỗi mới `"hợp nhất OCR + ASR: …"` rơi vào `else` và ghi
+**engine ASR** cho một bản mà phần lớn chữ đọc từ HÌNH — lịch sử nói dối đúng kiểu mà comment
+ngay trên câu đó cảnh báo. Nay có ba nhánh: `rapidocr` / `ocr+asr` / engine ASR.
+
+### Bài test cũ đỏ, và nó đỏ ĐÚNG
+
+`test_run_dung_ocr_khi_handler_co_ocr_engine` ghim `t.engine == "rapidocr"`. Fixture của nó
+cho `OcrGia` và `AsrGia` cùng trả đoạn `0.0-2.0`, nên nay đi qua nhánh hợp nhất và ghi
+`"ocr+asr"`. Kỳ vọng được **đổi kèm lý do** (không nới test cho xanh), và thêm
+`test_run_ghi_engine_rapidocr_khi_chi_co_ocr` với ASR trả `[]` để nhánh OCR-thuần vẫn bị ghim
+— nếu ai làm hỏng `if doan_ocr and doan_asr` thành luôn-đúng thì bài đó đỏ.
+
+### Ba phép phá, ba bài đỏ
+
+```
+A. if doan_ocr and doan_asr: -> if False:   (về chính sách cũ)   2 failed
+B. suspect=True -> suspect=False                                 1 failed
+C. đánh suspect cả khi chỉ có ASR                                1 failed
+```
+
+Vế **C** quan trọng nhất: "OCR bật mà đọc ra rỗng" KHÁC "không có OCR". Video không có phụ đề
+cứng thì OCR trả `[]` **hợp lệ**; đánh dấu nghi ngờ tất cả sẽ biến một video sạch thành hàng
+trăm việc giả.
+
+### Đo cuối
+
+```
+pytest tests/test_nguon_chu.py        14 passed
+pytest (toàn bộ)                      1460 passed, 15 deselected   EXIT_PYTEST=0
+npx tsc --noEmit                      EXIT_TS=0
+npm test                              196 tests, 196 pass, 0 fail  EXIT_TEST=0
+```
+
+Số nền README: `1451` → **`1460`** (+8 bài `nguon_chu`, +1 bài `transcribe`).
