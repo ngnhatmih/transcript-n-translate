@@ -265,41 +265,55 @@ export interface DauVaoDuongOng {
  */
 export function duongOng(d: DauVaoDuongOng): BuocDuongOng[] {
   /**
-   * 🔴 BƯỚC `asr` PHẢI ĐỌC TRẠNG THÁI JOB, KHÔNG CHỈ `coBanGhi`.
+   * BƯỚC `asr` — thứ tự xét, và vì sao thứ tự CŨ SAI.
    *
-   * Lỗi thật, người dùng báo: *"phần phiên âm cũng ghi là chưa nạp chứ ko ghi là đang
-   * chạy"*. Bản cũ chỉ có hai nhánh:
+   * 🔴 LỖI THẬT, ĐO ĐƯỢC (người dùng: *"#109 phiên âm · fw-large-v3-turbo — 5% khi mà như
+   * này ý thì state của cái header phiên âm cx phải đổi state. Nó cứ tick mãi"*).
    *
-   *     coBanGhi ? {note: engineAsr, state: "done"} : {note: "chưa nạp", state: "todo"}
+   * Bản trước xét `coBanGhi` TRƯỚC TIÊN:
    *
-   * nên suốt 20 phút bóc băng một video dài, thanh bước ghi "chưa nạp" và vẽ ô tròn
-   * RỖNG — y như chưa bấm gì. Người dùng không phân biệt được "đang chạy" với "đã chết".
+   *     const buocAsr = d.coBanGhi
+   *       ? { note: d.engineAsr ?? "", state: "done" }
+   *       : d.asrState === "running" ? … : …
    *
-   * Thứ tự xét, và vì sao đúng thứ tự này:
+   * Đo trên dữ liệu thật: nguồn 6 đã có BA transcript (#23, #24, #26) từ các job `asr`
+   * `done` trước đó, nên `coBanGhi === true`. Khi người dùng bấm chạy lại, job **#109**
+   * (`asr`, `running`, `prog=0.05`, `created=15:41:22`) đang chạy — nhưng nhánh đầu thắng,
+   * bước vẫn vẽ dấu tích và ghi engine cũ. Suốt 20 phút bóc băng, thanh bước nói "xong".
    *
-   *   1. ĐÃ CÓ BẢN GHI ⇒ `done`. Bản ghi là bằng chứng mạnh nhất; một job `asr` cũ còn
-   *      `queued` trong hàng đợi (người dùng bấm hai lần) không được làm bước đã xong
-   *      trông như đang chạy lại.
-   *   2. ĐANG CHẠY/ĐANG CHỜ ⇒ `running`. Đây là nhánh thiếu, và là toàn bộ lỗi.
-   *   3. `done` MÀ CHƯA CÓ BẢN GHI ⇒ "đang nạp lại". Trạng thái thoáng qua: worker ghi
-   *      xong job trước khi giao diện kịp `GET /api/transcripts`. Nói "chưa nạp" ở đây
-   *      là nói dối ngược lại — job vừa xong mà giao diện bảo chưa làm gì.
-   *   4. `failed`/`interrupted` ⇒ `blocked`, kèm lý do đọc được.
+   * Docblock cũ biện luận cho thứ tự đó: *"một job `asr` cũ còn `queued` trong hàng đợi
+   * (người dùng bấm hai lần) không được làm bước đã xong trông như đang chạy lại"*. Lập
+   * luận ấy đúng cho job CŨ, và sai cho job MỚI HƠN bản ghi — mà chạy lại chính là ca đó.
+   *
+   * Thứ tự đúng:
+   *
+   *   1. Job ĐANG CHẠY/ĐANG CHỜ ⇒ `running`. Một job đang chạy là sự thật MỚI HƠN bản ghi
+   *      cũ; nó không thể "cũ" theo nghĩa docblock lo, vì hàng đợi chạy FIFO và job `queued`
+   *      của lần bấm trước sẽ chạy TRƯỚC job mới. Nếu nó còn `queued` sau khi đã có bản ghi
+   *      thì nó sắp chạy thật, và bước nói "chờ tới lượt" là đúng.
+   *   2. `failed`/`interrupted` ⇒ `blocked`, kèm lý do đọc được. Xét TRƯỚC `coBanGhi`: người
+   *      dùng vừa bấm chạy lại và job hỏng thì họ cần thấy "lỗi", không phải dấu tích của
+   *      bản ghi cũ.
+   *   3. ĐÃ CÓ BẢN GHI ⇒ `done`. Bản ghi là bằng chứng bền nhất khi không có job nào đang
+   *      nói khác.
+   *   4. `done` MÀ CHƯA CÓ BẢN GHI ⇒ "đang nạp lại". Trạng thái thoáng qua: worker ghi xong
+   *      job trước khi giao diện kịp `GET /api/transcripts`.
    *   5. Còn lại (`null`, `cancelled`) ⇒ "chưa nạp".
    */
-  const buocAsr: BuocDuongOng = d.coBanGhi
-    ? { id: "asr", name: "Phiên âm", note: d.engineAsr ?? "", state: "done" }
-    : d.asrState === "running"
+  const buocAsr: BuocDuongOng =
+    d.asrState === "running"
       ? { id: "asr", name: "Phiên âm", note: "đang phiên âm…", state: "running" }
       : d.asrState === "queued"
         ? { id: "asr", name: "Phiên âm", note: "chờ tới lượt", state: "running" }
-        : d.asrState === "done"
-          ? { id: "asr", name: "Phiên âm", note: "đang nạp lại…", state: "running" }
-          : d.asrState === "failed"
-            ? { id: "asr", name: "Phiên âm", note: "lỗi — xem hàng đợi", state: "blocked" }
-            : d.asrState === "interrupted"
-              ? { id: "asr", name: "Phiên âm", note: "bị ngắt — chạy lại được", state: "blocked" }
-              : { id: "asr", name: "Phiên âm", note: "chưa nạp", state: "todo" };
+        : d.asrState === "failed"
+          ? { id: "asr", name: "Phiên âm", note: "lỗi — xem hàng đợi", state: "blocked" }
+          : d.asrState === "interrupted"
+            ? { id: "asr", name: "Phiên âm", note: "bị ngắt — chạy lại được", state: "blocked" }
+            : d.coBanGhi
+              ? { id: "asr", name: "Phiên âm", note: d.engineAsr ?? "", state: "done" }
+              : d.asrState === "done"
+                ? { id: "asr", name: "Phiên âm", note: "đang nạp lại…", state: "running" }
+                : { id: "asr", name: "Phiên âm", note: "chưa nạp", state: "todo" };
 
   const buocDich: BuocDuongOng = d.coBanDich
     ? { id: "dich", name: "Dịch", note: d.engineMt ?? "", state: "done" }

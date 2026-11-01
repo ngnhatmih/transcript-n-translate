@@ -327,10 +327,48 @@ describe("duongOng: sau buoc, bon trang thai", () => {
     assert.equal(b[0].note, "bị ngắt — chạy lại được");
   });
 
-  it("DA CO BAN GHI thi thang moi trang thai job — ban ghi la bang chung manh nhat", () => {
-    // Người dùng bấm "Phiên âm" hai lần: job thứ hai còn `queued` trong khi bản ghi của
-    // job thứ nhất đã có. Bước đã xong KHÔNG được trông như đang chạy lại.
+  it("JOB DANG CHAY thi thang ban ghi cu — chay lai phai hien 'dang phien am'", () => {
+    // 🔴 LỖI THẬT, ĐO ĐƯỢC (người dùng: "#109 phiên âm · fw-large-v3-turbo — 5% khi mà như
+    // này ý thì state của cái header phiên âm cx phải đổi state. Nó cứ tick mãi").
+    //
+    // Đo trên dữ liệu thật: nguồn 6 đã có BA transcript (#23, #24, #26) từ các job `asr`
+    // `done` trước, nên `coBanGhi === true`. Job **#109** (`asr`, `running`, `prog=0.05`,
+    // tạo 15:41:22) đang chạy — nhưng bản trước xét `coBanGhi` TRƯỚC TIÊN nên bước vẫn vẽ
+    // dấu tích và ghi engine cũ suốt 20 phút bóc băng.
+    const b = duongOng(vao({ coBanGhi: true, engineAsr: "fw-large-v3", asrState: "running" }));
+    assert.equal(b[0].state, "running", "job đang chạy mà bước vẫn 'done' là lỗi người dùng báo");
+    assert.equal(b[0].note, "đang phiên âm…");
+  });
+
+  it("JOB CHO thi cung thang ban ghi cu — hang doi FIFO nghia la no SAP chay that", () => {
+    // Bài CŨ ở đây ghim điều ngược lại, và nó SAI. Lý do cũ: "bấm Phiên âm hai lần thì job
+    // thứ hai còn queued, bước đã xong không được trông như đang chạy lại".
+    //
+    // 🔴 DỮ LIỆU THẬT BÁC BỎ LÝ DO ĐÓ: hàng đợi chạy FIFO, nên job `queued` của lần bấm
+    // trước chạy TRƯỚC job mới. Đo được trên chính máy này:
+    //
+    //     #88  asr  done  src=2  created=13:57:11  finished=14:00:14
+    //     #89  asr  done  src=2  created=13:59:26  finished=14:03:15
+    //
+    // #89 tạo SAU #88 và xong SAU #88 — tức job thứ hai THẬT SỰ CHẠY, trong lúc bản ghi
+    // của job thứ nhất đã tồn tại. Nếu bước nói "xong" trong khoảng 13:59–14:03 thì nó nói
+    // dối đúng khoảng thời gian người dùng cần biết máy đang làm gì.
     const b = duongOng(vao({ coBanGhi: true, engineAsr: "fw-large-v3", asrState: "queued" }));
+    assert.equal(b[0].state, "running", "job đang CHỜ thì bước phải nói đang chờ, không phải xong");
+    assert.equal(b[0].note, "chờ tới lượt");
+  });
+
+  it("JOB LOI thi thang ban ghi cu — nguoi dung vua bam chay lai va no hong", () => {
+    // Xét `failed` TRƯỚC `coBanGhi`: bản ghi cũ vẫn tồn tại, nhưng lần chạy lại vừa hỏng.
+    // Hiện dấu tích của bản ghi cũ là giấu mất lỗi.
+    const b = duongOng(vao({ coBanGhi: true, engineAsr: "fw-large-v3", asrState: "failed" }));
+    assert.equal(b[0].state, "blocked");
+    assert.equal(b[0].note, "lỗi — xem hàng đợi");
+  });
+
+  it("KHONG co job nao thi ban ghi van thang — do la bang chung ben nhat", () => {
+    // Vế còn lại, phải giữ: không có job nào đang nói khác thì bản ghi là sự thật.
+    const b = duongOng(vao({ coBanGhi: true, engineAsr: "fw-large-v3", asrState: null }));
     assert.equal(b[0].state, "done");
     assert.equal(b[0].note, "fw-large-v3");
   });
