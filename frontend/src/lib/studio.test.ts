@@ -21,7 +21,9 @@ import assert from "node:assert/strict";
 
 import type {
   DubPlanRow,
+  Job,
   Segment,
+  Status,
   Transcript,
   TranslationCps,
   TranslationDetail,
@@ -31,8 +33,10 @@ import {
   bangCps,
   chuCuaDoan,
   doDai,
+  dongMayChu,
   dungDong,
   duongOng,
+  hangDoi,
   lyDoChuaXuatDuoc,
   NGUONG_NEN,
   raSrt,
@@ -677,5 +681,126 @@ describe("viecCuaDongList: gop ca danh sach", () => {
 
   it("danh sach rong ⇒ rong", () => {
     assert.deepEqual(viecCuaDongList([]), []);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// PANEL "HÀNG ĐỢI" — dựng từ `jobs` THẬT, không phải chữ viết cứng.
+//
+// 🔴 LỖI THẬT, ĐO ĐƯỢC (người dùng gửi ảnh chụp panel và nói: *"hàng đợi ở đây có ghi
+// mấy cái đang chạy đâu"*). `Studio.tsx` chứa bốn dòng JSX VIẾT CỨNG:
+//
+//     <QueueItem name="#37 phiên âm · faster-whisper" state="xong" />
+//     <QueueItem name="#4 dịch · opus-mt" state="xong" />
+//     <QueueItem name="#36 lồng tiếng · vieneu-v3" state="xong" />
+//     <QueueItem name="#38 ghép nền · htdemucs" state={...} />
+//     <li>ollama đang chạy · vram 2524 MiB</li>
+//
+// Đó là dữ liệu mẫu bê từ `_lovable-code`, không đọc `jobs` và không đọc
+// `GET /api/status`. Job đang chạy vẫn hiện "xong"; `#37`/`#4`/`#36`/`#38` có thể không
+// tồn tại. Panel ấy là chỗ người dùng NHÌN ĐỂ BIẾT máy đang làm gì — nó nói dối.
+//
+// Ba trạng thái phải phân biệt được bằng mắt: đang chạy (kèm %), đang chờ, đã xong/lỗi.
+// ---------------------------------------------------------------------------
+
+function job(p: Partial<Job> & { id: number }): Job {
+  return {
+    workspace: 1,
+    type: "asr",
+    engine: "fw-large-v3-turbo",
+    phase: "asr:fw-large-v3-turbo",
+    state: "queued",
+    cancel_requested: false,
+    attempts: 0,
+    progress: 0,
+    log_tail: "",
+    error: null,
+    payload: {},
+    created_at: "2026-01-01T00:00:00Z",
+    started_at: null,
+    finished_at: null,
+    ...p,
+  };
+}
+
+describe("hangDoi: panel hàng đợi đọc `jobs` thật", () => {
+  it("job DANG CHAY phai hien 'dang-chay', khong phai 'xong'", () => {
+    const [d] = hangDoi([job({ id: 7, state: "running", progress: 0.42 })]);
+    assert.equal(d.trangThai, "dang-chay");
+    assert.equal(d.phanTram, 42, `phải đổi 0..1 sang %, đo được ${d.phanTram}`);
+  });
+
+  it("dang chay ma chua co tien do: KHONG ve thanh 0%", () => {
+    // `progress === 0` nghĩa là "chưa tới mốc nào", không phải "0%". Vẽ thanh 0% làm
+    // người dùng tưởng job đứng im.
+    const [d] = hangDoi([job({ id: 7, state: "running", progress: 0 })]);
+    assert.equal(d.trangThai, "dang-chay");
+    assert.equal(d.phanTram, null);
+  });
+
+  it("dang CHO khac dang CHAY — deu khong phai 'xong'", () => {
+    const [d] = hangDoi([job({ id: 8, state: "queued" })]);
+    assert.equal(d.trangThai, "cho");
+    assert.equal(d.phanTram, null);
+  });
+
+  it("job hong va job bi huy deu la 'loi' — khong duoc to mau xanh", () => {
+    for (const s of ["failed", "interrupted", "cancelled"] as const) {
+      const [d] = hangDoi([job({ id: 9, state: s })]);
+      assert.equal(d.trangThai, "loi", `state ${s} phải là lỗi, đo được ${d.trangThai}`);
+    }
+  });
+
+  it("nhan co ten loai TIENG VIET va engine that", () => {
+    const [d] = hangDoi([job({ id: 11, type: "translate", engine: "deepseek-web" })]);
+    assert.equal(d.nhan, "dịch · deepseek-web");
+  });
+
+  it("engine null thi nhan khong co dau ' · ' tho", () => {
+    const [d] = hangDoi([job({ id: 12, type: "ingest", engine: null })]);
+    assert.equal(d.nhan, "nạp");
+  });
+
+  it("MOI NHAT TRUOC, va cat dung `gioiHan`", () => {
+    // Hàng đợi thật đã đo được 96 job; đổ hết vào panel 256 px thì không đọc được gì.
+    const ds = [job({ id: 1 }), job({ id: 5 }), job({ id: 3 }), job({ id: 9 })];
+    const ra = hangDoi(ds, 3);
+    assert.deepEqual(ra.map((d) => d.id), [9, 5, 3]);
+  });
+
+  it("hang doi rong ⇒ mang rong, khong nem", () => {
+    assert.deepEqual(hangDoi([]), []);
+  });
+});
+
+describe("dongMayChu: chan panel doc /api/status that", () => {
+  it("chua doc duoc (null) thi NOI RO, khong in so 0", () => {
+    const s = dongMayChu(null);
+    assert.match(s, /chưa đọc được/, `phải nói rõ chưa đọc được, nhận ${JSON.stringify(s)}`);
+  });
+
+  it("doc duoc thi in so THAT tu may chu", () => {
+    const st: Status = {
+      queue_depth: 3,
+      running: [92],
+      current_phase: "asr:fw-large-v3-turbo",
+      phase_switches: 9,
+      vram: 1518,
+      vram_unit: "MiB",
+      ollama: "up",
+    };
+    const s = dongMayChu(st);
+    assert.match(s, /hàng đợi 3/);
+    assert.match(s, /ollama up/);
+    assert.match(s, /vram 1518 MiB/);
+    assert.doesNotMatch(s, /2524/, "2524 là con số VIẾT CỨNG trong bản cũ, không được quay lại");
+  });
+
+  it("vram null thi bo dong vram, khong in 'vram null'", () => {
+    const st: Status = {
+      queue_depth: 0, running: [], current_phase: null, phase_switches: 1,
+      vram: null, vram_unit: "MiB", ollama: "down",
+    };
+    assert.doesNotMatch(dongMayChu(st), /vram/);
   });
 });

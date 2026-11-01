@@ -12,11 +12,13 @@ import {
   patchSourceVungDoc,
   patchTranslation,
   registry,
+  status,
 } from "@/api/endpoints";
 import type {
   DubPlanRow,
   Job,
   Source,
+  Status,
   TranslationCps,
   TranslationDetail,
   Transcript,
@@ -56,6 +58,14 @@ import { VUNG_DOC_MAC_DINH, type VungDoc } from "@/components/studio/VungDoc";
 const NHIP_JOB_MS = 2000;
 
 /**
+ * Nhip lam moi cua `GET /api/status` — CHAM hon `jobs` la chu y.
+ *
+ * `vram` phai hoi `nvidia-smi`/ollama, dat hon mot truy van SQLite, va no khong can min
+ * toi 2 giay: con so do chi de nguoi dung biet may con cho hay da day.
+ */
+const NHIP_MAY_CHU_MS = 5000;
+
+/**
  * DẤU VÂN TAY của hàng đợi: chỉ đổi khi có job ĐỔI TRẠNG THÁI.
  *
  * 🔴 VÌ SAO CẦN (lỗi thật, người dùng báo "khi mở một video mới thì phải refresh trang
@@ -87,6 +97,8 @@ export function App() {
   const [transcript, setTranscript] = useState<Transcript | null>(null);
   const [banDich, setBanDich] = useState<TranslationDetail | null>(null);
   const [jobs, setJobs] = useState<Job[]>([]);
+  /** `GET /api/status` — `null` = chua doc duoc, khac "0 MiB". */
+  const [mayChu, setMayChu] = useState<Status | null>(null);
   const [keHoach, setKeHoach] = useState<ReadonlyMap<number, DubPlanRow>>(new Map());
   const [daDuyet, setDaDuyet] = useState<ReadonlySet<number>>(new Set());
   const [loi, setLoi] = useState<string | null>(null);
@@ -236,6 +248,42 @@ export function App() {
   /** CPS — lay THANG tu ban dich, khong tu chia chu cho giay. */
   const cps: TranslationCps | null = banDich === null ? null : banDich.cps;
 
+  /**
+   * TRẠNG THÁI MÁY CHỦ — nguồn của chân panel "Hàng đợi" (`vram`, `ollama`,
+   * `queue_depth`).
+   *
+   * 🔴 VÌ SAO PHẢI CÓ (lỗi thật, người dùng gửi ảnh chụp panel và nói "hàng đợi ở đây
+   * có ghi mấy cái đang chạy đâu"): panel đó in `ollama đang chạy · vram 2524 MiB` VIẾT
+   * CỨNG trong JSX, bê từ `_lovable-code`. Nó không đọc route nào, nên nó nói một con số
+   * không liên quan tới máy đang chạy.
+   *
+   * Đo được `GET /api/status` trả:
+   *
+   *     {"queue_depth":0,"running":[],"current_phase":null,"phase_switches":6,
+   *      "vram":1518,"vram_unit":"MiB","ollama":"up"}
+   *
+   * Nhịp RIÊNG, chậm hơn `jobs`: `vram` đọc qua `nvidia-smi`/ollama nên đắt hơn một
+   * truy vấn SQLite, và nó không cần mịn tới 2 giây.
+   */
+  useEffect(() => {
+    let huy = false;
+    const nap = async () => {
+      try {
+        const s = await status();
+        if (!huy) setMayChu(s);
+      } catch {
+        // `null` = CHƯA ĐỌC ĐƯỢC, khác "0 MiB". Panel nói rõ điều đó (`dongMayChu`).
+        if (!huy) setMayChu(null);
+      }
+    };
+    void nap();
+    const t = setInterval(() => void nap(), NHIP_MAY_CHU_MS);
+    return () => {
+      huy = true;
+      clearInterval(t);
+    };
+  }, []);
+
   /** JOB — nap lai theo nhip; day cung la nguon trang thai cua sau buoc duong ong. */
   useEffect(() => {
     let huy = false;
@@ -285,7 +333,16 @@ export function App() {
     return () => {
       huy = true;
     };
-  }, [banDich, jobs]);
+    // 🔴 `soJob` CHỨ KHÔNG PHẢI `jobs` (lỗi thật, đo được khi rà soát state).
+    //
+    // Bản trước để `[banDich, jobs]`, mà `jobs` là MẢNG MỚI mỗi 2 giây (`setJobs` trong
+    // effect polling) kể cả khi không có gì đổi. Nên `GET /api/dubs/{id}/plan` chạy lại
+    // MỖI 2 GIÂY, MÃI MÃI, suốt thời gian trang mở — trong khi kế hoạch lồng tiếng chỉ
+    // đổi khi một job `dub` chuyển trạng thái. Đó đúng là cái bẫy đã sửa ở hai effect
+    // `sources`/`transcript` bằng `soJob`, nhưng bị để nguyên ở đây.
+    //
+    // `soJob` là chuỗi `id:state`, so sánh theo GIÁ TRỊ: chỉ đổi khi job đổi trạng thái.
+  }, [banDich, soJob]);
 
   // -------------------------------------------------------------------------
   // BON HANH DONG GHI — moi hanh dong goi DUNG mot route
@@ -681,6 +738,7 @@ export function App() {
       cps={cps}
       keHoach={keHoach}
       jobs={jobs}
+      mayChu={mayChu}
       daDuyet={daDuyet}
       onDuyet={onDuyet}
       onSuaChu={onSuaChu}

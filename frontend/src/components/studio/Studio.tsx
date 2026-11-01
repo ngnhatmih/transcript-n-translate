@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Command as CmdIcon, Film, Menu, Moon, Pause, Play, Repeat, Sun, Upload, Cpu, X } from "lucide-react";
 
 import { mediaUrl, exportUrl, getPeaks } from "@/api/endpoints";
-import type { DubPlanRow, Job, Source, TranslationCps, TranslationDetail, Transcript } from "@/api/types";
+import type { DubPlanRow, Job, Source, Status, TranslationCps, TranslationDetail, Transcript } from "@/api/types";
 import {
   BA_GOC_NHIN,
   dungDong,
@@ -12,6 +12,8 @@ import {
   NHAN_LOAI_VIEC,
   raSrt,
   soVi,
+  hangDoi,
+  dongMayChu,
   tachTuKhac,
   viecCuaDong,
   viecCuaDongList,
@@ -96,6 +98,14 @@ export interface StudioProps {
   /** Hang ke hoach long tieng theo `Segment.i` (`GET /api/dubs/{id}/plan`). Rong khi chua long. */
   keHoach: ReadonlyMap<number, DubPlanRow>;
   jobs: Job[];
+  /**
+   * `GET /api/status` — trạng thái máy chủ cho chân panel "Hàng đợi".
+   *
+   * `null` = chưa đọc được (đang nạp, hoặc route hỏng). Panel phải NÓI RÕ điều đó thay
+   * vì in một con số cũ: `vram`/`ollama` đổi theo thời gian, và một dòng "vram 2524 MiB"
+   * viết cứng là thứ người dùng đã bắt được (xem `hangDoi` trong `lib/studio.ts`).
+   */
+  mayChu: Status | null;
   /** Tap `Segment.i` da duyet — thuoc `App`, khong thuoc may chu. */
   daDuyet: ReadonlySet<number>;
   onDuyet: (i: number) => void;
@@ -130,6 +140,7 @@ export function Studio(props: StudioProps) {
     cps,
     keHoach,
     jobs,
+    mayChu,
     daDuyet,
     onDuyet,
     onSuaMoc,
@@ -268,6 +279,38 @@ export function Studio(props: StudioProps) {
       huy = true;
     };
   }, [source]);
+
+  /**
+   * ĐỔI KÊNH THÌ QUÊN DÒNG ĐANG CHỌN — và chọn lại dòng ĐẦU của kênh mới.
+   *
+   * 🔴 LỖI THẬT, ĐO ĐƯỢC khi rà soát state: `currentId` là state CỤC BỘ của `Studio` và
+   * không có gì reset nó khi `source` đổi. Đổi sang video khác thì `currentId` vẫn giữ số
+   * dòng của video CŨ, và:
+   *
+   *   · video mới ÍT dòng hơn  ⇒ `current` thành `null`, panel sửa chữ trống rỗng mà
+   *     không nói vì sao;
+   *   · video mới NHIỀU dòng hơn ⇒ nó chọn một dòng CÙNG SỐ THỨ TỰ mà người dùng chưa hề
+   *     bấm — và panel sửa chữ hiện nội dung của dòng đó như thể đang được chọn.
+   *
+   * Cùng lớp lỗi với `VungDoc` (một `useEffect` ghi đè dữ liệu người dùng mỗi lần nạp
+   * trang): state cục bộ sống lâu hơn dữ liệu mà nó mô tả.
+   *
+   * ⚠️ KHÔNG đặt `null` rồi để yên: `Studio` TỰ CHỌN DÒNG ĐẦU khi có dòng (effect
+   * `daChonDau` ở trên, có cờ chặn lặp). Đặt `null` ở đây thì effect kia không chạy lại
+   * (`daChonDau` đã `true`), nên panel sửa chữ rỗng cho tới khi người dùng bấm một dòng.
+   * Việc đúng là chọn dòng đầu CỦA KÊNH MỚI — cùng trạng thái mà một lần mở trang mang
+   * lại, và cũng là thứ effect `daChonDau` muốn làm.
+   *
+   * `view`/`issueFilter`/`onlyIssues` KHÔNG reset: chúng là lựa chọn CÁCH XEM của người
+   * dùng (đang ở chế độ đối chiếu, đang lọc "nghi ngờ"), không phải dữ liệu của một kênh
+   * cụ thể. Reset chúng khi đổi kênh là cướp công cụ họ vừa bật.
+   */
+  useEffect(() => {
+    setCurrentId(dong.length === 0 ? null : dong[0].i);
+    // Chỉ khi ĐỔI KÊNH, không phải mỗi lần `dong` đổi (gõ một chữ cũng làm `dong` đổi, và
+    // lúc đó cướp dòng đang chọn là hành vi sai).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [source?.id]);
 
   /** VIEC — gop ba nguon that, dung luat "duyet roi thi het viec". */
   const issues = useMemo<Viec[]>(() => viecCuaDongList(dong), [dong]);
@@ -1170,16 +1213,37 @@ export function Studio(props: StudioProps) {
           </button>
           {queueOpen && (
             <ul className="text-[11.5px]">
-              <QueueItem name="#37 phiên âm · faster-whisper" state="xong" />
-              <QueueItem name="#4 dịch · opus-mt" state="xong" />
-              <QueueItem name="#36 lồng tiếng · vieneu-v3" state="xong" />
-              <QueueItem
-                name="#38 ghép nền · htdemucs"
-                state={remux === 0 ? "chưa chạy" : remux >= 100 ? "xong" : `${remux}%`}
-                progress={remux > 0 && remux < 100 ? remux : undefined}
-              />
+              {/* DỮ LIỆU THẬT, KHÔNG PHẢI CHỮ VIẾT CỨNG.
+                  Bản trước có bốn dòng `<QueueItem name="#37 phiên âm · faster-whisper"
+                  state="xong" />` bê từ `_lovable-code`: chúng không đọc `jobs` nên job
+                  đang chạy vẫn hiện "xong", và `#37`/`#4`/`#36`/`#38` có thể không tồn
+                  tại. Người dùng đã gửi ảnh chụp panel đó và nói đúng: "hàng đợi ở đây
+                  có ghi mấy cái đang chạy đâu". */}
+              {hangDoi(jobs).map((d) => (
+                <QueueItem
+                  key={d.id}
+                  name={`#${d.id} ${d.nhan}`}
+                  state={
+                    d.trangThai === "dang-chay"
+                      ? d.phanTram === null
+                        ? "đang chạy"
+                        : `${d.phanTram}%`
+                      : d.trangThai === "cho"
+                        ? "chờ"
+                        : d.trangThai === "xong"
+                          ? "xong"
+                          : "lỗi"
+                  }
+                  progress={d.phanTram ?? undefined}
+                />
+              ))}
+              {jobs.length === 0 && (
+                <li className="num border-b border-rule px-3 py-2 text-[10.5px] text-ink-2">
+                  hàng đợi trống
+                </li>
+              )}
               <li className="num border-b border-rule px-3 py-2 text-[10.5px] text-ink-2">
-                ollama đang chạy · vram 2524 MiB
+                {dongMayChu(mayChu)}
               </li>
             </ul>
           )}

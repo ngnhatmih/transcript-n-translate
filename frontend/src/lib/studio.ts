@@ -24,7 +24,15 @@
  *    tính lại từ `no_speech_prob`/`avg_logprob`.
  */
 
-import type { DubPlanRow, Segment, Transcript, TranslationCps, TranslationDetail } from "../api/types.ts";
+import type {
+  DubPlanRow,
+  Job,
+  Segment,
+  Status,
+  Transcript,
+  TranslationCps,
+  TranslationDetail,
+} from "../api/types.ts";
 
 /**
  * HÌNH DẠNG MỘT DÒNG MÀ `SegmentRow`/`Timeline`/`Studio` TIÊU THỤ.
@@ -515,4 +523,85 @@ export function viecCuaDong(d: Dong): Viec[] {
 /** Mọi việc của cả danh sách dòng — chip lọc và số đếm đọc từ đây. */
 export function viecCuaDongList(ds: readonly Dong[]): Viec[] {
   return ds.flatMap(viecCuaDong);
+}
+
+/**
+ * NHÃN HÀNG ĐỢI — dựng từ `jobs` THẬT, không phải chữ viết cứng.
+ *
+ * 🔴 LỖI THẬT, ĐO ĐƯỢC (người dùng gửi ảnh chụp panel "Hàng đợi" và nói: *"hàng đợi ở
+ * đây có ghi mấy cái đang chạy đâu"*). Panel đó chứa bốn dòng VIẾT CỨNG trong JSX:
+ *
+ *     <QueueItem name="#37 phiên âm · faster-whisper" state="xong" />
+ *     <QueueItem name="#4 dịch · opus-mt" state="xong" />
+ *     <QueueItem name="#36 lồng tiếng · vieneu-v3" state="xong" />
+ *     <QueueItem name="#38 ghép nền · htdemucs" state={...} />
+ *     <li>ollama đang chạy · vram 2524 MiB</li>
+ *
+ * Đó là dữ liệu mẫu bê từ `_lovable-code`. Nó KHÔNG đọc `jobs` và KHÔNG đọc
+ * `GET /api/status`, nên nó không bao giờ phản ánh hàng đợi thật — job đang chạy vẫn
+ * hiện "xong", còn `#37`/`#4`/`#36`/`#38` có thể không tồn tại. Người dùng nhìn panel
+ * ấy để biết máy đang làm gì, và nó nói dối.
+ *
+ * Ba trạng thái phải phân biệt được bằng MẮT:
+ *
+ *   `running`  — đang chạy ngay bây giờ, kèm % nếu `progress` > 0
+ *   `queued`   — đã vào hàng đợi, chưa tới lượt
+ *   còn lại    — kết thúc rồi (`done`/`failed`/`interrupted`/`cancelled`)
+ *
+ * Không đọc `current_phase` của `/api/status` để đoán job nào đang chạy: `running` là
+ * MẢNG ID do chính worker ghi, đúng hơn một chuỗi phase ghép từ (loại, engine) — hai
+ * job cùng phase là chuyện bình thường.
+ */
+export interface DongHangDoi {
+  id: number;
+  /** Tên hiển thị: "phiên âm · fw-large-v3-turbo". */
+  nhan: string;
+  /** Trạng thái để tô màu — trùng bộ chữ của `JobState`, không phải chuỗi tự do. */
+  trangThai: "dang-chay" | "cho" | "xong" | "loi";
+  /** 0..100 khi đang chạy và có tiến độ; `null` thì không vẽ thanh. */
+  phanTram: number | null;
+}
+
+/** Nhãn tiếng Việt của `JobType` — HIỂN THỊ, không phải khoá dữ liệu. */
+const TEN_LOAI: Record<string, string> = {
+  ingest: "nạp",
+  asr: "phiên âm",
+  translate: "dịch",
+  dub: "lồng tiếng",
+  export: "ghép nền",
+};
+
+/**
+ * Danh sách job để hiện trong panel hàng đợi, MỚI NHẤT TRƯỚC.
+ *
+ * `gioiHan` mặc định 8: panel rộng 256 px và cao bằng cột phải; hàng đợi thật đã đo được
+ * 96 job, đổ hết vào đó thì không đọc được gì. Cắt ở đây chứ không ở JSX để test đo được
+ * đúng phép cắt.
+ *
+ * Sắp theo `id` GIẢM DẦN, không theo `created_at`: hai job tạo trong cùng một giây thì so
+ * chuỗi thời gian cho kết quả tuỳ ý, còn `id` là thứ tự chèn thật.
+ */
+export function hangDoi(jobs: readonly Job[], gioiHan = 8): DongHangDoi[] {
+  return [...jobs]
+    .sort((a, b) => b.id - a.id)
+    .slice(0, gioiHan)
+    .map((j) => {
+      const ten = TEN_LOAI[j.type] ?? j.type;
+      const nhan = j.engine === null ? `${ten}` : `${ten} · ${j.engine}`;
+      if (j.state === "running") {
+        const pt = j.progress > 0 && j.progress < 1 ? Math.round(j.progress * 100) : null;
+        return { id: j.id, nhan, trangThai: "dang-chay" as const, phanTram: pt };
+      }
+      if (j.state === "queued") return { id: j.id, nhan, trangThai: "cho" as const, phanTram: null };
+      if (j.state === "done") return { id: j.id, nhan, trangThai: "xong" as const, phanTram: null };
+      return { id: j.id, nhan, trangThai: "loi" as const, phanTram: null };
+    });
+}
+
+/** Dòng chân panel: GPU/VRAM và ollama, đọc từ `GET /api/status`. */
+export function dongMayChu(s: Status | null): string {
+  if (s === null) return "chưa đọc được trạng thái máy";
+  const phan = [`hàng đợi ${s.queue_depth}`, `ollama ${s.ollama}`];
+  if (s.vram !== null) phan.push(`vram ${s.vram} ${s.vram_unit}`);
+  return phan.join(" · ");
 }

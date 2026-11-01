@@ -29,7 +29,7 @@ import type {
   Transcript,
   TranslationDetail,
 } from "../../api/types.ts";
-import { cleanup, fireEvent, render, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, waitFor, within } from "@testing-library/react";
 import { Studio, type StudioProps } from "./Studio.tsx";
 import { VUNG_DOC_MAC_DINH } from "./VungDoc.tsx";
 import { setupDom, teardownDom } from "../../../test/dom.ts";
@@ -249,6 +249,74 @@ describe("Studio: sửa chữ gọi onSuaChu với ĐÚNG i và chữ mới", ()
     const sua = goi.filter((g) => g.ten === "onSuaChu");
     assert.equal(sua.length, 1);
     assert.deepEqual(sua[0].args, [1, "đoạn hai"]);
+  });
+});
+
+describe("Studio: đổi kênh thì QUÊN dòng đang chọn", () => {
+  /**
+   * 🔴 LỖI THẬT, ĐO ĐƯỢC khi rà soát toàn bộ state: `currentId` là state CỤC BỘ của
+   * `Studio`, và KHÔNG có gì reset nó khi `source` đổi. Đổi sang video khác thì
+   * `currentId` vẫn giữ số dòng của video CŨ:
+   *
+   *   · video mới ÍT dòng hơn  ⇒ `current` thành `null`, panel sửa chữ trống rỗng mà
+   *     không nói vì sao;
+   *   · video mới NHIỀU dòng hơn ⇒ nó chọn một dòng CÙNG SỐ THỨ TỰ mà người dùng chưa hề
+   *     bấm.
+   *
+   * Cùng lớp lỗi với `VungDoc` (một `useEffect` ghi đè dữ liệu người dùng mỗi lần nạp
+   * trang): state cục bộ sống lâu hơn dữ liệu mà nó mô tả.
+   *
+   * ⚠️ Trạng thái ĐÚNG sau khi đổi kênh KHÔNG phải "không chọn dòng nào": `Studio` tự
+   * chọn dòng ĐẦU khi có dòng (effect `daChonDau`). Nên phép đo là: chọn dòng 1 của kênh
+   * A, đổi sang kênh B, và panel sửa chữ phải quay về dòng 0 — không được giữ dòng 1.
+   *
+   * Kênh B cố ý có CÙNG bộ dòng, nên nếu không reset thì số thứ tự 1 vẫn khớp và nội dung
+   * của kênh A vẫn hiện. Đó là thứ cần bắt; cho kênh B ít dòng hơn thì `current` thành
+   * `null` và bài test xanh vì lý do khác.
+   */
+  it("chọn dòng 1 ở kênh A, đổi sang kênh B ⇒ quay về dòng 0, không giữ dòng 1", async () => {
+    const { props } = dungThu({ source: KENH });
+    const { rerender } = render(<Studio {...props} />);
+
+    // 🔴 PHÉP ĐO PHẢI ĐỌC THỨ THỰC SỰ PHỤ THUỘC `currentId`.
+    //
+    // Hai lần sai trước, ghi lại vì cả hai đều cho bài test XANH khi đã gỡ effect reset
+    // (tức test GIẢ):
+    //
+    //   1. Chọn dòng bằng `goChu` (chỉ phát `onChange`). `onSelect` gắn vào
+    //      `<li onClick={onSelect}>` (`SegmentRow.tsx:64-66`), nên gõ vào ô KHÔNG đổi
+    //      `currentId` — chưa bao giờ có dòng nào được chọn.
+    //   2. Đọc `value` của ô đoạn 0. Đo được: `SegmentRow` chỉ dùng `current` để tô nền
+    //      (`bg-signal-soft`), vẽ vạch `w-[3px]`, và đổi màu số thứ tự — KHÔNG dùng nó
+    //      cho giá trị ô nhập. Nên giá trị ô đoạn 0 luôn như nhau dù `currentId` là gì.
+    //
+    // Thứ DUY NHẤT đọc được bằng chữ và phụ thuộc thẳng `currentId` là khối
+    // `Đoạn #N` (`Studio.tsx:1027-1032`): nó chỉ hiện khi `current !== null`, và `N`
+    // tính từ vị trí của `current` trong danh sách.
+    const hang1 = q()
+      .getAllByRole("listitem")
+      .find((li) => li.querySelector('[aria-label="Phụ đề đoạn 1"]') !== null);
+    assert.ok(hang1, "không tìm được hàng của đoạn 1 để bấm");
+    fireEvent.click(hang1);
+
+    await waitFor(() => {
+      assert.match(
+        document.body.textContent ?? "",
+        /Đoạn #2/,
+        "bấm hàng đoạn 1 mà khối 'Đoạn #' không chuyển sang #2 — phép đo sau vô nghĩa",
+      );
+    });
+
+    rerender(<Studio {...props} source={{ ...KENH, id: 2 }} />);
+
+    await waitFor(() => {
+      assert.match(
+        document.body.textContent ?? "",
+        /Đoạn #1/,
+        "đổi kênh mà khối 'Đoạn #' VẪN ở #2 — `currentId` chưa reset theo `source.id`, " +
+        "nên nó đang trỏ vào dòng cùng số thứ tự của kênh cũ",
+      );
+    });
   });
 });
 

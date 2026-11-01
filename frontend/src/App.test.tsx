@@ -807,4 +807,49 @@ describe("App: hàng đợi đổi trạng thái thì tự nạp lại, không c
       traFetch();
     }
   });
+
+  /**
+   * KẾ HOẠCH LỒNG TIẾNG KHÔNG ĐƯỢC GỌI LẠI MỖI 2 GIÂY.
+   *
+   * 🔴 LỖI THẬT, ĐO ĐƯỢC khi rà soát toàn bộ state: effect `keHoach` có deps
+   * `[banDich, jobs]`. `jobs` là MẢNG MỚI mỗi `NHIP_JOB_MS` = 2000 ms (`setJobs` trong
+   * effect polling tạo mảng mới kể cả khi không có gì đổi), nên `GET
+   * /api/dubs/{id}/plan` chạy lại MỖI 2 GIÂY, MÃI MÃI, suốt thời gian trang mở.
+   *
+   * Đó đúng là cái bẫy đã sửa ở hai effect `sources`/`transcript` bằng `soJob`, nhưng bị
+   * để nguyên ở đây — và tệ hơn: `soJob` chỉ đổi khi job chuyển TRẠNG THÁI, còn `jobs`
+   * đổi mỗi nhịp.
+   *
+   * Phép đo: đếm số lần gọi `/plan`, chờ QUA hai nhịp polling, rồi đòi con số không đổi.
+   */
+  it("GET /api/dubs/{id}/plan KHÔNG bị gọi lại mỗi nhịp polling", async () => {
+    let lanPlan = 0;
+    chanFetch((duong, method) => {
+      if (duong.startsWith("/dubs/") && duong.endsWith("/plan") && method === "GET") {
+        lanPlan += 1;
+        return null;
+      }
+      return traMacDinh(duong, method);
+    });
+    try {
+      render(<App />);
+      await doiNapXong();
+      const sauKhiNap = lanPlan;
+      assert.ok(sauKhiNap >= 1, `phải gọi /plan ít nhất một lần, đo được ${sauKhiNap}`);
+
+      // Chờ QUA hai nhịp polling (2 × 2000 ms) rồi mới đo. Đợi 1 giây thì bài test xanh
+      // dù sản phẩm vẫn gọi lại — phép đo phải dài hơn nhịp nó định bắt.
+      await new Promise((r) => setTimeout(r, 5200));
+
+      assert.equal(
+        lanPlan,
+        sauKhiNap,
+        `GET /plan bị gọi lại ${lanPlan - sauKhiNap} lần trong 5,2 giây — deps còn ` +
+        `\`jobs\` (mảng mới mỗi 2 giây) thay vì \`soJob\`. Đo được tổng ${lanPlan} lần.`,
+      );
+    } finally {
+      cleanup();
+      traFetch();
+    }
+  });
 });
