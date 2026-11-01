@@ -329,20 +329,71 @@ export function Studio(props: StudioProps) {
    * `ghepState` doc tu job `tron_nen` that; `dubState` tu job `dub` that. Ban goc
    * dung bien `remux` chay bang `setTimeout` — do la mo phong, khong phai trang thai.
    */
+  /**
+   * JOB LỒNG TIẾNG của bản dịch đang xem — job `dub` KHÔNG ghép nền.
+   *
+   * Hai chỗ sửa so với bản trước, cùng một lý do "phải đọc đúng dữ liệu":
+   *
+   *   1. `j.payload["translation_id"]` → `j.payload?.["translation_id"]`. `payload` là
+   *      `Record<string, unknown>` nhưng dữ liệu qua JSON có thể thiếu hẳn trường này;
+   *      đọc thẳng ném `Cannot read properties of undefined` (đo được: cả bộ test đỏ vì
+   *      một job mẫu không có `payload`).
+   *   2. `ds[ds.length - 1]` → `reduce(max id)`. Mảng `jobs` do máy chủ trả theo `id` TĂNG,
+   *      nên `ds[ds.length - 1]` hiện đúng — nhưng đó là phụ thuộc vào THỨ TỰ MẢNG, thứ
+   *      không nằm trong hợp đồng. Lấy theo `id` là đọc đúng thứ mà nó muốn nói: job mới
+   *      nhất.
+   *
+   * Bản này KHÔNG lọc `tron_nen`: job `dub` có ghép nền vẫn là job lồng tiếng (nó làm cả
+   * hai việc), nên bước "Lồng tiếng" phải thấy nó.
+   */
   const jobDub = useMemo(() => {
     if (banDich === null) return null;
     const ds = jobs.filter(
-      (j) => j.type === "dub" && (j.payload["translation_id"] as number | undefined) === banDich.id,
+      (j) =>
+        j.type === "dub" &&
+        (j.payload?.["translation_id"] as number | undefined) === banDich.id,
     );
-    return ds.length === 0 ? null : ds[ds.length - 1];
+    return ds.length === 0 ? null : ds.reduce((a, b) => (b.id > a.id ? b : a));
   }, [jobs, banDich]);
 
+  /**
+   * JOB GHÉP NỀN — và đây là chỗ bản trước lọc SAI LOẠI JOB.
+   *
+   * 🔴 LỖI THẬT, ĐO ĐƯỢC (người dùng: *"khi hoàn thành xong task nào đó thì phần refresh
+   * lại để nó hiện ra dấu tích"*). Bản trước lọc:
+   *
+   *     j.type === "export" && j.payload["translation_id"] === banDich.id
+   *
+   * Hai trường đó KHÔNG CÙNG TỒN TẠI. Đo trên `GET /api/jobs` (108 job):
+   *
+   *     #64 export done {"transcript_id": 9, "format": "srt", ...}
+   *     #65 export done {"transcript_id": 9, "format": "ass", ...}
+   *
+   * `ExportPayload` (`routes_jobs.py:95`) có `transcript_id`, `format`, `bilingual`,
+   * `stem`, `translations` — KHÔNG có `translation_id`. Nên phép lọc luôn ra rỗng,
+   * `jobGhep` luôn `null`, và hai bước "Ghép nền"/"Xuất" KHÔNG BAO GIỜ đạt `done` ⇒
+   * không bao giờ hiện dấu tích, dù việc đã xong.
+   *
+   * Sự thật về hai việc này:
+   *
+   *   · GHÉP NỀN **không phải một loại job**. Nó là job `dub` chạy với
+   *     `payload.tron_nen = true` (`dub.py:229-234`, `296`), và chính nó sinh ra
+   *     `dub-{tid}.mp4` qua `_tron_va_remux`. Vì vậy phải lọc `type === "dub"` +
+   *     `tron_nen` — không phải `export`.
+   *   · `export` là XUẤT PHỤ ĐỀ (srt/ass) theo `transcript_id`, không liên quan tới video.
+   *
+   * `tron_nen` đọc bằng `=== true`, không bằng truthiness: `undefined` (job cũ không có
+   * trường) phải KHÁC `true`. Truthiness sẽ biến mọi job `dub` cũ thành "đã ghép nền".
+   */
   const jobGhep = useMemo(() => {
     if (banDich === null) return null;
     const ds = jobs.filter(
-      (j) => j.type === "export" && (j.payload["translation_id"] as number | undefined) === banDich.id,
+      (j) =>
+        j.type === "dub" &&
+        (j.payload?.["translation_id"] as number | undefined) === banDich.id &&
+        j.payload?.["tron_nen"] === true,
     );
-    return ds.length === 0 ? null : ds[ds.length - 1];
+    return ds.length === 0 ? null : ds.reduce((a, b) => (b.id > a.id ? b : a));
   }, [jobs, banDich]);
 
   /**

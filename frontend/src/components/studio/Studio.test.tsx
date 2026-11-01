@@ -95,6 +95,19 @@ function banDichCua(segments: Segment[]): TranslationDetail {
   };
 }
 
+/**
+ * `id` của bản dịch trong fixture — PHẢI khớp `banDichCua()`.
+ *
+ * 🔴 ĐO ĐƯỢC (bài test "Ghép nền" đỏ vì lý do này, không phải vì sản phẩm):
+ * `banDichCua()` trả `id: 4`, còn job mẫu của tôi ghi `translation_id: 1`. `jobGhep`
+ * lọc theo `translation_id === banDich.id`, nên nó ra rỗng và bước "Ghép nền" đứng ở
+ * "chưa chạy" — đúng như nó phải, vì job đó thuộc một bản dịch KHÁC.
+ *
+ * Viết cứng `1` ở ba chỗ là ba cơ hội để lệch khỏi fixture; đọc từ chính `banDichCua()`
+ * thì không thể lệch.
+ */
+const BAN_DICH_ID = banDichCua([]).id;
+
 const KENH = {
   id: 1,
   kind: "file",
@@ -411,5 +424,103 @@ describe("Studio: thông báo lỗi từ tầng trên được HIỆN, không nu
     const { props } = dungThu({ loi: "máy chủ trả 500" });
     render(<Studio {...props} />);
     assert.ok(q().getByText(/máy chủ trả 500/));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// DẤU TÍCH CỦA BƯỚC "GHÉP NỀN" — phải hiện khi việc đã XONG.
+//
+// 🔴 LỖI THẬT, ĐO ĐƯỢC (người dùng: *"khi hoàn thành xong task nào đó thì phần refresh
+// lại để nó hiện ra dấu tích"*). `jobGhep` lọc:
+//
+//     j.type === "export" && j.payload["translation_id"] === banDich.id
+//
+// Hai trường đó KHÔNG CÙNG TỒN TẠI. Đo trên `GET /api/jobs` (108 job):
+//
+//     #64 export done {"transcript_id": 9, "format": "srt", ...}
+//     #65 export done {"transcript_id": 9, "format": "ass", ...}
+//
+// `ExportPayload` (`routes_jobs.py:95`) có `transcript_id`/`format`/`bilingual`/`stem`/
+// `translations` — KHÔNG có `translation_id`. Nên phép lọc luôn rỗng, `jobGhep` luôn
+// `null`, và hai bước "Ghép nền"/"Xuất" KHÔNG BAO GIỜ đạt `done` ⇒ không bao giờ có dấu
+// tích, dù `dub-{tid}.mp4` đã nằm trên đĩa.
+//
+// Sự thật: GHÉP NỀN không phải một loại job — nó là job `dub` với
+// `payload.tron_nen = true` (`dub.py:229-234`, `296`), chính nó sinh ra mp4.
+// ---------------------------------------------------------------------------
+
+/** Job mẫu — chỉ những trường mà `Studio` đọc. */
+function job(p: Partial<Job> & { id: number }): Job {
+  return {
+    workspace: 1,
+    type: "dub",
+    engine: null,
+    phase: "dub:-",
+    state: "queued",
+    cancel_requested: false,
+    attempts: 0,
+    progress: 0,
+    log_tail: "",
+    error: null,
+    payload: {},
+    created_at: "2026-01-01T00:00:00Z",
+    started_at: null,
+    finished_at: null,
+    ...p,
+  };
+}
+
+describe("Studio: bước Ghép nền hiện dấu tích khi job dub tron_nen xong", () => {
+  it("có job dub tron_nen done ⇒ bước Ghép nền done (dấu tích hiện)", () => {
+    const { props } = dungThu({
+      source: KENH,
+      jobs: [
+        job({
+          id: 70,
+          type: "dub",
+          state: "done",
+          payload: { translation_id: BAN_DICH_ID, tron_nen: true },
+        }),
+      ],
+    });
+    render(<Studio {...props} />);
+    // `PipelineBar` vẽ `s.note` dưới tên bước; bước done mang nhãn "đã ghép".
+    assert.match(
+      document.body.textContent ?? "",
+      /đã ghép/,
+      "job dub tron_nen đã done mà bước Ghép nền KHÔNG hiện 'đã ghép' — dấu tích không " +
+      "bao giờ hiện vì phép lọc tìm `export` + `translation_id` (không cùng tồn tại)",
+    );
+  });
+
+  it("job dub KHÔNG tron_nen thì Ghép nền vẫn chưa xong", () => {
+    // Vế chống sửa quá tay: nếu ai đó bỏ điều kiện `tron_nen`, mọi job lồng tiếng đều
+    // thành "đã ghép nền" và dấu tích hiện sai — video chưa hề có bản trộn nền.
+    const { props } = dungThu({
+      source: KENH,
+      jobs: [job({ id: 71, type: "dub", state: "done", payload: { translation_id: BAN_DICH_ID } })],
+    });
+    render(<Studio {...props} />);
+    assert.doesNotMatch(
+      document.body.textContent ?? "",
+      /đã ghép/,
+      "job dub KHÔNG tron_nen mà bước Ghép nền báo 'đã ghép' — thiếu điều kiện tron_nen",
+    );
+  });
+
+  it("job dub tron_nen còn đang chạy ⇒ chưa có dấu tích", () => {
+    const { props } = dungThu({
+      source: KENH,
+      jobs: [
+        job({
+          id: 72,
+          type: "dub",
+          state: "running",
+          payload: { translation_id: BAN_DICH_ID, tron_nen: true },
+        }),
+      ],
+    });
+    render(<Studio {...props} />);
+    assert.doesNotMatch(document.body.textContent ?? "", /đã ghép/);
   });
 });
