@@ -450,6 +450,23 @@ describe("Studio: thông báo lỗi từ tầng trên được HIỆN, không nu
 // ---------------------------------------------------------------------------
 
 /** Job mẫu — chỉ những trường mà `Studio` đọc. */
+/**
+ * Trạng thái bước "Phiên âm" hiện trên thanh đường ống.
+ *
+ * Đọc `title` (chính là `note`) và chữ trong nút, KHÔNG đọc màu/nền: `state` là dữ liệu,
+ * `bg-*` là trình bày — đổi bảng màu không được làm đỏ bài test.
+ *
+ * `PipelineBar.tsx` không đặt `aria-label`; `title={s.note}` là chỗ duy nhất mang `note` ra
+ * ngoài DOM, nên nó là thứ phải đọc.
+ */
+function buocAsr(): { chu: string; ghiChu: string } {
+  const nut = q()
+    .getAllByRole("button")
+    .find((b) => (b.textContent ?? "").startsWith("Phiên âm")) as HTMLElement | undefined;
+  if (nut === undefined) throw new Error("không tìm thấy nút bước 'Phiên âm'");
+  return { chu: nut.textContent ?? "", ghiChu: nut.getAttribute("title") ?? "" };
+}
+
 function job(p: Partial<Job> & { id: number }): Job {
   return {
     workspace: 1,
@@ -522,5 +539,119 @@ describe("Studio: bước Ghép nền hiện dấu tích khi job dub tron_nen xo
     });
     render(<Studio {...props} />);
     assert.doesNotMatch(document.body.textContent ?? "", /đã ghép/);
+  });
+});
+
+
+// ---------------------------------------------------------------------------
+// TRẠNG THÁI LẠC QUAN CỦA BƯỚC "PHIÊN ÂM" — đổi NGAY lúc bấm
+//
+// 🔴 LỖI THẬT, ĐO ĐƯỢC (người dùng: "nên đổi state từ cái lúc ấn ý").
+//
+// `asrState` suy từ `jobAsr`, mà `jobAsr` chỉ có sau khi `GET /api/jobs` trả về. Hai độ trễ
+// cộng lại:
+//
+//   1. nhịp hỏi `NHIP_JOB_MS = 2000` — tối đa 2 giây trước lượt hỏi kế tiếp;
+//   2. độ trễ mạng + thời gian `POST /api/jobs` trả về (job phải được GHI vào DB rồi mới
+//      lọt vào danh sách).
+//
+// Trong khoảng đó bước vẫn vẽ dấu tích của bản ghi CŨ. Người dùng bấm, thấy không có gì đổi,
+// và bấm lại — đo được trong lịch sử job: #95/#96, #98/#99, #101/#102 đều là cặp job `asr`
+// cách nhau vài giây, tức thao tác bị lặp vì giao diện không phản hồi.
+// ---------------------------------------------------------------------------
+
+describe("Studio: bước Phiên âm đổi trạng thái NGAY lúc bấm", () => {
+  it("bấm Phiên âm khi đã có bản ghi cũ ⇒ bước đổi sang 'đang phiên âm…' ngay, chưa cần job", () => {
+    // Đây đúng là ca người dùng báo: nguồn đã có bản ghi (nên bước đang tick), bấm chạy lại.
+    const { props } = dungThu({ source: KENH, jobs: [] as Job[] });
+    render(<Studio {...props} />);
+
+    assert.equal(buocAsr().ghiChu, 'whisper', 'trước khi bấm: bước ghi engine của bản ghi cũ (anGhi() dựng ngine: whisper)');
+
+    fireEvent.click(q().getByRole("button", { name: /^Phiên âm/ }));
+
+    assert.equal(
+      buocAsr().ghiChu,
+      "đang phiên âm…",
+      "bấm xong phải đổi NGAY; còn ghi engine cũ nghĩa là vẫn đợi /api/jobs (tới 2 giây)",
+    );
+  });
+
+  it("bấm Phiên âm vẫn gọi onBuoc('asr') — đổi màu KHÔNG được thay việc gửi job", () => {
+    // Vế ngược lại: nếu chỉ đổi state mà quên `onBuoc` thì giao diện nói dối là đang chạy
+    // trong khi không có job nào được tạo — tệ hơn lỗi gốc.
+    const { props, goi } = dungThu({ source: KENH, jobs: [] as Job[] });
+    render(<Studio {...props} />);
+    fireEvent.click(q().getByRole("button", { name: /^Phiên âm/ }));
+    assert.deepEqual(
+      goi.filter((g) => g.ten === "onBuoc").map((g) => g.args[0]),
+      ["asr"],
+      "phải gửi đúng một lời gọi onBuoc('asr')",
+    );
+  });
+
+  it("job asr THẬT về với state 'running' ⇒ vẫn 'đang phiên âm…', không nhấp nháy về tick", () => {
+    const { props, rerender } = (() => {
+      const r = dungThu({ source: KENH, jobs: [] as Job[] });
+      const { rerender: rr } = render(<Studio {...r.props} />);
+      return { props: r.props, rerender: rr };
+    })();
+    fireEvent.click(q().getByRole("button", { name: /^Phiên âm/ }));
+    assert.equal(buocAsr().ghiChu, "đang phiên âm…");
+
+    rerender(
+      <Studio
+        {...props}
+        jobs={[job({ id: 109, type: "asr", state: "running", payload: { source_id: KENH.id } })]}
+      />,
+    );
+    assert.equal(
+      buocAsr().ghiChu,
+      "đang phiên âm…",
+      "job thật đã tới thì trạng thái phải GIỮ NGUYÊN, không được nhảy về tick",
+    );
+  });
+
+  it("job asr THẬT về với state 'failed' ⇒ HIỆN LỖI, cờ lạc quan phải tan", () => {
+    // Che lỗi bằng trạng thái lạc quan là kiểu nói dối mà cả hai lần sửa này đang diệt.
+    const r = dungThu({ source: KENH, jobs: [] as Job[] });
+    const { rerender } = render(<Studio {...r.props} />);
+    fireEvent.click(q().getByRole("button", { name: /^Phiên âm/ }));
+
+    rerender(
+      <Studio
+        {...r.props}
+        jobs={[job({ id: 110, type: "asr", state: "failed", payload: { source_id: KENH.id } })]}
+      />,
+    );
+    assert.equal(buocAsr().ghiChu, "lỗi — xem hàng đợi", "job hỏng phải hiện lỗi, không che");
+  });
+
+  it("job asr 'done' mà cờ lạc quan ĐÃ TAN ⇒ về tick, không kẹt ở 'đang phiên âm…'", () => {
+    // Bài này ghim vế dễ hỏng nhất: nếu effect KHÔNG BAO GIỜ tắt cờ thì sau lần bấm đầu,
+    // mọi trạng thái `done` sau này bị che thành "đang phiên âm…" VĨNH VIỄN.
+    const r = dungThu({ source: KENH, jobs: [] as Job[] });
+    const { rerender } = render(<Studio {...r.props} />);
+    fireEvent.click(q().getByRole("button", { name: /^Phiên âm/ }));
+
+    // 1. job thật `running` -> cờ tan.
+    rerender(
+      <Studio
+        {...r.props}
+        jobs={[job({ id: 111, type: "asr", state: "running", payload: { source_id: KENH.id } })]}
+      />,
+    );
+    // 2. job xong -> `done` + đã có bản ghi -> phải về engine, KHÔNG kẹt.
+    rerender(
+      <Studio
+        {...r.props}
+        jobs={[job({ id: 111, type: "asr", state: "done", payload: { source_id: KENH.id } })]}
+      />,
+    );
+    assert.doesNotMatch(
+      buocAsr().ghiChu,
+      /đang phiên âm/,
+      "cờ lạc quan không tan -> bước kẹt ở 'đang phiên âm…' mãi mãi",
+    );
   });
 });

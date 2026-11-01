@@ -177,6 +177,31 @@ export function Studio(props: StudioProps) {
    * sach phu de, khong phai mot danh muc viec chiem het man hinh khi vua mo.
    */
   const [viecMo, setViecMo] = useState(false);
+  /**
+   * TRẠNG THÁI LẠC QUAN của bước "Phiên âm" — đặt NGAY khi bấm, trước khi job thật về.
+   *
+   * 🔴 LỖI THẬT, ĐO ĐƯỢC (người dùng: *"nên đổi state từ cái lúc ấn ý"*).
+   *
+   * `asrState` suy từ `jobAsr`, mà `jobAsr` chỉ có sau khi `GET /api/jobs` trả về. Đo được
+   * hai độ trễ cộng lại:
+   *
+   *   1. nhịp hỏi `NHIP_JOB_MS = 2000` — tối đa 2 giây trước lượt hỏi kế tiếp;
+   *   2. độ trễ mạng + thời gian `POST /api/jobs` trả về (job phải được GHI vào DB rồi mới
+   *      lọt vào danh sách).
+   *
+   * Trong khoảng đó bước vẫn vẽ dấu tích của bản ghi CŨ. Người dùng bấm, thấy không có gì
+   * đổi, và bấm lại — sinh ra job thứ hai (đo được trong lịch sử: #95/#96, #98/#99,
+   * #101/#102 đều là cặp job `asr` cách nhau vài giây).
+   *
+   * Cách sửa: ghi thẳng "đang phiên âm" vào state NGAY trong `onStep`, rồi TỰ TAN khi
+   * `jobAsr` thật sự mang trạng thái đó (hoặc khi nó `failed`/`interrupted` — lúc đó hiện
+   * lỗi là đúng, không được che bằng trạng thái lạc quan).
+   *
+   * Vì sao không đặt `"queued"`: người dùng vừa bấm và job sẽ chạy, "đang phiên âm…" nói
+   * đúng việc đang xảy ra; "chờ tới lượt" chỉ đúng khi hàng đợi có job khác chạy trước, và
+   * giao diện biết điều đó qua `/api/jobs` chứ không đoán được lúc bấm.
+   */
+  const [asrLacQuan, setAsrLacQuan] = useState(false);
 
   const media: string | null = source === null ? null : mediaUrl(source.id);
   const player = usePlayer(media);
@@ -430,7 +455,12 @@ export function Studio(props: StudioProps) {
       duongOng({
         coBanGhi: transcript !== null,
         engineAsr: transcript === null ? null : transcript.engine,
-        asrState: jobAsr === null ? null : jobAsr.state,
+        asrState:
+          asrLacQuan && (jobAsr === null || jobAsr.state === "done")
+            ? "running"
+            : jobAsr === null
+              ? null
+              : jobAsr.state,
         coBanDich: banDich !== null,
         engineMt: banDich === null ? null : banDich.engine,
         soViec: issues.length,
@@ -438,8 +468,36 @@ export function Studio(props: StudioProps) {
         ghepState: jobGhep === null ? null : jobGhep.state,
         coFileXuat: jobGhep !== null && jobGhep.state === "done",
       }),
-    [transcript, banDich, issues.length, jobDub, jobGhep, jobAsr],
+    [transcript, banDich, issues.length, jobDub, jobGhep, jobAsr, asrLacQuan],
   );
+
+  // TỰ TAN trạng thái lạc quan khi `/api/jobs` đã mang tin THẬT về job này.
+  //
+  // Hai điều kiện tan, và vì sao đúng hai:
+  //
+  //   1. `jobAsr` đang `queued`/`running` ⇒ job thật đã tới, nó tự nói trạng thái. Giữ cờ
+  //      lạc quan nữa thì vô hại nhưng vô nghĩa — nhánh `running` của `duongOng` thắng như
+  //      nhau. Tan để lần bấm SAU còn dùng lại được cờ (nếu không tan, cờ `true` vĩnh viễn
+  //      và mọi trạng thái `done` sau này bị che thành "đang phiên âm…").
+  //   2. `jobAsr` `failed`/`interrupted` ⇒ lần chạy vừa hỏng. Phải HIỆN LỖI, không được che
+  //      bằng trạng thái lạc quan — đó chính là kiểu nói dối mà cả hai lần sửa này đang diệt.
+  //
+  // Không tan khi `jobAsr === null`: đó là khoảng trễ đang chờ, đúng lúc cờ cần có tác dụng.
+  // Không tan khi `jobAsr.state === "done"` mà `coBanGhi` chưa có: trạng thái thoáng qua
+  // (worker ghi xong job trước khi giao diện kịp nạp transcript) — `duongOng` đã có nhánh
+  // "đang nạp lại" cho nó, và cờ lạc quan nói cùng một điều.
+  useEffect(() => {
+    if (!asrLacQuan || jobAsr === null) return;
+    if (
+      jobAsr.state === "queued" ||
+      jobAsr.state === "running" ||
+      jobAsr.state === "failed" ||
+      jobAsr.state === "interrupted" ||
+      jobAsr.state === "cancelled"
+    ) {
+      setAsrLacQuan(false);
+    }
+  }, [asrLacQuan, jobAsr]);
 
   const lyDoXuat = useMemo(() => lyDoChuaXuatDuoc(cacBuoc), [cacBuoc]);
 
@@ -570,6 +628,18 @@ export function Studio(props: StudioProps) {
         return;
       }
       setView("edit");
+      // ĐẶT TRẠNG THÁI LẠC QUAN NGAY, trước khi `onBuoc` kịp gửi request.
+      //
+      // `onBuoc("asr")` là `async`: nó `POST /api/jobs` rồi trả về, và bước chỉ đổi màu khi
+      // `/api/jobs` (nhịp 2 s) mang job mới về. Người dùng bấm, thấy dấu tích cũ đứng yên,
+      // và bấm lại — đo được trong lịch sử job: #95/#96, #98/#99, #101/#102 đều là cặp job
+      // `asr` cách nhau vài giây, tức thao tác bị lặp vì giao diện không phản hồi.
+      //
+      // Đặt ở đây, KHÔNG trong `onBuoc`, vì `onBuoc` còn được gọi từ nơi khác (nút trong
+      // panel, phím tắt) và ta chỉ muốn cờ này cho hành động bấm bước trên thanh đường ống.
+      // Đặt trước `onBuoc` để request hỏng cũng đã đổi màu — và nếu hỏng thì `App` đặt `loi`,
+      // effect tự tan cờ khi `jobAsr` mang `failed`.
+      if (id === "asr") setAsrLacQuan(true);
       onBuoc(id);
     },
     [issues.length, diViec, lyDoXuat, onXuatVideo, onBuoc],
