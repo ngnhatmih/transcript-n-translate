@@ -233,13 +233,24 @@ def test_empty_segment_list_gives_valid_empty_documents():
 
 
 def test_ass_without_a_frame_keeps_the_original_coordinate_system_byte_for_byte():
-    """`khung=None` ⇒ `1920×1080`, cỡ 54, lề 60, `WrapStyle: 2` — y như trước."""
+    """`khung=None` ⇒ `1920×1080`, cỡ 54, lề 60, `WrapStyle: 2` — hệ toạ độ y như trước.
+
+    🔴 Vế "byte for byte" nay chỉ còn đúng cho HỆ TOẠ ĐỘ, không cho toàn tệp: màu chữ,
+    hộp nền và `BorderStyle` đã đổi theo yêu cầu trực tiếp (trắng trên hộp đen) — xem
+    `test_ass_style_is_white_text_on_a_black_box`. Giữ nguyên ở đây là `PlayRes`, cỡ
+    chữ, lề và `WrapStyle`, vì đó mới là thứ `khung` sinh ra để điều khiển.
+    """
     out = to_ass([Segment(i=0, start=0.0, end=1.0, text="x")])
     assert "PlayResX: 1920" in out
     assert "PlayResY: 1080" in out
     assert "WrapStyle: 2" in out
-    assert "Style: Default,Archivo,54,&H00DCE4E8" in out
-    assert ",0,0,0,0,100,100,0,0,1,2,1,2,60,60,48,1" in out
+    f = _style_fields(out)
+    assert f["Fontname"] == "Archivo"
+    assert f["Fontsize"] == "54"
+    assert f["MarginL"] == "60" and f["MarginR"] == "60"
+    assert f["MarginV"] == "48"
+    # Không có `khung` ⇒ không ghi đè vị trí: `\pos` chỉ có khi biết khung thật.
+    assert "\\pos(" not in out
 
 
 def test_ass_for_a_vertical_frame_declares_that_frame_and_shrinks_the_style():
@@ -254,8 +265,12 @@ def test_ass_for_a_vertical_frame_declares_that_frame_and_shrinks_the_style():
     assert "WrapStyle: 0" in out
     # ti_le = min(1080/1920, 1920/1080) = 0,5625  =>  co 54*0,5625 = 30,375 -> 30
     #                                              le 60*0,5625 = 33,75    -> 34
-    assert "Style: Default,Archivo,30,&H00DCE4E8" in out
-    assert ",1,1,1,2,34,34,27,1" in out
+    #                                              duoi 48*0,5625 = 27     -> 27
+    f = _style_fields(out)
+    assert f["Fontname"] == "Archivo"
+    assert f["Fontsize"] == "30"
+    assert f["MarginL"] == "34" and f["MarginR"] == "34"
+    assert f["MarginV"] == "27"
 
 
 def test_ass_frame_scales_by_the_SHORT_side_so_text_fits_the_narrow_axis():
@@ -265,12 +280,12 @@ def test_ass_frame_scales_by_the_SHORT_side_so_text_fits_the_narrow_axis():
     `ti_le` = 1,78 và chữ phình TO ra — bài này bắt đúng lỗi đó.
     """
     ngang = to_ass([Segment(i=0, start=0.0, end=1.0, text="x")], khung=(1920, 1080))
-    assert "Style: Default,Archivo,54,&H00DCE4E8" in ngang
     assert "PlayResY: 1080" in ngang
+    assert _style_fields(ngang)["Fontsize"] == "54"
 
     vuong = to_ass([Segment(i=0, start=0.0, end=1.0, text="x")], khung=(1080, 1080))
     assert "PlayResX: 1080" in vuong and "PlayResY: 1080" in vuong
-    assert "Style: Default,Archivo,30,&H00DCE4E8" in vuong
+    assert _style_fields(vuong)["Fontsize"] == "30"
 
 
 def test_ass_rejects_a_nonsense_frame_by_falling_back_to_the_default():
@@ -292,6 +307,119 @@ def test_render_passes_the_frame_only_to_ass():
     # Không phải `ass`: `khung` bị bỏ qua, không được ném vì tham số lạ.
     assert "WEBVTT" in render("vtt", segs, khung=(1080, 1920))
     assert render("srt", segs, khung=(1080, 1920)).startswith("1\n")
+
+
+# ---------------------------------------------------------------------------
+# Hộp đen + chữ trắng, và độ hạ khối chữ.
+#
+# Bốn bài dưới ghim HÀNH VI ĐÃ ĐO TRÊN VIDEO THẬT (`dub-7.mp4`, 1080×1920, ba khung
+# ở 5 s / 20 s / 60 s): chữ Việt TRẮNG nằm trong HỘP ĐEN ở đáy khung, không bị cắt
+# mép dưới. Trước bản vá, style là `BorderStyle: 1` (chỉ viền) với `PrimaryColour:
+# &H00DCE4E8` (xám ngả xanh) — đo được là CHÌM vào nền và không tách được khỏi lớp
+# phụ đề Trung cứng của video gốc.
+# ---------------------------------------------------------------------------
+
+
+def _style_fields(out: str) -> list[str]:
+    """Tách dòng `Style:` thành danh sách trường, theo đúng thứ tự `Format:` của ASS.
+
+    🔴 ĐỌC CHỈ SỐ TỪ `Format:` CHỨ KHÔNG ĐẾM TAY (đo được: tôi đã đếm sai một ô).
+    Dòng `Format:` khai 23 tên, còn dòng `Style:` có `Name` + 23 giá trị = 24 ô. Cắt
+    `split(",")[1:]` để bỏ `Name` là ĐÚNG, nhưng nếu đếm chay thì `BackColour` bị đọc
+    thành `'0'` và bài test báo sai chỗ — một test sai chỉ số còn tệ hơn không có test,
+    vì nó chỉ ra một lỗi không tồn tại.
+
+    Trả về `dict` tên→giá trị, nên bài test gọi theo TÊN và không bao giờ lệch ô nữa.
+    """
+    dong = [d for d in out.splitlines() if d.startswith("Style:")]
+    assert len(dong) == 1, f"phải có đúng một dòng Style:, thấy {len(dong)}"
+    ten = [d for d in out.splitlines() if d.startswith("Format: Name")][0]
+    truong = [x.strip() for x in ten[len("Format:"):].split(",")]
+    gia_tri = [x.strip() for x in dong[0][len("Style:"):].split(",")]
+    assert len(truong) == len(gia_tri), (
+        f"Format: khai {len(truong)} trường nhưng Style: có {len(gia_tri)} giá trị — "
+        f"hai dòng đã trôi khỏi nhau"
+    )
+    return dict(zip(truong, gia_tri))
+
+
+def test_ass_style_is_white_text_on_a_black_box():
+    """Chữ TRẮNG (`&H00FFFFFF`) trên HỘP ĐEN (`BorderStyle: 3`), không phải chỉ viền.
+
+    Vì sao ghim CẢ BA vế: `PrimaryColour`, `BackColour` và `BorderStyle` là ba trục
+    độc lập. Đổi mỗi màu chữ mà quên `BorderStyle` thì vẫn ra chữ trắng có viền mảnh,
+    chìm vào nền sáng; đổi mỗi `BorderStyle` mà quên màu thì ra hộp đen chứa chữ xám;
+    quên `BackColour` thì hộp trong suốt và không che được gì. Chỉ khi cả ba cùng đúng
+    mới đọc được — và đó là thứ đã đo trên khung hình thật.
+    """
+    out = to_ass([Segment(i=0, start=0.0, end=1.0, text="x")],
+                 translations=["chữ"], khung=(1080, 1920))
+    f = _style_fields(out)
+    assert f["PrimaryColour"] == "&H00FFFFFF", (
+        f"PrimaryColour phải là trắng đục, thấy {f['PrimaryColour']!r}"
+    )
+    assert f["BackColour"] == "&HA0000000", (
+        f"BackColour phải là đen bán trong, thấy {f['BackColour']!r}"
+    )
+    assert f["BorderStyle"] == "3", (
+        f"BorderStyle phải là 3 (hộp), thấy {f['BorderStyle']!r}"
+    )
+
+
+def test_ass_box_style_is_on_even_without_a_frame():
+    """Hộp đen + chữ trắng áp cho CẢ đường xuất tệp rời (`khung=None`).
+
+    Vì sao: đó là lựa chọn TRÌNH BÀY của sản phẩm, không phải hệ quả của kích thước
+    video. Tệp `.ass` xuất rời rồi mở trong trình phát cũng phải ra chữ trắng hộp đen —
+    nếu chỉ bật khi burn thì hai đường cho ra hai giao diện khác nhau từ cùng dữ liệu.
+    """
+    f = _style_fields(to_ass([Segment(i=0, start=0.0, end=1.0, text="x")]))
+    assert f["PrimaryColour"] == "&H00FFFFFF"
+    assert f["BorderStyle"] == "3"
+
+
+def test_ass_lowers_the_text_and_keeps_it_inside_the_frame():
+    r"""Offset hạ khối chữ xuống, và KHÔNG BAO GIỜ đẩy nó ra ngoài mép dưới.
+
+    Bài này ghim đúng ba lỗi đã đo, theo thứ tự chúng xuất hiện:
+      1. trừ offset vào `MarginV` ⇒ `MarginV` về 0 (chữ dính mép, hộp bị cắt cụt);
+      2. `MarginV` âm ⇒ libass CẮT chữ;
+      3. giữ `\pos` nhưng vẫn trừ vào `duoi` ⇒ `pos_y` BÃO HOÀ ở 1905 với mọi offset
+         từ 0,02 trở lên — tham số không điều khiển được gì.
+
+    Nên phép kiểm là QUAN HỆ, không phải một con số: offset lớn hơn ⇒ `pos_y` nhỏ hơn
+    (chữ thấp hơn), và mọi `pos_y` đều nằm trong `(0, cao)`.
+    """
+    import re
+
+    seg = [Segment(i=0, start=0.0, end=1.0, text="x")]
+    truoc = None
+    for offset in (0.0, 0.04, 0.10, 0.30):
+        out = to_ass(seg, translations=["chữ"], khung=(1080, 1920), offset_doc=offset)
+        dong = [d for d in out.splitlines() if d.startswith("Dialogue:")][0]
+        khop = re.search(r"\\an2\\pos\((\d+),(\d+)\)", dong)
+        assert khop is not None, f"offset={offset} phải có \\an2\\pos, thấy {dong!r}"
+        x, y = int(khop.group(1)), int(khop.group(2))
+        assert x == 540, f"phải neo giữa khung 1080 (x=540), thấy {x}"
+        assert 0 < y < 1920, f"offset={offset} đẩy chữ ra ngoài khung: y={y}"
+        if truoc is not None:
+            assert y < truoc, (
+                f"offset tăng mà chữ KHÔNG hạ xuống: {truoc} → {y} "
+                f"(offset={offset}) — tham số bão hoà"
+            )
+        truoc = y
+
+
+def test_ass_offset_is_clamped_for_nonsense_values():
+    r"""Offset âm hoặc > 1 vẫn phải cho `pos_y` trong khung — kẹp, không ném, không cắt."""
+    import re
+
+    seg = [Segment(i=0, start=0.0, end=1.0, text="x")]
+    for offset in (-1.0, 2.0):
+        out = to_ass(seg, translations=["chữ"], khung=(1080, 1920), offset_doc=offset)
+        dong = [d for d in out.splitlines() if d.startswith("Dialogue:")][0]
+        y = int(re.search(r"\\pos\(\d+,(\d+)\)", dong).group(1))
+        assert 0 < y < 1920, f"offset={offset} cho pos_y ngoài khung: {y}"
 
 
 # --------------------------------------------------------------------------

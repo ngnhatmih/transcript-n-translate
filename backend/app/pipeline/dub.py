@@ -397,6 +397,9 @@ class DubHandler:
                     report(0.94, "không đọc được kích thước video — phụ đề dùng hệ "
                                  "1920×1080, có thể lệch trên khung dọc")
                 phu_de.write_text(
+                    # `khung` khai đúng hệ toạ độ; `offset_doc` (mặc định 6 % chiều cao)
+                    # đẩy khối chữ XUỐNG để HỘP ĐEN che lấp lớp phụ đề TRUNG CỨNG của
+                    # video gốc ở đáy khung — xem `subtitle_format._ASS_OFFSET_DOC_MAC_DINH`.
                     _export.render("ass", transcript.segments,
                                    translations=list(chu_dich or []), khung=khung),
                     encoding="utf-8",
