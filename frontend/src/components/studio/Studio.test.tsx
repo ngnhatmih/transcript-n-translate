@@ -781,3 +781,59 @@ describe("Studio: buoc Long tieng / Ghep nen cung doi NGAY luc bam", () => {
     assert.equal(buocTheoTen("Lồng tiếng").ghiChu, "lỗi — xem hàng đợi");
   });
 });
+
+
+// ---------------------------------------------------------------------------
+// THANH CHAY TREN BUOC — uoc luong tien do khi backend khong bao
+//
+// 🔴 VI SAO CAN: `Job.progress` dung nguyen o `0.05` suot thoi gian chay (do duoc tren
+// job #113) roi nhay thang `1.0`. Nen giao dien truoc day chi biet hai trang thai, va
+// nguoi dung nhin mot vong xoay dung yen khong biet con bao lau.
+// ---------------------------------------------------------------------------
+
+describe("Studio: buoc dang chay co thanh uoc luong tien do", () => {
+  it("job asr running co started_at + duration => hien thanh chay voi tiLe", () => {
+    // `started_at` cach 'bay gio' 92 s; mo hinh nhanh cho video 279 s la 18 s, nen
+    // tiLe se cham tran 97 % — dieu quan trong la THANH PHAI CO, khong phai con so.
+    const batDau = new Date(Date.now() - 92_000).toISOString();
+    const { props } = dungThu({
+      source: KENH,
+      jobs: [
+        job({ id: 300, type: "asr", state: "running", started_at: batDau, payload: { source_id: KENH.id } }),
+      ],
+    });
+    render(<Studio {...props} />);
+    const thanh = q().getAllByRole("progressbar");
+    assert.equal(thanh.length, 1, "phai co dung mot thanh chay");
+    const now = Number(thanh[0].getAttribute("aria-valuenow"));
+    assert.ok(Number.isFinite(now) && now > 0, `aria-valuenow phai la so duong, do duoc ${now}`);
+    assert.ok(now <= 97, `tiLe khong duoc cham 100 khi job con chay, do duoc ${now}`);
+  });
+
+  it("job asr running NHUNG thieu started_at => KHONG ve thanh, khong bia so", () => {
+    // Thanh dung yen la kieu noi doi te hon khong co thanh: no trong nhu dang chay ma
+    // thuc ra khong biet gi.
+    const { props } = dungThu({
+      source: KENH,
+      jobs: [
+        job({ id: 301, type: "asr", state: "running", started_at: null, payload: { source_id: KENH.id } }),
+      ],
+    });
+    render(<Studio {...props} />);
+    assert.equal(q().queryAllByRole("progressbar").length, 0);
+  });
+
+  it("job translate running => KHONG ve thanh (dao dong qua rong de uoc luong)", () => {
+    // Do duoc `translate` chay 4-57 s tren cung do dai video. Mot thanh chay sai nhip
+    // te hon khong co thanh nao.
+    const batDau = new Date(Date.now() - 10_000).toISOString();
+    const { props } = dungThu({
+      source: KENH,
+      jobs: [
+        job({ id: 302, type: "translate", state: "running", started_at: batDau, payload: {} }),
+      ],
+    });
+    render(<Studio {...props} />);
+    assert.equal(q().queryAllByRole("progressbar").length, 0);
+  });
+});

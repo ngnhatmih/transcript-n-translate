@@ -11,6 +11,8 @@ import {
   NGUONG_NEN,
   NHAN_LOAI_VIEC,
   raSrt,
+  chuConLai,
+  uocLuongTienDo,
   soVi,
   hangDoi,
   dongMayChu,
@@ -67,6 +69,17 @@ import { VungDocKhung, type VungDoc } from "./VungDoc";
  * nguyen co che do (xem `styles.css` khoi `[data-theme="light"]`), nhung nut doi
  * che do nam trong header va trang thai van thuoc component nay.
  */
+
+/**
+ * Nhịp đồng hồ của THANH CHẠY, mili-giây.
+ *
+ * 250 ms: một bước nhảy 1/4 giây trên thanh dài hàng trăm pixel là dưới 1 pixel — mắt
+ * không thấy giật, mà CPU không bị đốt. Nhịp này CHỈ chạy khi có bước đang chạy.
+ *
+ * Không dùng `NHIP_JOB_MS` (2000) của `App.tsx`: đó là nhịp HỎI MÁY CHỦ, và thanh chạy
+ * cập nhật theo nó sẽ đứng yên 2 giây rồi nhảy một bước — trông như đang treo.
+ */
+const NHIP_DONG_HO_MS = 250;
 
 const VIEWS: { id: ViewMode; label: string }[] = [
   { id: "edit", label: "Bien tap" },
@@ -206,6 +219,18 @@ export function Studio(props: StudioProps) {
    * tan đúng lúc.
    */
   const [lacQuan, setLacQuan] = useState<ReadonlySet<string>>(() => new Set());
+
+  /**
+   * ĐỒNG HỒ của THANH CHẠY — nhịp riêng, nhanh hơn `NHIP_JOB_MS` (2 giây).
+   *
+   * 🔴 VÌ SAO PHẢI CÓ: `tiLe` được suy từ `Date.now() - started_at`, nên nếu chỉ cập nhật
+   * theo nhịp hỏi `/api/jobs` thì thanh chạy đứng yên 2 giây rồi nhảy một bước — trông như
+   * đang treo, tức lại đúng cái cảm giác mà tính năng này sinh ra để diệt.
+   *
+   * 250 ms là đủ mượt cho mắt mà không đốt CPU: một bước nhảy 1/4 giây trên một
+   * thanh dài hàng trăm pixel là dưới 1 pixel. Chỉ chạy khi CÓ bước đang chạy.
+   */
+  const [bayGio, setBayGio] = useState(() => Date.now());
 
   /** Đặt trạng thái lạc quan cho MỘT bước. Gọi ngay trong handler bấm, trước `onBuoc`. */
   const datLacQuan = useCallback((id: string) => {
@@ -533,7 +558,52 @@ export function Studio(props: StudioProps) {
     });
   }, [jobAsr, jobDub, jobGhep]);
 
-  const lyDoXuat = useMemo(() => lyDoChuaXuatDuoc(cacBuoc), [cacBuoc]);
+  /**
+   * GẮN ƯỚC LƯỢNG vào bước đang chạy — tính NGOÀI `duongOng` vì hàm đó là THUẦN và
+   * không đọc đồng hồ (`uocLuongTienDo` nhận `bayGio` làm THAM SỐ, để test được bằng số cố
+   * định thay vì `sleep`).
+   *
+   * Chỉ bước `asr` được ước lượng: đo được `translate` chạy 4–57 s và `dub` 29–265 s trên
+   * cùng độ dài video, dao động quá rộng để trung vị có nghĩa. Thà không hiện gì còn hơn hiện
+   * một thanh chạy sai nhịp.
+   */
+  const uocLuongAsr = useMemo(() => {
+    // Khong can kiem `jobAsr.state === "running"` o day: `uocLuongTienDo` da co dong dau
+    // `if (job.state !== "running") return null;`. DO DUOC: pha bo dieu kien lap do di thi
+    // 3/3 bai test UI VAN XANH — tuc no la khai bao thua. Repo nay khong giu khai bao thua.
+    if (jobAsr === null) return null;
+    // LỊCH SỬ CỦA CHÍNH NGUỒN: nguồn ổn định theo nhóm qua các lần chạy (xem `uocLuongTienDo`).
+    const lichSu = jobs.filter(
+      (j) =>
+        (j.type === "asr" || j.type === "ingest") &&
+        (j.payload?.["source_id"] as number | undefined) === source?.id,
+    );
+    return uocLuongTienDo(
+      jobAsr,
+      source === null ? null : source.duration,
+      lichSu,
+      bayGio,
+    );
+  }, [jobAsr, jobs, source, bayGio]);
+
+  // ĐỒNG HỒ CHỈ CHẠY KHI CÓ BƯỚC ĐANG CHẠY — `setInterval` vô điều kiện là bắt React
+  // re-render 4 lần/giây suốt phiên làm việc, kể cả khi không có gì chạy.
+  useEffect(() => {
+    if (uocLuongAsr === null) return;
+    const t = setInterval(() => setBayGio(Date.now()), NHIP_DONG_HO_MS);
+    return () => clearInterval(t);
+  }, [uocLuongAsr === null]);
+
+  const cacBuocCoUocLuong: BuocDuongOng[] = useMemo(() => {
+    if (uocLuongAsr === null) return cacBuoc;
+    return cacBuoc.map((b) =>
+      b.id === "asr"
+        ? { ...b, tiLe: uocLuongAsr.tiLe, conLai: chuConLai(uocLuongAsr.conLaiGiay) }
+        : b,
+    );
+  }, [cacBuoc, uocLuongAsr]);
+
+  const lyDoXuat = useMemo(() => lyDoChuaXuatDuoc(cacBuocCoUocLuong), [cacBuocCoUocLuong]);
 
   const current = dong.find((s) => s.i === currentId) ?? null;
 
@@ -819,7 +889,12 @@ export function Studio(props: StudioProps) {
   const segments = dong;
 
   /** `steps` cua ban goc = sau buoc suy tu du lieu THAT. */
-  const steps = cacBuoc;
+  //
+  // 🔴 DO DUOC: ban dau dong nay la `cacBuoc`, va no lam ca tinh nang uoc luong VO HIEU
+  // — `cacBuocCoUocLuong` chi duoc truyen cho `lyDoXuat`, con `PipelineBar` nhan ban
+  // CHUA gan `tiLe`. Bai test UI do dung: "Unable to find an accessible element with the
+  // role \"progressbar\"".
+  const steps = cacBuocCoUocLuong;
 
   /**
    * `timecode(t)` cua ban goc in `M:SS.ss`. Repo da co `formatTimecode` trong

@@ -209,6 +209,17 @@ export interface BuocDuongOng {
   note: string;
   /** Bon trang thai — TRUNG TEN voi `StepState` cua ban da duyet. */
   state: "done" | "running" | "blocked" | "todo";
+  /**
+   * Phan da chay, `0..1` — CHI co khi buoc dang `running` VA uoc luong duoc.
+   *
+   * 🔴 KHONG phai `Job.progress` cua backend: do duoc la no dung yen o `0.05` roi nhay
+   * thang `1.0`. Day la so UOC LUONG tu thoi gian da troi (`uocLuongTienDo`), nen thanh
+   * chay moi chay duoc. `undefined` nghia la "khong uoc luong duoc" — khi do giao dien ve
+   * vong xoay khong kem thanh, dung hon la ve mot thanh dung yen.
+   */
+  tiLe?: number;
+  /** Cau "~2 phut 10 giay con lai" — chi co cung luc voi `tiLe`. */
+  conLai?: string;
 }
 
 /** Dau vao cua phep suy duong ong — TAT CA la du lieu may chu, khong co co cuc bo nao. */
@@ -618,4 +629,256 @@ export function dongMayChu(s: Status | null): string {
   const phan = [`hàng đợi ${s.queue_depth}`, `ollama ${s.ollama}`];
   if (s.vram !== null) phan.push(`vram ${s.vram} ${s.vram_unit}`);
   return phan.join(" · ");
+}
+
+// ---------------------------------------------------------------------------
+// ƯỚC LƯỢNG TIẾN ĐỘ KHI BACKEND KHÔNG BÁO
+// ---------------------------------------------------------------------------
+
+/**
+ * 🔴 VÌ SAO PHẢI ƯỚC LƯỢNG — đo được, không phải phỏng đoán.
+ *
+ * `Job.progress` KHÔNG phải số đo tiến độ. Job `#113` (`asr`, `running`) giữ nguyên
+ * `progress = 0.05` suốt thời gian chạy, và mọi job `done` đều nhảy thẳng `1.0`. Backend
+ * chỉ báo hai mốc: bắt đầu và xong. Không có mốc nào ở giữa để vẽ.
+ *
+ * `job.started_at` thì CÓ. Nên ước lượng được bằng thời gian đã trôi.
+ *
+ * ## CÙNG một `type = "asr"` nhưng HAI đường chạy, nhanh chậm gấp 20 lần
+ *
+ * ĐO ĐƯỢC trên 34 lần chạy `done` của máy này, phân theo dòng `log_tail`:
+ *
+ *   "bóc băng …"  (ASR thuần)      17 mẫu:  video  279 s → 12–46 s
+ *                                            video 1249 s → 41–73 s
+ *   "dùng OCR …"  (OCR + ASR)      17 mẫu:  video  279 s → 178–201 s
+ *                                            video 1249 s → 424–448 s
+ *
+ * Hai nhóm KHÔNG CHỒNG NHAU một giây nào (nhóm nhanh tối đa 73 s, nhóm chậm tối thiểu
+ * 178 s). Và `phase` của cả hai đều là `asr:fw-large-v3` — KHÔNG phân biệt được bằng
+ * trường đó.
+ *
+ * ## Nên dùng LỊCH SỬ CỦA CHÍNH NGUỒN, không dùng hằng số
+ *
+ * ĐO ĐƯỢC: nhóm của một nguồn ỔN ĐỊNH qua các lần chạy, chỉ đổi MỘT lần khi `vung_doc`
+ * được đặt:
+ *
+ *   nguồn 1  →  ASR thuần   4/4 lần
+ *   nguồn 3  →  ASR thuần   4/4
+ *   nguồn 6  →  OCR + ASR   5/5
+ *   nguồn 2  →  ĐỔI: #8/#38/#40/#67 = ASR thuần, rồi #69… = OCR + ASR
+ *   nguồn 5  →  ĐỔI: #57/#58 = ASR thuần, rồi #92/#93 = OCR + ASR
+ *
+ * Nên trung vị thời gian chạy của các job `done` TRƯỚC ĐÓ trên cùng nguồn là dự đoán tốt
+ * nhất — nó là số ĐO ĐƯỢC, không phải hệ số tôi chọn. Chỉ khi nguồn chưa có lịch sử mới
+ * dùng mô hình `duration`.
+ *
+ * ## Mô hình dự phòng, hồi quy từ chính 34 mẫu trên
+ *
+ *   ASR thuần:   giây = 0,0484 × duration + 4,5
+ *   OCR + ASR:   giây = 0,2586 × duration + 113,0
+ *
+ * Khi chưa biết nhóm, dùng mô hình OCR (chậm hơn): ước lượng thấp hơn thực tế làm thanh
+ * chạy đứng ở 97 % rất lâu, đó là kiểu sai tệ hơn. Ước lượng cao hơn thì thanh chạm trần
+ * rồi job xong — người dùng thấy "sắp xong" đúng lúc sắp xong.
+ */
+
+/** Hệ số hồi quy cho job asr KHÔNG có phụ đề cứng (đo 17 mẫu). */
+export const ASR_NHANH = { a: 0.0484, b: 4.5 };
+
+/** Hệ số hồi quy cho job asr CÓ đọc phụ đề cứng (đo 17 mẫu). */
+export const ASR_CHAM = { a: 0.2586, b: 113.0 };
+
+/** Trần `tiLe` khi job còn chạy — chạm `1` là nói dối "xong rồi". */
+export const TI_LE_TOI_DA = 0.97;
+
+/** Một job đã xong, đủ để lấy thời gian chạy. */
+export interface JobDaXong {
+  type: string;
+  state: string;
+  started_at: string | null;
+  finished_at: string | null;
+}
+
+export interface UocLuong {
+  /** Phần đã chạy, `0..0.97`. */
+  tiLe: number;
+  /** Giây còn lại theo ước lượng, `>= 0`. */
+  conLaiGiay: number;
+}
+
+/** Giây chạy của một job đã xong, hoặc `null` khi thiếu mốc. */
+function giayDaChay(j: JobDaXong): number | null {
+  if (j.started_at === null || j.finished_at === null) return null;
+  const a = Date.parse(j.started_at);
+  const b = Date.parse(j.finished_at);
+  if (Number.isNaN(a) || Number.isNaN(b)) return null;
+  const giay = (b - a) / 1000;
+  return giay > 0 ? giay : null;
+}
+
+/**
+ * Trung vị thời gian chạy của các job CÙNG LOẠI đã xong trong `lichSu`.
+ *
+ * Trung vị chứ không trung bình: đo được một ngoại lai rất nặng (`#5` chạy 3701 s cho
+ * video 1249 s, gấp 60 lần trung vị nhóm nó), và trung bình sẽ bị nó kéo lệch hoàn toàn.
+ */
+/** Hệ số nhân để coi một mẫu lịch sử là NGOẠI LAI. */
+export const NGOAI_LAI_GAP = 20;
+
+/**
+ * Trung vị thời gian chạy của các job CÙNG LOẠI đã xong trong `lichSu`.
+ *
+ * ## Hai điều phải làm, và vì sao
+ *
+ * **1. LOẠI NGOẠI LAI TRƯỚC KHI LẤY TRUNG VỊ.** ĐO ĐƯỢC: `#5` chạy **3701 s** cho video
+ * 1249 s, trong khi trung vị nhóm nó là 58 s — gấp **64 lần**. Trung vị chỉ miễn nhiễm
+ * ngoại lai khi số mẫu ĐỦ LỚN; với `n = 2` thì trung vị CHÍNH LÀ trung bình hai số, nên
+ * `#5` + một mẫu 42 s cho ra 1871 s. Mô phỏng trên lịch sử thật: `#27` bị ước 1871 s trong
+ * khi thực tế 42 s — sai **+4354 %**.
+ *
+ * Cách loại: sắp xếp, lấy trung vị của các mẫu NHỎ, rồi bỏ mẫu lớn hơn `NGOAI_LAI_GAP`
+ * lần. Làm hai lượt để mẫu lớn không kéo mốc so sánh lên.
+ *
+ * **2. TRUNG VỊ, KHÔNG TRUNG BÌNH.** Cùng lý do trên: một ngoại lai kéo trung bình lệch
+ * hoàn toàn, còn trung vị thì không.
+ */
+export function trungViThoiGianChay(lichSu: readonly JobDaXong[], loai: string): number | null {
+  const ds: number[] = [];
+  for (const j of lichSu) {
+    if (j.type !== loai || j.state !== "done") continue;
+    const g = giayDaChay(j);
+    if (g !== null) ds.push(g);
+  }
+  if (ds.length === 0) return null;
+  ds.sort((x, y) => x - y);
+
+  // Mốc là mẫu NHỎ NHẤT — nó không thể bị một ngoại lai LỚN kéo lên, nên nó là mốc
+  // duy nhất không tự đầu độc.
+  //
+  // ⚠️ BẢN ĐẦU CÓ THÊM MỘT LƯỢT LỌC THỨ HAI (mốc là trung vị của các mẫu đã lọc).
+  // ĐO ĐƯỢC nó là CODE CHẾT: phá nó đi thì 3/3 bài test của `trungViThoiGianChay` VẪN
+  // XANH, vì mọi ngoại lai thật đều đã bị lượt 1 bắt:
+  //
+  //     ds = [41, 42, 73, 3701]   loc1 (mốc 41*20=820) = [41, 42, 73]   3701 chết ở LƯỢT 1
+  //     ds = [2, 100, 1000]       loc1 (mốc 2*20=40)   = [2]           100 và 1000 chết ở LƯỢT 1
+  //     ds = [1, 500, 900, 1000]  loc1 (mốc 1*20=20)   = [1]           cả ba chết ở LƯỢT 1
+  //
+  // Nghĩa là lượt 2 chưa từng loại thêm mẫu nào. Xoá thay vì viết một bài test giả để
+  // che nó — repo này không giữ khai báo chết.
+  let loc = ds.filter((g) => g <= ds[0] * NGOAI_LAI_GAP);
+  if (loc.length === 0) loc = ds;
+
+  const giua = Math.floor(loc.length / 2);
+  return loc.length % 2 === 1 ? loc[giua] : (loc[giua - 1] + loc[giua]) / 2;
+}
+
+/**
+ * Ước lượng tiến độ từ thời gian đã trôi.
+ *
+ * `bayGio` là THAM SỐ chứ không đọc `Date.now()` bên trong: hàm thuần thì test được bằng
+ * số cố định, không phải `sleep`.
+ *
+ * `lichSu` là các job đã xong của CÙNG nguồn (mọi loại; hàm tự lọc `asr`).
+ *
+ * ## Thứ tự quyết định, và số đo đứng sau
+ *
+ * **1. Lịch sử của chính nguồn** — số đo thật, ưu tiên tuyệt đối. ĐO ĐƯỢC: nhóm chạy của
+ * một nguồn ỔN ĐỊNH qua các lần (nguồn 1: 4/4 ASR thuần; nguồn 6: 5/5 OCR + ASR), chỉ đổi
+ * MỘT lần khi `vung_doc` được đặt.
+ *
+ * **2. Chưa có lịch sử — chọn nhánh NHANH.** ĐO ĐƯỢC: mô phỏng trên 35 lần chạy thật cho
+ * thấy chọn nhánh chậm sai gấp 10 lần ở 4/6 nguồn đầu tiên:
+ *
+ *     #2   ước 436 s  thực  41 s   +963 %
+ *     #8   ước 185 s  thực  15 s  +1133 %
+ *     #12  ước 185 s  thực  12 s  +1442 %
+ *
+ * Đa số nguồn chạy nhánh nhanh, nên đó là dự đoán đúng hơn khi chưa biết gì.
+ *
+ * **3. Đã chạy vượt `1,2 ×` ước lượng ban đầu ⇒ CHUYỂN NHÁNH CHẬM.** ĐO ĐƯỢC vì sao phải
+ * có bước này: nguồn 2 chuyển từ ASR thuần sang OCR, và nếu giữ nguyên lịch sử nhanh thì
+ * `#69…#80` bị ước 17–21 s trong khi thực tế 178–191 s — sai **−89 %**. Điều kiện cũ của
+ * tôi (`daChay > tuLichSu * 1,5`) KHÔNG BAO GIỜ đúng ở ca đó vì `20 × 1,5 = 30 s`, và ở
+ * 30 s thanh đã chạm trần 97 % nên không còn gì để chuyển.
+ *
+ * Trả `null` khi KHÔNG ước lượng được: job không `running`, thiếu `started_at`, hoặc
+ * không có cả lịch sử lẫn `duration`.
+ */
+export function uocLuongTienDo(
+  job: { type: string; state: string; started_at: string | null },
+  durationGiay: number | null,
+  lichSu: readonly JobDaXong[],
+  bayGio: number,
+): UocLuong | null {
+  if (job.state !== "running") return null;
+  if (job.started_at === null) return null;
+  const batDau = Date.parse(job.started_at);
+  if (Number.isNaN(batDau)) return null;
+  const daChay = Math.max(0, (bayGio - batDau) / 1000);
+
+  const loai = job.type;
+  if (loai !== "asr" && loai !== "ingest") return null;
+
+  const coDuration = durationGiay !== null && durationGiay > 0;
+  const nhanh = coDuration ? ASR_NHANH.a * durationGiay + ASR_NHANH.b : null;
+  const cham = coDuration ? ASR_CHAM.a * durationGiay + ASR_CHAM.b : null;
+
+  const tuLichSu = trungViThoiGianChay(lichSu, loai);
+
+  // TRỘN lịch sử với mô hình khi lịch sử còn MỎNG.
+  //
+  // 🔴 ĐO ĐƯỢC vì sao cần: nguồn 4 chỉ có 3 lần chạy, lần đầu (#19) mất 46 s còn hai lần
+  // sau 18 s và 14 s. Với `n = 1` thì "trung vị" CHÍNH LÀ mẫu đó, nên #51 bị ước 46 s
+  // trong khi thực 18 s — sai +155,6 %. Không có mẫu thứ hai để bù.
+  //
+  // Đo trên 35 lần chạy thật, bốn mức trộn (`w` = số mẫu ảo của mô hình):
+  //
+  //     w=0  trung vị 32,0 %  tb 43,7 %  max 155,6 %  sai>100 %: 2
+  //     w=1  trung vị 31,9 %  tb 44,0 %  max  98,6 %  sai>100 %: 0   <- chọn
+  //     w=2  trung vị 36,5 %  tb 45,6 %  max  98,5 %  sai>100 %: 0
+  //     w=3  trung vị 38,8 %  tb 46,9 %  max  98,4 %  sai>100 %: 0
+  //
+  // `w = 1` vừa hạ trung vị xuống thấp nhất vừa XOÁ SẠCH hai ca sai trên 100 %. Trộn mạnh
+  // hơn làm trung vị tệ đi — mô hình `duration` không đáng tin bằng lịch sử thật khi đã có
+  // mẫu, nên chỉ dùng nó để ĐỠ LÚC THIẾU, không để thay thế.
+  const nLichSu = lichSu.filter((j) => j.type === loai && j.state === "done" && giayDaChay(j) !== null).length;
+  let banDau: number | null;
+  if (tuLichSu !== null && nhanh !== null) {
+    banDau = (tuLichSu * nLichSu + nhanh) / (nLichSu + 1);
+  } else {
+    banDau = tuLichSu ?? nhanh;
+  }
+
+  let tong: number;
+  if (banDau === null) {
+    // Không có lịch sử, không có `duration`: chỉ còn cách nói "không biết".
+    return null;
+  }
+  if (cham !== null && daChay > banDau * 1.2) {
+    // Đã vượt ước lượng ban đầu ⇒ lần này chậm hơn hẳn (nguồn vừa được đặt `vung_doc`,
+    // chuyển từ ASR thuần sang OCR + ASR). Nhảy sang nhánh chậm thay vì đứng ở trần.
+    tong = cham;
+  } else {
+    tong = banDau;
+  }
+
+  return {
+    tiLe: Math.min(TI_LE_TOI_DA, daChay / tong),
+    conLaiGiay: Math.max(0, tong - daChay),
+  };
+}
+
+/**
+ * Câu hiển thị cho người dùng — "~2 phút 10 giây còn lại".
+ *
+ * ⚠️ LUÔN có chữ "~": đây là ước lượng từ thời gian đã trôi, không phải số đo của backend.
+ * Ghi "còn 2 phút" không có "~" là biến một phỏng đoán thành lời hứa.
+ */
+export function chuConLai(giay: number): string {
+  if (giay < 5) return "~sắp xong";
+  const phut = Math.floor(giay / 60);
+  const gi = Math.round(giay % 60);
+  if (phut === 0) return `~${gi} giây còn lại`;
+  if (gi === 0) return `~${phut} phút còn lại`;
+  return `~${phut} phút ${gi} giây còn lại`;
 }

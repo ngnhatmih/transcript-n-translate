@@ -48,6 +48,9 @@ import {
   viecCuaDongList,
   viecCuaDoan,
   type DauVaoDuongOng,
+  uocLuongTienDo,
+  chuConLai,
+  trungViThoiGianChay,
 } from "./studio.ts";
 
 // ---------------------------------------------------------------------------
@@ -842,3 +845,268 @@ describe("dongMayChu: chan panel doc /api/status that", () => {
     assert.doesNotMatch(dongMayChu(st), /vram/);
   });
 });
+// ---------------------------------------------------------------------------
+
+// UOC LUONG TIEN DO — do tren 34 lan chay `asr` THAT cua may nay.
+
+//
+
+// 🔴 VI SAO CAN: `Job.progress` KHONG phai so do tien do. Do duoc job #113 dung nguyen
+
+// `0.05` suot thoi gian chay, va moi job `done` nhay thang `1.0`.
+
+//
+
+// DO DUOC hai duong chay cua CUNG `type = "asr"`, nhanh cham gap 20 lan:
+
+//
+
+//   "boc bang" (ASR thuan)   17 mau:  video  279 s -> 12-46 s
+
+//                                    video 1249 s -> 41-73 s
+
+//   "dung OCR" (OCR + ASR)   17 mau:  video  279 s -> 178-201 s
+
+//                                    video 1249 s -> 424-448 s
+
+//
+
+// Hai nhom KHONG chong nhau mot giay nao, va `phase` cua ca hai GIONG NHAU
+
+// (`asr:fw-large-v3`) — nen khong phan biet duoc bang truong co san.
+
+// ---------------------------------------------------------------------------
+
+
+
+const T0 = Date.parse("2026-11-01T10:00:00Z");
+
+
+
+function daXong(giay: number, loai = "asr"): { type: string; state: string; started_at: string; finished_at: string } {
+
+  return {
+
+    type: loai,
+
+    state: "done",
+
+    started_at: new Date(T0).toISOString(),
+
+    finished_at: new Date(T0 + giay * 1000).toISOString(),
+
+  };
+
+}
+
+
+
+describe("uocLuongTienDo", () => {
+
+  it("KHONG uoc luong khi job khong chay — tra null, khong bia so", () => {
+
+    const j = { type: "asr", state: "done", started_at: new Date(T0).toISOString() };
+
+    assert.equal(uocLuongTienDo(j, 279, [], T0 + 10_000), null);
+
+  });
+
+
+
+  it("KHONG uoc luong khi thieu started_at", () => {
+
+    const j = { type: "asr", state: "running", started_at: null };
+
+    assert.equal(uocLuongTienDo(j, 279, [], T0), null);
+
+  });
+
+
+
+  it("KHONG uoc luong translate/dub — do duoc chung dao dong qua rong", () => {
+
+    // `translate` chay 4-57 s va `dub` 29-265 s tren cung mot do dai video, nen trung vi
+
+    // khong co nghia. Tha khong hien gi con hon hien mot thanh chay sai nhip.
+
+    const j = { type: "translate", state: "running", started_at: new Date(T0).toISOString() };
+
+    assert.equal(uocLuongTienDo(j, 279, [daXong(10, "translate")], T0 + 5000), null);
+
+  });
+
+
+
+  it("chua co lich su thi dung mo hinh NHANH — da so nguon chay nhanh", () => {
+
+    // DO DUOC: chon nhanh cham sai gap 10 lan o 4/6 nguon dau tien:
+
+    //   #2 uoc 436 s thuc 41 s (+963 %), #8 uoc 185 s thuc 15 s (+1133 %)
+
+    // Mo hinh nhanh cho video 279 s: 0,0484 * 279 + 4,5 = 18,0 s
+
+    const j = { type: "asr", state: "running", started_at: new Date(T0).toISOString() };
+
+    const u = uocLuongTienDo(j, 279, [], T0 + 9000);
+
+    assert.ok(u !== null);
+
+    assert.ok(Math.abs(u.tiLe - 0.5) < 0.05, `tiLe phai ~0,5, do duoc ${u.tiLe}`);
+
+    assert.ok(u.conLaiGiay > 8 && u.conLaiGiay < 10, `conLai phai ~9 s, do duoc ${u.conLaiGiay}`);
+
+  });
+
+
+
+  it("co lich su thi BAM lich su, khong bam mo hinh", () => {
+
+    // Nguon 6: 5/5 lan chay deu ~185 s. Lich su phai LAN AT mo hinh nhanh (18 s).
+
+    // ⚠️ CON SO KY VONG, tinh tay de bai test khong phai doan:
+    //     trungVi([183, 185, 186]) = 185
+    //     tron w=1 voi mo hinh nhanh 18,0  ->  (185*3 + 18) / 4 = 141,75
+    //     sau 92,5 s  ->  92,5 / 141,75 = 0,6527
+    //
+    // 🔴 Ban dau toi viet ky vong ~0,5 va bai test DO (do duoc 0,6457) — vi toi quen buoc
+    // tron. Neu tron khong co tac dung thi tiLe se la 92,5/185 = 0,5; con so 0,6457 chinh
+    // la bang chung buoc tron DANG chay dung.
+    const ls = [daXong(183), daXong(185), daXong(186)];
+
+    const j = { type: "asr", state: "running", started_at: new Date(T0).toISOString() };
+
+    const u = uocLuongTienDo(j, 279, ls, T0 + 92_500);
+
+    assert.ok(u !== null);
+
+    assert.ok(
+      Math.abs(u.tiLe - 0.6527) < 0.02,
+      `tiLe phai ~0,653 (tron lich su 185 s voi mo hinh 18 s), do duoc ${u.tiLe}`,
+    );
+
+    // Phai KHAC han 0,5: neu bang 0,5 thi lich su dang duoc dung NGUYEN, tuc buoc tron da
+    // bi bo mat trong luc sua.
+    assert.ok(u.tiLe > 0.55, `phai thay dau vet cua buoc tron, do duoc ${u.tiLe}`);
+
+  });
+
+
+
+  it("da chay VUOT uoc luong ban dau thi chuyen sang mo hinh CHAM", () => {
+
+    // DO DUOC vi sao can: nguon 2 chuyen tu ASR thuan sang OCR, nen #69..#80 bi uoc
+
+    // 17-21 s trong khi thuc te 178-191 s — sai -89 %. Dieu kien cu
+
+    // (`daChay > tuLichSu * 1,5`) KHONG BAO GIO dung vi 20 * 1,5 = 30 s, va o 30 s
+
+    // thanh da cham tran 97 % nen khong con gi de chuyen.
+
+    const ls = [daXong(18), daXong(20)];
+
+    const j = { type: "asr", state: "running", started_at: new Date(T0).toISOString() };
+
+    // Mo hinh cham cho 279 s: 0,2586 * 279 + 113 = 185,1 s. Sau 100 s: tiLe ~0,54.
+
+    const u = uocLuongTienDo(j, 279, ls, T0 + 100_000);
+
+    assert.ok(u !== null);
+
+    assert.ok(u.tiLe > 0.4 && u.tiLe < 0.7, `phai theo mo hinh cham (~0,54), do duoc ${u.tiLe}`);
+
+  });
+
+
+
+  it("tiLe KHONG BAO GIO cham 1 khi job con chay", () => {
+
+    // Cham 1 la noi doi "xong roi". Tran 0,97 giu cho thanh con khoang trong.
+
+    const j = { type: "asr", state: "running", started_at: new Date(T0).toISOString() };
+
+    const u = uocLuongTienDo(j, 279, [daXong(18)], T0 + 10_000_000);
+
+    assert.ok(u !== null);
+
+    assert.equal(u.tiLe, 0.97);
+
+    assert.equal(u.conLaiGiay, 0);
+
+  });
+
+});
+
+
+
+describe("trungViThoiGianChay", () => {
+
+  it("LOAI NGOAI LAI — #5 chay 3701 s cho video 1249 s, gap 64 lan trung vi", () => {
+
+    // DO DUOC: voi n = 2 thi trung vi CHINH LA trung binh hai so, nen #5 + mot mau 42 s
+
+    // cho ra 1871 s. Mo phong tren lich su that: #27 bi uoc 1871 s trong khi thuc 42 s
+
+    // — sai +4354 %.
+
+    const ls = [daXong(41), daXong(3701), daXong(42), daXong(73)];
+
+    const tv = trungViThoiGianChay(ls, "asr");
+
+    assert.ok(tv !== null);
+
+    assert.ok(tv < 200, `phai loai 3701 s, do duoc trung vi ${tv}`);
+
+  });
+
+
+
+  it("tra null khi khong co mau nao", () => {
+
+    assert.equal(trungViThoiGianChay([], "asr"), null);
+
+  });
+
+
+
+  it("bo qua job chua xong", () => {
+
+    const ls = [
+
+      { type: "asr", state: "failed", started_at: new Date(T0).toISOString(), finished_at: new Date(T0 + 999_000).toISOString() },
+
+      daXong(20),
+
+    ];
+
+    assert.equal(trungViThoiGianChay(ls, "asr"), 20);
+
+  });
+
+});
+
+
+
+describe("chuConLai", () => {
+
+  it("LUON co chu ~ — day la uoc luong, khong phai so do", () => {
+
+    // Ghi "con 2 phut" khong co "~" la bien mot phong doan thanh loi hua.
+
+    assert.equal(chuConLai(130), "~2 phút 10 giây còn lại");
+
+    assert.equal(chuConLai(45), "~45 giây còn lại");
+
+    assert.equal(chuConLai(120), "~2 phút còn lại");
+
+    assert.equal(chuConLai(2), "~sắp xong");
+
+  });
+
+  it("0 giay van noi 'sap xong', khong noi 'con 0 giay'", () => {
+
+    assert.equal(chuConLai(0), "~sắp xong");
+
+  });
+
+});
+

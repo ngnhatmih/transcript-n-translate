@@ -73,6 +73,32 @@ export function PipelineBar({ steps, onStep }: { steps: BuocDuongOng[]; onStep: 
                 {s.note}
               </span>
             </span>
+            {/*
+              THANH CHẠY — chỉ khi bước đang chạy VÀ ước lượng được.
+
+              🔴 VÌ SAO KHÔNG DÙNG `Job.progress`: đo được nó đứng yên ở `0.05` suốt thời
+              gian chạy rồi nhảy thẳng `1.0`, nên vẽ theo nó là vẽ một thanh đứng yên. `s.tiLe`
+              là số UắC LƯỢNG từ thời gian đã trôi (`uocLuongTienDo`).
+
+              Độ rộng 28 px: thanh bước đã chật (đo trên khung 375 px chỉ còn ~200 px cho
+              5 bước), nên thanh chạy phải nhỏ hơn chữ, không được đẩy các bước ra ngoài.
+            */}
+            {s.state === "running" && s.tiLe !== undefined && (
+              <span
+                className="ml-1 h-0.5 w-7 shrink-0 overflow-hidden rounded-sm bg-rule"
+                role="progressbar"
+                aria-valuemin={0}
+                aria-valuemax={100}
+                aria-valuenow={Math.round(s.tiLe * 100)}
+                aria-label={`Ước lượng tiến độ ${s.name}`}
+                title={s.conLai}
+              >
+                <span
+                  className="block h-full bg-signal transition-[width] duration-200"
+                  style={{ width: `${Math.round(s.tiLe * 100)}%` }}
+                />
+              </span>
+            )}
           </button>
         </li>
       ))}
