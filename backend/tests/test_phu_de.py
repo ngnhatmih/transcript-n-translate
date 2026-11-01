@@ -13,7 +13,7 @@ import pytest
 
 from app.domain.phu_de import (
     DUNG_SAI_X, Hop, gop_thanh_dong, loc_hinh_dang, loc_on_dinh, loc_theo_asr,
-    tim_dai_phu_de,
+    noi_manh_cung_dong, tim_dai_phu_de,
 )
 
 CAO = 720
@@ -255,3 +255,295 @@ def test_dung_sai_x_nam_trong_khoang_trong_do_duoc():
     # 31 px: mẩu menu '12', phải BỎ (cạnh trên của khoảng trống).
     bo = loc_on_dinh([_hop("12", 100.0), _hop("12", 131.0)], fps=2.0)
     assert bo == [], f"31 px phải coi là CHẠY, đo được {[h.text for h in bo]} còn lại"
+
+
+# ---------------------------------------------------------------------------
+# NỐI MẢNH CÙNG MỘT DÒNG PHỤ ĐỀ — lỗi chủ dự án báo:
+#
+#   "bằng 1 cách nào đấy các đoạn dùng ocr bị khá là ngắn mặc dù phụ đề trên vid đoạn phụ
+#    đề đấy chưa kết thúc. Nên xem lại."
+#
+# 🔴 ĐO ĐƯỢC trên transcript #13 (nguồn 2, `vung_doc=[0,0.1,1,1]`, 77 dòng):
+#
+#     so cap CUNG CHU LIEN NHAU trong danh sach:  0
+#     so cap cung chu bi dong khac chen giua:     15, khoang cach DEU = 0,0 s
+#
+#     '福州烟台山商业漫步街区' x6  moc=[(189.5,190.5),(190.5,191.0),(191.0,191.5),
+#                                       (191.5,192.0),(192.0,192.5),(192.5,193.0)]
+#
+# Dòng đó hiện 3,5 giây THẬT mà thành 6 dòng 0,5 s, vì `gop_thanh_dong` chỉ nối hộp CÙNG
+# CHỮ LIỀN NHAU và hai dòng phụ đề đan xen nhau trong danh sách.
+#
+# ⚠️ Vùng 191–195 s của cùng transcript có BA dòng phụ đề hiện ĐỒNG THỜI ở ba dải `y`, và
+# `福州烟台山` xuất hiện ở ba khung liền nhau ở HAI dải khác nhau. Nên phép nối phải có điều
+# kiện `y`, không chỉ `text` + thời gian.
+# ---------------------------------------------------------------------------
+
+
+def _hop_o(t, text, y0, y1):
+    return Hop(text=text, x0=100.0, y0=y0, x1=500.0, y1=y1, t=t, diem=0.9)
+
+
+def test_noi_manh_gop_cac_manh_cung_chu_cung_dai_y_bi_chen_giua():
+    """Ca THẬT: một dòng hiện 4 khung, một dòng khác chen vào giữa 2 khung đầu."""
+    hops = [
+        _hop_o(191.0, "A", 600, 650), _hop_o(191.0, "B", 700, 750),
+        _hop_o(191.5, "A", 600, 650),
+        _hop_o(192.0, "A", 600, 650), _hop_o(192.0, "C", 800, 850),
+        _hop_o(192.5, "A", 600, 650), _hop_o(192.5, "C", 800, 850),
+    ]
+    hops.sort(key=lambda h: (h.t, h.x0))
+    ra = noi_manh_cung_dong(hops)
+    a = [h for h in ra if h.text == "A"]
+    assert len(a) == 1, f"A phải gộp thành MỘT hộp, đo được {len(a)}"
+    assert a[0].t == 191.0, f"phải giữ `t` của hộp ĐẦU, đo được {a[0].t}"
+    c = [h for h in ra if h.text == "C"]
+    assert len(c) == 1, f"C phải gộp thành MỘT hộp, đo được {len(c)}"
+    assert len(ra) == 3, f"phải còn A, B, C = 3 hộp, đo được {[h.text for h in ra]}"
+
+
+def test_noi_manh_KHONG_mat_hop_nao():
+    """🔴 LỖI THẬT của bản đầu: `break` nằm NGOÀI `if`, nên vòng lặp chỉ xét đúng phần tử
+    cuối của `ra` rồi thoát.
+
+    Đo được hậu quả: 5 hộp `A,B,A,B,A` vào, chỉ **2** hộp ra — `A@2.0` và `A@3.0` BIẾN MẤT
+    khỏi kết quả. Đó là MẤT dòng phụ đề, không phải nối sai, nên phải có bài đếm số hộp.
+    """
+    hops = [
+        _hop_o(1.0, "A", 600, 650), _hop_o(1.5, "B", 700, 750),
+        _hop_o(2.0, "A", 600, 650), _hop_o(2.5, "B", 700, 750),
+        _hop_o(3.0, "A", 600, 650),
+    ]
+    hops.sort(key=lambda h: (h.t, h.x0))
+    ra = noi_manh_cung_dong(hops)
+    assert sorted(h.text for h in ra) == ["A", "B"], (
+        f"phải còn đúng A và B, đo được {[h.text for h in ra]}")
+
+
+def test_noi_manh_KHONG_noi_cung_chu_khac_dai_y():
+    """`福州烟台山` xuất hiện ở hai dải `y` khác nhau — đó là HAI dòng thật, không phải mảnh.
+
+    Đo được trên #13: `193.00-193.50` ở dải này và `194.00-194.50` ở dải khác. Nối chúng
+    thành một dòng 1,5 s là bịa ra một câu chưa ai nói liền mạch.
+    """
+    hops = [
+        _hop_o(193.0, "福州烟台山", 600, 650),
+        _hop_o(194.0, "福州烟台山", 800, 850),
+    ]
+    ra = noi_manh_cung_dong(hops)
+    assert len(ra) == 2, f"khác dải y thì KHÔNG nối, đo được {len(ra)} hộp"
+
+
+def test_noi_manh_KHONG_noi_watermark_lap_lai_xa_nhau():
+    """Đo trên #12: 8 cặp cùng chữ nhưng cách nhau 26–134 s — watermark hiện lại.
+
+    Nối chúng sẽ kéo một "dòng phụ đề" từ giây 51 tới giây 185.
+    """
+    hops = [_hop_o(51.0, "想想工作室", 600, 650),
+            _hop_o(185.0, "想想工作室", 600, 650)]
+    ra = noi_manh_cung_dong(hops)
+    assert len(ra) == 2, f"cách 134 s thì KHÔNG nối, đo được {len(ra)} hộp"
+
+
+def test_noi_manh_giu_diem_cao_nhat():
+    """Mảnh đọc rõ nhất đại diện cho cả lần hiện — điểm tin cậy là max, không phải trung bình."""
+    hops = [
+        Hop(text="A", x0=100.0, y0=600.0, x1=500.0, y1=650.0, t=1.0, diem=0.4),
+        Hop(text="A", x0=100.0, y0=600.0, x1=500.0, y1=650.0, t=1.5, diem=0.95),
+    ]
+    ra = noi_manh_cung_dong(hops)
+    assert len(ra) == 1
+    assert ra[0].diem == 0.95, f"phải giữ điểm CAO NHẤT, đo được {ra[0].diem}"
+
+
+def test_noi_manh_danh_sach_rong_tra_rong():
+    assert noi_manh_cung_dong([]) == []
+
+
+def test_nguong_noi_manh_khop_fps_mac_dinh():
+    """`_NHIP_KHUNG` là hằng số CỦA `fps = 2`, không phải hằng số thuật toán.
+
+    `doc_phu_de` nhận `fps` làm tham số; nếu ai đổi mặc định sang `fps = 1` mà không đổi
+    hằng số này thì ngưỡng nối thành hai nhịp khung và có thể nối nhầm hai lần hiện khác
+    nhau. Bài này ghim sự ràng buộc đó để nó không trôi âm thầm.
+    """
+    from app.domain.phu_de import _NHIP_KHUNG
+    import inspect
+    from app.ports.ocr import OCREngine
+
+    mac_dinh = inspect.signature(OCREngine.doc_phu_de).parameters["fps"].default
+    assert _NHIP_KHUNG == 1.0 / mac_dinh, (
+        f"_NHIP_KHUNG={_NHIP_KHUNG} nhưng fps mặc định là {mac_dinh} "
+        f"(1/fps = {1.0 / mac_dinh}) — đổi fps thì phải đổi hằng số này")
+
+# ---------------------------------------------------------------------------
+# KÉO `end` THEO MỐC LỜI NÓI ASR — lỗi chủ dự án báo:
+#
+#   "các đoạn dùng ocr bị khá là ngắn mặc dù phụ đề trên vid đoạn phụ đề đấy chưa kết thúc.
+#    Được thì dùng timestamp của asr cx đc nhưng nên tìm cách giải quyết cái này"
+#
+# 🔴 ĐO ĐƯỢC: mọi dòng OCR đều dài đúng `1/fps` = 0,50 s (76/77 dòng của transcript #13),
+# vì `gop_thanh_dong` đặt `end = t_hộp_cuối + 1/fps`. ASR có mốc word-level:
+#
+#     OCR 193.00..193.50  '你会在山上看到'
+#     ASR  你[192.53-193.13] 会[193.13-193.25] 在[193.25-193.35]
+#          山[193.35-193.51] 上[193.51-193.63] 看到[193.63-193.81]
+#
+# Kéo đúng: `end` 193,50 -> 193,81. Đo trên cả tệp: 12/77 dòng được kéo, độ dài trung bình
+# 0,506 -> 0,559 s, và số cặp chồng lấn KHÔNG đổi (14 -> 14), tức phép kéo không tạo ra
+# chồng lấn mới.
+# ---------------------------------------------------------------------------
+
+
+def _doan(i, start, end, text, suspect=False):
+    from app.domain.models import Segment
+    return Segment(i=i, start=start, end=end, text=text, suspect=suspect)
+
+
+def _word(w, s, e):
+    from app.domain.models import Word
+    return Word(w=w, s=s, e=e)
+
+
+def test_keo_dai_lay_end_tu_tu_asr_cuoi_cung_khop():
+    """Ca THẬT của #13: OCR `你会在山上看到` 0,50 s, lời nói thật tới 193,81."""
+    from app.domain.phu_de import keo_dai_theo_asr
+    doan = [_doan(0, 193.0, 193.5, "你会在山上看到")]
+    tu = [_word("你", 192.53, 193.13), _word("会", 193.13, 193.25),
+          _word("在", 193.25, 193.35), _word("山", 193.35, 193.51),
+          _word("上", 193.51, 193.63), _word("看到", 193.63, 193.81)]
+    ra = keo_dai_theo_asr(doan, tu)
+    assert len(ra) == 1
+    assert abs(ra[0].end - 193.81) < 0.01, f"end phải là 193,81, đo được {ra[0].end}"
+    assert ra[0].start == 193.0, "start KHÔNG đổi — đó là chỗ phụ đề bắt đầu hiện"
+
+
+def test_keo_dai_KHONG_keo_khi_ASR_noi_chuyen_khac():
+    """OCR `胖2026见` gặp ASR `这样一个雷霆大海豹`: khớp dưới ngưỡng ⇒ GIỮ NGUYÊN.
+
+    Đo được: tỉ lệ ký tự OCR có mặt trong ASR cùng cửa sổ là 66,7 % TÍNH TRUNG BÌNH, nhưng
+    phân bố không đều — cặp đúng khớp 6/8 tới 8/9, cặp sai gần 0. Kéo theo ASR ở ca sai là
+    gán mốc của một câu khác cho dòng này.
+    """
+    from app.domain.phu_de import keo_dai_theo_asr
+    doan = [_doan(0, 193.5, 194.0, "胖2026见")]
+    tu = [_word("这样", 193.81, 194.07), _word("一个", 194.07, 194.25),
+          _word("雷", 194.25, 194.41), _word("霆", 194.41, 194.53),
+          _word("大", 194.53, 194.63), _word("海", 194.63, 194.75),
+          _word("豹", 194.75, 194.93)]
+    ra = keo_dai_theo_asr(doan, tu)
+    assert ra[0].end == 194.0, f"khớp dưới ngưỡng thì KHÔNG kéo, đo được end={ra[0].end}"
+
+
+def test_keo_dai_dung_o_tu_dau_tien_khong_dong_gop_gi():
+    """ASR hay NGHE THÊM chữ ở cuối; lấy từ cuối cả cửa sổ sẽ kéo sang câu sau.
+
+    Đo được: OCR `会显得不太聪明` gặp ASR `价值会显得不太聪明比如` — ASR thừa `比如`.
+    """
+    from app.domain.phu_de import keo_dai_theo_asr
+    doan = [_doan(0, 48.5, 49.0, "会显得不太聪明")]
+    tu = [_word("价值", 48.20, 48.50), _word("会", 48.50, 48.70),
+          _word("显得", 48.70, 48.90), _word("不太", 48.90, 49.10),
+          _word("聪明", 49.10, 49.47),
+          # Hai từ THỪA — không có ký tự nào OCR cần.
+          _word("比如", 49.47, 49.80)]
+    ra = keo_dai_theo_asr(doan, tu)
+    assert abs(ra[0].end - 49.47) < 0.01, (
+        f"phải dừng ở '聪明' (49,47), không lấy '比如' (49,80); đo được {ra[0].end}")
+
+
+def test_keo_dai_KHONG_lay_tu_cua_dong_song_song_lam_end():
+    """Ba dòng phụ đề hiện ĐỒNG THỜI ở ba dải `y` — phép chặn trên không được cắt oan.
+
+    🔴 LỖI THẬT của bản đầu: chặn vô điều kiện bằng `min(end, doan[k+1].start)`. Đo được:
+    nó CẮT SAI 14 cặp, vì dòng kế tiếp trong danh sách bắt đầu ĐÚNG LÚC dòng này bắt đầu
+    (hai dòng SONG SONG, không tranh nhau chỗ nói), nên `min` kéo `end` về bằng `start`.
+    """
+    from app.domain.phu_de import keo_dai_theo_asr
+    doan = [
+        _doan(0, 193.0, 193.5, "你会在山上看到"),
+        _doan(1, 193.0, 193.5, "福州烟台山"),      # SONG SONG: cùng start
+    ]
+    tu = [_word("你", 192.53, 193.13), _word("会", 193.13, 193.25),
+          _word("在", 193.25, 193.35), _word("山", 193.35, 193.51),
+          _word("上", 193.51, 193.63), _word("看到", 193.63, 193.81)]
+    ra = keo_dai_theo_asr(doan, tu)
+    assert abs(ra[0].end - 193.81) < 0.01, (
+        f"dòng song song KHÔNG được chặn, đo được end={ra[0].end}")
+
+
+def test_keo_dai_CHAN_dong_noi_tiep():
+    """Vế ngược lại: dòng NỐI TIẾP thì `end` không được vượt `start` của nó."""
+    from app.domain.phu_de import keo_dai_theo_asr
+    doan = [
+        _doan(0, 10.0, 10.5, "你会在山上看到"),
+        _doan(1, 11.0, 11.5, "另一句"),
+    ]
+    tu = [_word("你", 10.0, 10.3), _word("会", 10.3, 10.6),
+          _word("在", 10.6, 10.9), _word("山", 10.9, 11.3),
+          _word("上", 11.3, 11.6), _word("看到", 11.6, 11.9)]
+    ra = keo_dai_theo_asr(doan, tu)
+    assert ra[0].end <= 11.0 + 0.001, (
+        f"end không được vượt start của dòng nối tiếp (11,0), đo được {ra[0].end}")
+
+
+def test_keo_dai_KHONG_rut_ngan_end_da_dung():
+    """ASR kết thúc SỚM hơn `end` hiện tại thì giữ `end` cũ, không rút ngắn."""
+    from app.domain.phu_de import keo_dai_theo_asr
+    doan = [_doan(0, 10.0, 12.0, "你会在山上看到")]
+    tu = [_word("你", 10.0, 10.2), _word("会", 10.2, 10.4),
+          _word("在", 10.4, 10.6), _word("山", 10.6, 10.8),
+          _word("上", 10.8, 11.0), _word("看到", 11.0, 11.2)]
+    ra = keo_dai_theo_asr(doan, tu)
+    assert ra[0].end == 12.0, f"KHÔNG được rút ngắn, đo được {ra[0].end}"
+
+
+def test_keo_dai_giu_co_suspect():
+    """`suspect` do `hop_nhat_theo_doan` đặt phải sống qua phép kéo."""
+    from app.domain.phu_de import keo_dai_theo_asr
+    doan = [_doan(0, 10.0, 10.5, "你会在山上看到", suspect=True)]
+    tu = [_word("你", 10.0, 10.3), _word("会", 10.3, 10.6),
+          _word("在", 10.6, 10.9), _word("山", 10.9, 11.3),
+          _word("上", 11.3, 11.6), _word("看到", 11.6, 11.9)]
+    ra = keo_dai_theo_asr(doan, tu)
+    assert ra[0].suspect is True, "cờ nghi ngờ bị mất qua phép kéo"
+
+
+def test_keo_dai_danh_sach_rong_tra_rong():
+    from app.domain.phu_de import keo_dai_theo_asr
+    assert keo_dai_theo_asr([], []) == []
+
+
+def test_keo_dai_khong_co_tu_asr_thi_giu_nguyen():
+    from app.domain.phu_de import keo_dai_theo_asr
+    doan = [_doan(0, 10.0, 10.5, "你会在山上看到")]
+    ra = keo_dai_theo_asr(doan, [])
+    assert ra[0].end == 10.5
+
+def test_keo_dai_KHONG_keo_khi_khop_chi_MOT_PHAN():
+    """Ngưỡng khớp phải TỰ chặn, không nhờ vòng tích luỹ chặn hộ.
+
+    🔴 PHÉP PHÁ ĐO ĐƯỢC: bỏ hẳn điều kiện ``< KHOP_TOI_THIEU`` (đổi thành ``if False``) mà
+    bài ``test_keo_dai_KHONG_keo_khi_ASR_noi_chuyen_khac`` VẪN XANH — vì ở ca đó tỉ lệ khớp
+    là 0,000, nên vòng tích luỹ cũng không tìm được ký tự nào đóng góp và ``end`` không đổi.
+    Hai cơ chế cùng chặn thì phép phá không nói được cái nào đang giữ.
+
+    Bài này dựng ca mà vòng tích luỹ MỘT MÌNH sẽ kéo: khớp đúng 2/6 ký tự (dưới 0,5) nhưng
+    khác rỗng, và từ khớp nằm CUỐI cửa sổ. Bỏ ngưỡng thì ``end`` nhảy sang từ đó; giữ ngưỡng
+    thì ``end`` đứng yên.
+    """
+    from app.domain.phu_de import keo_dai_theo_asr
+    # OCR 6 ký tự; từ khớp ('你') nằm CUỐI cửa sổ và ĐÓNG GÓP được, nên vòng tích luỹ một
+    # mình sẽ kéo `end` tới 10,9. Tỉ lệ khớp 1/6 = 0,167 < 0,5 ⇒ ngưỡng phải chặn.
+    #
+    # ĐO ĐƯỢC vì sao cần đúng ca này: bản đầu của bài dùng "你会天地人和" với hai từ khớp ở
+    # ĐẦU, tỉ lệ 0,33, và khi bỏ hẳn ngưỡng (`if False:`) bài VẪN XANH — vì từ cuối `别的`
+    # không đóng góp ký tự nào nên vòng tích luỹ tự chặn hộ, và phép phá không nói được
+    # ngưỡng có đang giữ hay không.
+    doan = [_doan(0, 10.0, 10.5, "天地人和你我")]
+    tu = [_word("别的", 10.0, 10.3), _word("话", 10.3, 10.6),
+          _word("你", 10.6, 10.9)]
+    ra = keo_dai_theo_asr(doan, tu)
+    assert ra[0].end == 10.5, (
+        f"khớp 1/6 = 0,167 dưới ngưỡng 0,5 thì KHÔNG được kéo (bỏ ngưỡng sẽ ra 10,9), "
+        f"đo được end={ra[0].end}")

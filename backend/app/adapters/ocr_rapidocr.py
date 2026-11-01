@@ -19,7 +19,8 @@ import tempfile
 
 from app.domain.models import Segment
 from app.domain.phu_de import (
-    Hop, gop_thanh_dong, loc_hinh_dang, loc_on_dinh, loc_theo_asr, tim_dai_phu_de,
+    Hop, gop_thanh_dong, loc_hinh_dang, loc_on_dinh, loc_theo_asr, noi_manh_cung_dong,
+    tim_dai_phu_de,
 )
 
 
@@ -231,4 +232,9 @@ class RapidOCREngine:
             hops = loc_theo_asr(hops, khoang_asr)
 
         hops.sort(key=lambda h: (h.t, h.x0))
-        return gop_thanh_dong(hops, fps=fps)
+        # NỐI MẢNH TRƯỚC KHI GỘP DÒNG. Khi video hiện hai dòng phụ đề cùng lúc, hai dòng
+        # đan xen trong danh sách và `gop_thanh_dong` (chỉ nối hộp CÙNG CHỮ LIỀN NHAU) chẻ
+        # mỗi lần hiện thành nhiều dòng `1/fps`. Đo được trên transcript #13: dòng
+        # `福州烟台山商业漫步街区` hiện 3,5 s thật mà thành 6 dòng 0,5 s. Xem docblock
+        # `noi_manh_cung_dong`.
+        return gop_thanh_dong(noi_manh_cung_dong(hops), fps=fps)

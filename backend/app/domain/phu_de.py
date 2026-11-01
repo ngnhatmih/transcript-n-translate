@@ -21,7 +21,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from app.domain.models import Segment
+from app.domain.models import Segment, Word
 
 
 @dataclass
@@ -273,6 +273,118 @@ def loc_theo_asr(hops: list[Hop], khoang_asr: list[tuple[float, float]]) -> list
     return ra
 
 
+def noi_manh_cung_dong(hops: list[Hop]) -> list[Hop]:
+    """NỐI các mảnh của CÙNG một lần hiện phụ đề, bị dòng khác chen vào giữa.
+
+    ## Lỗi thật (chủ dự án báo: *"các đoạn dùng ocr bị khá là ngắn mặc dù phụ đề trên vid
+    ## đoạn phụ đề đấy chưa kết thúc"*)
+
+    `gop_thanh_dong` chỉ nối các hộp **cùng chữ LIỀN NHAU** trong danh sách đã sắp. Khi
+    video hiện HAI dòng phụ đề cùng lúc (chữ Hán ở một dải, một dòng khác ở dải khác) thì
+    hai dòng ĐAN XEN nhau trong danh sách, chuỗi bị đứt, và mỗi lần đổi chữ sinh một
+    `Segment` mới dài đúng `1/fps`.
+
+    ĐO ĐƯỢC trên transcript #13 (nguồn 2, `vung_doc=[0,0.1,1,1]`, 77 dòng):
+
+        so cap CUNG CHU LIEN NHAU trong danh sach:  0
+        so cap cung chu bi dong khac chen giua:     15, khoang cach DEU = 0,0 s
+
+        '福州烟台山商业漫步街区' x6  moc=[(189.5,190.5),(190.5,191.0),(191.0,191.5),
+                                          (191.5,192.0),(192.0,192.5),(192.5,193.0)]
+        '你在十一黄金周'        x3  moc=[(190.0,190.5),(190.5,191.0),(191.0,191.5)]
+
+    Dòng đầu hiện **3,5 giây** thật (189,5 → 193,0) nhưng bị chẻ thành 6 dòng `0,5 s`. Mảnh
+    đầu dài `1,0 s` vì trong cửa sổ đó có hai hộp.
+
+    ## Luật nối — và vì sao phải có CẢ HAI điều kiện
+
+    Hai hộp được coi là cùng một lần hiện khi CẢ BA:
+
+    1. **cùng `text`**;
+    2. **cùng DẢI `y`** — tâm dọc của hai hộp lệch nhau dưới `DAY_DAI_TOI_DA / 2` chiều
+       cao khung. Hai dòng phụ đề thật hiện đồng thời nằm ở hai dải khác nhau;
+    3. **cách nhau dưới `_NHIP_KHUNG * 2`** — đo được: cả 15/15 cặp cần nối ở #13 đều cách
+       đúng `0,0 s`, nhưng phải nới vì hộp khác chữ chen vào giữa làm mất một nhịp.
+
+    ⚠️ ĐIỀU KIỆN `y` KHÔNG PHẢI PHÒNG XA — dữ liệu thật bắt buộc phải có. Đo trên
+    transcript #13, vùng 191–195 s:
+
+        191.00 -> 191.50  '福州烟台山商业漫步街区'
+        191.00 -> 191.50  '你在十一黄金周'
+        191.50 -> 192.00  '来到福州烟台山'
+        193.00 -> 193.50  '福州烟台山'      <- CÙNG chữ, KHÁC dải y
+        194.00 -> 194.50  '福州烟台山'
+        194.50 -> 195.00  '福州烟台山'
+
+    `福州烟台山` xuất hiện ba lần ở ba khung liền nhau nhưng là BA DÒNG THẬT khác nhau (mỗi
+    khung có 3 dòng phụ đề đồng thời, và dòng này đổi vị trí giữa các khung). Không có `y`
+    thì chúng bị nối thành một dòng dài 2,0 s — sai.
+
+    ⚠️ KHÔNG nối theo chữ đơn thuần: đo trên transcript #12 (cùng nguồn, không lọc vùng),
+    **8 cặp cùng chữ nhưng cách nhau 26–134 s** — watermark `想想工作室…` hiện lại ở những
+    đoạn khác nhau, không phải cùng một lần hiện. Điều kiện 3 chặn chúng.
+
+    ## Trả gì
+
+    Danh sách hộp ĐÃ GỘP: mỗi lần hiện còn ĐÚNG MỘT hộp, mang `t` của hộp ĐẦU (để
+    `gop_thanh_dong` tính `start` đúng chỗ phụ đề bắt đầu hiện) và `diem` CAO NHẤT trong
+    các mảnh (mảnh đọc được rõ nhất đại diện cho cả lần hiện). `x`/`y` lấy của mảnh đầu.
+
+    Giữ nguyên thứ tự `t` tăng dần của danh sách vào.
+    """
+    if not hops:
+        return []
+    #: Nửa bề dày dải phụ đề, tính bằng TỈ LỆ chiều cao khung — nhưng `Hop` ở đây dùng
+    #: PIXEL, và hàm này không biết chiều cao khung. Nên so theo tỉ lệ giữa `y` với chính
+    #: bề dày hộp: hai hộp cùng một dòng thì tâm dọc gần như trùng, khác dòng thì lệch ít
+    #: nhất một bề dày. Dùng `DAY_DAI_TOI_DA` làm hệ số nhân bề dày hộp trung bình.
+    ra: list[Hop] = []
+    # `t_cuoi[k]` = `t` của hộp CUỐI CÙNG đã gộp vào chuỗi `k`. Phải nhớ riêng: `ra[k].t`
+    # là `t` của hộp ĐẦU (dùng để tính `start`), và so ngưỡng nối với hộp ĐẦU là SAI.
+    t_cuoi: list[float] = []
+    for h in hops:
+        noi_vao: int | None = None
+        for k in range(len(ra) - 1, -1, -1):
+            ung = ra[k]
+            if ung.text != h.text:
+                continue
+            # Cùng dải y? So TÂM dọc, với dung sai bằng bề dày hộp (một dòng phụ đề có
+            # thể cao thấp hơn nhau vài pixel giữa các khung do khử răng cưa).
+            tam_ung = (ung.y0 + ung.y1) / 2
+            tam_h = (h.y0 + h.y1) / 2
+            be_day = max(1.0, (ung.y1 - ung.y0 + h.y1 - h.y0) / 2)
+            if abs(tam_h - tam_ung) > be_day:
+                continue
+            if h.t - t_cuoi[k] <= _NHIP_KHUNG * 2:
+                noi_vao = k
+            # 🔴 `break` PHAI NẰM TRONG `if`: bản trước để nó ngoài, nên vòng lặp chỉ xét
+            # ĐÚNG phần tử cuối của `ra` rồi thoát. Đo được hậu quả: 5 hộp `A,B,A,B,A`
+            # vào, chỉ 2 hộp ra — `A@190.5` và `A@191.5` BIẾN MẤT khỏi kết quả, tức mất
+            # dòng phụ đề, chứ không phải nối sai. Đó là lý do phải có bài test đếm số hộp.
+            break
+        if noi_vao is None:
+            ra.append(Hop(text=h.text, x0=h.x0, y0=h.y0, x1=h.x1, y1=h.y1,
+                          t=h.t, diem=h.diem))
+            t_cuoi.append(h.t)
+        else:
+            ung = ra[noi_vao]
+            ra[noi_vao] = Hop(text=ung.text, x0=ung.x0, y0=ung.y0, x1=ung.x1, y1=ung.y1,
+                              t=ung.t, diem=max(ung.diem, h.diem))
+            t_cuoi[noi_vao] = h.t
+    return ra
+
+
+#: Một nhịp khung ở `fps = 2` — ngưỡng nối mảnh trong `noi_manh_cung_dong`.
+#:
+#: ⚠️ ĐÂY LÀ HẰNG SỐ CỦA `fps = 2`, không phải hằng số của thuật toán. `doc_phu_de` nhận
+#: `fps` làm tham số, nên nếu ai đó gọi với `fps = 1` thì ngưỡng này thành hai nhịp khung và
+#: có thể nối nhầm hai lần hiện khác nhau. `noi_manh_cung_dong` không nhận `fps` vì nó chạy
+#: trên `Hop` đã có `t` tuyệt đối; truyền `fps` vào đây sẽ là tham số thứ hai cùng nói một
+#: điều. Nếu đổi `fps` mặc định thì phải đổi cả hằng số này — ghim bằng
+#: `test_nguong_noi_manh_khop_fps_mac_dinh`.
+_NHIP_KHUNG = 0.5
+
+
 def gop_thanh_dong(hops: list[Hop], *, fps: float) -> list[Segment]:
     """Gộp các hộp liên tiếp CÙNG chữ thành một `Segment`.
 
@@ -296,4 +408,133 @@ def gop_thanh_dong(hops: list[Hop], *, fps: float) -> list[Segment]:
         ra.append(Segment(i=len(ra), start=dau, end=truoc.t + buoc, text=truoc.text))
         dau, truoc = h.t, h
     ra.append(Segment(i=len(ra), start=dau, end=truoc.t + buoc, text=truoc.text))
+    return ra
+
+
+# ---------------------------------------------------------------------------
+# KÉO `end` CỦA DÒNG OCR THEO MỐC LỜI NÓI ASR
+# ---------------------------------------------------------------------------
+
+#: Tỉ lệ ký tự OCR tối thiểu phải khớp với từ ASR để coi là "cùng một câu".
+#:
+#: ĐO ĐƯỢC trên nguồn 2: 538 ký tự OCR, 359 ký tự có mặt trong ASR cùng cửa sổ = **66,7 %**.
+#: Nhưng phân bố KHÔNG đều — các cặp đúng khớp 6/8 tới 8/9, còn cặp sai (OCR `胖2026见` trong
+#: khi ASR nghe `这样一个雷霆大海豹`) khớp gần 0. Đặt 0,5 nằm giữa hai cụm đó.
+KHOP_TOI_THIEU = 0.5
+
+
+def _chu(s: str) -> set[str]:
+    """Tập ký tự của `s`, bỏ khoảng trắng và dấu câu — để so OCR với ASR.
+
+    OCR và ASR khác nhau ở dấu câu và khoảng trắng (`作为一个搞艺术的` vs
+    `作为一个搞艺术`), nên so nguyên chuỗi sẽ trượt. So tập KÝ TỰ chịu được cả thiếu chữ
+    lẫn thừa dấu.
+    """
+    return {c for c in s if not c.isspace() and c.isalnum()}
+
+
+def _tu_trong_khoang(tu: list[Word], dau: float, cuoi: float,
+                     dung_sai: float = 0.0) -> list[Word]:
+    """Các từ có TÂM nằm trong `[dau - dung_sai, cuoi + dung_sai]`."""
+    ra: list[Word] = []
+    for w in tu:
+        tam = (w.s + w.e) / 2
+        if dau - dung_sai <= tam <= cuoi + dung_sai:
+            ra.append(w)
+    return ra
+
+
+def keo_dai_theo_asr(doan: list[Segment], tu_asr: list[Word],
+                     dung_sai: float = 0.5) -> list[Segment]:
+    """Kéo `end` của mỗi dòng OCR tới hết LỜI NÓI của câu đó.
+
+    ## Vì sao cần (lỗi thật, chủ dự án báo)
+
+    *"các đoạn dùng ocr bị khá là ngắn mặc dù phụ đề trên vid đoạn phụ đề đấy chưa kết
+    thúc. Được thì dùng timestamp của asr cx đc"*
+
+    OCR chỉ biết "dòng này hiện ở KHUNG nào". `gop_thanh_dong` đặt
+    `end = t_hộp_cuối + 1/fps`, nên **mọi** dòng OCR dài đúng `0,50 s` ở `fps = 2` — đo
+    được: 76/77 dòng của transcript #13 dài `0,50`, một dòng `1,00`. Một phụ đề hiện 1,3 s
+    vẫn thành dòng `0,50 s` nếu OCR chỉ đọc được một khung.
+
+    ASR có mốc **word-level** và phủ đúng chỗ đó. Đo được trên nguồn 2:
+
+        OCR 193.00..193.50  '你会在山上看到'
+        ASR  你[192.53-193.13] 会[193.13-193.25] 在[193.25-193.35]
+             山[193.35-193.51] 上[193.51-193.63] 看到[193.63-193.81]
+
+    Chữ OCR khớp các từ ASR trải tới `193,81` — dài **1,28 s**, không phải `0,50 s`.
+
+    ## Luật
+
+    Với mỗi đoạn OCR:
+
+    1. Lấy các từ ASR có tâm nằm trong `[start - dung_sai, end + dung_sai]`.
+    2. Tính tỉ lệ ký tự OCR có mặt trong các từ đó. Dưới `KHOP_TOI_THIEU` ⇒ **KHÔNG kéo**:
+       ASR đang nói chuyện khác, và kéo theo nó là gán mốc của câu khác.
+    3. Khớp đủ ⇒ kéo `end` tới `e` của từ ASR **cuối cùng LIÊN TỤC khớp**. Dừng ở từ đầu
+       tiên không đóng góp ký tự mới nào: đo được ASR hay NGHE THÊM chữ không có trong OCR
+       (`会显得不太聪明` vs `价值会显得不太聪明比如` — ASR thừa `比如` ở cuối), và lấy từ
+       cuối của cả cửa sổ sẽ kéo `end` sang câu sau.
+
+    ## Không bao giờ vượt dòng kế tiếp
+
+    Ràng buộc CỨNG của dự án: hai dòng không được chồng nhau. Nên `end` bị chặn trên bởi
+    `start` của dòng OCR kế tiếp (khi có). Không có dòng kế thì không chặn.
+
+    `end` không bao giờ bị RÚT NGẮN: nếu ASR kết thúc sớm hơn `end` hiện tại (OCR đọc được
+    khung cuối muộn hơn lời nói), giữ `end` cũ.
+    """
+    if not doan:
+        return []
+    ra: list[Segment] = []
+    for k, s in enumerate(doan):
+        tu = _tu_trong_khoang(tu_asr, s.start, s.end, dung_sai)
+        if not tu:
+            ra.append(s)
+            continue
+        ocr_chu = _chu(s.text)
+        if not ocr_chu:
+            ra.append(s)
+            continue
+        asr_chu: set[str] = set()
+        for w in tu:
+            asr_chu |= _chu(w.w)
+        if len(ocr_chu & asr_chu) / len(ocr_chu) < KHOP_TOI_THIEU:
+            ra.append(s)
+            continue
+
+        # Đi từng từ theo thời gian, dừng ở từ đầu tiên KHÔNG đóng góp ký tự mới nào mà
+        # OCR cần. `da_co` tích luỹ để `比如` ở cuối (ký tự đã có) không kéo dài thêm.
+        da_co: set[str] = set()
+        end_moi = s.end
+        for w in sorted(tu, key=lambda x: x.s):
+            moi = _chu(w.w) & ocr_chu
+            if not moi - da_co:
+                # 🔴 BỎ QUA, KHÔNG DỪNG. ĐO ĐƯỢC (bài test đỏ vì lỗi này): OCR
+                # `会显得不太聪明`, ASR `价值会显得不太聪明比如`. Bản đầu `break` ngay ở
+                # `价值` — từ ĐẦU TIÊN — vì nó không đóng góp ký tự nào OCR cần, nên
+                # KHÔNG kéo được gì và `end` đứng ở 49,0 thay vì 49,47.
+                #
+                # Từ thừa ở GIỮA cũng không được kéo `end` (nó không đóng góp gì), nhưng
+                # cũng không được dừng vòng lặp: từ sau nó có thể đóng góp. Chỉ dừng khi đã
+                # phủ hết ký tự OCR cần — điều kiện `da_co >= ocr_chu` ở dưới.
+                continue
+            da_co |= moi
+            end_moi = max(end_moi, w.e)
+            if da_co >= ocr_chu:
+                break
+
+        # Chặn trên: chỉ chặn khi dòng kế tiếp là DÒNG NỐI TIẾP (bắt đầu SAU dòng này).
+        #
+        # 🔴 ĐO ĐƯỢC: bản đầu chặn vô điều kiện bằng `min(end, doan[k+1].start)` và nó
+        # CẮT SAI 14 cặp. Vùng 191-195 s của #13 có BA dòng phụ đề hiện ĐỒNG THỜI (cùng
+        # `start`, khác dải `y`); dòng kế tiếp trong danh sách bắt đầu ĐÚNG LÚC dòng này
+        # bắt đầu, nên `min` kéo `end` về bằng `start` — dòng dài 0 giây. Đó là hai
+        # dòng SONG SONG, không phải nối tiếp, và chúng không tranh nhau chỗ nói.
+        if k + 1 < len(doan) and doan[k + 1].start > s.start:
+            end_moi = min(end_moi, doan[k + 1].start)
+        ra.append(Segment(i=s.i, start=s.start, end=max(s.end, end_moi), text=s.text,
+                          suspect=s.suspect))
     return ra

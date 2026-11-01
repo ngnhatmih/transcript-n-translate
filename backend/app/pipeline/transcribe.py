@@ -13,6 +13,7 @@ from app.domain import job_state as js
 from app.domain.models import Job
 from app.domain.paths import PathOutsideRoot, resolve_within
 from app.domain.nguon_chu import chon_nguon, khoang_co_tieng
+from app.domain.phu_de import keo_dai_theo_asr
 from app.ports.asr import ASREngine
 from app.ports.ocr import OCREngine
 from app.ports.repos import Repos
@@ -201,6 +202,25 @@ class TranscribeHandler:
             doan_ocr = self._ocr.doc_phu_de(media_path, khoang_asr=khoang or None,
                                             vung_doc=vung_doc)
             if doan_ocr:
+                # KÉO DÀI THEO MỐC LỜI NÓI, trước khi hợp nhất.
+                #
+                # 🔴 VÌ SAO CẦN (chủ dự án: *"các đoạn dùng ocr bị khá là ngắn mặc dù phụ
+                # đề trên vid đoạn phụ đề đấy chưa kết thúc. Được thì dùng timestamp của
+                # asr cx đc"*): OCR chỉ biết "dòng này hiện ở KHUNG nào", nên mọi dòng dài
+                # đúng `1/fps` = 0,5 s — đo được 76/77 dòng của transcript #13. ASR có mốc
+                # word-level và phủ đúng chỗ đó.
+                #
+                # Đặt TRƯỚC `chon_nguon` để `hop_nhat_theo_doan` so giao với mốc đã đúng,
+                # và để đoạn OCR được giữ có `end` thật. Đặt sau thì dòng đã bị cắt ngắn
+                # xong mới kéo, và các mốc `start` của dòng kế đã dùng để chặn trên lại là
+                # mốc ngắn cũ.
+                #
+                # Chỉ chạy khi CÓ ASR: `tu_asr` rỗng thì `keo_dai_theo_asr` trả nguyên
+                # danh sách, nhưng gọi vô ích thì để làm gì.
+                if doan_asr:
+                    tu_asr = [w for s in doan_asr for w in (s.words or [])]
+                    if tu_asr:
+                        doan_ocr = keo_dai_theo_asr(doan_ocr, tu_asr)
                 return chon_nguon(doan_ocr, doan_asr)
         if not doan_asr and engine_id:
             doan_asr = self._engine_for(engine_id).transcribe(media_path, lang)
