@@ -71,7 +71,10 @@ def test_migration_adds_status_without_losing_rows(tmp_path):
     assert "status" in cols, "DB v1 migrate xong phải CÓ cột status"
     assert row == (7, 1, "queued"), "hàng cũ phải còn nguyên và nhận default 'queued'"
     assert src == ("x",), "dữ liệu bảng khác không được mất"
-    assert version == str(SCHEMA_VERSION) == "3"
+    # `SCHEMA_VERSION` là 4 từ khi `sources.vung_doc` được thêm (vùng đọc OCR lưu
+    # theo NGUỒN). Con số ở đây cố ý viết cứng: nó phải đổi CÙNG LÚC với
+    # `schema.py`, nên một lần bump quên cập nhật sẽ đỏ ngay thay vì lặng lẽ trôi.
+    assert version == str(SCHEMA_VERSION) == "4"
 
 
 def test_migration_adds_the_chimera_trace_column(tmp_path):
@@ -148,12 +151,12 @@ def test_migration_heals_database_stamped_v2_without_status_column(tmp_path):
     assert row == (7, 1, "queued"), "hàng cũ phải sống sót và nhận default 'queued'"
     assert src == ("x",), "dữ liệu bảng khác không được mất"
     # ⚠️ ĐÍNH CHÍNH: bản trước ghim "version phải GIỮ NGUYÊN '2'". Câu đó chỉ đúng
-    # khi version hiện hành LÀ 2. Từ nhánh CHIMERA, `SCHEMA_VERSION` là 3, nên
-    # `init_schema()` đóng dấu 3 — và đó vẫn là hành vi đúng: version là con dấu
-    # "schema hiện hành", KHÔNG phải cổng chặn migration (vế "không dùng version
-    # làm cổng" ở docstring trên mới là bất biến, và nó vẫn được ghim: cột `status`
-    # được vá trên một DB mang version '2').
-    assert version == str(SCHEMA_VERSION) == "3", (
+    # khi version hiện hành LÀ 2. Từ nhánh CHIMERA, `SCHEMA_VERSION` là 3, và từ khi
+    # `sources.vung_doc` được thêm nó là 4, nên `init_schema()` đóng dấu 4 — và đó
+    # vẫn là hành vi đúng: version là con dấu "schema hiện hành", KHÔNG phải cổng
+    # chặn migration (vế "không dùng version làm cổng" ở docstring trên mới là bất
+    # biến, và nó vẫn được ghim: cột `status` được vá trên một DB mang version '2').
+    assert version == str(SCHEMA_VERSION) == "4", (
         "init_schema() đóng dấu version HIỆN HÀNH, và việc vá vẫn theo CỘT"
     )
 
@@ -168,7 +171,47 @@ def test_fresh_database_is_created_at_current_version(tmp_path):
     conn.close()
     assert "status" in info
     assert "chimera" in info, "DB mới phải có cột chimera ngay từ SCHEMA_SQL"
-    assert version == str(SCHEMA_VERSION) == "3", "DB mới phải mang version hiện hành"
+    assert version == str(SCHEMA_VERSION) == "4", "DB mới phải mang version hiện hành"
     assert info["status"] == (1, "'queued'"), (
         "cột status trên DB mới phải NOT NULL DEFAULT 'queued'"
     )
+
+
+def test_migration_adds_the_source_vung_doc_column(tmp_path):
+    """Cột `sources.vung_doc` (vùng đọc OCR) phải tới được DB CŨ.
+
+    Vì sao cột này cần migration chứ không chỉ `SCHEMA_SQL`: `CREATE TABLE IF NOT
+    EXISTS` KHÔNG thêm cột vào bảng đã tồn tại, nên mọi DB đang chạy (máy này đã
+    có dữ liệu thật) sẽ thiếu cột và `set_source_vung_doc` ném
+    `no such column: vung_doc` — đúng lúc người dùng bấm lưu vùng đọc.
+
+    Và trạng thái của hàng CŨ phải là `None`, không phải `()`: `None` nghĩa là
+    "chưa ai chọn — dùng mặc định registry", còn `()` là "đã TẮT lọc vùng". Gán
+    nhầm `()` cho hàng cũ là biến mọi video cũ thành "đã tắt OCR theo vùng" mà
+    không ai bấm gì.
+    """
+    db = tmp_path / "old.db"
+    _make_v1(db)
+
+    repos = SqliteRepos(db, clock=SystemClock())
+    repos.init_schema()
+
+    conn = sqlite3.connect(db)
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(sources)")}
+    raw = conn.execute("SELECT vung_doc FROM sources WHERE id=1").fetchone()[0]
+    conn.close()
+
+    assert "vung_doc" in cols, "DB cũ migrate xong phải CÓ cột sources.vung_doc"
+    assert raw is None, (
+        f"hàng nguồn cũ phải mang NULL (chưa chọn vùng), không phải {raw!r}: "
+        f"`'[]'` sẽ có nghĩa là người dùng đã TẮT lọc vùng"
+    )
+    assert repos.get_source(1).vung_doc is None
+
+    # Chạy lại phải là no-op: `duplicate column name` ở đây nghĩa là bước migration
+    # không idempotent, và lần khởi động thứ hai của API sẽ chết.
+    repos.init_schema()
+
+    # Và ghi được trên DB vừa migrate — cột có thật, không chỉ có tên trong PRAGMA.
+    repos.set_source_vung_doc(1, (0.0, 0.1, 1.0, 1.0))
+    assert repos.get_source(1).vung_doc == (0.0, 0.1, 1.0, 1.0)

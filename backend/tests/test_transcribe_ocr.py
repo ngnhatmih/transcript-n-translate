@@ -246,12 +246,22 @@ def test_run_dua_VIDEO_cho_ocr_chu_khong_phai_wav(tmp_path):
 # ---------------------------------------------------------------------------
 
 
-def _chay_voi_vung(tmp_path, payload_them, *, mac_dinh=(0.0, 0.1, 1.0, 1.0)):
+def _chay_voi_vung(tmp_path, payload_them, *, mac_dinh=(0.0, 0.1, 1.0, 1.0),
+                   vung_cua_nguon="__khong_dat__"):
     """Chạy `run` với `payload_them`, trả `vung_doc` mà OCR nhận.
 
     `mac_dinh` đặt vào `h._vung_doc` để mô phỏng `opts.vung_doc` của registry — nếu để
     `None` thì nhánh "không khai" và nhánh "`[]`" cho CÙNG kết quả, và bài test sẽ
     xanh trong khi nút × không có tác dụng gì.
+
+    `vung_cua_nguon` mô phỏng cột `sources.vung_doc` (giao diện lưu khi người dùng kéo
+    khung). Ba giá trị có nghĩa khác nhau, nên mặc định là một sentinel chứ không phải
+    `None`:
+
+      `"__khong_dat__"` — KHÔNG gọi `set_source_vung_doc` (nguồn chưa ai chọn)
+      `None`            — ghi NULL (chưa chọn, dùng mặc định registry)
+      `()`              — ghi `'[]'` (đã TẮT lọc vùng, nút ×)
+      `(x0,y0,x1,y1)`   — ghi vùng đã chọn
     """
     video = tmp_path / "video.mp4"
     video.write_bytes(b"\x00" * 64)
@@ -265,6 +275,8 @@ def _chay_voi_vung(tmp_path, payload_them, *, mac_dinh=(0.0, 0.1, 1.0, 1.0)):
 
     sid = h._repos.add_source(kind="file", origin="video.mp4", media_path=str(video),
                               audio_path=str(wav), duration=1.0, lang="zh")
+    if vung_cua_nguon != "__khong_dat__":
+        h._repos.set_source_vung_doc(sid, vung_cua_nguon)
     h.run(Job(id=None, workspace=1, type="asr", engine="asr-gia",
               phase="asr:asr-gia", payload={"source_id": sid, **payload_them}),
           lambda *_: None)
@@ -304,3 +316,60 @@ def test_vung_doc_sai_hinh_dang_thi_job_hong_ON_AO(tmp_path):
 
     with pytest.raises(ValueError, match="x0 < x1"):
         _chay_voi_vung(tmp_path, {"vung_doc": [1, 0.1, 0, 1]})
+
+
+# ---------------------------------------------------------------------------
+# TẦNG NGUỒN — vùng đã lưu của `sources.vung_doc` (giao diện ghi khi kéo khung).
+#
+# Thứ tự ưu tiên: payload job > vùng của NGUỒN > `opts.vung_doc` của registry.
+#
+# Vì sao phải có tầng nguồn: người dùng kéo khung MỘT lần cho mỗi video, rồi lưu.
+# Không đọc tầng đó thì lần bóc băng sau (bấm lại bước "Phiên âm") quay về mặc định
+# registry — người dùng đã chọn vùng mà sản phẩm bỏ qua.
+#
+# Vì sao payload vẫn THẮNG nguồn: payload là "lượt chạy này dùng vùng nào", do chính
+# lần bấm đó gửi. Nó là bản ghi của hành động, còn cột nguồn là bộ nhớ dài hạn.
+# ---------------------------------------------------------------------------
+
+
+def test_vung_cua_NGUON_thang_mac_dinh_registry(tmp_path):
+    """Nguồn đã lưu vùng ⇒ dùng vùng đó, không dùng mặc định registry."""
+    ra = _chay_voi_vung(tmp_path, {}, mac_dinh=(0.0, 0.5, 1.0, 1.0),
+                        vung_cua_nguon=(0.1, 0.2, 0.9, 0.8))
+    assert ra == (0.1, 0.2, 0.9, 0.8), ra
+
+
+def test_vung_cua_NGUON_rong_la_TAT(tmp_path):
+    """`()` trong cột (JSON `'[]'`) ⇒ TẮT lọc vùng, dù registry có mặc định.
+
+    Đây là bài ghim hành vi nút × SAU KHI TẢI LẠI TRANG: người dùng bấm ×, vùng được
+    lưu thành `[]`, và lần bóc băng sau phải đọc cả khung. Nếu `run` đọc `()` thành
+    `None` rồi rơi tiếp về registry thì nút × chỉ có tác dụng cho tới lần tải lại —
+    đúng kiểu hỏng im lặng.
+    """
+    assert _chay_voi_vung(tmp_path, {}, vung_cua_nguon=()) is None
+
+
+def test_vung_cua_NGUON_null_thi_van_dung_mac_dinh_registry(tmp_path):
+    """Nguồn chưa chọn (`None`) KHÔNG được hiểu là "đã tắt"."""
+    ra = _chay_voi_vung(tmp_path, {}, mac_dinh=(0.0, 0.1, 1.0, 1.0),
+                        vung_cua_nguon=None)
+    assert ra == (0.0, 0.1, 1.0, 1.0), ra
+
+
+def test_PAYLOAD_thang_vung_cua_nguon(tmp_path):
+    """Payload thắng cả nguồn lẫn registry — nó là vùng của CHÍNH lượt chạy này."""
+    ra = _chay_voi_vung(tmp_path, {"vung_doc": [0.25, 0.3, 0.75, 0.7]},
+                        mac_dinh=(0.0, 0.1, 1.0, 1.0),
+                        vung_cua_nguon=(0.1, 0.2, 0.9, 0.8))
+    assert ra == (0.25, 0.3, 0.75, 0.7), ra
+
+
+def test_PAYLOAD_rong_thang_ca_vung_cua_nguon(tmp_path):
+    """`[]` trong payload TẮT được cả vùng đã lưu của nguồn.
+
+    Không có bài này thì một lần bấm × trên giao diện vẫn bị vùng cũ của nguồn ghi đè,
+    và người dùng thấy watermark vẫn bị lọc dù đã tắt.
+    """
+    assert _chay_voi_vung(tmp_path, {"vung_doc": []},
+                          vung_cua_nguon=(0.1, 0.2, 0.9, 0.8)) is None

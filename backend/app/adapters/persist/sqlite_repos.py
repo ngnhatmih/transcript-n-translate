@@ -91,6 +91,13 @@ class SqliteRepos:
         # `'{}'`, thứ sẽ nói "có chạy, mà không có ứng viên nào".
         (3, "translations", "chimera",
          "ALTER TABLE translations ADD COLUMN chimera TEXT"),
+        # `vung_doc` cho phép NULL và KHÔNG có default: một nguồn cũ (và mọi nguồn
+        # chưa ai kéo khung) mang NULL, nghĩa là "chưa chọn — dùng mặc định của
+        # registry". Khác hẳn `'[]'`, thứ nói "người dùng đã TẮT lọc vùng". Gộp hai
+        # trạng thái đó làm một là biến nút × thành không có tác dụng sau khi mở lại
+        # trang.
+        (4, "sources", "vung_doc",
+         "ALTER TABLE sources ADD COLUMN vung_doc TEXT"),
     )
 
     def _column_names(self, conn: sqlite3.Connection, table: str) -> set[str]:
@@ -144,7 +151,29 @@ class SqliteRepos:
         return Source(id=row["id"], kind=row["kind"], origin=row["origin"],
                       media_path=row["media_path"], lang=row["lang"],
                       audio_path=row["audio_path"], duration=row["duration"],
+                      vung_doc=_vung_doc_from_row(row),
                       created_at=row["created_at"])
+
+    def set_source_vung_doc(self, source_id: int,
+                            vung_doc: tuple[float, ...] | None) -> None:
+        """Ghi ĐÈ vùng đọc OCR của một nguồn. `None` xoá (về mặc định registry).
+
+        Ba trạng thái ghi xuống cột:
+          `None`             -> SQL NULL   ("chưa chọn — dùng mặc định registry")
+          `()` (tuple rỗng)  -> `'[]'`      ("đã TẮT lọc vùng", nút ×)
+          `(x0, y0, x1, y1)` -> `'[x0,...]'`
+
+        Id không tồn tại ném `NotFound`: một `UPDATE` không khớp hàng nào vẫn
+        "thành công", nên nuốt lỗi đó biến một id sai thành "đã lưu vùng" trong khi
+        DB không có gì — người dùng kéo khung, tải lại, và vùng cũ quay về mà không
+        có lỗi nào. Cùng lý do với `update_translation_segments`.
+        """
+        raw = None if vung_doc is None else json.dumps(list(vung_doc))
+        with self._connect() as conn:
+            cur = conn.execute("UPDATE sources SET vung_doc=? WHERE id=?",
+                               (raw, source_id))
+            if cur.rowcount == 0:
+                raise NotFound(f"source {source_id} không tồn tại")
 
     def get_source(self, source_id: int) -> Source:
         with self._connect() as conn:
@@ -791,6 +820,28 @@ class SqliteRepos:
                 " ORDER BY engine, model_ref"
             ).fetchall()
         return [dict(r) for r in rows]
+
+
+def _vung_doc_from_row(row) -> tuple[float, ...] | None:
+    """Cột `sources.vung_doc` -> tuple, hoặc `None`.
+
+    Ba trạng thái phải đọc ra được, và đây là lý do hàm này là hàm cấp module chứ
+    không phải một biểu thức trong `_row_to_source`:
+
+      cột NULL / vắng mặt  -> `None`  ("chưa chọn — dùng mặc định registry")
+      `'[]'`               -> `()`    ("đã TẮT lọc vùng", nút ×)
+      `'[x0, y0, x1, y1]'` -> tuple bốn số
+
+    Dùng `row.keys()` chứ không tin là cột luôn có: `_row_to_source` cũng chạy trên
+    một DB vừa được migration, và một `IndexError` ở đây sẽ đội lốt "hàng nguồn
+    hỏng" thay vì "DB chưa migrate" — đúng cái bẫy `_chimera_from_row` đã ghi.
+    """
+    if "vung_doc" not in row.keys():
+        return None
+    raw = row["vung_doc"]
+    if raw is None:
+        return None
+    return tuple(json.loads(raw))
 
 
 def _chimera_from_row(row) -> dict | None:

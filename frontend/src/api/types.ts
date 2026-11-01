@@ -171,6 +171,21 @@ export interface Source {
   audio_path: string | null;
   duration: number | null;
   lang: SourceLang | null;
+  /**
+   * Vùng đọc OCR của CHÍNH nguồn này — `[x0, y0, x1, y1]` theo tỉ lệ khung.
+   *
+   * Ba trạng thái, và client phải phân biệt được cả ba (backend ghi chúng thành ba
+   * giá trị khác nhau trong `sources.vung_doc`, xem `_vung_doc_from_row`):
+   *
+   *   `null`              — chưa ai chọn ⇒ dùng `opts.vung_doc` của registry
+   *   `[]`                — người dùng đã TẮT lọc vùng (nút ×) ⇒ OCR đọc cả khung
+   *   `[x0, y0, x1, y1]`  — vùng đã chọn cho video này
+   *
+   * 🔴 Đừng viết `source.vung_doc?.length ? ... : mặc_định`. `[]` là falsy, nên phép
+   * đó biến "người dùng đã tắt" thành "dùng mặc định" — nút × trông như đã bấm mà
+   * watermark vẫn bị lọc. Kiểm bằng `=== null` hoặc `=== undefined`.
+   */
+  vung_doc: [number, number, number, number] | [] | null;
   created_at: string;
 }
 

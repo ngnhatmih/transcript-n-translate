@@ -104,6 +104,32 @@ export function deleteSource(sourceId: number): Promise<void> {
   return api.del<void>(`/sources/${sourceId}`);
 }
 
+/**
+ * Lưu vùng đọc OCR của MỘT nguồn — `PATCH /api/sources/{id}/vung-doc`.
+ *
+ * Ba `mode`, và chúng KHÔNG được gộp thành một trường mang ba nghĩa:
+ *
+ *   `"dat"`      + `vung_doc: [x0,y0,x1,y1]`  — đặt vùng
+ *   `"tat"`                                   — TẮT lọc vùng (nút ×)
+ *   `"mac_dinh"`                              — xoá lựa chọn, về mặc định registry
+ *
+ * Vì sao không gửi thẳng `[]`/`null`: một trường duy nhất mang ba nghĩa thì mỗi chỗ
+ * đọc phải nhớ luật ngầm, và luật ngầm là thứ đã làm hỏng nhánh OCR ba lần.
+ *
+ * Trả về `Source` SAU khi ghi (nguồn sự thật là máy chủ): `App` thay hàng trong danh
+ * sách bằng đúng hàng này, nhờ đó giao diện hiện `vung_doc` mà DB đang có, không
+ * phải bản cục bộ vừa đoán.
+ */
+export function patchSourceVungDoc(
+  sourceId: number,
+  body:
+    | { mode: "dat"; vung_doc: [number, number, number, number] }
+    | { mode: "tat" }
+    | { mode: "mac_dinh" },
+): Promise<Source> {
+  return api.patch<Source>(`/sources/${sourceId}/vung-doc`, body);
+}
+
 // ---------------------------------------------------------------------------
 // jobs — hàng đợi: tạo, liệt kê, xem, huỷ, chạy lại
 // ---------------------------------------------------------------------------

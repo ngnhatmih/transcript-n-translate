@@ -1,4 +1,4 @@
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS schema_meta (
@@ -13,6 +13,18 @@ CREATE TABLE IF NOT EXISTS sources (
   audio_path TEXT,
   duration REAL,
   lang TEXT,
+  -- Vùng đọc OCR của CHÍNH nguồn này, dạng JSON `[x0, y0, x1, y1]` theo tỉ lệ
+  -- khung (0..1). NULL = chưa ai chọn, dùng `opts.vung_doc` của registry.
+  -- `'[]'` = người dùng đã TẮT lọc vùng (nút ×) — khác hẳn NULL, xem
+  -- `_vung_doc_tu_payload` trong `pipeline/transcribe.py`.
+  --
+  -- Vì sao lưu ở ĐÂY chứ không chỉ trong payload job: vùng watermark thuộc về
+  -- VIDEO. Đo được `8f4b5304daf42569.mp4` (1080×1920) có watermark ở `y=35-102`,
+  -- còn `ac5df767b9e0c878.mp4` (1280×720) ở chỗ khác. Người dùng kéo khung MỘT
+  -- lần cho mỗi video; bắt họ kéo lại sau mỗi lần mở trang là dùng dữ liệu đã
+  -- mất. Payload job vẫn giữ bản sao của lượt chạy đó (để biết job nào dùng vùng
+  -- nào), nhưng nguồn mới là chỗ NHỚ.
+  vung_doc TEXT,
   created_at TEXT NOT NULL
 );
 

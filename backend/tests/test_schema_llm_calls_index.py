@@ -215,10 +215,10 @@ def test_an_older_database_is_healed_without_a_migration(tmp_path):
         "init_schema() trên DB cũ phải tạo index — nếu không thì mọi DB đã tồn "
         "tại vẫn quét cả bảng và cần một migration thật"
     )
-    assert _version(db) == str(SCHEMA_VERSION) == "3", (
-        "init_schema() đóng dấu version HIỆN HÀNH; ở nhánh này nó là 3 vì cột "
-        "`translations.chimera`, KHÔNG vì index — xem "
-        "`test_the_index_is_not_a_migration_step`"
+    assert _version(db) == str(SCHEMA_VERSION) == "4", (
+        "init_schema() đóng dấu version HIỆN HÀNH; ở nhánh này nó là 4 vì cột "
+        "`sources.vung_doc` (và trước đó là 3 vì `translations.chimera`), KHÔNG vì "
+        "index — xem `test_the_index_is_not_a_migration_step`"
     )
 
 

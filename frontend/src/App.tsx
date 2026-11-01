@@ -9,6 +9,7 @@ import {
   getTranslation,
   listSources,
   patchSegmentTiming,
+  patchSourceVungDoc,
   patchTranslation,
   registry,
 } from "@/api/endpoints";
@@ -66,24 +67,43 @@ export function App() {
   const [keHoach, setKeHoach] = useState<ReadonlyMap<number, DubPlanRow>>(new Map());
   const [daDuyet, setDaDuyet] = useState<ReadonlySet<number>>(new Set());
   const [loi, setLoi] = useState<string | null>(null);
-  /**
-   * VÙNG ĐỌC OCR của nguồn đang mở — `null` = TẮT (OCR đọc cả khung).
-   *
-   * Vì sao thuộc `App` chứ không thuộc `Studio`: nó đi vào PAYLOAD của job `asr`, mà
-   * `Studio` không được biết `fetch` là gì (xem docstring đầu tệp này). `Studio` vẽ
-   * khung và báo thay đổi lên đây; `App` giữ giá trị và gửi nó khi tạo job.
-   *
-   * Vì sao KHÔNG lưu xuống máy chủ: đây là tham số của MỘT LƯỢT bóc băng, không phải
-   * thuộc tính của nguồn. Lưu vào DB thì phải thêm cột, thêm route, và trả lời câu hỏi
-   * "vùng nào đúng khi người dùng đã kéo lại lần thứ ba" — trong khi payload của job
-   * đã ghi lại chính xác vùng đã dùng cho lần chạy đó (nó nằm trong `job.payload`).
-   */
-  const [vungDoc, setVungDoc] = useState<VungDoc | null>(VUNG_DOC_MAC_DINH);
 
   const source = useMemo(
     () => (sourceId === null ? null : (sources.find((s) => s.id === sourceId) ?? null)),
     [sources, sourceId],
   );
+
+  /**
+   * VÙNG ĐỌC OCR của nguồn đang mở — dẫn xuất từ `source.vung_doc`, KHÔNG phải state
+   * riêng.
+   *
+   * 🔴 VÌ SAO DẪN XUẤT CHỨ KHÔNG GIỮ STATE (đây là đính chính của chính tôi): bản đầu
+   * tôi để `useState<VungDoc | null>(VUNG_DOC_MAC_DINH)` vì cho rằng đây là tham số
+   * của MỘT LƯỢT bóc băng. Sai ở hai điểm, cả hai đều đo được:
+   *
+   *   1. Nó mất khi tải lại trang, nên người dùng phải kéo khung lại cho mỗi video —
+   *      trong khi vùng watermark là thuộc tính của VIDEO (`8f4b5304daf42569.mp4` có
+   *      watermark ở `y=35-102`, `ac5df767b9e0c878.mp4` ở chỗ khác).
+   *   2. Một state song song với DB là hai nguồn sự thật cho cùng một con số. Sau khi
+   *      lưu, cái nào thắng? Không có câu trả lời đúng, chỉ có thứ tự ghi.
+   *
+   * Nay `sources` (nạp từ `GET /api/sources`) là nguồn sự thật DUY NHẤT, và
+   * `onVungDoc` ghi qua `PATCH` rồi thay hàng trong danh sách bằng hàng máy chủ trả về.
+   *
+   * Ba trạng thái của cột, đọc THẲNG không qua truthiness:
+   *   `null`/`undefined` — chưa chọn ⇒ dùng `VUNG_DOC_MAC_DINH`
+   *   `[]`               — đã TẮT lọc vùng (nút ×) ⇒ `null` cho khung
+   *   bốn số             — vùng đã chọn
+   *
+   * ⚠️ `vung_doc?.length ? ... : mặc_định` là SAI: `[]` falsy nên nút × biến thành
+   * "dùng mặc định", và watermark vẫn bị lọc dù người dùng đã tắt.
+   */
+  const vungDoc: VungDoc | null = useMemo(() => {
+    const v = source?.vung_doc;
+    if (v === null || v === undefined) return VUNG_DOC_MAC_DINH;
+    if (v.length === 0) return null;
+    return [v[0], v[1], v[2], v[3]];
+  }, [source]);
 
   /** KENH — nap mot lan khi mo trang, va moi khi mot job `ingest` xong. */
   const napKenh = useCallback(async () => {
@@ -228,6 +248,52 @@ export function App() {
   // BON HANH DONG GHI — moi hanh dong goi DUNG mot route
   // -------------------------------------------------------------------------
 
+  /**
+   * Lưu vùng đọc OCR — `PATCH /api/sources/{id}/vung-doc`.
+   *
+   * Vì sao ghi NGAY khi người dùng thả chuột, không đợi tới lúc bấm "Phiên âm": họ
+   * vừa chỉ ra một sự thật về video (watermark ở đâu), và sự thật đó phải sống qua lần
+   * tải lại trang. Đợi tới lúc chạy job thì một lần đóng tab là mất.
+   *
+   * `vung === null` là nút ×: gửi `mode: "tat"`, KHÔNG gửi `mode: "mac_dinh"`. Hai thứ
+   * đó khác nhau — "tắt" nghĩa là đọc cả khung, "mặc định" nghĩa là quay lại vùng của
+   * registry. Gửi nhầm thì nút × chỉ có tác dụng cho tới lần chạy sau.
+   *
+   * Cập nhật lạc quan TRƯỚC rồi ghi thật (cùng luật với `onSuaChu`): khung phải theo
+   * chuột ngay, không giật về vị trí cũ trong lúc chờ mạng. Máy chủ trả về hàng `Source`
+   * đã ghi, và hàng đó THAY hàng trong danh sách — nhờ vậy giao diện luôn hiện đúng
+   * thứ DB đang có, không phải bản cục bộ vừa đoán.
+   */
+  const onVungDoc = useCallback(
+    (v: VungDoc | null) => {
+      if (sourceId === null) return;
+      setSources((cu) =>
+        cu.map((s) =>
+          s.id === sourceId
+            ? { ...s, vung_doc: v === null ? [] : [v[0], v[1], v[2], v[3]] }
+            : s,
+        ),
+      );
+      void (async () => {
+        try {
+          const da = await patchSourceVungDoc(
+            sourceId,
+            v === null
+              ? { mode: "tat" }
+              : { mode: "dat", vung_doc: [v[0], v[1], v[2], v[3]] },
+          );
+          setSources((cu) => cu.map((s) => (s.id === da.id ? da : s)));
+        } catch (e) {
+          setLoi(e instanceof Error ? e.message : String(e));
+          // Ghi hỏng thì nạp lại danh sách: khung đang hiện một vùng mà DB KHÔNG có,
+          // và để nguyên là nói dối về thứ đã lưu.
+          void napKenh();
+        }
+      })();
+    },
+    [sourceId, napKenh],
+  );
+
   /** Duyet mot dong: tap CUC BO cua giao dien, khong goi route (backend duyet ca ban ghi). */
   const onDuyet = useCallback((i: number) => {
     setDaDuyet((cu) => {
@@ -320,17 +386,17 @@ export function App() {
             await endpoints.createJob({
               type: "asr",
               workspace: transcript.id,
-              // `vung_doc: []` = TẮT lọc vùng (nút ×) — đọc cả khung, đúng hành vi
-              // trước khi có tính năng này. `null` ở state nghĩa là TẮT, nên phải gửi
-              // mảng rỗng chứ KHÔNG bỏ khoá: bỏ khoá là "dùng mặc định registry", và
-              // backend phân biệt hai thứ đó bằng `"vung_doc" in payload`
-              // (xem `_vung_doc_tu_payload`). Gửi `null` cũng sai: payload schema khai
-              // `list[float] | None` nên nó nhận, nhưng `null` mang nghĩa "không khai"
-              // — dùng `[]` cho rõ ràng.
-              payload: {
-                source_id: transcript.source_id,
-                ...(vungDoc === null ? { vung_doc: [] } : { vung_doc: [...vungDoc] }),
-              },
+              // KHÔNG gửi `vung_doc` ở đây nữa — vùng đã lưu ở CHÍNH NGUỒN
+              // (`sources.vung_doc`, ghi qua `PATCH /api/sources/{id}/vung-doc` mỗi
+              // lần người dùng thả chuột), và `TranscribeHandler.run` đọc nó làm tầng
+              // giữa: payload job > vùng của nguồn > `opts.vung_doc` của registry.
+              //
+              // Vì sao bỏ khỏi payload thay vì gửi kèm: payload là "lượt chạy NÀY dùng
+              // vùng nào", còn cột nguồn là bộ nhớ dài hạn. Gửi kèm cả hai thì có hai
+              // bản sao của cùng một con số, và khi chúng lệch nhau (người dùng kéo
+              // khung rồi bấm "Phiên âm" trước khi PATCH xong) thì không ai biết bản
+              // nào đúng. Một nguồn sự thật, đọc từ nguồn.
+              payload: { source_id: transcript.source_id },
             });
           } catch (e) {
             setLoi(e instanceof Error ? e.message : String(e));
@@ -475,7 +541,7 @@ export function App() {
       loi={loi}
       soEngine={engineCount}
       vungDoc={vungDoc}
-      onVungDoc={setVungDoc}
+      onVungDoc={onVungDoc}
     />
   );
 }

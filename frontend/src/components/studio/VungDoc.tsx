@@ -114,11 +114,38 @@ export type VungDocProps = {
   /** Vùng hiện tại; `null` = TẮT lọc vùng. */
   vung: VungDoc | null;
   onChange: (v: VungDoc | null) => void;
-  /** Khoá theo nguồn: đổi video thì khung phải về mặc định, không mang vùng cũ sang. */
-  sourceId: number | null;
 };
 
-export function VungDocKhung({ vung, onChange, sourceId }: VungDocProps) {
+/**
+ * 🔴 ĐÃ XOÁ một `useEffect` và prop `sourceId` — chúng là LỖI, không phải tính năng.
+ *
+ * Bản trước có:
+ *
+ *     useEffect(() => {
+ *       if (sourceId === null || sourceId === daKhoa.current) return;
+ *       daKhoa.current = sourceId;
+ *       onChange(VUNG_DOC_MAC_DINH);   // "đổi video thì đặt lại mặc định"
+ *     }, [sourceId, onChange]);
+ *
+ * Ý định khi viết nó là đúng: vùng đo cho video dọc 1080×1920 áp lên video ngang
+ * 1280×720 sẽ cắt mất phụ đề thật. Nhưng nó chỉ cần thiết khi vùng là STATE CỤC BỘ,
+ * vì lúc đó không có gì khác nhớ vùng thuộc video nào.
+ *
+ * Nay vùng là DẪN XUẤT từ `source.vung_doc` (đọc từ `GET /api/sources`), nên `sourceId`
+ * đổi là `vung` đổi theo — không cần ai đặt lại. Giữ effect lại thì nó không còn việc
+ * gì làm mà vẫn chạy một lần khi `sourceId` xuất hiện lần đầu, và ghi mặc định LÊN
+ * TRÊN vùng đang có trong DB:
+ *
+ *     mở trang với `vung_doc: []` (người dùng đã bấm ×)
+ *       -> effect chạy -> onChange([0, 0.1, 1, 1]) -> PATCH đè `[]` thành bốn số
+ *       -> nút × TỰ BẬT LẠI sau mỗi lần tải trang
+ *
+ * Đo được: bài `bấm × gửi mode='tat'` đỏ với "Unable to find an accessible element with
+ * the role button and name Tắt lọc vùng đọc" — vì khung đã bị đổi về mặc định nên
+ * không còn nút × nào trong DOM. Một effect thừa không chỉ vô dụng: nó ghi đè dữ liệu
+ * người dùng.
+ */
+export function VungDocKhung({ vung, onChange }: VungDocProps) {
   const hopRef = useRef<HTMLDivElement | null>(null);
   const [dangKeo, setDangKeo] = useState<{
     tay: TayKeo;
@@ -128,20 +155,6 @@ export function VungDocKhung({ vung, onChange, sourceId }: VungDocProps) {
     rong: number;
     cao: number;
   } | null>(null);
-
-  /**
-   * Đổi video ⇒ đặt lại khung về mặc định.
-   *
-   * Vì sao phải làm: vùng đo cho video dọc 1080×1920 (watermark góc trên phải) áp lên
-   * video ngang 1280×720 sẽ cắt mất một dải phụ đề thật — và không có gì báo. Mang
-   * vùng của video trước sang video sau là dùng dữ liệu của một video khác.
-   */
-  const daKhoa = useRef<number | null>(null);
-  useEffect(() => {
-    if (sourceId === null || sourceId === daKhoa.current) return;
-    daKhoa.current = sourceId;
-    onChange(VUNG_DOC_MAC_DINH);
-  }, [sourceId, onChange]);
 
   useEffect(() => {
     if (dangKeo === null) return;
@@ -184,12 +197,14 @@ export function VungDocKhung({ vung, onChange, sourceId }: VungDocProps) {
     [vung],
   );
 
-  if (sourceId === null) return null;
-
   // ── TẮT: chỉ còn một nút để bật lại. ────────────────────────────────────────
   if (vung === null) {
     return (
       <button
+        // Bật lại = đặt vùng MẶC ĐỊNH, không phải "xoá lựa chọn". Người dùng vừa bấm
+        // "bật lại" nghĩa là họ muốn LỌC VÙNG trở lại; đưa họ về `mode: "mac_dinh"`
+        // thì giao diện hiện mặc định nhưng DB vẫn là "đã tắt", và lần chạy sau OCR
+        // vẫn đọc cả khung — nút trông như đã bật mà tác dụng thì không.
         onClick={() => onChange(VUNG_DOC_MAC_DINH)}
         className="absolute left-2 top-2 z-20 rounded-sm border border-rule bg-panel-0/90 px-2 py-1 text-[10.5px] text-ink-1 backdrop-blur-sm hover:border-ink-1 hover:text-ink-0"
         title="OCR đang đọc CẢ khung — watermark và logo sẽ bị đọc như chữ phụ đề"

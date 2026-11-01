@@ -56,6 +56,14 @@ def _source_json(source: Source) -> dict:
         "id": source.id, "kind": source.kind, "origin": source.origin,
         "media_path": source.media_path, "audio_path": source.audio_path,
         "duration": source.duration, "lang": source.lang,
+        # Ba trạng thái xuống JSON, và client phải phân biệt được cả ba:
+        #   `null`          — chưa chọn, dùng mặc định registry
+        #   `[]`            — đã TẮT lọc vùng (nút ×)
+        #   `[x0,y0,x1,y1]` — vùng đã chọn cho video này
+        # `list(...)` chứ không để tuple: JSON không có tuple, và để nguyên thì
+        # FastAPI tự đổi — nhưng đổi NGẦM, nên một test đọc `_source_json` trực
+        # tiếp sẽ thấy kiểu khác với cái client nhận.
+        "vung_doc": None if source.vung_doc is None else list(source.vung_doc),
         "created_at": source.created_at,
     }
 
@@ -185,6 +193,70 @@ def list_sources(repos=Depends(get_repos)):
 @router.get("/{source_id}")
 def get_source(source_id: int, repos=Depends(get_repos)):
     try:
+        return _source_json(repos.get_source(source_id))
+    except LookupError as exc:
+        raise HTTPException(404, str(exc)) from exc
+
+
+class VungDocIn(BaseModel):
+    """Thân của `PATCH /api/sources/{id}/vung-doc`.
+
+    `vung_doc` phải phân biệt được BA trạng thái, nên nó KHÔNG dùng
+    `list[float] | None` — với kiểu đó, `null` và "không gửi" là một, và nút ×
+    không lưu được. Thay vào đó dùng `mode`:
+
+      `"dat"`   — đặt vùng, `vung_doc` phải đúng bốn số
+      `"tat"`   — TẮT lọc vùng (nút ×)
+      `"mac_dinh"` — xoá lựa chọn, quay về `opts.vung_doc` của registry
+
+    Vì sao không nhận thẳng `[]`/`null`: một trường duy nhất mang ba nghĩa thì mỗi
+    lần đọc phải nhớ luật ngầm, và luật ngầm là thứ đã làm hỏng nhánh OCR ba lần.
+    """
+
+    mode: str
+    vung_doc: list[float] | None = None
+
+
+@router.patch("/{source_id}/vung-doc")
+def dat_vung_doc(source_id: int, payload: VungDocIn, repos=Depends(get_repos)):
+    """Lưu vùng đọc OCR của nguồn — để người dùng kéo khung MỘT lần cho mỗi video.
+
+    Vì sao lưu ở nguồn chứ không chỉ trong payload job: vùng watermark thuộc về
+    VIDEO. Đo được `8f4b5304daf42569.mp4` (1080×1920) có watermark ở `y=35-102`,
+    còn `ac5df767b9e0c878.mp4` (1280×720) ở chỗ khác. Không lưu thì mỗi lần mở lại
+    trang người dùng phải kéo lại, và lần nào quên thì watermark lọt vào phụ đề.
+
+    Kiểm ngữ nghĩa Ở ĐÂY, cùng bộ luật với `AsrPayload` (routes_jobs.py): bốn số
+    trong `[0, 1]`, `x0 < x1`, `y0 < y1`. Hai cửa ghi cùng một khái niệm mà kiểm
+    khác nhau là cách chắc chắn nhất để một trong hai chấp nhận thứ không dùng được.
+    """
+    if payload.mode == "mac_dinh":
+        gia_tri: tuple[float, ...] | None = None
+    elif payload.mode == "tat":
+        # Tuple RỖNG, không phải `None`: `None` là "chưa chọn — dùng mặc định
+        # registry", còn đây là "đã chọn TẮT". Gộp hai thứ là biến nút × thành
+        # không có tác dụng sau khi tải lại trang.
+        gia_tri = ()
+    elif payload.mode == "dat":
+        v = payload.vung_doc
+        if v is None or len(v) != 4:
+            raise HTTPException(
+                422, "mode 'dat' cần vung_doc là đúng 4 số [x0, y0, x1, y1] "
+                     f"theo tỉ lệ khung; nhận được {v!r}")
+        if not all(0.0 <= x <= 1.0 for x in v):
+            raise HTTPException(422, f"vung_doc phải nằm trong [0, 1]: {v!r}")
+        x0, y0, x1, y1 = v
+        if not (x0 < x1 and y0 < y1):
+            raise HTTPException(
+                422, "vung_doc phải thoả x0 < x1 và y0 < y1 "
+                     f"(thứ tự [x0, y0, x1, y1]): {v!r}")
+        gia_tri = (x0, y0, x1, y1)
+    else:
+        raise HTTPException(
+            422, f"mode không hợp lệ: {payload.mode!r} (nhận: 'dat', 'tat', 'mac_dinh')")
+
+    try:
+        repos.set_source_vung_doc(source_id, gia_tri)
         return _source_json(repos.get_source(source_id))
     except LookupError as exc:
         raise HTTPException(404, str(exc)) from exc

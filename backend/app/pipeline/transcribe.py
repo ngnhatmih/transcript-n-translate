@@ -295,7 +295,8 @@ class TranscribeHandler:
             if not media.is_file():
                 raise FileNotFoundError(f"tệp media không tồn tại: {media}")
             report(0.05, f"chọn nguồn chữ cho {media.name} (lang={lang})")
-            # Vùng đọc: ƯU TIÊN payload của CHÍNH job này, rồi mới tới registry.
+            # Vùng đọc: ƯU TIÊN payload của CHÍNH job này, rồi tới vùng đã lưu của
+            # NGUỒN, rồi mới tới registry.
             #
             # 🔴 VÌ SAO THỨ TỰ ĐÓ (đo được): vùng watermark phụ thuộc VIDEO, không phụ
             # thuộc engine. `8f4b5304daf42569.mp4` (1080×1920) có watermark ở
@@ -303,15 +304,22 @@ class TranscribeHandler:
             # chung trong registry đúng cho video này và SAI cho video kia — và cái sai
             # đó im lặng: hoặc watermark lọt, hoặc phụ đề thật bị cắt mất.
             #
-            # Nên giao diện gửi vùng nó đã chọn cho từng video; registry chỉ là mặc
-            # định khi không ai chọn. `[]` (rỗng) là TẮT — nút × trên giao diện — và
-            # phải phân biệt được với `None` ("không gửi gì"): `[]` nghĩa là "đọc cả
-            # khung", `None` nghĩa là "dùng mặc định". `payload.get` trả `None` cho cả
-            # hai nếu dùng `or`, nên phải kiểm bằng `in`.
+            # Vì sao có tầng NGUỒN ở giữa: giao diện cho người dùng kéo khung MỘT lần
+            # cho mỗi video, rồi lưu vào `sources.vung_doc`. Không đọc tầng đó thì lần
+            # bóc băng sau (bấm lại bước "Phiên âm" trên thanh đường ống) quay về mặc
+            # định registry — tức người dùng đã chọn vùng mà sản phẩm bỏ qua, đúng kiểu
+            # hỏng im lặng mà cả nhánh OCR vừa phải sửa.
+            #
+            # Ba trạng thái phải phân biệt được, nên phải kiểm bằng `in` chứ không dùng
+            # `or`: `[]` là falsy, nên `payload.get(...) or ...` biến "người dùng bấm ×
+            # để tắt" thành "dùng lại vùng cũ" — nút × trông như đã bấm mà watermark vẫn
+            # bị lọc theo vùng cũ.
             vung = self._vung_doc
+            if source.vung_doc is not None:
+                # `()` (tuple rỗng) = người dùng đã TẮT lọc vùng ⇒ `None` cho OCR.
+                vung = source.vung_doc if len(source.vung_doc) == 4 else None
             if "vung_doc" in job.payload:
-                tho = job.payload["vung_doc"]
-                vung = _vung_doc_tu_payload(tho)
+                vung = _vung_doc_tu_payload(job.payload["vung_doc"])
             segments, ly_do = self.chon_doan(str(media), lang,
                                             asr_engine_id=job.engine or None,
                                             vung_doc=vung)

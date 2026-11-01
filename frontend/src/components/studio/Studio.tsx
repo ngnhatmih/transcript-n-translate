@@ -945,13 +945,7 @@ export function Studio(props: StudioProps) {
                 hoặc phụ đề thật bị cắt, cả hai đều im lặng.
                 Chỉ hiện khi ĐÃ có video: chưa có hình thì không có gì để chọn vùng.
               */}
-              {player.src !== null && (
-                <VungDocKhung
-                  vung={vungDoc}
-                  onChange={onVungDoc}
-                  sourceId={source === null ? null : source.id}
-                />
-              )}
+              {player.src !== null && <VungDocKhung vung={vungDoc} onChange={onVungDoc} />}
             </div>
             <div className="flex min-w-0 flex-1 flex-col justify-between py-1">
               <div>

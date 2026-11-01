@@ -150,6 +150,74 @@ trình duyệt — ba lỗi nó tồn tại để chặn: kẹp từng cạnh kh
 mép, cho `x0 >= x1` (backend từ chối, lỗi hiện ở tận lúc chạy job), và không có sàn kích
 thước (khung co về 0, không bắt lại được bằng chuột).
 
+### Vùng đọc LƯU THEO NGUỒN (`sources.vung_doc`, schema 3 → 4)
+
+Bản đầu tôi để vùng trong một `useState` cục bộ, lập luận rằng nó là tham số của MỘT lượt
+bóc băng. **Sai, và đo được là sai**: mở lại trang là mất, nên mỗi video phải kéo khung
+lại, và lần nào quên thì watermark lọt vào phụ đề. Vùng watermark là thuộc tính của VIDEO
+— nó phải sống lâu hơn một lượt chạy.
+
+**Cột mới `sources.vung_doc TEXT`** (JSON), `SCHEMA_VERSION` 3 → 4, thêm một bước vào
+`_MIGRATIONS`:
+
+    (4, "sources", "vung_doc", "ALTER TABLE sources ADD COLUMN vung_doc TEXT")
+
+Cột cho phép NULL và KHÔNG có default, vì ba trạng thái phải phân biệt được **ở tầng DB**:
+
+| cột `sources.vung_doc` | nghĩa | JSON ra client |
+|---|---|---|
+| `NULL` | chưa ai chọn ⇒ dùng `opts.vung_doc` của registry | `null` |
+| `'[]'` | đã **TẮT** lọc vùng (nút ×) | `[]` |
+| `'[x0,y0,x1,y1]'` | vùng đã chọn cho video này | bốn số |
+
+Gộp `NULL` với `'[]'` là biến nút × thành "tự bật lại sau khi tải trang". Đo migration
+trên DB cũ (v3, có dữ liệu thật):
+
+    truoc: sources co vung_doc = False
+    sau:   sources co vung_doc = True, version = 4
+    hang cu con nguyen: origin = a.mp4, vung_doc = None   <- NULL, KHONG phai '[]'
+    init_schema lan 2: OK (idempotent)
+
+**Route `PATCH /api/sources/{id}/vung-doc`** dùng `mode` thay vì một trường mang ba nghĩa:
+`"dat"` + `vung_doc`, `"tat"`, `"mac_dinh"`. Kiểm ngữ nghĩa **ở cửa**, cùng bộ luật với
+`AsrPayload`. Đo trên container:
+
+    mode=dat [0,0.12,1,0.95]  -> 200  vung_doc = [0.0, 0.12, 1.0, 0.95]
+    GET lai                   -> 200  vung_doc = [0.0, 0.12, 1.0, 0.95]   (doc tu DB)
+    mode=tat                  -> 200  vung_doc = []      (KHONG phai null)
+    mode=mac_dinh             -> 200  vung_doc = None
+    mode=dat [0,0,1]          -> 422  "mode 'dat' cần vung_doc là đúng 4 số ..."
+    mode=dat [1,0.1,0,1]      -> 422  "vung_doc phải thoả x0 < x1 và y0 < y1 ..."
+    mode=xyz                  -> 422  "mode không hợp lệ: 'xyz' ..."
+    nguon 99999               -> 404  "source 99999 không tồn tại"
+
+**`TranscribeHandler.run` đọc BA tầng, theo thứ tự**: payload job > `source.vung_doc` >
+`opts.vung_doc` của registry. Đo bằng hai job thật, payload **không** khai `vung_doc`, chỉ
+đổi cột của nguồn:
+
+    A  nguon [0, 0.25, 1, 0.95]  -> job 82: 77 dong,  0 watermark  (dung vung cua nguon)
+    B  nguon TAT  ('[]')         -> job 84: 48 dong, 32 watermark  (doc ca khung)
+
+Job 84 khớp **chính xác** job 69 (48 dòng / 32 watermark, trước khi có tính năng), nên
+"tắt" ở tầng nguồn tương đương đúng hành vi cũ. Và job 82 chứng minh vùng đã lưu **thật sự
+được dùng** — không có tầng đó thì nó là 48 dòng có watermark.
+
+### Một `useEffect` thừa đã GHI ĐÈ dữ liệu người dùng
+
+Khi vùng còn là state cục bộ, `VungDocKhung` có một effect hợp lý: "đổi `sourceId` ⇒ đặt
+lại mặc định", để vùng của video dọc không áp lên video ngang. Khi vùng trở thành **dẫn
+xuất** từ `source.vung_doc`, effect đó không còn việc gì làm — nhưng tôi để lại, và nó vẫn
+chạy một lần khi `sourceId` xuất hiện lần đầu:
+
+    mo trang voi vung_doc = []  (nguoi dung da bam x)
+      -> effect chay -> onChange([0, 0.1, 1, 1]) -> PATCH de [] thanh bon so
+      -> nut x TU BAT LAI sau moi lan tai trang
+
+Đo được: bài `bấm × gửi mode='tat'` đỏ với *"Unable to find an accessible element with the
+role button and name Tắt lọc vùng đọc"* — vì khung đã bị đổi về mặc định nên **không còn
+nút × nào trong DOM**. Đã xoá effect, xoá luôn prop `sourceId` (nó chỉ tồn tại để phục vụ
+effect đó). Bài học: một effect thừa không chỉ vô dụng, nó ghi đè dữ liệu người dùng.
+
 
 ### Bốn bài test mới, và hai lần chúng suýt là test GIẢ
 
@@ -205,32 +273,32 @@ GPU. Nó tự ép UTF-8 cho stdout (console Windows mặc định cp1252, còn s
 tiếng Trung/Việt) và tự đặt cache model trước khi nạp `faster_whisper`.
 
 Con số nền của lần chạy mặc định, đo sau khi xoá `__pycache__` (lệnh ở mục
-"Kiểm thử" trên, chạy từ trong `backend\`). Thứ có nghĩa là **1436 / 15**, không
+"Kiểm thử" trên, chạy từ trong `backend\`). Thứ có nghĩa là **1447 / 15**, không
 phải số giây — thời gian trôi giữa các lần chạy (đã thấy 24,00–30,94 s) còn con
 số bài thì không:
 
 ```
-1436 passed, 15 deselected, 3 warnings
+1447 passed, 15 deselected, 3 warnings
 ```
 
 Hai con số đó là SỐ BÀI ĐƯỢC CHỌN, và chúng khớp với số mà `--collect-only` báo
-(`1436/1451`, 15 bài `live` bị bỏ;
+(`1447/1462`, 15 bài `live` bị bỏ;
 `tests/test_backend_readme.py::test_readme_baseline_matches_the_tests_actually_
 collected` đối chiếu mỗi lần chạy).
 
 
-Máy này **CÓ** `ffmpeg 8.1.1` + `ffprobe` trên PATH (đã đo), nên `1436/15` ở trên
+Máy này **CÓ** `ffmpeg 8.1.1` + `ffprobe` trên PATH (đã đo), nên `1447/15` ở trên
 là số THẬT của nó. Máy **không có** `ffmpeg`/`ffprobe` cho một kết quả KHÁC: cả
 `tests/test_ingest.py` bị `skipif` ở cấp module — **9** bài cùng skip một lượt —
-nên dòng tổng kết của máy đó là **`1427 passed, 9 skipped, 15 deselected`** (=
-`1436 − 9`; con số này TỪNG ghi `978`, tức một baseline rất cũ, và nó lệch phép
+nên dòng tổng kết của máy đó là **`1438 passed, 9 skipped, 15 deselected`** (=
+`1447 − 9`; con số này TỪNG ghi `978`, tức một baseline rất cũ, và nó lệch phép
 trừ của chính khối nền ngay trên nó). Đó là
 con số của máy thiếu ffmpeg, **không phải** con số máy này từng in ra; đừng chép
 nó vào khối nền ở trên, và đừng "sửa" số nền xuống chỉ vì thiếu ffmpeg.
 
 ⚠️ Con số `856` ở đây TỪNG không khớp phép trừ của chính nó: `865 − 9 = 856`, tức
 nó là số của lượt TRƯỚC `V1` (+3 bài) còn sót lại. Phép trừ của khối nền hiện tại
-là `1436 − 9` = `1427`.
+là `1447 − 9` = `1438`.
 
 
 (Con số này từng bị ghi là `798`: bài `test_a_failed_translation_leaves_the_

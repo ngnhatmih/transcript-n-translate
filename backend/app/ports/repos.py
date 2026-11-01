@@ -15,6 +15,13 @@ class Repos(Protocol):
     def get_source(self, source_id: int) -> Source: ...
     def list_sources(self) -> list[Source]: ...
     def set_source_audio(self, source_id: int, audio_path: str, duration: float) -> None: ...
+    def set_source_vung_doc(self, source_id: int,
+                            vung_doc: tuple[float, ...] | None) -> None:
+        """Ghi ĐÈ vùng đọc OCR của nguồn.
+
+        Ba trạng thái: `None` = chưa chọn (dùng mặc định registry), `()` = đã TẮT
+        lọc vùng, `(x0, y0, x1, y1)` = vùng đã chọn. Xem `Source.vung_doc`.
+        """
     def delete_source(self, source_id: int) -> None:
         """Xoá MỘT nguồn cùng MỌI transcript và MỌI bản dịch của nó.
 

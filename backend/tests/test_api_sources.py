@@ -377,7 +377,13 @@ def test_list_sources_goes_through_the_port_not_the_database_file(tmp_path):
     assert resp.status_code == 200, resp.text
     assert resp.json() == [{
         "id": 7, "kind": "file", "origin": "a.mp4", "media_path": "m/a.mp4",
-        "audio_path": None, "duration": None, "lang": "zh", "created_at": "",
+        "audio_path": None, "duration": None, "lang": "zh",
+        # `vung_doc` = None cho một nguồn chưa ai kéo khung. Khoá này PHẢI có mặt
+        # trong response: client phân biệt ba trạng thái bằng chính nó (`None` =
+        # chưa chọn, `[]` = đã tắt, bốn số = đã chọn). Thiếu khoá thì client đọc ra
+        # `undefined` và không phân biệt được "chưa chọn" với "tắt".
+        "vung_doc": None,
+        "created_at": "",
     }]
 
 
@@ -1862,3 +1868,106 @@ def test_upload_route_keeps_its_blocking_io_off_the_event_loop(client, monkeypat
         idents = seen[what] if what.startswith("open:") else {seen[what]}
         assert seen["route"] not in idents, (
             f"{what} chạy CÙNG luồng với thân route `async def` => đang chặn event loop")
+
+
+# ---------------------------------------------------------------------------
+# `PATCH /api/sources/{id}/vung-doc` — lưu vùng đọc OCR của NGUỒN.
+#
+# Vì sao phải lưu: vùng watermark thuộc về VIDEO, không thuộc engine. Đo được
+# `8f4b5304daf42569.mp4` (1080×1920) có watermark ở `y=35-102`, còn
+# `ac5df767b9e0c878.mp4` (1280×720) ở chỗ khác. Không lưu thì mỗi lần mở lại
+# trang người dùng phải kéo khung lại, và lần nào quên thì watermark lọt vào phụ đề.
+#
+# Ba trạng thái PHẢI phân biệt được, và chúng là toàn bộ lý do route dùng `mode`
+# thay vì một trường `vung_doc` mang ba nghĩa:
+#
+#   mode="dat"      -> [x0, y0, x1, y1]
+#   mode="tat"      -> []      (nút ×: đọc cả khung)
+#   mode="mac_dinh" -> None    (chưa chọn: dùng `opts.vung_doc` của registry)
+# ---------------------------------------------------------------------------
+
+
+def _tao_nguon(client):
+    created = client.post(
+        "/api/sources/upload",
+        files={"file": ("v.mp4", io.BytesIO(b"x"), "video/mp4")},
+        data={"lang": "zh"},
+    ).json()
+    return created["source"]["id"]
+
+
+def test_patch_vung_doc_dat_roi_doc_lai(client):
+    """`mode="dat"` lưu đúng bốn số, và `GET` đọc lại được y nguyên."""
+    sid = _tao_nguon(client)
+    assert client.get(f"/api/sources/{sid}").json()["vung_doc"] is None, (
+        "nguồn mới phải là None (chưa chọn), KHÔNG phải [] (đã tắt)")
+
+    r = client.patch(f"/api/sources/{sid}/vung-doc",
+                     json={"mode": "dat", "vung_doc": [0.0, 0.1, 1.0, 1.0]})
+    assert r.status_code == 200, r.text
+    assert r.json()["vung_doc"] == [0.0, 0.1, 1.0, 1.0]
+
+    assert client.get(f"/api/sources/{sid}").json()["vung_doc"] == [0.0, 0.1, 1.0, 1.0]
+    ds = [s for s in client.get("/api/sources").json() if s["id"] == sid]
+    assert ds[0]["vung_doc"] == [0.0, 0.1, 1.0, 1.0], "danh sách cũng phải mang vùng"
+
+
+def test_patch_vung_doc_tat_la_mang_rong_chu_khong_phai_null(client):
+    """`mode="tat"` (nút ×) ghi `[]`, KHÁC `None` — nếu gộp hai thứ thì nút × vô nghĩa.
+
+    Đây là bài chặn đúng cái bẫy đã làm hỏng nhánh OCR ba lần: `None` và `[]` đều
+    falsy, nên một chỗ nào đó dùng `or`/truthiness là biến "người dùng đã tắt"
+    thành "dùng mặc định". Ở tầng DB hai giá trị này phải khác nhau THẬT.
+    """
+    sid = _tao_nguon(client)
+    client.patch(f"/api/sources/{sid}/vung-doc", json={"mode": "dat",
+                                                       "vung_doc": [0.0, 0.1, 1.0, 1.0]})
+
+    r = client.patch(f"/api/sources/{sid}/vung-doc", json={"mode": "tat"})
+    assert r.status_code == 200, r.text
+    assert r.json()["vung_doc"] == [], (
+        f"nút × phải ghi mảng RỖNG, nhận được {r.json()['vung_doc']!r}; "
+        f"`null` sẽ có nghĩa là 'chưa chọn' và lọc vùng tự bật lại")
+    assert r.json()["vung_doc"] is not None
+
+
+def test_patch_vung_doc_mac_dinh_xoa_ve_null(client):
+    """`mode="mac_dinh"` xoá lựa chọn — khác `mode="tat"`."""
+    sid = _tao_nguon(client)
+    client.patch(f"/api/sources/{sid}/vung-doc", json={"mode": "tat"})
+    assert client.get(f"/api/sources/{sid}").json()["vung_doc"] == []
+
+    r = client.patch(f"/api/sources/{sid}/vung-doc", json={"mode": "mac_dinh"})
+    assert r.status_code == 200, r.text
+    assert r.json()["vung_doc"] is None
+
+
+def test_patch_vung_doc_sai_hinh_dang_tra_422(client):
+    """Bảy hình dạng sai phải bị chặn Ở CỬA, không lọt vào DB.
+
+    Cùng bộ luật với `AsrPayload` (routes_jobs.py). Hai cửa ghi cùng một khái niệm
+    mà kiểm khác nhau là cách chắc chắn nhất để một trong hai chấp nhận thứ không
+    dùng được — và với `vung_doc` thì "không dùng được" nghĩa là hoặc watermark
+    lọt, hoặc phụ đề thật bị cắt, cả hai đều im lặng.
+    """
+    sid = _tao_nguon(client)
+    for nhan, than in [
+        ("ba so", {"mode": "dat", "vung_doc": [0.0, 0.1, 1.0]}),
+        ("nam so", {"mode": "dat", "vung_doc": [0, 0, 1, 1, 0]}),
+        ("thieu vung", {"mode": "dat"}),
+        ("ngoai [0,1]", {"mode": "dat", "vung_doc": [-0.1, 0.1, 1.0, 1.0]}),
+        ("dao x", {"mode": "dat", "vung_doc": [1.0, 0.1, 0.0, 1.0]}),
+        ("dao y", {"mode": "dat", "vung_doc": [0.0, 0.9, 1.0, 0.1]}),
+        ("mode la", {"mode": "xyz"}),
+    ]:
+        r = client.patch(f"/api/sources/{sid}/vung-doc", json=than)
+        assert r.status_code == 422, f"{nhan}: mong 422, nhận {r.status_code} — {r.text}"
+
+    assert client.get(f"/api/sources/{sid}").json()["vung_doc"] is None, (
+        "cả bảy lần sai đều không được ghi gì vào DB")
+
+
+def test_patch_vung_doc_nguon_khong_ton_tai_tra_404(client):
+    r = client.patch("/api/sources/9999/vung-doc",
+                     json={"mode": "dat", "vung_doc": [0.0, 0.1, 1.0, 1.0]})
+    assert r.status_code == 404, r.text

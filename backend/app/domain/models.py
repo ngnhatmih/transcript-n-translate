@@ -118,6 +118,17 @@ class Source:
     audio_path: str | None = None
     duration: float | None = None
     created_at: str = ""
+    #: Vùng đọc OCR của CHÍNH nguồn này, `(x0, y0, x1, y1)` theo tỉ lệ khung.
+    #:
+    #: BA trạng thái, và cả ba phải phân biệt được:
+    #:   `None`             — chưa ai chọn ⇒ dùng `opts.vung_doc` của registry
+    #:   `()` (tuple rỗng)  — người dùng đã TẮT lọc vùng (nút ×) ⇒ đọc cả khung
+    #:   `(x0, y0, x1, y1)` — vùng đã chọn cho video này
+    #:
+    #: Vì sao `()` chứ không phải `None` cho trạng thái tắt: `None` đã mang nghĩa
+    #: "chưa chọn". Gộp hai thứ đó làm một là biến nút × thành không có tác dụng
+    #: sau khi mở lại trang — người dùng bấm tắt, tải lại, và lọc vùng tự bật lại.
+    vung_doc: tuple[float, ...] | None = None
 
 
 @dataclass

@@ -91,6 +91,10 @@ const KENH = {
   lang: "zh",
   size: 1024,
   duration: 10,
+  // Backend LUÔN trả khoá này (`_source_json`), kể cả khi chưa ai chọn vùng.
+  // `null` = chưa chọn ⇒ giao diện dùng `VUNG_DOC_MAC_DINH`. Thiếu khoá ở fixture
+  // thì test không bao giờ chạm nhánh thật của nó.
+  vung_doc: null,
   created_at: "2026-01-01T00:00:00Z",
 };
 
@@ -304,11 +308,22 @@ describe("App: dời một mốc gửi MỘT đoạn, không gửi cả danh sá
       bamNut(/Đặt vào/);
 
       await waitFor(() => {
-        const patch = bang.goi.filter((g) => g.method === "PATCH");
-        assert.equal(patch.length, 1, `phải có ĐÚNG MỘT PATCH, đo được ${patch.length}`);
+        // Lọc theo ROUTE MỐC, không phải mọi PATCH. Bài này kiểm "một thao tác dời mốc
+        // sinh ĐÚNG MỘT lệnh ghi vào route một-đoạn"; đếm mọi PATCH thì nó vỡ vì những
+        // lệnh PATCH KHÔNG LIÊN QUAN — đo được: thêm `PATCH /api/sources/{id}/vung-doc`
+        // (lưu vùng đọc OCR) làm bài này đỏ với "đo được 2" dù thao tác mốc vẫn đúng.
+        //
+        // Đây là sửa PHẠM VI cho khớp ý định, KHÔNG phải nới lỏng: nếu route mốc bị gọi
+        // hai lần thì `length` vẫn là 2 và bài vẫn đỏ.
+        const patch = bang.goi.filter(
+          (g) => g.method === "PATCH" && g.url.startsWith("/api/transcripts/2/segments/"),
+        );
+        assert.equal(patch.length, 1, `phải có ĐÚNG MỘT PATCH mốc, đo được ${patch.length}`);
       });
 
-      const patch = bang.goi.filter((g) => g.method === "PATCH")[0]!;
+      const patch = bang.goi.filter(
+        (g) => g.method === "PATCH" && g.url.startsWith("/api/transcripts/2/segments/"),
+      )[0]!;
       // Vế 1: route MỘT ĐOẠN, không phải `/transcripts/2`.
       assert.equal(patch.url, "/api/transcripts/2/segments/0");
       // Vế 2: thân chỉ có start/end. `segments` xuất hiện ở đây là tái phạm #55.
@@ -336,7 +351,16 @@ describe("App: dời một mốc gửi MỘT đoạn, không gửi cả danh sá
       bamNut(/Đặt ra/);
 
       await waitFor(() => {
-        assert.equal(bang.goi.filter((g) => g.method === "PATCH").length, 1);
+        // Cùng lý do với bài trên: đếm PATCH của ROUTE MỐC, không phải mọi PATCH —
+        // `PATCH /api/sources/{id}/vung-doc` (lưu vùng đọc OCR) cũng là PATCH và làm
+        // phép đếm toàn cục lệch. Bất biến của bài này là "dời một mốc sinh đúng một
+        // lệnh ghi mốc", không phải "cả app chỉ có một PATCH".
+        assert.equal(
+          bang.goi.filter(
+            (g) => g.method === "PATCH" && g.url.startsWith("/api/transcripts/2/segments/"),
+          ).length,
+          1,
+        );
       });
 
       const caDanhSach = bang.goi.filter(
@@ -347,6 +371,118 @@ describe("App: dời một mốc gửi MỘT đoạn, không gửi cả danh sá
         "PATCH /api/transcripts/2 gửi TOÀN BỘ đoạn và TĂNG version ⇒ mọi bản dịch "
         + "thành stale (ERRATA #55). Phải dùng route MỘT ĐOẠN.",
       );
+    } finally {
+      cleanup();
+      traFetch();
+    }
+  });
+});
+
+/**
+ * VÙNG ĐỌC OCR — đọc từ `source.vung_doc`, ghi qua `PATCH /api/sources/{id}/vung-doc`.
+ *
+ * Vì sao có nhóm này: bản đầu tôi giữ vùng trong một `useState` cục bộ, nên nó MẤT khi
+ * tải lại trang — người dùng phải kéo khung lại cho mỗi video, và lần nào quên thì
+ * watermark lọt vào phụ đề. Nay `sources` (nạp từ `GET /api/sources`) là nguồn sự thật
+ * duy nhất, và các bài dưới ghim đúng ba trạng thái của cột:
+ *
+ *   `null` — chưa chọn ⇒ khung ở `VUNG_DOC_MAC_DINH` (`[0, 0.1, 1, 1]`)
+ *   `[]`   — đã TẮT (nút ×) ⇒ KHÔNG có khung, chỉ có nút "bật lại"
+ *   bốn số — khung ở đúng vùng đó
+ *
+ * 🔴 Cái bẫy phải ghim: `[]` là falsy, nên `vung_doc?.length ? ... : mặc_định` biến
+ * "đã tắt" thành "dùng mặc định" — nút × trông như đã bấm mà watermark vẫn bị lọc.
+ */
+describe("App: vùng đọc OCR đọc từ nguồn, ghi qua PATCH", () => {
+  it("vung_doc = null thì khung ở mặc định (bỏ 10% trên cùng)", async () => {
+    chanFetch((duong, method) => traMacDinh(duong, method));
+    try {
+      render(<App />);
+      await doiNapXong();
+
+      const nhan = q().getByText(/OCR đọc vùng này/);
+      assert.match(
+        nhan.textContent ?? "",
+        /y 10–100 %/,
+        `khung mặc định phải bỏ 10% trên cùng, đọc được ${JSON.stringify(nhan.textContent)}`,
+      );
+    } finally {
+      cleanup();
+      traFetch();
+    }
+  });
+
+  it("vung_doc = [] (nút × đã bấm) thì KHÔNG có khung, chỉ có nút bật lại", async () => {
+    chanFetch((duong, method) => {
+      if (duong === "/sources" && method === "GET") return [{ ...KENH, vung_doc: [] }];
+      return traMacDinh(duong, method);
+    });
+    try {
+      render(<App />);
+      await doiNapXong();
+
+      // Đây là bài chặn cái bẫy truthiness: nếu `[]` bị đọc thành "chưa chọn" thì
+      // khung mặc định hiện ra, và người dùng thấy lọc vùng vẫn bật dù đã tắt.
+      assert.equal(
+        q().queryByText(/OCR đọc vùng này/),
+        null,
+        "vung_doc = [] phải là TẮT: không được vẽ khung đọc nào",
+      );
+      assert.ok(
+        q().getByText(/Vùng đọc: tắt/),
+        "phải có nút bật lại khi vùng đọc đang tắt",
+      );
+    } finally {
+      cleanup();
+      traFetch();
+    }
+  });
+
+  it("vung_doc = bốn số thì khung ở đúng vùng đó", async () => {
+    chanFetch((duong, method) => {
+      if (duong === "/sources" && method === "GET") {
+        return [{ ...KENH, vung_doc: [0.0, 0.25, 1.0, 0.75] }];
+      }
+      return traMacDinh(duong, method);
+    });
+    try {
+      render(<App />);
+      await doiNapXong();
+
+      const nhan = q().getByText(/OCR đọc vùng này/);
+      assert.match(nhan.textContent ?? "", /y 25–75 %/, nhan.textContent ?? "");
+    } finally {
+      cleanup();
+      traFetch();
+    }
+  });
+
+  it("bấm × gửi mode='tat', KHÔNG phải 'mac_dinh'", async () => {
+    const bang = chanFetch((duong, method) => {
+      if (duong === "/sources/1/vung-doc" && method === "PATCH") {
+        return { ...KENH, vung_doc: [] };
+      }
+      return traMacDinh(duong, method);
+    });
+    try {
+      render(<App />);
+      await doiNapXong();
+
+      // `getByRole("button", { name })` chứ không `getByLabelText`: nút × mang
+      // `aria-label` (nhãn của CHÍNH phần tử), không phải `<label for>` trỏ tới nó.
+      // `getByLabelText` chỉ tìm `<label>`/`aria-labelledby` nên nó báo "Unable to
+      // find a label" — đỏ vì truy vấn sai, không phải vì nút thiếu.
+      q().getByRole("button", { name: "Tắt lọc vùng đọc" }).click();
+
+      await waitFor(() => {
+        const patch = bang.goi.filter((g) => g.method === "PATCH");
+        assert.equal(patch.length, 1, `phải có đúng một PATCH, đo được ${patch.length}`);
+      });
+      const patch = bang.goi.filter((g) => g.method === "PATCH")[0]!;
+      assert.equal(patch.url, "/api/sources/1/vung-doc");
+      // Hai mode này KHÁC NHAU: "tat" = đọc cả khung, "mac_dinh" = quay lại vùng của
+      // registry. Gửi nhầm thì nút × chỉ có tác dụng cho tới lần chạy sau.
+      assert.deepEqual(JSON.parse(patch.body ?? "{}"), { mode: "tat" });
     } finally {
       cleanup();
       traFetch();
