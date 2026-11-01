@@ -42,6 +42,27 @@ class Segment:
     suspect: bool = False
     t: str | None = None
     qa: list[str] = field(default_factory=list)
+    #: Lop bang chung sinh ra doan nay — xem `nguon_chu.LOP_MOT_NGUON` / `LOP_HAI_NGUON`.
+    #:
+    #: LOP 1 = chi co MOT nguon doc ra, nen do la bang chung chat nhat va duoc uu tien:
+    #:   hoac OCR doc duoc phu de ma ASR khong nghe ra, hoac ASR nghe duoc loi noi ma OCR
+    #:   khong doc ra. Khong co nguon thu hai de doi chieu.
+    #: LOP 2 = OCR va ASR CUNG doc/nghe ra mot cau. Hai nguon khop nhau nen chu da duoc
+    #:   kiem cheo, nhung chinh vi the no khong mang them thong tin ma lop 1 chua co.
+    #:
+    #: `""` = doan khong do `chon_nguon` sinh ra (ASR thuan, OCR thuan, duong khac). Day la
+    #: truong MOI nen du lieu cu doc len se la `""` — do la hanh vi dung, khong phai loi:
+    #: du lieu cu khong co bang chung de gan lop.
+    layer: str = ""
+    #: `i` cua doan BAO doan nay, hoac `-1` khi no khong nam gon trong doan nao.
+    #:
+    #: DO DUOC: `1-3` va `2-4` GIAO 1.00 s nhung KHONG cai nao bao cai kia; con `2.0-2.5` trong
+    #: `1-3` giao 0.50 s va DUNG la bao. Hai quan he khac nhau, nen phai tach.
+    #:
+    #: Khi bao nhau thi GIU CA HAI doan (xem `nguon_chu.hop_nhat_theo_doan`): bo doan trong la
+    #: mat dong chu that tren hinh (logo, dong ghi cong), bo doan ngoai la mat loi noi that.
+    #: `-1` chu khong phai `None` de so sanh `>= 0` la du, khong phai kiem hai lan.
+    chua_trong: int = -1
 
     @property
     def duration(self) -> float:
@@ -78,6 +99,10 @@ class Segment:
             d["t"] = self.t
         if self.qa:
             d["qa"] = list(self.qa)
+        if self.layer:
+            d["layer"] = self.layer
+        if self.chua_trong >= 0:
+            d["chua_trong"] = self.chua_trong
         return d
 
     @classmethod
@@ -97,6 +122,8 @@ class Segment:
             suspect=bool(d.get("suspect", False)),
             t=d.get("t"),
             qa=list(d.get("qa") or []),
+            layer=str(d.get("layer") or ""),
+            chua_trong=int(d.get("chua_trong", -1)),
         )
 
 

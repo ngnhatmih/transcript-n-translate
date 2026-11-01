@@ -109,6 +109,16 @@ export interface Segment {
   /** Bản dịch tay của người dùng cho đoạn này, nếu có. */
   t?: string;
   qa?: string[];
+  /**
+   * Lop bang chung sinh ra doan nay (`nguon_chu.LOP_*` o backend).
+   *
+   * `"mot_nguon"` = chi MOT nguon doc ra (OCR thuan, hoac ASR thuan). Day la bang chung
+   * chat nhat nen duoc uu tien. `"hai_nguon"` = OCR va ASR cung doc/nghe ra mot cau.
+   * `undefined` = du lieu cu, truoc khi backend co truong nay.
+   */
+  layer?: string;
+  /** `i` cua doan BAO doan nay (doan nay nam gon ben trong no); `undefined` khi khong. */
+  chua_trong?: number;
 }
 
 /** Thứ tự dài của một hàng `jobs` (`routes_jobs._job_json`). */

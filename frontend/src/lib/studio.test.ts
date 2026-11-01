@@ -51,6 +51,10 @@ import {
   uocLuongTienDo,
   chuConLai,
   trungViThoiGianChay,
+  lopCua,
+  mauLop,
+  moTaLop,
+  NHAN_LOP,
 } from "./studio.ts";
 
 // ---------------------------------------------------------------------------
@@ -1110,3 +1114,77 @@ describe("chuConLai", () => {
 
 });
 
+
+// ---------------------------------------------------------------------------
+// LOP NGUON CHU — nhan, mo ta, va MAU
+// ---------------------------------------------------------------------------
+
+describe("lopCua: doc lop tu du lieu may chu", () => {
+  it("nhan dung hai gia tri backend sinh ra", () => {
+    assert.equal(lopCua({ layer: "mot_nguon" }), "mot_nguon");
+    assert.equal(lopCua({ layer: "hai_nguon" }), "hai_nguon");
+  });
+
+  it("du lieu CU (khong co truong) tra null, KHONG doan bua mot lop", () => {
+    assert.equal(lopCua({}), null);
+    assert.equal(lopCua({ layer: undefined }), null);
+  });
+
+  it("gia tri la (backend doi ten) tra null thay vi nem", () => {
+    assert.equal(lopCua({ layer: "ba_nguon" }), null);
+    assert.equal(lopCua({ layer: "" }), null);
+  });
+});
+
+describe("mauLop: VIEN va NEN cua dong theo lop", () => {
+  it("mot_nguon dung vien signal va co nen", () => {
+    assert.equal(mauLop("mot_nguon").vien, "border-signal/50");
+    assert.equal(mauLop("mot_nguon").nen, "bg-signal-soft/40");
+  });
+
+  it("hai_nguon dung vien rule, KHONG co nen", () => {
+    assert.equal(mauLop("hai_nguon").vien, "border-rule");
+    assert.equal(mauLop("hai_nguon").nen, "");
+  });
+
+  it("hai lop KHONG duoc trung vien — day la ca muc dich cua no", () => {
+    assert.notEqual(mauLop("mot_nguon").vien, mauLop("hai_nguon").vien);
+  });
+
+  it("null dung mau trung tinh (khong to mau cho cai chua biet)", () => {
+    assert.equal(mauLop(null).vien, "border-rule");
+    assert.equal(mauLop(null).nen, "");
+  });
+});
+
+describe("NHAN_LOP va moTaLop: noi RO nguon nao", () => {
+  it("nhan ngan cho chip", () => {
+    assert.equal(NHAN_LOP.mot_nguon, "1 nguon");
+    assert.equal(NHAN_LOP.hai_nguon, "2 nguon");
+  });
+
+  it("mot_nguon + suspect=true la CHI ASR — day la thong tin nguoi doc can", () => {
+    assert.equal(moTaLop({ layer: "mot_nguon", suspect: true, chuaTrong: null }),
+      "chỉ ASR nghe ra");
+  });
+
+  it("mot_nguon + suspect=false la CHI OCR", () => {
+    assert.equal(moTaLop({ layer: "mot_nguon", suspect: false, chuaTrong: null }),
+      "chỉ OCR đọc ra");
+  });
+
+  it("doan nam trong doan khac thi noi ro so hieu doan bao", () => {
+    assert.equal(moTaLop({ layer: "mot_nguon", suspect: false, chuaTrong: 7 }),
+      "chỉ OCR đọc ra · nằm trong đoạn #7");
+  });
+
+  it("hai_nguon noi ca hai nguon cung doc ra", () => {
+    assert.equal(moTaLop({ layer: "hai_nguon", suspect: false, chuaTrong: null }),
+      "OCR và ASR cùng đọc ra câu này");
+  });
+
+  it("layer null thi noi la chua ro, khong gan bua", () => {
+    assert.equal(moTaLop({ layer: null, suspect: false, chuaTrong: null }),
+      "chưa rõ nguồn (bản ghi cũ)");
+  });
+});

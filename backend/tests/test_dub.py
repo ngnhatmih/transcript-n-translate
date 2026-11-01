@@ -12,7 +12,15 @@ from __future__ import annotations
 
 import numpy as np
 
-from app.pipeline.dub import ke_hoach_toc_do, rap, trong_im_lang
+from app.domain.models import Segment
+from app.pipeline.dub import (
+    LOP_HAI_NGUON,
+    LOP_MOT_NGUON,
+    ke_hoach_toc_do,
+    mot_dong_moi_cap,
+    rap,
+    trong_im_lang,
+)
 
 
 def test_nen_toi_dung_muc_can_khong_kep_o_tran():
@@ -153,3 +161,65 @@ def test_rap_dat_dung_offset_va_cong_don_khi_chong():
     # chồng tiếng thì CỘNG, không đè mất
     chong = rap([(0.0, take), (0.05, take)], 1.0, sr=sr)
     assert chong[75] == 0.5
+
+def _d(i, start, end, text, layer="", suspect=False, chua_trong=-1):
+    return Segment(i=i, start=start, end=end, text=text, layer=layer,
+                   suspect=suspect, chua_trong=chua_trong)
+
+
+def test_ban_long_chi_doc_MOT_lan_moi_cau_khi_OCR_va_ASR_cung_cau():
+    """Ca that tren #36: ASR nghe sai "海豹", OCR doc dung "海报".
+
+    Timeline giu CA HAI de nguoi doc thay may nghe sai. Ban long ma doc ca hai thi cung
+    mot cau duoc noi hai lan chong len nhau — vi pham rang buoc "dong N khong duoc con
+    noi khi N+1 bat dau".
+    """
+    d = [
+        _d(96, 195.50, 196.53, "ASR nghe sai", LOP_HAI_NGUON, True),
+        _d(97, 195.50, 196.17, "OCR doc dung", LOP_HAI_NGUON, False),
+    ]
+    ra = mot_dong_moi_cap(d)
+    assert len(ra) == 1, [s.text for s in ra]
+    assert ra[0].text == "OCR doc dung", "phai giu ban OCR: " + repr(ra[0].text)
+
+
+def test_ban_long_giu_ban_OCR_khi_hai_dong_trung_khit():
+    d = [
+        _d(98, 197.00, 198.11, "cung mot cau", LOP_HAI_NGUON, True),
+        _d(99, 197.00, 198.11, "cung mot cau", LOP_HAI_NGUON, False),
+    ]
+    ra = mot_dong_moi_cap(d)
+    assert len(ra) == 1, [s.text for s in ra]
+    assert ra[0].suspect is False, "phai giu ban OCR (suspect=False)"
+
+
+def test_ban_long_BO_logo_long_trong_loi_thoai():
+    """Ca i=109/i=110: ca hai deu mot_nguon, nen loc theo layer KHONG bat duoc.
+
+    Do duoc: neu chi loc theo `layer` thi ham tra ve CA HAI. Phai dung `chua_trong` —
+    no da danh dau san doan nao nam gon trong doan nao.
+    """
+    d = [
+        _d(109, 219.17, 221.11, "loi noi that", LOP_MOT_NGUON, True),
+        _d(110, 220.00, 220.50, "LOGO", LOP_MOT_NGUON, False, chua_trong=109),
+    ]
+    ra = mot_dong_moi_cap(d)
+    assert [s.text for s in ra] == ["loi noi that"], [s.text for s in ra]
+
+
+def test_ban_long_GIU_CA_HAI_khi_hai_cau_khong_chong_nhau():
+    d = [
+        _d(0, 0.0, 1.0, "cau mot", LOP_HAI_NGUON, False),
+        _d(1, 2.0, 3.0, "cau hai", LOP_HAI_NGUON, False),
+    ]
+    assert [s.text for s in mot_dong_moi_cap(d)] == ["cau mot", "cau hai"]
+
+
+def test_ban_long_KHONG_dung_toi_du_lieu_cu_khong_co_lop():
+    """Ban ghi tao truoc khi backend co truong `layer` — khong duoc doan bua."""
+    d = [
+        _d(0, 0.0, 1.0, "cu mot"),
+        _d(1, 0.5, 1.5, "cu hai"),
+    ]
+    assert len(mot_dong_moi_cap(d)) == 2
+

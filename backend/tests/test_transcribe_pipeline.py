@@ -762,7 +762,10 @@ def test_run_dung_ocr_khi_handler_co_ocr_engine(repos, specs, tmp_path):
     h.run(repos.get_job(job_id), lambda p, line: None)
 
     t = repos.list_transcripts()[0]
-    assert [s.text for s in t.segments] == ["từ phụ đề"], [s.text for s in t.segments]
+    # HOP DONG MOI (2026-11-02): giu CA HAI dong. Xem `test_transcribe_ocr.py`.
+    chu = [s.text for s in t.segments]
+    assert "từ phụ đề" in chu, chu
+    assert "từ âm thanh" in chu, "phai giu ca dong ASR: " + repr(chu)
     # 🔴 ĐỔI KỲ VỌNG, có lý do — không phải nới test cho xanh.
     #
     # Bài này ghim "cột `engine` phải nói ĐÚNG nguồn". Kỳ vọng cũ là `"rapidocr"`, đúng

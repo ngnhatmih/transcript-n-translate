@@ -128,7 +128,13 @@ def test_co_ocr_engine_va_ocr_co_chu_thi_dung_ocr(tmp_path):
     asr = AsrGia([Segment(i=0, start=0.0, end=1.0, text="từ ASR")])
     h = _handler(tmp_path, ocr=ocr, asr=asr)
     doan, ly_do = h.chon_doan(str(_media(tmp_path)), "zh")
-    assert [s.text for s in doan] == ["từ OCR"]
+    # HOP DONG MOI (2026-11-02): giu CA HAI dong khi OCR va ASR cung mot cau.
+    # Ban cu bo han chu ASR; do duoc tren #36 thi 51/56 doan "hai_nguon" khong con
+    # dong ASR nao song song — nhan "2 nguon" nhung thuc chat chi con chu OCR.
+    # Ban long loc theo `layer` (xem `dub.mot_dong_moi_cap`) de khong doc hai lan.
+    chu = [s.text for s in doan]
+    assert "từ OCR" in chu, chu
+    assert "từ ASR" in chu, "phai giu ca dong ASR: " + repr(chu)
     assert "OCR" in ly_do, ly_do
     assert ocr.duoc_goi == 1
 

@@ -49,6 +49,78 @@ import type {
  *       được từ số đo thật (`cps`, `cpsOver`, `tiLeNen`). Không trường nào là hằng số bịa.
  * Chọn (b). `Dong` dưới đây là kiểu đó.
  */
+// ---------------------------------------------------------------------------
+// LOP NGUON CHU — quyet dinh MAU cua mot dong
+// ---------------------------------------------------------------------------
+
+/**
+ * Lop bang chung cua mot doan — TRUNG TEN voi `nguon_chu.LOP_*` ben backend.
+ *
+ * Nguoi dung dat ten: "Layer 1 la chat nhat va duoc uu tien lay: ocr + asr doan ko co ocr.
+ * layer 2 la co ocr nhung co ca asr".
+ *
+ * Vi sao lop 1 CHAT hon: no la thu DUY NHAT mot nguon doc ra, nen khong co nguon thu hai
+ * phu nhan no. Lop 2 co hai nguon noi cung mot cau — da kiem cheo, nhung khong mang them
+ * thong tin nao ma lop 1 chua co.
+ */
+export type LopNguon = "mot_nguon" | "hai_nguon";
+
+/**
+ * Doc `Segment.layer` thanh `LopNguon`, hoac `null` khi khong nhan ra.
+ *
+ * `null` KHONG phai loi: du lieu cu (tao truoc khi backend co truong `layer`) khong co
+ * bang chung de gan lop, va bia mot lop cho no la noi doi ve nguon goc cua chu.
+ */
+export function lopCua(seg: { layer?: string }): LopNguon | null {
+  const v = seg.layer;
+  return v === "mot_nguon" || v === "hai_nguon" ? v : null;
+}
+
+/** Nhan nguoi doc cho tung lop — dung tren chip va trong `title`. */
+export const NHAN_LOP: Record<LopNguon, string> = {
+  mot_nguon: "1 nguon",
+  hai_nguon: "2 nguon",
+};
+
+/**
+ * Mo ta DAY DU cho `title` — noi RO nguon nao doc ra, khong chi noi "1 nguon".
+ *
+ * Nguoi dung can biet DAY LA OCR hay ASR, vi do la khac biet co nghia: OCR doc chu da
+ * bien tap (dung chinh ta) con ASR nghe va hay sai ten rieng.
+ */
+export function moTaLop(d: Pick<Dong, "layer" | "suspect" | "chuaTrong">): string {
+  if (d.layer === null) return "chưa rõ nguồn (bản ghi cũ)";
+  if (d.layer === "hai_nguon") return "OCR và ASR cùng đọc ra câu này";
+  // mot_nguon: phan biet bang `suspect` — backend danh `suspect=True` cho doan CHI ASR.
+  const goc = d.suspect ? "chỉ ASR nghe ra" : "chỉ OCR đọc ra";
+  if (d.chuaTrong === null) return goc;
+  return goc + ` · nằm trong đoạn #${d.chuaTrong}`;
+}
+
+/**
+ * MAU CUA MOT DONG theo lop nguon chu — tra ve class cho CA VIEN va NEN cua dong.
+ *
+ * Yeu cau nguoi dung: "doi mau border, background cua cai nay". Nen mau nam tren chinh
+ * dong phu de, khong phai mot vach phu them ben canh.
+ *
+ * Dung token co san trong `styles.css` thay vi ma mau moi: doi bang mau la doi mot cho.
+ *
+ *   mot_nguon -> vien `signal` (hong ho phach) + nen `signal-soft`
+ *                Bang chung CHAT nhat: chi MOT nguon doc ra, khong co nguon thu hai
+ *                phu nhan. Day la lop duoc uu tien.
+ *   hai_nguon -> vien `rule` (xam) + nen trong
+ *                Da kiem cheo boi hai nguon, khong can chu y.
+ *   null      -> vien `rule` + nen trong
+ *                Khong biet nguon (ban ghi cu) thi KHONG to mau bia.
+ */
+export function mauLop(l: LopNguon | null): { vien: string; nen: string } {
+  if (l === "mot_nguon") {
+    return { vien: "border-signal/50", nen: "bg-signal-soft/40" };
+  }
+  return { vien: "border-rule", nen: "" };
+}
+
+
 export interface Dong {
   /** `Segment.i` — khoá ghép với bảng CPS và với take. */
   i: number;
@@ -70,6 +142,15 @@ export interface Dong {
   tiLeNen: number | null;
   /** Đã duyệt — tập cục bộ của `App`, không phải trường máy chủ (backend duyệt cả bản ghi). */
   daDuyet: boolean;
+  /**
+   * LỚP BẰNG CHỨNG của đoạn này — `"mot_nguon"` hoặc `"hai_nguon"`, `null` khi dữ liệu cũ.
+   *
+   * ĐÂY LÀ TRƯỜNG QUYẾT ĐỊNH MÀU: người dùng cần thấy ngay đoạn nào do OCR mà ra và
+   * đoạn nào do ASR mà ra. Xem `NHAN_LOP` / `mauLop` bên dưới.
+   */
+  layer: LopNguon | null;
+  /** `i` của đoạn BAO đoạn này, hoặc `null`. */
+  chuaTrong: number | null;
 }
 
 /** Ngưỡng nén mạnh — chép từ bản đã duyệt (`COMPRESS_LIMIT = 1.5`). */
@@ -521,6 +602,8 @@ export function dungDong(
       text: seg.text,
       dich: banDichTheoI.get(seg.i) ?? "",
       suspect: seg.suspect,
+      layer: lopCua(seg),
+      chuaTrong: seg.chua_trong === undefined ? null : seg.chua_trong,
       cps: c === undefined ? null : c.cps,
       cpsOver: c === undefined ? false : c.over,
       maxCps: c === undefined ? 0 : c.maxCps,

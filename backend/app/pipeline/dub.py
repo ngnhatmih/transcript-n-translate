@@ -31,6 +31,85 @@ from app.worker import JobCancelled
 NGUONG_IM_LANG = 0.01
 
 
+#: Hai lop nguon chu — TRUNG TEN voi `nguon_chu.LOP_*`.
+#: Doc o day de khong phai import domain vao tang pipeline cho mot phep so chuoi.
+LOP_MOT_NGUON = "mot_nguon"
+LOP_HAI_NGUON = "hai_nguon"
+
+
+def mot_dong_moi_cap(segments: list) -> list:
+    """LOC theo LOP: moi cap (OCR, ASR) cung noi mot cau chi giu MOT dong de long.
+
+    ## Vi sao phai loc
+
+    `nguon_chu.hop_nhat_theo_doan` giu CA HAI dong khi OCR va ASR cung doc/nghe ra mot
+    cau (nguoi dung chot 2026-11-02: "chia 2 layer 2 dong"). Do la dung cho TIMELINE —
+    nguoi doc thay duoc may nghe gi va doc gi.
+
+    Nhung BAN LONG thi khong duoc doc hai lan. Rang buoc da chot tu dau: dong N khong
+    duoc con noi khi N+1 bat dau, va moi cau chi noi MOT lan. Hai dong cung mot cau ma
+    deu vao TTS thi ban long noi cau do hai lan chong len nhau.
+
+    ## Giu dong nao
+
+    * Cap co MOT dong `mot_nguon`  -> giu dong do (bang chung chat nhat, va do la dong
+      DUY NHAT co chu dung: dong con lai la ban sao).
+    * Cap co HAI dong `hai_nguon`  -> giu dong `suspect=False`, tuc dong OCR — OCR doc
+      CHU DA BIEN TAP, con ASR nghe va hay sai ten rieng. Do duoc tren #36:
+
+            ASR "你见过人类做海豹吗"   <- nghe sai (hai cau)
+            OCR "你见过人类做海报吗"   <- doc dung (poster)
+
+    * Dong khong co `layer` (du lieu cu, hoac ASR/OCR thuan) -> giu nguyen, khong doan bua.
+
+    Phan biet "cung mot cau" bang CHONG THOI GIAN, khong bang chu: hai dong cung cap luon
+    chong len nhau it nhat mot phan, va do la dau hieu duy nhat khong phu thuoc vao viec
+    ASR nghe dung hay sai.
+    """
+    ra = []
+    for s in segments:
+        # DOAN BI BAO ma doan bao la LOI THOAI THAT thi day khong phai loi thoai.
+        #
+        # Do duoc tren #36:
+        #
+        #     i=109 [219.17-221.11]S "所以为什么是榕树女神"  <- loi noi that
+        #     i=110 [220.00-220.50]  "LAMDA"                 <- LOGO, khong phai loi noi
+        #
+        # Ca hai deu `mot_nguon` (moi ben chi mot nguon doc ra), nen phep loc theo
+        # `layer` KHONG bat duoc cap nay — do duoc: ham tra ve CA HAI, va ban long se
+        # doc "LAMDA" chong len cau noi that. Nhung `chua_trong` da danh dau san:
+        # doan nam gon trong mot doan khac la vat the RIENG, khong phai mot cau.
+        #
+        # Bo no khoi ban long. Van giu tren TIMELINE (nguoi doc can thay).
+        if getattr(s, "chua_trong", -1) >= 0:
+            continue
+
+        if getattr(s, "layer", "") != LOP_HAI_NGUON:
+            ra.append(s)
+            continue
+
+        # Dong `hai_nguon` nay da co mot dong khac cung cap duoc giu chua?
+        da_co = any(
+            getattr(khac, "layer", "") == LOP_HAI_NGUON
+            and min(khac.end, s.end) - max(khac.start, s.start) > 0.0
+            for khac in ra
+        )
+        if not da_co:
+            ra.append(s)
+            continue
+
+        # Da co dong cung cap trong `ra`. Chi THAY khi dong nay la OCR va dong kia la ASR.
+        if not getattr(s, "suspect", False):
+            for k in range(len(ra) - 1, -1, -1):
+                khac = ra[k]
+                if (getattr(khac, "layer", "") == LOP_HAI_NGUON
+                        and getattr(khac, "suspect", False)
+                        and min(khac.end, s.end) - max(khac.start, s.start) > 0.0):
+                    ra[k] = s
+                    break
+    return ra
+
+
 def ke_hoach_toc_do(takes: list[float], slots: list[float], avails: list[float]
                     ) -> tuple[list[float], list[float]]:
     """Tốc độ cho từng dòng, và `need` (tốc độ tối thiểu) để chẩn đoán.
@@ -234,7 +313,9 @@ class DubHandler:
             tron_nen = self._tron_nen
 
         ban = self._repos.get_translation(tid)
-        dong = [s for s in ban.segments if (s.text or "").strip()]
+        # LOC THEO LOP truoc khi long: timeline giu 2 dong de nguoi doc soat, nhung
+        # ban long chi duoc noi MOT lan moi cau (xem `mot_dong_moi_cap`).
+        dong = mot_dong_moi_cap([s for s in ban.segments if (s.text or "").strip()])
         if gioi_han:
             dong = dong[: int(gioi_han)]
         if not dong:

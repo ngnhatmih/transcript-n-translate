@@ -3,6 +3,8 @@ import { Check, Play, RotateCcw } from "lucide-react";
 
 import {
   NGUONG_NEN,
+  mauLop,
+  moTaLop,
   soVi,
   tachTuKhac,
   viecCuaDong,
@@ -59,6 +61,7 @@ export const SegmentRow = forwardRef<HTMLLIElement, Props>(function SegmentRow(
 ) {
   const issues = viecCuaDong(seg);
   const banDich = seg.dich === "" ? seg.text : seg.dich;
+  const mau = mauLop(seg.layer);
 
   return (
     <li
@@ -74,7 +77,17 @@ export const SegmentRow = forwardRef<HTMLLIElement, Props>(function SegmentRow(
 
           Tu `sm` tro len tra ve dung bo cuc cu — khong doi mot pixel nao.
         */
-        "relative grid grid-cols-[44px_minmax(0,1fr)] gap-x-2 gap-y-1.5 border-b border-rule px-2.5 py-2 transition-colors sm:grid-cols-[88px_minmax(0,1fr)_auto] sm:gap-x-4 sm:gap-y-2 sm:px-4 sm:py-2.5",
+        "relative grid grid-cols-[44px_minmax(0,1fr)] gap-x-2 gap-y-1.5 border-y border-r px-2.5 py-2 transition-colors sm:grid-cols-[88px_minmax(0,1fr)_auto] sm:gap-x-4 sm:gap-y-2 sm:px-4 sm:py-2.5",
+        //
+        // MAU THEO LOP NGUON CHU — vien va nen cua CHINH DONG NAY, khong phai mot vach
+        // phu ben canh. Nguoi dung can thay ngay dong nao do OCR ma ra (lop 1, bang
+        // chung chat nhat) va dong nao da co hai nguon doi chieu (lop 2).
+        //
+        // `border-l-2` co dinh de do day vien khong doi theo lop — doi do day se lam dong
+        // nhay khi cuon, va mau da du de phan biet.
+        "border-l-2",
+        mau.vien,
+        mau.nen,
         current ? "bg-signal-soft" : "hover:bg-panel-1",
         issues.length > 0 && "hatch-left",
         flash && "animate-flash",
