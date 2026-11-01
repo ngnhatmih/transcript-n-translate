@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Command as CmdIcon, Film, Menu, Moon, Pause, Play, Repeat, Sun, Upload, Cpu, X } from "lucide-react";
 
 import { mediaUrl, exportUrl, getPeaks } from "@/api/endpoints";
-import type { DubPlanRow, Job, Source, Status, TranslationCps, TranslationDetail, Transcript } from "@/api/types";
+import type { DubPlanRow, Job, JobState, Source, Status, TranslationCps, TranslationDetail, Transcript } from "@/api/types";
 import {
   BA_GOC_NHIN,
   dungDong,
@@ -178,30 +178,44 @@ export function Studio(props: StudioProps) {
    */
   const [viecMo, setViecMo] = useState(false);
   /**
-   * TRẠNG THÁI LẠC QUAN của bước "Phiên âm" — đặt NGAY khi bấm, trước khi job thật về.
+   * TRẠNG THÁI LẠC QUAN — bước nào vừa được bấm thì ghi NGAY, trước khi job thật về.
    *
-   * 🔴 LỖI THẬT, ĐO ĐƯỢC (người dùng: *"nên đổi state từ cái lúc ấn ý"*).
+   * 🔴 LỖI THẬT, ĐO ĐƯỢC. Hai lần người dùng báo, cùng một gốc:
    *
-   * `asrState` suy từ `jobAsr`, mà `jobAsr` chỉ có sau khi `GET /api/jobs` trả về. Đo được
-   * hai độ trễ cộng lại:
+   *   · *"#109 phiên âm · fw-large-v3-turbo — 5% … Nó cứ tick mãi"*  → bước giữ `done` cũ.
+   *   · *"nên đổi state từ cái lúc ấn ý"*                            → bước không đổi khi bấm.
    *
-   *   1. nhịp hỏi `NHIP_JOB_MS = 2000` — tối đa 2 giây trước lượt hỏi kế tiếp;
-   *   2. độ trễ mạng + thời gian `POST /api/jobs` trả về (job phải được GHI vào DB rồi mới
-   *      lọt vào danh sách).
+   * Gốc: mọi `*State` trong `duongOng` suy từ `GET /api/jobs`, mà lượt hỏi cách nhau
+   * `NHIP_JOB_MS = 2000` (`App.tsx:58`). Cộng thêm độ trễ mạng và thời gian `POST` ghi job
+   * vào DB, người dùng bấm xong nhìn thấy trạng thái CŨ tới vài giây — rồi bấm lại.
    *
-   * Trong khoảng đó bước vẫn vẽ dấu tích của bản ghi CŨ. Người dùng bấm, thấy không có gì
-   * đổi, và bấm lại — sinh ra job thứ hai (đo được trong lịch sử: #95/#96, #98/#99,
-   * #101/#102 đều là cặp job `asr` cách nhau vài giây).
+   * ĐO ĐƯỢC hậu quả trong lịch sử job: `#95/#96`, `#98/#99`, `#101/#102` là ba cặp job
+   * `asr` cách nhau vài giây trên cùng một nguồn — thao tác bị lặp vì giao diện không
+   * phản hồi.
    *
-   * Cách sửa: ghi thẳng "đang phiên âm" vào state NGAY trong `onStep`, rồi TỰ TAN khi
-   * `jobAsr` thật sự mang trạng thái đó (hoặc khi nó `failed`/`interrupted` — lúc đó hiện
-   * lỗi là đúng, không được che bằng trạng thái lạc quan).
+   * ## Vì sao một `Set` chứ không bốn cờ riêng
    *
-   * Vì sao không đặt `"queued"`: người dùng vừa bấm và job sẽ chạy, "đang phiên âm…" nói
-   * đúng việc đang xảy ra; "chờ tới lượt" chỉ đúng khi hàng đợi có job khác chạy trước, và
-   * giao diện biết điều đó qua `/api/jobs` chứ không đoán được lúc bấm.
+   * Bốn cờ riêng là bốn bản sao của cùng một luật "đặt khi bấm, tan khi job thật tới", và
+   * bản sao thứ tư sẽ lệch. Một `Set<id bước>` gom luật về một chỗ: `datLacQuan(id)` và
+   * một `useEffect` tan cho mọi bước.
+   *
+   * ## Không áp cho `duyet` và `xuat`
+   *
+   * `duyet` chỉ `setDaDuyet` cục bộ — đổi ngay, không có độ trễ. `xuat` tải tệp trực tiếp
+   * bằng thẻ `<a>`, cũng không qua job. Đặt cờ cho chúng là thêm trạng thái không bao giờ
+   * tan đúng lúc.
    */
-  const [asrLacQuan, setAsrLacQuan] = useState(false);
+  const [lacQuan, setLacQuan] = useState<ReadonlySet<string>>(() => new Set());
+
+  /** Đặt trạng thái lạc quan cho MỘT bước. Gọi ngay trong handler bấm, trước `onBuoc`. */
+  const datLacQuan = useCallback((id: string) => {
+    setLacQuan((cu) => {
+      if (cu.has(id)) return cu;
+      const moi = new Set(cu);
+      moi.add(id);
+      return moi;
+    });
+  }, []);
 
   const media: string | null = source === null ? null : mediaUrl(source.id);
   const player = usePlayer(media);
@@ -450,25 +464,39 @@ export function Studio(props: StudioProps) {
     return ds.length === 0 ? null : ds.reduce((a, b) => (b.id > a.id ? b : a));
   }, [jobs, source]);
 
+  /**
+   * Trạng thái job THẬT, đã trộn trạng thái lạc quan — dùng chung cho MỌI bước.
+   *
+   * Luật một chỗ: nếu bước đang có cờ lạc quan VÀ job thật chưa nói gì khác (`null` hoặc
+   * `done` cũ), thì coi như `"running"`. Đây đúng là ca "chạy lại trên bản ghi đã có": job
+   * cũ `done`, người dùng vừa bấm, job mới chưa về.
+   *
+   * Khi job thật tới với `queued`/`running`/`failed`/`interrupted`/`cancelled` thì trả
+   * THẲNG trạng thái thật — cờ lạc quan không được che lỗi, và `useEffect` dưới sẽ dọn cờ.
+   */
+  const trangThai = useCallback(
+    (id: string, that: JobState | null): JobState | null => {
+      if (!lacQuan.has(id)) return that;
+      if (that === null || that === "done") return "running";
+      return that;
+    },
+    [lacQuan],
+  );
+
   const cacBuoc: BuocDuongOng[] = useMemo(
     () =>
       duongOng({
         coBanGhi: transcript !== null,
         engineAsr: transcript === null ? null : transcript.engine,
-        asrState:
-          asrLacQuan && (jobAsr === null || jobAsr.state === "done")
-            ? "running"
-            : jobAsr === null
-              ? null
-              : jobAsr.state,
+        asrState: trangThai("asr", jobAsr === null ? null : jobAsr.state),
         coBanDich: banDich !== null,
         engineMt: banDich === null ? null : banDich.engine,
         soViec: issues.length,
-        dubState: jobDub === null ? null : jobDub.state,
-        ghepState: jobGhep === null ? null : jobGhep.state,
+        dubState: trangThai("long", jobDub === null ? null : jobDub.state),
+        ghepState: trangThai("ghep", jobGhep === null ? null : jobGhep.state),
         coFileXuat: jobGhep !== null && jobGhep.state === "done",
       }),
-    [transcript, banDich, issues.length, jobDub, jobGhep, jobAsr, asrLacQuan],
+    [transcript, banDich, issues.length, jobDub, jobGhep, jobAsr, trangThai],
   );
 
   // TỰ TAN trạng thái lạc quan khi `/api/jobs` đã mang tin THẬT về job này.
@@ -487,17 +515,23 @@ export function Studio(props: StudioProps) {
   // (worker ghi xong job trước khi giao diện kịp nạp transcript) — `duongOng` đã có nhánh
   // "đang nạp lại" cho nó, và cờ lạc quan nói cùng một điều.
   useEffect(() => {
-    if (!asrLacQuan || jobAsr === null) return;
-    if (
-      jobAsr.state === "queued" ||
-      jobAsr.state === "running" ||
-      jobAsr.state === "failed" ||
-      jobAsr.state === "interrupted" ||
-      jobAsr.state === "cancelled"
-    ) {
-      setAsrLacQuan(false);
-    }
-  }, [asrLacQuan, jobAsr]);
+    // Cặp `(id bước, job thật)` — job nào tới với trạng thái THẬT thì cờ của bước đó tan.
+    const cap: Array<[string, JobState | null]> = [
+      ["asr", jobAsr === null ? null : jobAsr.state],
+      ["long", jobDub === null ? null : jobDub.state],
+      ["ghep", jobGhep === null ? null : jobGhep.state],
+    ];
+    setLacQuan((cu) => {
+      if (cu.size === 0) return cu;
+      const moi = new Set(cu);
+      for (const [id, that] of cap) {
+        if (that === null) continue;            // chưa có job: đúng lúc cờ cần tác dụng
+        if (that === "done") continue;          // `done` cũ: `trangThai` đã tự xử, xem dưới
+        moi.delete(id);                         // queued/running/failed/... job tự nói
+      }
+      return moi.size === cu.size ? cu : moi;
+    });
+  }, [jobAsr, jobDub, jobGhep]);
 
   const lyDoXuat = useMemo(() => lyDoChuaXuatDuoc(cacBuoc), [cacBuoc]);
 
@@ -620,6 +654,10 @@ export function Studio(props: StudioProps) {
         return;
       }
       if (id === "long") {
+        // Bấm "Lồng tiếng" trên thanh bước chỉ ĐỔI GÓC NHÌN — job `dub` do nút "Lồng lại"
+        // trong panel tạo. Nhưng người dùng bấm bước này vì muốn lồng tiếng, và bước phải
+        // phản hồi ngay thay vì đứng yên tới lượt hỏi `/api/jobs` kế tiếp.
+        datLacQuan("long");
         setView("dub");
         return;
       }
@@ -639,7 +677,7 @@ export function Studio(props: StudioProps) {
       // panel, phím tắt) và ta chỉ muốn cờ này cho hành động bấm bước trên thanh đường ống.
       // Đặt trước `onBuoc` để request hỏng cũng đã đổi màu — và nếu hỏng thì `App` đặt `loi`,
       // effect tự tan cờ khi `jobAsr` mang `failed`.
-      if (id === "asr") setAsrLacQuan(true);
+      datLacQuan(id);
       onBuoc(id);
     },
     [issues.length, diViec, lyDoXuat, onXuatVideo, onBuoc],
@@ -1299,6 +1337,12 @@ export function Studio(props: StudioProps) {
                   player.play();
                 }}
                 onRedub={() => {
+                  // ĐẶT CỜ NGAY: `onLongLai` gửi `POST /api/dubs` rồi trả về, còn bước
+                  // "Lồng tiếng" chỉ đổi khi `/api/jobs` mang job `dub` về (nhịp 2 s).
+                  // Đo được hậu quả của việc không đặt: cặp job `dub` `#47/#48` trên cùng
+                  // một bản dịch, cách nhau 47 giây — người dùng bấm lại vì không thấy gì.
+                  datLacQuan("long");
+                  datLacQuan("ghep");
                   onLongLai(s.i);
                   setNotice(`Đã lồng lại đoạn #${segments.findIndex((x) => x.i === s.i) + 1}`);
                 }}

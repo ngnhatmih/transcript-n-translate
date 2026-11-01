@@ -459,12 +459,22 @@ describe("Studio: thông báo lỗi từ tầng trên được HIỆN, không nu
  * `PipelineBar.tsx` không đặt `aria-label`; `title={s.note}` là chỗ duy nhất mang `note` ra
  * ngoài DOM, nên nó là thứ phải đọc.
  */
-function buocAsr(): { chu: string; ghiChu: string } {
-  const nut = q()
+function buocTheoTen(ten: string): { chu: string; ghiChu: string; ten: string; nut: HTMLElement } {
+  // Tim TRONG `<ol aria-label="Cac buoc xu ly">`.
+  // ⚠️ DO DUOC: tim ngoai pham vi do khop HAI nut cung ten "Long tieng" — nut doi goc nhin
+  // (`Studio.tsx:74`) va nut buoc tren thanh duong ong — nen `getByRole` NEM con
+  // `getAllByRole` thi bam nham nut.
+  const thanh = q().getByLabelText("Các bước xử lý");
+  const nut = within(thanh)
     .getAllByRole("button")
-    .find((b) => (b.textContent ?? "").startsWith("Phiên âm")) as HTMLElement | undefined;
-  if (nut === undefined) throw new Error("không tìm thấy nút bước 'Phiên âm'");
-  return { chu: nut.textContent ?? "", ghiChu: nut.getAttribute("title") ?? "" };
+    .find((b) => (b.textContent ?? "").startsWith(ten)) as HTMLElement | undefined;
+  if (nut === undefined) throw new Error(`khong tim thay nut buoc '${ten}'`);
+  return { chu: nut.textContent ?? "", ghiChu: nut.getAttribute("title") ?? "", ten, nut };
+}
+
+function buocAsr(): { chu: string; ghiChu: string } {
+  const b = buocTheoTen("Phiên âm");
+  return { chu: b.chu, ghiChu: b.ghiChu };
 }
 
 function job(p: Partial<Job> & { id: number }): Job {
@@ -566,7 +576,7 @@ describe("Studio: bước Phiên âm đổi trạng thái NGAY lúc bấm", () =
     const { props } = dungThu({ source: KENH, jobs: [] as Job[] });
     render(<Studio {...props} />);
 
-    assert.equal(buocAsr().ghiChu, 'whisper', 'trước khi bấm: bước ghi engine của bản ghi cũ (anGhi() dựng ngine: whisper)');
+    assert.equal(buocAsr().ghiChu, 'whisper', 'truoc khi bam: buoc ghi engine cua ban ghi cu (banGhi() dung engine: whisper)');
 
     fireEvent.click(q().getByRole("button", { name: /^Phiên âm/ }));
 
@@ -653,5 +663,121 @@ describe("Studio: bước Phiên âm đổi trạng thái NGAY lúc bấm", () =
       /đang phiên âm/,
       "cờ lạc quan không tan -> bước kẹt ở 'đang phiên âm…' mãi mãi",
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// BA BUOC CON LAI CUNG PHAI DOI NGAY — nguoi dung: "tim cac state khac xem no cung
+// nen nhu the".
+//
+// DO DUOC buoc nao that su co do tre khi bam:
+//
+//   asr   POST /api/jobs            -> can co lac quan  (da lam o khoi tren)
+//   long  POST /api/dubs            -> can co lac quan
+//   ghep  POST /api/dubs(tron_nen)  -> can co lac quan
+//   duyet setDaDuyet cuc bo         -> KHONG co do tre, khong can co
+//   xuat  the <a> tai tep truc tiep -> KHONG qua job, khong can co
+//
+// Hau qua do duoc cua viec thieu co o `long`: cap job `dub` **#47/#48** tren cung mot ban
+// dich, tao cach nhau **47 giay** — nguoi dung bam lai vi buoc khong phan hoi.
+// ---------------------------------------------------------------------------
+
+describe("Studio: buoc Long tieng / Ghep nen cung doi NGAY luc bam", () => {
+  it("bam buoc Long tieng => buoc doi sang dang chay ngay, chua can job dub", () => {
+    const { props } = dungThu({ source: KENH, jobs: [] as Job[] });
+    render(<Studio {...props} />);
+
+    const truoc = buocTheoTen("Lồng tiếng");
+    fireEvent.click(truoc.nut);
+
+    assert.equal(
+      buocTheoTen("Lồng tiếng").ghiChu,
+      "đang chạy…",
+      "bam xong phai doi ngay; con 'chua chay' nghia la van doi /api/jobs (toi 2 giay)",
+    );
+  });
+
+  it("bam Long lai mot doan => goi onLongLai va doi buoc Long tieng ngay", () => {
+    const { props, goi } = dungThu({ source: KENH, jobs: [] as Job[] });
+    render(<Studio {...props} />);
+
+    // Goc nhin Long tieng moi co nut "Long lai" (`SegmentRow.tsx:133` — `view === "dub"`).
+    //
+    // ⚠️ DO DUOC: `getByRole("button", { name: /^Long tieng/ })` NEM vi khop HAI nut —
+    // nut doi goc nhin (`Studio.tsx:74`) va nut buoc tren thanh duong ong. Phai chon nut
+    // doi goc nhin, va no la nut co `textContent` DUNG BANG "Long tieng".
+    // ⚠️ DO DUOC: nhan nut la "Long tieng 3" — co ca SO PHIM TAT o cuoi
+    // (`Studio.tsx:1288` in `{v.label} <span class="kbd">{i + 1}</span>`), nen so sanh
+    // `textContent === "Long tieng"` khong bao gio khop. Phai dung `startsWith`.
+    const doiGocNhin = q()
+      .getAllByRole("button")
+      .find((b) => (b.textContent ?? "").trim().startsWith("Long tieng")) as
+      | HTMLElement
+      | undefined;
+    assert.ok(doiGocNhin, "khong tim thay nut doi goc nhin 'Long tieng'");
+    fireEvent.click(doiGocNhin);
+
+    const nut = q()
+      .getAllByRole("button")
+      .find((b) => (b.getAttribute("aria-label") ?? "") === "Lồng lại") as HTMLElement | undefined;
+    assert.ok(nut, "khong tim thay nut 'Long lai' o goc nhin Long tieng");
+    fireEvent.click(nut);
+
+    assert.deepEqual(
+      goi.filter((g) => g.ten === "onLongLai").map((g) => g.args[0]),
+      [0],
+      "phai goi onLongLai dung mot lan voi doan #0",
+    );
+    assert.equal(
+      buocTheoTen("Lồng tiếng").ghiChu,
+      "đang chạy…",
+      "bam Long lai phai doi buoc Long tieng NGAY",
+    );
+  });
+
+  it("co lac quan cua Long tieng TAN khi job dub that ve done", () => {
+    // Ve de hong nhat, giong bai cua `asr`: co khong tan thi buoc ket o "dang chay…" mai.
+    const r = dungThu({ source: KENH, jobs: [] as Job[] });
+    const { rerender } = render(<Studio {...r.props} />);
+    fireEvent.click(buocTheoTen("Lồng tiếng").nut);
+    assert.equal(buocTheoTen("Lồng tiếng").ghiChu, "đang chạy…");
+
+    rerender(
+      <Studio
+        {...r.props}
+        jobs={[
+          job({ id: 200, type: "dub", state: "running", payload: { translation_id: BAN_DICH_ID } }),
+        ]}
+      />,
+    );
+    rerender(
+      <Studio
+        {...r.props}
+        jobs={[
+          job({ id: 200, type: "dub", state: "done", payload: { translation_id: BAN_DICH_ID } }),
+        ]}
+      />,
+    );
+    assert.doesNotMatch(
+      buocTheoTen("Lồng tiếng").ghiChu,
+      /đang chạy/,
+      "co lac quan khong tan -> buoc Long tieng ket o 'dang chay…' mai mai",
+    );
+  });
+
+  it("job dub THAT ve voi failed => hien loi, co lac quan khong che", () => {
+    const r = dungThu({ source: KENH, jobs: [] as Job[] });
+    const { rerender } = render(<Studio {...r.props} />);
+    fireEvent.click(buocTheoTen("Lồng tiếng").nut);
+
+    rerender(
+      <Studio
+        {...r.props}
+        jobs={[
+          job({ id: 201, type: "dub", state: "failed", payload: { translation_id: BAN_DICH_ID } }),
+        ]}
+      />,
+    );
+    assert.equal(buocTheoTen("Lồng tiếng").ghiChu, "lỗi — xem hàng đợi");
   });
 });
