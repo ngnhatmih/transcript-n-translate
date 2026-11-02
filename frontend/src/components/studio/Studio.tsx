@@ -644,10 +644,38 @@ export function Studio(props: StudioProps) {
   // Do duoc (nguoi dung gui anh): playhead o 0:30.00, `playingSeg` chon dung i=20 (OCR)
   // nhung khoi vien vang lai la i=19 (ASR) — vi dieu kien cu doi `player.playing`, nen
   // khi pause + seek thi `currentId` giu gia tri cu (tu lan click hoac lan phat truoc).
+  // Dong dang chon phai la dong DANG PHAT, ke ca khi dang PAUSE va vua seek tay.
+  //
+  // 🔴 Khi layer 1 KHONG co dong nao tai moc nay thi phai BO CHON, khong giu dong cu.
+  //
+  // Do duoc (nguoi dung gui anh): playhead o ~7 s, layer 1 trong, nhung khoi vien vang
+  // van la i=0 [0.00-1.04] — dong cu tu luc playhead con o dau phim. Ban truoc co
+  // `if (playingSeg === undefined) return;` nen no giu nguyen `currentId`.
+  // Dong dang chon phai la dong DANG PHAT — ca khi dang phat lan khi vua seek tay.
+  //
+  // Hai nguon doi `currentId`: nguoi dung BAM mot dong (`select`), va playhead di
+  // chuyen. Phai phan biet, neu khong se giu dong cu mai:
+  //
+  //   - Dang phat: dong dang chon phai bam playhead, ke ca khi layer 1 trong (bo chon).
+  //   - Dang pause: chi bo chon khi dong dang chon KHONG CON phu `player.time` — tuc
+  //     nguoi dung vua seek di cho khac. Neu dong do van phu thi giu, vi do la lua
+  //     chon cua nguoi dung khi bam vao no.
+  //
+  // Do duoc (nguoi dung gui anh): playhead o ~7 s, layer 1 trong, nhung khoi vien vang
+  // van la i=0 [0.00-1.04] — dong cu tu luc playhead con o dau phim.
   useEffect(() => {
-    if (playingSeg === undefined) return;
-    if (playingSeg.i !== currentId) setCurrentId(playingSeg.i);
-  }, [playingSeg, currentId]);
+    const i = playingSeg?.i ?? null;
+    if (i === currentId) return;
+    if (player.playing) {
+      setCurrentId(i);
+      return;
+    }
+    // Dang pause: chi bo chon khi dong cu khong con phu thoi diem hien tai.
+    if (currentId === null) return;
+    const cu = dong.find((s) => s.i === currentId);
+    if (cu === undefined) return;
+    if (player.time < cu.start || player.time >= cu.end) setCurrentId(i);
+  }, [player.playing, player.time, playingSeg, currentId, dong]);
 
   useEffect(() => {
     if (currentId === null) return;
