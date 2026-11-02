@@ -623,30 +623,21 @@ export function Studio(props: StudioProps) {
   // Cung mot luat nhu `mot_dong_moi_cap` o backend: trong cac dong dang chay, chon dong
   // KHONG `suspect` (OCR) neu co; khong co thi lay dong dau.
   const playingSeg = (() => {
-    // 🔴 LAYER DA DUOC SAP XEP SAN. Chi viec di toi dong ke tiep CUA CUNG LAYER DO.
+    // 🔴 CHI DOC LAYER 1. Khong bao gio nhay sang layer 2.
     //
-    // Nguoi dung: "dung co ocr voi asr. Layer da duoc sap xep roi ma chi viec di toi doan
-    // tiep theo cua layer do thoi".
+    // Nguoi dung: "o dong tren la layer 1, no dang doc tu layer 1 va toi chi can doc tu
+    // layer 1 thoi, chu ko duoc nhay sang layer 2".
     //
-    // Do duoc tren #43 (146 doan):
+    // Va khi duoc hoi layer 1 trong thi lam gi: "De trong hoan toan".
     //
-    //     layer 1 (mot_nguon)  94 dong,  7 cap chong lan — deu la chong MEP 0,01-0,15 s
-    //     layer 2 (hai_nguon)  52 dong, 26 cap chong lan — chong THAT, den 2,16 s
+    // Nen ham chi con MOT buoc: tim dong layer 1 dang phu `player.time`. Khong co thi
+    // tra `undefined` — phu de trong. Do duoc tren #43: 1884/5151 moc (moi 0,05 s)
+    // khong co dong layer 1 nao, gom 7,02-9,66 s va 145,24-161,87 s.
     //
-    // Vi du layer 2:  i=7 [7.02-9.66]  va  i=8 [7.50-8.00]  chong 2,16 s. Do la MOT cau
-    // (ASR doc tron, OCR doc manh). Ban truoc doi qua lai giua chung nen phu de nhay ba
-    // lan cho mot cau: i=7 -> i=8 -> i=9.
-    //
-    // Layer 1 khong co van de do. Nen: lay dong layer 1 DANG phu `player.time`; khong co
-    // thi lay dong layer 2 dang phu. Khong tron, khong so OCR/ASR, khong keo dai.
-    const dangPhu = (s: Dong) => player.time >= s.start && player.time < s.end;
-
-    const cua1 = dong.find((s) => s.layer === "mot_nguon" && dangPhu(s));
-    if (cua1 !== undefined) return cua1;
-
-    // Layer 1 khong phu moc nay => hoac im lang, hoac lop 1 khong doc ra cau nay.
-    // Ca hai truong hop deu phai thu layer 2 truoc khi ket luan la im lang.
-    return dong.find((s) => s.layer !== "mot_nguon" && dangPhu(s));
+    // Layer 2 VAN CON trong `dong` — timeline ve du hai khoi, chi khong dung lam phu de.
+    return dong.find(
+      (s) => s.layer === "mot_nguon" && player.time >= s.start && player.time < s.end,
+    );
   })();
   // Dong dang chon phai la dong DANG PHAT, ke ca khi dang PAUSE va vua seek tay.
   //
