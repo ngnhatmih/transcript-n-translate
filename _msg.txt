@@ -1,0 +1,81 @@
+fix(studio): phu de tren video uu tien layer 1, thieu thi lay layer 2
+
+Nguoi dung: "LA CHI DUNG LAYER 1 THOI, dung co dung toi layer 2, va cung
+ko xoa layer 2" va "CAN GI PHU KIN CA DOAN PHIM. co ai noi lien tuc ca
+doan dau".
+
+## Ba loi do duoc, sua trong mot ham chon dung chung
+
+playingSeg truoc day chi co MOT buoc: .find() phan tu dau tien khop
+gio, roi tra ngay. Ba loi noi tiep:
+
+1. **ASR thang OCR.** Voi cap cung cau, ASR dai hon nen dung truoc
+   trong mang (dong sap theo start, end):
+
+       i=0 [0.00-1.04] OCR  "Lam mot nguoi lam nghe thuat"
+       i=1 [0.00-1.14] ASR  "Lam mot nguoi lam nghe thuat"
+
+   .find() tra i=1. Do duoc tren #43 truoc khi sua.
+
+2. **LUI VE CAU TRUOC.** ASR i=7 [7.02-9.66] bao OCR i=8 [7.50-8.00]
+   va i=9 [8.00-9.10]. Tu 9,10 s den 9,66 s khong OCR nao phu, nen phu
+   de nhay ve i=7 — cau da doc xong. Do duoc: 15 lan LUI tren toan phim.
+
+3. **Khong chon gi khi layer 1 trong.** i=0..3 (2,42 s dau phim) deu
+   hai_nguon, nen l1.filter(...) rong va ham return undefined.
+   Nguoi dung gui anh: khong khoi nao duoc to sang.
+
+## Ham chonTrong, ap dung GIONG NHAU cho ca hai tang
+
+   1. Co OCR dang chay -> lay luon.
+   2. Khong co -> OCR CUOI CUNG ma mot ASR dang chay bao, voi
+      o.start <= player.time de khong hien cau chua noi.
+   3. Khong co -> ASR (nguon duy nhat).
+
+playingSeg = chonTrong(layer 1 dang chay) ?? chonTrong(layer 2 dang chay).
+
+Buoc 2 phai co o CA HAI tang: do duoc khi chi dat no o tang layer 1 thi
+tap du lieu da sua layer cho 15 lan LUI, vi OCR cua cap mang hai_nguon
+nen tang layer 1 khong thay no.
+
+## currentId
+
+useEffect doi currentId truoc day co dieu kien player.playing. Do
+duoc: playhead o 0:30.00, playingSeg chon dung i=20 (OCR) nhung khoi
+vien vang lai la i=19 (ASR), vi khi pause + seek thi currentId giu gia
+tri cu. Bo dieu kien do.
+
+## Sua du lieu layer (43/146 dong sai)
+
+layer trong DB do phien ban CU cua nguon_chu.py ghi: ban do gan
+hai_nguon cho MOI phan tu ung_vien, ke ca dong chi cham mep. Do duoc
+43 dong sai so voi luat hien tai (_giao(...) >= NGUONG_UNG):
+
+    sua thanh hai_nguon: 12
+    sua thanh mot_nguon: 31   (36 OCR bi gan nham hai_nguon)
+
+Sua ca transcripts lan translations — hai bang luu BAN SAO rieng,
+sua mot ben khong lan sang ben kia:
+
+    transcripts/41   52 hai_nguon / 94 mot_nguon
+    translations/43  52 hai_nguon / 94 mot_nguon
+
+## Cua ai
+
+    npx tsc --noEmit    EXIT_TS=0
+    npm test            237 pass, 0 fail             EXIT_TEST=0
+    npm run build       EXIT_BUILD=0
+    docker build web    EXIT=0, chunk index-DuuG16Ka.js
+
+Mo phong tren DB THAT (5151 moc, moi 0,05 s):
+
+    so lan dong LUI                   : 0    (truoc: 15)
+    layer1 dang chay ma chon layer2   : 0
+    moc khong co chu                  : 1884 (im lang that)
+
+Ba ca trong anh nguoi dung gui:
+
+    t= 0.05 -> i=0  OCR  "La mot nguoi lam nghe thuat"
+    t= 7.60 -> i=8  OCR  "Thuong xuyen phai chung minh"
+    t= 9.50 -> i=9  OCR  (giu dung, khong lui)
+    t=30.00 -> i=20 OCR  (truoc: i=19 ASR)
