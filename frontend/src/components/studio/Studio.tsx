@@ -654,9 +654,32 @@ export function Studio(props: StudioProps) {
   // Do duoc tren #43: 1884/5151 moc (moi 0,05 s) khong co dong layer 1, gom ca
   // 7,02-9,66 s. Neu dung chung `playingSeg` thi playhead chay qua ma khong khoi nao
   // duoc to vang.
-  const dongDangChon = dong.find(
-    (s) => player.time >= s.start && player.time < s.end,
-  );
+  // 🔴 PHAI UU TIEN LAYER 1, giong het `playingSeg`. Neu khong, `find` lay dong DAU TIEN
+  // phu `player.time` — va trong mang, dong layer 2 dung truoc dong layer 1 cua cung cau.
+  //
+  // Do duoc tren DB that tai 30,0 s:
+  //
+  //     i=19  [29.21-30.89]  hai_nguon  suspect=True   <- dung TRUOC trong mang
+  //     i=20  [29.50-30.51]  hai_nguon  suspect=False  <- ban OCR, dang le phai duoc chon
+  //
+  // Nguoi dung gui anh: khoi vien vang dang o LAN DUOI (ban ASR), trong khi cung cau o
+  // LAN TREN (ban OCR, xanh la) khong duoc chon. Vi `find` tra ve `i=19`.
+  //
+  // Sua: tim trong layer 1 truoc, khong co moi sang layer 2.
+  // 🔴 CHON BAN OCR (suspect === false) TRUOC, vi do la ban duoc xep LAN TREN.
+  //
+  // Do duoc tren DB that tai 30,0 s — CA HAI deu la hai_nguon, nen uu tien `layer` KHONG
+  // giai quyet duoc gi (do lai: layer 1 trong khoang 28-33 s = KHONG CO dong nao):
+  //
+  //     i=19  [29.21-30.89]  hai_nguon  suspect=True    ASR
+  //     i=20  [29.50-30.51]  hai_nguon  suspect=False   OCR
+  //
+  // `xepLan` doi cho hai khoi nay: i=20 len lan 0 (top=1), i=19 xuong lan 1 (top=19).
+  // Nhung `find` duyet MANG GOC, khong duyet lan — i=19 dung truoc nen no thang. Do tren
+  // DOM: khoi vang o top=19 (ASR), con cung cau o top=1 (OCR, vien xanh la) khong duoc
+  // chon. Nguoi dung: "current doan no nhe ra phai la cai tren ko phai cai duoi".
+  const dangPhu = dong.filter((s) => player.time >= s.start && player.time < s.end);
+  const dongDangChon = dangPhu.find((s) => s.suspect === false) ?? dangPhu[0];
   // Dong dang chon phai la dong DANG PHAT, ke ca khi dang PAUSE va vua seek tay.
   //
   // Do duoc (nguoi dung gui anh): playhead o 0:30.00, `playingSeg` chon dung i=20 (OCR)
