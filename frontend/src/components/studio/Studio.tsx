@@ -623,67 +623,30 @@ export function Studio(props: StudioProps) {
   // Cung mot luat nhu `mot_dong_moi_cap` o backend: trong cac dong dang chay, chon dong
   // KHONG `suspect` (OCR) neu co; khong co thi lay dong dau.
   const playingSeg = (() => {
-    /**
-     * Chon dong de hien trong danh sach `ung` (cac dong dang phu `player.time`).
-     *
-     * Ba buoc, ap dung GIONG NHAU cho ca layer 1 lan layer 2:
-     *
-     *   1. Co OCR dang chay -> lay luon.
-     *   2. Khong co -> OCR CUOI CUNG ma mot ASR dang chay bao, voi `o.start <= time`.
-     *   3. Khong co -> ASR (nguon duy nhat).
-     *
-     * 🔴 VI SAO PHAI CO BUOC 2 O CA HAI TANG.
-     *
-     * Do duoc tren #43: ASR i=7 [7.02-9.66] va OCR i=8 [7.50-8.00], i=9 [8.00-9.10].
-     * Tu 9,10 s den 9,66 s khong OCR nao phu, chi con ASR i=7. Ban truoc tra ngay
-     * `dangChay[0]` = i=7, tuc phu de LUI VE cau truoc: **15 lan LUI** tren toan phim.
-     * Buoc 2 giu i=9 cho toi het cap.
-     */
-    const chonTrong = (ung: Dong[]): Dong | undefined => {
-      if (ung.length === 0) return undefined;
-
-      const ocr = ung.find((s) => !s.suspect);
-      if (ocr !== undefined) return ocr;
-
-      // `o.start <= player.time`: OCR phai da BAT DAU. Bo dieu kien nay thi luc
-      // 7,05 s — truoc khi i=8 [7.50-8.00] bat dau — ham chon i=9 vi no co `end` lon
-      // nhat, tuc phu de hien cau CHUA NOI.
-      const dungSai = 0.05;
-      for (const a of ung) {
-        const trong = dong
-          .filter((o) =>
-            !o.suspect &&
-            o.start <= player.time &&
-            o.start >= a.start - dungSai &&
-            o.end <= a.end + dungSai &&
-            o.end - o.start < a.end - a.start)
-          .sort((x, y) => x.end - y.end);
-        if (trong.length > 0) return trong[trong.length - 1];
-      }
-
-      return ung[0];
-    };
-
-    // 🔴 UU TIEN LAYER 1. Nguoi dung: "LA CHI DUNG LAYER 1 THOI, dung co dung toi layer 2,
-    // va cung ko xoa layer 2".
+    // 🔴 LAYER DA DUOC SAP XEP SAN. Chi viec di toi dong ke tiep CUA CUNG LAYER DO.
     //
-    // `layer === "mot_nguon"` moi la layer 1. `hai_nguon` la layer 2 — van GIU trong `dong`
-    // de timeline ve du hai khoi, chi KHONG dung lam phu de khi layer 1 co mat.
+    // Nguoi dung: "dung co ocr voi asr. Layer da duoc sap xep roi ma chi viec di toi doan
+    // tiep theo cua layer do thoi".
     //
-    // Layer 1 khong co doan nao dang chay => KHONG phai "im lang", ma la "lop 1 khong doc
-    // ra cau nay". Nguoi dung: "CAN GI PHU KIN CA DOAN PHIM. co ai noi lien tuc ca doan dau"
-    // — dung, cho trong vi IM LANG thi de trong, con cho trong vi LOP 1 KHONG DOC RA thi
-    // van phai hien chu cua lop 2.
-    const l1 = dong.filter(
-      (s) => s.layer === "mot_nguon" && player.time >= s.start && player.time < s.end,
-    );
-    const cua1 = chonTrong(l1);
+    // Do duoc tren #43 (146 doan):
+    //
+    //     layer 1 (mot_nguon)  94 dong,  7 cap chong lan — deu la chong MEP 0,01-0,15 s
+    //     layer 2 (hai_nguon)  52 dong, 26 cap chong lan — chong THAT, den 2,16 s
+    //
+    // Vi du layer 2:  i=7 [7.02-9.66]  va  i=8 [7.50-8.00]  chong 2,16 s. Do la MOT cau
+    // (ASR doc tron, OCR doc manh). Ban truoc doi qua lai giua chung nen phu de nhay ba
+    // lan cho mot cau: i=7 -> i=8 -> i=9.
+    //
+    // Layer 1 khong co van de do. Nen: lay dong layer 1 DANG phu `player.time`; khong co
+    // thi lay dong layer 2 dang phu. Khong tron, khong so OCR/ASR, khong keo dai.
+    const dangPhu = (s: Dong) => player.time >= s.start && player.time < s.end;
+
+    const cua1 = dong.find((s) => s.layer === "mot_nguon" && dangPhu(s));
     if (cua1 !== undefined) return cua1;
 
-    const l2 = dong.filter(
-      (s) => s.layer !== "mot_nguon" && player.time >= s.start && player.time < s.end,
-    );
-    return chonTrong(l2);
+    // Layer 1 khong phu moc nay => hoac im lang, hoac lop 1 khong doc ra cau nay.
+    // Ca hai truong hop deu phai thu layer 2 truoc khi ket luan la im lang.
+    return dong.find((s) => s.layer !== "mot_nguon" && dangPhu(s));
   })();
   // Dong dang chon phai la dong DANG PHAT, ke ca khi dang PAUSE va vua seek tay.
   //
