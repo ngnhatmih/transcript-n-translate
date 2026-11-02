@@ -54,14 +54,16 @@ import type {
 // ---------------------------------------------------------------------------
 
 /**
- * Lop bang chung cua mot doan — TRUNG TEN voi `nguon_chu.LOP_*` ben backend.
+ * LOP HIEN THI cua mot doan — kieu layer trong Photoshop, KHONG phai phep dem nguon.
  *
- * Nguoi dung dat ten: "Layer 1 la chat nhat va duoc uu tien lay: ocr + asr doan ko co ocr.
- * layer 2 la co ocr nhung co ca asr".
+ * Nguoi dung: "Layer nghia la nhu layer trong photoshop y. Ko phai dua vao so nguon, no chi
+ * la chua doan nao doan nao xong luc bat layer nay thi no hien cac doan tren layer do".
  *
- * Vi sao lop 1 CHAT hon: no la thu DUY NHAT mot nguon doc ra, nen khong co nguon thu hai
- * phu nhan no. Lop 2 co hai nguon noi cung mot cau — da kiem cheo, nhung khong mang them
- * thong tin nao ma lop 1 chua co.
+ * Chuoi trong DB van la `mot_nguon`/`hai_nguon` (di san, giu de khong phai migrate), nhung
+ * nghia cua no la LOP: bat lop nao thi hien cac doan cua lop do.
+ *
+ *   lop 1 (`mot_nguon`)  BAN CHINH — doan chat nhat cho cau do.
+ *   lop 2 (`hai_nguon`)  BAN PHU  — doan thu hai cua cung cau, de doi chieu.
  */
 export type LopNguon = "mot_nguon" | "hai_nguon";
 
@@ -78,8 +80,8 @@ export function lopCua(seg: { layer?: string }): LopNguon | null {
 
 /** Nhan nguoi doc cho tung lop — dung tren chip va trong `title`. */
 export const NHAN_LOP: Record<LopNguon, string> = {
-  mot_nguon: "1 nguon",
-  hai_nguon: "2 nguon",
+  mot_nguon: "lớp 1",
+  hai_nguon: "lớp 2",
 };
 
 /**
@@ -89,10 +91,10 @@ export const NHAN_LOP: Record<LopNguon, string> = {
  * bien tap (dung chinh ta) con ASR nghe va hay sai ten rieng.
  */
 export function moTaLop(d: Pick<Dong, "layer" | "suspect" | "chuaTrong">): string {
-  if (d.layer === null) return "chưa rõ nguồn (bản ghi cũ)";
-  if (d.layer === "hai_nguon") return "OCR và ASR cùng đọc ra câu này";
+  if (d.layer === null) return "chưa rõ lớp (bản ghi cũ)";
+  if (d.layer === "hai_nguon") return "lớp 2 — bản phụ của câu này";
   // mot_nguon: phan biet bang `suspect` — backend danh `suspect=True` cho doan CHI ASR.
-  const goc = d.suspect ? "chỉ ASR nghe ra" : "chỉ OCR đọc ra";
+  const goc = d.suspect ? "lớp 1 — chỉ ASR nghe ra" : "lớp 1 — chỉ OCR đọc ra";
   if (d.chuaTrong === null) return goc;
   return goc + ` · nằm trong đoạn #${d.chuaTrong}`;
 }

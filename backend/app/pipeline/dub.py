@@ -31,12 +31,13 @@ from app.worker import JobCancelled
 NGUONG_IM_LANG = 0.01
 
 
-#: Hai lop nguon chu — TRUNG TEN voi `nguon_chu.LOP_*`.
-#: Doc o day de khong phai import domain vao tang pipeline cho mot phep so chuoi.
-LOP_MOT_NGUON = "mot_nguon"
-LOP_HAI_NGUON = "hai_nguon"
-
-
+#: Hai LOP hien thi — MOT dinh nghia duy nhat, o domain.
+#: Ban truoc khai lai o day ("trung ten voi nguon_chu.LOP_*") va do la cho sinh loi:
+#: hai noi cung dinh nghia mot khai niem thi khong co gi bao chung lech nhau.
+#: Van xuat ra duoi ten cu vi tests/test_dub.py va cac cho khac import chung.
+from app.domain.nguon_chu import LOP_1, LOP_2
+LOP_MOT_NGUON = LOP_1
+LOP_HAI_NGUON = LOP_2
 def mot_dong_moi_cap(segments: list) -> list:
     """LOC theo LOP: moi cap (OCR, ASR) cung noi mot cau chi giu MOT dong de long.
 
@@ -52,15 +53,15 @@ def mot_dong_moi_cap(segments: list) -> list:
 
     ## Giu dong nao
 
-    * Cap co MOT dong `mot_nguon`  -> giu dong do (bang chung chat nhat, va do la dong
+    * Cap co MOT dong LOP 1        -> giu dong do (bang chung chat nhat, va do la dong
       DUY NHAT co chu dung: dong con lai la ban sao).
-    * Cap co HAI dong `hai_nguon`  -> giu dong `suspect=False`, tuc dong OCR — OCR doc
+    * Cap co HAI dong LOP 2        -> giu dong `suspect=False`, tuc dong OCR — OCR doc
       CHU DA BIEN TAP, con ASR nghe va hay sai ten rieng. Do duoc tren #36:
 
             ASR "你见过人类做海豹吗"   <- nghe sai (hai cau)
             OCR "你见过人类做海报吗"   <- doc dung (poster)
 
-    * Dong khong co `layer` (du lieu cu, hoac ASR/OCR thuan) -> giu nguyen, khong doan bua.
+    * Dong khong co `layer` (du lieu cu) -> giu nguyen, khong doan bua.
 
     Phan biet "cung mot cau" bang CHONG THOI GIAN, khong bang chu: hai dong cung cap luon
     chong len nhau it nhat mot phan, va do la dau hieu duy nhat khong phu thuoc vao viec

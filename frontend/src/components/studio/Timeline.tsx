@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { Dong } from "@/lib/studio";
-import { mauLop, viecCuaDong } from "@/lib/studio";
+import { mauLop, viecCuaDong, NHAN_LOP } from "@/lib/studio";
 import { formatTimecode } from "@/lib/timecode";
 import { cn } from "@/lib/utils";
 
@@ -46,6 +46,21 @@ export function Timeline({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   /** Vùng nhìn thấy: `[batDau, batDau + rongNhin)` theo px của dải thời gian. */
   const [khungNhin, setKhungNhin] = useState({ batDau: 0, rong: 1200 });
+
+  /**
+   * BAT/TAT TUNG LOP — kieu bang Layers trong Photoshop.
+   *
+   * Nguoi dung: "Layer nghia la nhu layer trong photoshop y. Ko phai dua vao so nguon, no chi
+   * la chua doan nao doan nao xong luc bat layer nay thi no hien cac doan tren layer do".
+   *
+   * Mac dinh bat CA HAI: do la trang thai dang dung hien nay, va tat di la mot thay doi
+   * nguoi dung khong yeu cau.
+   */
+  const [lopBat, setLopBat] = useState({ mot_nguon: true, hai_nguon: true });
+
+  // Loc TRUOC khi xep lan: tat mot lop thi khoi cua lop do khong duoc ve, va khong
+  // chiem cho trong `xepLan` (neu loc sau, cac khoi con lai van bi day xuong lan trong).
+  const segmentsLoc = segments.filter((s) => s.layer === null || lopBat[s.layer]);
   const width = Math.max(1, duration * pxPerSec);
   // `peaks` luon rong — 40 px do dang giu cho mot canvas khong ve duoc gi.
   const H = 56;
@@ -125,8 +140,8 @@ export function Timeline({
       trong.end <= ngoai.end + dungSai &&
       trong.end - trong.start < ngoai.end - ngoai.start;
 
-    const asr = segments.filter((s) => s.suspect);
-    const ocr = segments.filter((s) => !s.suspect);
+    const asr = segmentsLoc.filter((s) => s.suspect);
+    const ocr = segmentsLoc.filter((s) => !s.suspect);
     const keo = new Map<number, { start: number; end: number }>();
 
     for (const a of asr) {
@@ -138,20 +153,24 @@ export function Timeline({
         keo.set(o.i, { start: dau, end: Math.max(dau + 0.01, cuoi) });
       });
     }
-    return segments.map((s) => keo.get(s.i) ?? { start: s.start, end: s.end });
+    // Tra MAP theo `s.i`, KHONG theo chi so mang: vong ve dung `segmentsLoc` (da loc
+    // theo lop), nen chi so hai mang khac nhau. Tra theo khoa `i` thi khong lech.
+    const ra = new Map<number, { start: number; end: number }>();
+    for (const s of segmentsLoc) ra.set(s.i, keo.get(s.i) ?? { start: s.start, end: s.end });
+    return ra;
   })();
 
   const xepLan = (() => {
     const cuoiMoiLan: number[] = [];
     const lanCua = new Map<number, { lan: number; rong: number; trai: number }>();
 
-    // Xep theo (start, end) nhu cu — GIU NGUYEN thu tu goc.
-    const thuTu = segments
-      .map((s, k) => ({ s, k }))
-      .sort((x, y) => x.s.start - y.s.start || x.s.end - y.s.end);
+    // Xep theo (start, end) — chi tren cac doan DANG BAT (da loc theo lop).
+    const thuTu = segmentsLoc
+      .slice()
+      .sort((x, y) => x.start - y.start || x.end - y.end);
 
-    for (const { s, k } of thuTu) {
-      const kv = khoangVe[k]!;
+    for (const s of thuTu) {
+      const kv = khoangVe.get(s.i)!;
       const moc = kv.start * pxPerSec;
       const rong = Math.max(2, (kv.end - kv.start) * pxPerSec);
       let lan = 0;
@@ -171,17 +190,16 @@ export function Timeline({
     //   · ASR co OCR chong len             -> doi cho: OCR len lan cua ASR, ASR xuong lan OCR.
     //
     // Lan truoc toi doi MOI cap, ke ca khi OCR von da o tren — lam ASR tut xuong vo co.
-    const viTri = new Map(segments.map((s, k) => [s.i, k]));
-    const ocrHet = segments.filter((s) => !s.suspect);
+    const ocrHet = segmentsLoc.filter((s) => !s.suspect);
     const doi = new Map<number, number>();
 
-    for (const a of segments.filter((s) => s.suspect)) {
+    for (const a of segmentsLoc.filter((s) => s.suspect)) {
       const laA = lanCua.get(a.i);
       if (!laA) continue;
 
       // ASR nay co OCR nao chong len khong?
       const coOcr = ocrHet.filter((o) => {
-        const kv = khoangVe[viTri.get(o.i)!]!;
+        const kv = khoangVe.get(o.i)!;
         return Math.min(kv.end, a.end) - Math.max(kv.start, a.start) > 0;
       });
       if (coOcr.length === 0) continue; // ASR don doc -> de nguyen tren.
@@ -199,10 +217,19 @@ export function Timeline({
       if (cu) lanCua.set(i, { ...cu, lan: lanMoi });
     }
 
-    return segments.map((s, k) => lanCua.get(s.i) ?? { lan: 0, rong: 2, trai: khoangVe[k]!.start * pxPerSec });
+    // Tra MAP theo `s.i` — vong ve dung `segmentsLoc`, chi so hai mang khac nhau.
+    const ra = new Map<number, { lan: number; rong: number; trai: number }>();
+    for (const s of segmentsLoc) {
+      ra.set(s.i, lanCua.get(s.i) ?? {
+        lan: 0,
+        rong: 2,
+        trai: (khoangVe.get(s.i) ?? { start: s.start }).start * pxPerSec,
+      });
+    }
+    return ra;
   })();
 
-  const soLan = xepLan.reduce((m, b) => Math.max(m, b.lan + 1), 1);
+  const soLan = [...xepLan.values()].reduce((m, b) => Math.max(m, b.lan + 1), 1);
   const caoDoan = soLan * CAO_LAN + 4;
 
   // vẽ sóng
@@ -419,96 +446,127 @@ export function Timeline({
   const ticks = Array.from({ length: Math.floor(duration / 5) + 1 }, (_, i) => i * 5);
 
   return (
-    <div
-      ref={scrollRef}
-      className="relative overflow-x-auto overflow-y-hidden border-y border-rule bg-panel-0"
-      role="slider"
-      aria-label="Dòng thời gian"
-      aria-valuemin={0}
-      aria-valuemax={duration}
-      aria-valuenow={time}
-      tabIndex={0}
-    >
+    <div className="border-t border-rule bg-panel-1">
+      {/*
+        BANG LOP — bat/tat tung lop, kieu bang Layers trong Photoshop.
+        Nguoi dung: "bat layer nay thi no hien cac doan tren layer do".
+        Mac dinh bat CA HAI: do la trang thai dang dung, tat di la thay doi khong ai yeu cau.
+      */}
+      <div className="flex items-center gap-1.5 border-b border-rule px-2 py-1">
+        <span className="label-engraved mr-1 !text-ink-2">lớp</span>
+        {(["mot_nguon", "hai_nguon"] as const).map((lop) => (
+          <button
+            key={lop}
+            type="button"
+            onClick={() => setLopBat((cu) => ({ ...cu, [lop]: !cu[lop] }))}
+            aria-pressed={lopBat[lop]}
+            title={`${NHAN_LOP[lop]} — ${lopBat[lop] ? "đang hiện" : "đang ẩn"}`}
+            className={cn(
+              "num rounded-sm border px-1.5 py-0.5 text-[10.5px] transition-colors",
+              lopBat[lop]
+                ? "border-signal bg-signal-soft text-ink-0"
+                : "border-rule text-ink-2 hover:border-ink-1 hover:text-ink-1",
+            )}
+          >
+            {NHAN_LOP[lop]}
+          </button>
+        ))}
+        <span className="num ml-auto text-[10px] text-ink-2">
+          {segmentsLoc.length}/{segments.length}
+        </span>
+      </div>
+
       <div
-        className="relative cursor-crosshair"
-        style={{ width, height: 20 + H + caoDoan }}
-        onPointerDown={(e) => onSeek(toTime(e.clientX))}
+        ref={scrollRef}
+        className="relative overflow-x-auto overflow-y-hidden bg-panel-0"
+        role="slider"
+        aria-label="Dòng thời gian"
+        aria-valuemin={0}
+        aria-valuemax={duration}
+        aria-valuenow={time}
+        tabIndex={0}
       >
-        {/* thước */}
-        <div className="absolute inset-x-0 top-0 h-5 border-b border-rule">
-          {ticks.map((t) => (
-            <span
-              key={t}
-              className="num absolute top-1 text-[9.5px] text-ink-2"
-              style={{ left: t * pxPerSec + 3 }}
-            >
-              {formatTimecode(t)}
-            </span>
-          ))}
-        </div>
-        {/*
-          Bề rộng và vị trí do effect vẽ đặt (`c.style.width`,
-          `c.style.transform`) — KHÔNG khai trong JSX, vì React sẽ ghi đè lại
-          `width` của cả dải và canvas lại vượt ngưỡng 65 535 px.
-        */}
-        <canvas
-          ref={canvasRef}
-          className="absolute left-0 top-5 text-wave"
-          style={{ height: H }}
-        />
-        {/* khối đoạn — bề rộng = thời gian, xếp làn theo CHỒNG LẤN THẬT (`xepLan`) */}
-        <div className="absolute inset-x-0 bottom-0" style={{ height: caoDoan }}>
-          {segments.map((s, k) => {
-            const b = xepLan[k]!;
-            const bad = viecCuaDong(s).length > 0;
-            const cur = s.i === currentId;
-            const mau = mauLop(s);
-            const chu = s.dich === "" ? s.text : s.dich;
-            return (
-              <div
-                key={s.i}
-                className={cn(
-                  "group absolute overflow-hidden truncate rounded-sm border px-1.5 text-[10.5px] leading-[16px] whitespace-nowrap transition-colors",
-                  cur
-                    ? "z-10 border-signal bg-signal-soft text-ink-0"
-                    : cn(mau.vien, mau.nen, "text-ink-1 hover:z-10"),
-                  s.daDuyet && !cur && "border-ok/60",
-                  bad && "hatch-left pl-3",
-                )}
-                style={{
-                  // `b.trai`/`b.rong` den tu `xepLan`, da keo theo ASR bao no.
-                  left: b.trai,
-                  width: b.rong,
-                  top: b.lan * CAO_LAN + 1,
-                  height: CAO_LAN - 2,
-                }}
-                onPointerDown={(e) => {
-                  e.stopPropagation();
-                  onSelect(s.i);
-                }}
-                title={`${chu} · ${formatTimecode(s.start)} → ${formatTimecode(s.end)}`}
-              >
-                {chu}
-                <span
-                  className="absolute inset-y-0 left-0 w-1.5 cursor-ew-resize opacity-0 group-hover:opacity-100 bg-signal/60"
-                  onPointerDown={(e) => startDrag(e, s.i, "start")}
-                  aria-label="Kéo giờ vào"
-                />
-                <span
-                  className="absolute inset-y-0 right-0 w-1.5 cursor-ew-resize opacity-0 group-hover:opacity-100 bg-signal/60"
-                  onPointerDown={(e) => startDrag(e, s.i, "end")}
-                  aria-label="Kéo giờ ra"
-                />
-              </div>
-            );
-          })}
-        </div>
-        {/* đầu phát */}
         <div
-          className="pointer-events-none absolute top-0 bottom-0 w-px bg-signal"
-          style={{ left: time * pxPerSec }}
+          className="relative cursor-crosshair"
+          style={{ width, height: 20 + H + caoDoan }}
+          onPointerDown={(e) => onSeek(toTime(e.clientX))}
         >
-          <span className="absolute -left-[4px] top-0 h-2 w-[9px] bg-signal [clip-path:polygon(0_0,100%_0,50%_100%)]" />
+          {/* thước */}
+          <div className="absolute inset-x-0 top-0 h-5 border-b border-rule">
+            {ticks.map((t) => (
+              <span
+                key={t}
+                className="num absolute top-1 text-[9.5px] text-ink-2"
+                style={{ left: t * pxPerSec + 3 }}
+              >
+                {formatTimecode(t)}
+              </span>
+            ))}
+          </div>
+          {/*
+            Bề rộng và vị trí do effect vẽ đặt (`c.style.width`,
+            `c.style.transform`) — KHÔNG khai trong JSX, vì React sẽ ghi đè lại
+            `width` của cả dải và canvas lại vượt ngưỡng 65 535 px.
+          */}
+          <canvas
+            ref={canvasRef}
+            className="absolute left-0 top-5 text-wave"
+            style={{ height: H }}
+          />
+          {/* khối đoạn — bề rộng = thời gian, xếp làn theo CHỒNG LẤN THẬT (`xepLan`) */}
+          <div className="absolute inset-x-0 bottom-0" style={{ height: caoDoan }}>
+            {segmentsLoc.map((s) => {
+              const b = xepLan.get(s.i)!;
+              const bad = viecCuaDong(s).length > 0;
+              const cur = s.i === currentId;
+              const mau = mauLop(s);
+              const chu = s.dich === "" ? s.text : s.dich;
+              return (
+                <div
+                  key={s.i}
+                  className={cn(
+                    "group absolute overflow-hidden truncate rounded-sm border px-1.5 text-[10.5px] leading-[16px] whitespace-nowrap transition-colors",
+                    cur
+                      ? "z-10 border-signal bg-signal-soft text-ink-0"
+                      : cn(mau.vien, mau.nen, "text-ink-1 hover:z-10"),
+                    s.daDuyet && !cur && "border-ok/60",
+                    bad && "hatch-left pl-3",
+                  )}
+                  style={{
+                    // `b.trai`/`b.rong` den tu `xepLan`, da keo theo ASR bao no.
+                    left: b.trai,
+                    width: b.rong,
+                    top: b.lan * CAO_LAN + 1,
+                    height: CAO_LAN - 2,
+                  }}
+                  onPointerDown={(e) => {
+                    e.stopPropagation();
+                    onSelect(s.i);
+                  }}
+                  title={`${chu} · ${formatTimecode(s.start)} → ${formatTimecode(s.end)}`}
+                >
+                  {chu}
+                  <span
+                    className="absolute inset-y-0 left-0 w-1.5 cursor-ew-resize opacity-0 group-hover:opacity-100 bg-signal/60"
+                    onPointerDown={(e) => startDrag(e, s.i, "start")}
+                    aria-label="Kéo giờ vào"
+                  />
+                  <span
+                    className="absolute inset-y-0 right-0 w-1.5 cursor-ew-resize opacity-0 group-hover:opacity-100 bg-signal/60"
+                    onPointerDown={(e) => startDrag(e, s.i, "end")}
+                    aria-label="Kéo giờ ra"
+                  />
+                </div>
+              );
+            })}
+          </div>
+          {/* đầu phát */}
+          <div
+            className="pointer-events-none absolute top-0 bottom-0 w-px bg-signal"
+            style={{ left: time * pxPerSec }}
+          >
+            <span className="absolute -left-[4px] top-0 h-2 w-[9px] bg-signal [clip-path:polygon(0_0,100%_0,50%_100%)]" />
+          </div>
         </div>
       </div>
     </div>

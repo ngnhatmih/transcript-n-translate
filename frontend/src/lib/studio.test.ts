@@ -1164,34 +1164,34 @@ describe("mauLop: VIEN va NEN theo NGUON CHU (OCR xanh la, ASR xanh bien)", () =
   });
 });
 
-describe("NHAN_LOP va moTaLop: noi RO nguon nao", () => {
+describe("NHAN_LOP va moTaLop: noi RO LOP nao (layer kieu Photoshop)", () => {
   it("nhan ngan cho chip", () => {
-    assert.equal(NHAN_LOP.mot_nguon, "1 nguon");
-    assert.equal(NHAN_LOP.hai_nguon, "2 nguon");
+    assert.equal(NHAN_LOP.mot_nguon, "lớp 1");
+    assert.equal(NHAN_LOP.hai_nguon, "lớp 2");
   });
 
-  it("mot_nguon + suspect=true la CHI ASR — day la thong tin nguoi doc can", () => {
+  it("lop 1 + suspect=true la CHI ASR — day la thong tin nguoi doc can", () => {
     assert.equal(moTaLop({ layer: "mot_nguon", suspect: true, chuaTrong: null }),
-      "chỉ ASR nghe ra");
+      "lớp 1 — chỉ ASR nghe ra");
   });
 
-  it("mot_nguon + suspect=false la CHI OCR", () => {
+  it("lop 1 + suspect=false la CHI OCR", () => {
     assert.equal(moTaLop({ layer: "mot_nguon", suspect: false, chuaTrong: null }),
-      "chỉ OCR đọc ra");
+      "lớp 1 — chỉ OCR đọc ra");
   });
 
   it("doan nam trong doan khac thi noi ro so hieu doan bao", () => {
     assert.equal(moTaLop({ layer: "mot_nguon", suspect: false, chuaTrong: 7 }),
-      "chỉ OCR đọc ra · nằm trong đoạn #7");
+      "lớp 1 — chỉ OCR đọc ra · nằm trong đoạn #7");
   });
 
-  it("hai_nguon noi ca hai nguon cung doc ra", () => {
+  it("lop 2 noi day la BAN PHU cua cau", () => {
     assert.equal(moTaLop({ layer: "hai_nguon", suspect: false, chuaTrong: null }),
-      "OCR và ASR cùng đọc ra câu này");
+      "lớp 2 — bản phụ của câu này");
   });
 
   it("layer null thi noi la chua ro, khong gan bua", () => {
     assert.equal(moTaLop({ layer: null, suspect: false, chuaTrong: null }),
-      "chưa rõ nguồn (bản ghi cũ)");
+      "chưa rõ lớp (bản ghi cũ)");
   });
 });

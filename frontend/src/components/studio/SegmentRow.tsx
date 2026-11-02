@@ -7,6 +7,8 @@ import {
   soVi,
   tachTuKhac,
   viecCuaDong,
+  lopCua,
+  NHAN_LOP,
   type Dong,
 } from "@/lib/studio";
 import { formatTimecode } from "@/lib/timecode";
@@ -182,6 +184,14 @@ export const SegmentRow = forwardRef<HTMLLIElement, Props>(function SegmentRow(
               <RotateCcw className="size-3" />
             </button>
           </div>
+        )}
+        {/*
+          CHIP LOP — lop la LOP HIEN THI kieu Photoshop, khong phai phep dem nguon.
+          Nguoi dung: "Layer nghia la nhu layer trong photoshop y... bat layer nay thi no
+          hien cac doan tren layer do". Chip nay cho biet doan thuoc lop nao.
+        */}
+        {seg.layer !== null && (
+          <span className="label-engraved !text-ink-2">{NHAN_LOP[seg.layer]}</span>
         )}
         {/*
           NHAN VIEC — chi ve viec KHONG hien o cot phai.

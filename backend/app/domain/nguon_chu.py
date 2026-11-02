@@ -59,22 +59,32 @@ DUNG_SAI_OCR = 0.5
 #: Nho hon `DUNG_SAI_OCR` (0.5) vi day la phep so NOI DUNG, khong phai phep no sai so.
 NGUONG_UNG = 0.30
 
-#: LOP 1 — chi MOT nguon doc ra duoc doan nay.
+#: LOP 1 — BAN CHINH. Bat lop nay thi chi hien cac doan cua lop 1.
 #:
-#: Hai ca, ca hai deu la bang chung CHAT NHAT vi khong co nguon thu hai phu nhan:
+#: Layer la mot LOP HIEN THI kieu Photoshop, KHONG phai phep dem so nguon.
+#: Ten cu `mot_nguon`/`hai_nguon` la di san: chuoi trong DB van giu nguyen de
+#: khong phai migrate, nhung nghia cua no la LOP, khong phai "may nguon doc ra".
+#:
+#: Doan vao lop 1 khi no la ban CHAT NHAT cho cau do:
 #:   · OCR doc duoc phu de ma ASR khong nghe ra  -> doan OCR thuan;
 #:   · ASR nghe duoc loi noi ma OCR khong doc ra -> doan ASR thuan, `suspect=True`.
 #:
 #: Nguoi dung dat ten: "Layer 1 la chat nhat va duoc uu tien lay: ocr + asr doan ko co ocr".
-LOP_MOT_NGUON = "mot_nguon"
+LOP_1 = "mot_nguon"
 
-#: LOP 2 — CA HAI nguon cung doc/nghe ra mot cau.
+#: Ten cu, giu lai cho cho nao con doc. Dung `LOP_1` trong ma moi.
+LOP_MOT_NGUON = LOP_1
+
+#: LOP 2 — BAN PHU. Bat lop nay thi chi hien cac doan cua lop 2.
 #:
-#: Hai nguon khop nhau nen chu da duoc kiem cheo; nhung chinh vi the no khong mang them
-#: thong tin ma lop 1 chua co, nen lop 2 xep SAU.
+#: Doan vao lop 2 khi OCR va ASR cung doc/nghe ra mot cau — chu da duoc kiem cheo,
+#: nhung khong mang them thong tin ma lop 1 chua co, nen lop 2 xep SAU.
 #:
 #: Nguoi dung dat ten: "layer 2 la co ocr nhung co ca asr".
-LOP_HAI_NGUON = "hai_nguon"
+LOP_2 = "hai_nguon"
+
+#: Ten cu, giu lai cho cho nao con doc. Dung `LOP_2` trong ma moi.
+LOP_HAI_NGUON = LOP_2
 
 
 
