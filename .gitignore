@@ -78,4 +78,4 @@ _lovable-code/
 # nuot `frontend/frontend.rar` (998 012 B) vao commit. Khong bao gio commit chung.
 *.rar
 *.7z
-*.zip
+*.zip_commit_msg.txt
