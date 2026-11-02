@@ -639,6 +639,24 @@ export function Studio(props: StudioProps) {
       (s) => s.layer === "mot_nguon" && player.time >= s.start && player.time < s.end,
     );
   })();
+
+  // 🔴 KHONG KHOI NAO DUOC CHON khi layer 1 trong — do duoc tren DOM that:
+  //
+  //     time=4.32  so_chon=1  "Ve len roi thi den di"
+  //     time=5.82  so_chon=1  "Ve len roi thi den di"
+  //     time=7.34  so_chon=0                            <- MAT
+  //     time=9.36  so_chon=0                            <- MAT
+  //
+  // `playingSeg` la CHU tren video — chi doc layer 1, dung nhu yeu cau. Nhung
+  // `currentId` la KHUNG DANG CHON trong danh sach, va no phai luon tro vao mot
+  // khoi de nguoi dung biet minh dang o dau. Hai thu nay KHAC NHAU.
+  //
+  // Do duoc tren #43: 1884/5151 moc (moi 0,05 s) khong co dong layer 1, gom ca
+  // 7,02-9,66 s. Neu dung chung `playingSeg` thi playhead chay qua ma khong khoi nao
+  // duoc to vang.
+  const dongDangChon = dong.find(
+    (s) => player.time >= s.start && player.time < s.end,
+  );
   // Dong dang chon phai la dong DANG PHAT, ke ca khi dang PAUSE va vua seek tay.
   //
   // Do duoc (nguoi dung gui anh): playhead o 0:30.00, `playingSeg` chon dung i=20 (OCR)
@@ -663,8 +681,16 @@ export function Studio(props: StudioProps) {
   //
   // Do duoc (nguoi dung gui anh): playhead o ~7 s, layer 1 trong, nhung khoi vien vang
   // van la i=0 [0.00-1.04] — dong cu tu luc playhead con o dau phim.
+  // Chon khoi theo `dongDangChon` (TOAN BO dong), KHONG theo `playingSeg`.
+  //
+  // `playingSeg` chi doc layer 1, nen o 7,02-9,66 s no la undefined va truoc day keo
+  // theo `currentId = null` — playhead chay qua ma khong khoi nao duoc to vang.
+  // Do duoc tren DOM that: time=7.34 so_chon=0, time=9.36 so_chon=0.
+  //
+  // `dongDangChon` tim trong ca hai layer, nen luon co khoi de to vang khi playhead
+  // dang o trong mot doan co tieng noi.
   useEffect(() => {
-    const i = playingSeg?.i ?? null;
+    const i = dongDangChon?.i ?? null;
     if (i === currentId) return;
     if (player.playing) {
       setCurrentId(i);
@@ -675,7 +701,7 @@ export function Studio(props: StudioProps) {
     const cu = dong.find((s) => s.i === currentId);
     if (cu === undefined) return;
     if (player.time < cu.start || player.time >= cu.end) setCurrentId(i);
-  }, [player.playing, player.time, playingSeg, currentId, dong]);
+  }, [player.playing, player.time, dongDangChon, currentId, dong]);
 
   useEffect(() => {
     if (currentId === null) return;
