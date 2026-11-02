@@ -98,24 +98,38 @@ export function moTaLop(d: Pick<Dong, "layer" | "suspect" | "chuaTrong">): strin
 }
 
 /**
- * MAU CUA MOT DONG theo lop nguon chu — tra ve class cho CA VIEN va NEN cua dong.
+ * MAU CUA MOT DONG theo NGUON CHU — tra ve class cho CA VIEN va NEN cua dong.
  *
- * Yeu cau nguoi dung: "doi mau border, background cua cai nay". Nen mau nam tren chinh
- * dong phu de, khong phai mot vach phu them ben canh.
+ * Yeu cau nguoi dung: "de ocr mau xanh la con asr xanh bien di".
  *
- * Dung token co san trong `styles.css` thay vi ma mau moi: doi bang mau la doi mot cho.
+ * ## Phan biet bang `suspect`, KHONG bang `layer`
  *
- *   mot_nguon -> vien `signal` (hong ho phach) + nen `signal-soft`
- *                Bang chung CHAT nhat: chi MOT nguon doc ra, khong co nguon thu hai
- *                phu nhan. Day la lop duoc uu tien.
- *   hai_nguon -> vien `rule` (xam) + nen trong
- *                Da kiem cheo boi hai nguon, khong can chu y.
- *   null      -> vien `rule` + nen trong
- *                Khong biet nguon (ban ghi cu) thi KHONG to mau bia.
+ * `layer` noi "co may nguon doc ra cau nay", con `suspect` moi noi "nguon nao doc ra
+ * no". Do duoc tren transcript #41 (146 doan):
+ *
+ *     layer        suspect   so dong   nghia
+ *     hai_nguon    False       49      dong OCR cua cap (OCR + ASR cung cau)
+ *     hai_nguon    True        22      dong ASR cua cap
+ *     mot_nguon    False       13      OCR thuan (ASR khong nghe ra)
+ *     mot_nguon    True        62      ASR thuan (khong co phu de cung)
+ *
+ * Nen `mot_nguon` KHONG dong nghia voi OCR: 62/75 dong `mot_nguon` la do ASR ma ra.
+ * To mau theo `layer` se to xanh la cho ca loat dong ASR do — sai han y nguoi dung.
+ *
+ * ## Mau
+ *
+ *   suspect=False (OCR) -> xanh LA  `ok`    (token co san, xem `styles.css`)
+ *   suspect=True  (ASR) -> xanh BIEN `wave`
+ *   khong biet          -> `rule` (xam), khong to mau bia
  */
-export function mauLop(l: LopNguon | null): { vien: string; nen: string } {
-  if (l === "mot_nguon") {
-    return { vien: "border-signal/50", nen: "bg-signal-soft/40" };
+export function mauLop(d: Pick<Dong, "suspect">): { vien: string; nen: string } {
+  if (d.suspect === false) {
+    // OCR doc CHU DA BIEN TAP — bang chung chat nhat.
+    return { vien: "border-ocr", nen: "bg-ocr/15" };
+  }
+  if (d.suspect === true) {
+    // ASR NGHE ra — co the sai ten rieng, nhung la thu duy nhat co khi khong co phu de.
+    return { vien: "border-asr", nen: "bg-asr/15" };
   }
   return { vien: "border-rule", nen: "" };
 }

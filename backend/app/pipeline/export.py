@@ -20,6 +20,7 @@ from typing import Callable
 from app.domain.models import Job
 from app.domain.paths import safe_basename
 from app.domain.subtitle_format import to_ass, to_json, to_srt, to_vtt
+from app.pipeline.dub import mot_dong_moi_cap
 from app.ports.repos import Repos
 
 FORMATS = {"srt": to_srt, "vtt": to_vtt, "ass": to_ass, "json": to_json}
@@ -160,7 +161,25 @@ class ExportHandler:
         if translations is not None and len(translations) != len(transcript.segments):
             raise ValueError("số bản dịch không khớp số đoạn")
 
-        content = render(fmt, transcript.segments, translations=translations,
+        # 🔴 UU TIEN LOP 1 KHI XUAT PHU DE.
+        #
+        # Nguoi dung: "khi dung phu de thi uu tien chat dung layer 1".
+        #
+        # `hop_nhat_theo_doan` giu CA HAI dong khi OCR va ASR cung mot cau (de nguoi
+        # doc soat tren timeline). Nhung tep phu de ma chua ca hai thi nguoi xem thay
+        # hai dong chu chong nhau o cung mot moc thoi gian — vo dung.
+        #
+        # Do duoc tren transcript #41: 71/146 doan la `hai_nguon`, tuc 71 cap trung.
+        #
+        # Loc bang `mot_dong_moi_cap` — CUNG ham ma ban long dung, nen phu de va ban
+        # long khong bao gio noi lech nhau ve viec "cau nao duoc xuat".
+        giu = {s.i for s in mot_dong_moi_cap(list(transcript.segments))}
+        chi_so = [k for k, s in enumerate(transcript.segments) if s.i in giu]
+        doan = [transcript.segments[k] for k in chi_so]
+        if translations is not None:
+            translations = [translations[k] for k in chi_so]
+
+        content = render(fmt, doan, translations=translations,
                          bilingual=bilingual,
                          meta=export_meta(transcript=transcript))
 

@@ -289,7 +289,11 @@ def to_json(segments: list[Segment], *, translations: list[str] | None = None,
     * `text` — câu NGUỒN; `translation` — bản dịch, `null` khi bản xuất không kèm
       bản dịch (đường cũ không truyền `translations`);
     * `suspect` — cờ nghi ngờ của đoạn NGUỒN (ASR); `qa` — các issue CỦA RIÊNG
-      đoạn này (lọc từ `meta.qa_issues` theo `id`, cộng `seg.qa` nếu có).
+      đoạn này (lọc từ `meta.qa_issues` theo `id`, cộng `seg.qa` nếu có);
+    * `layer` — `"mot_nguon"` / `"hai_nguon"`, tức LỚP của đoạn. Trường này
+      ĐỘC LẬP với `suspect`: `layer` nói mấy nguồn cùng đọc ra câu, `suspect`
+      nói nguồn nào đọc ra nó. Đo được trên #41: 62/75 đoạn `mot_nguon` là do
+      ASR sinh ra, nên hai trường không suy ra được nhau.
 
     `meta` do bên gọi dựng (`pipeline/export.py::export_meta`) và được đặt NGUYÊN
     vào `meta` của tệp: hàm này không biết gì về bảng `translations`, nên nó
@@ -321,6 +325,16 @@ def to_json(segments: list[Segment], *, translations: list[str] | None = None,
             "text": seg.text,
             "translation": None if translations is None else translations[position],
             "suspect": bool(seg.suspect),
+            # `layer` KHONG phai ban sao cua `suspect` — hai truc doc lap:
+            #
+            #     layer   = "may NGUON doc ra cau nay"   (mot_nguon / hai_nguon)
+            #     suspect = "NGUON NAO doc ra no"        (False=OCR, True=ASR)
+            #
+            # Do duoc tren #41: 62/75 doan `mot_nguon` la do ASR sinh ra. Nen nhin
+            # `layer` khong suy ra duoc `suspect`, va nguoc lai. Tep xuat truoc day chi
+            # co `suspect`, nen nguoi doc khong biet doan nao la layer 1 — phai mo lai
+            # du lieu goc moi kiem duoc.
+            "layer": seg.layer,
             "qa": qa,
         })
     return json.dumps({"meta": header, "segments": out},

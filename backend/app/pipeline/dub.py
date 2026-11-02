@@ -66,47 +66,39 @@ def mot_dong_moi_cap(segments: list) -> list:
     chong len nhau it nhat mot phan, va do la dau hieu duy nhat khong phu thuoc vao viec
     ASR nghe dung hay sai.
     """
+    # Moi CAU chi giu MOT dong de long/xuat phu de. Uu tien dong OCR (lop tren).
+    #
+    # Nguoi dung: "toi chi bao dung phu de cua cai tren cua layer 1 chu co bao bo cai gi
+    # dau". Nghia la: TIMELINE giu ca hai dong de soat, con PHU DE / BAN LONG chi lay dong
+    # cua lop 1. Khong duoc bo dong nao khoi du lieu — chi chon dong nao duoc dung.
+    #
+    # "Cung mot cau" do bang CHONG THOI GIAN: hai dong cua cung mot cau luon chong len nhau.
+    #
+    # Trong mot cap:
+    #   · co OCR (suspect=False) -> lay OCR. OCR doc CHU DA BIEN TAP; ASR nghe va hay sai
+    #     ten rieng. Do duoc tren #36:
+    #
+    #         ASR "你见过人类做海豹吗"   <- nghe sai (hai cau)
+    #         OCR "你见过人类做海报吗"   <- doc dung (poster)
+    #
+    #   · chi co ASR             -> lay ASR. Do la nguon DUY NHAT o doan do.
+    #
+    # Dong co `chua_trong >= 0` (logo / dong ghi cong nam gon trong mot cau) VAN duoc giu
+    # trong du lieu; no chi khong duoc chon lam dai dien khi da co dong khac cung cap.
     ra = []
+    da_dung: set[int] = set()
     for s in segments:
-        # DOAN BI BAO ma doan bao la LOI THOAI THAT thi day khong phai loi thoai.
-        #
-        # Do duoc tren #36:
-        #
-        #     i=109 [219.17-221.11]S "所以为什么是榕树女神"  <- loi noi that
-        #     i=110 [220.00-220.50]  "LAMDA"                 <- LOGO, khong phai loi noi
-        #
-        # Ca hai deu `mot_nguon` (moi ben chi mot nguon doc ra), nen phep loc theo
-        # `layer` KHONG bat duoc cap nay — do duoc: ham tra ve CA HAI, va ban long se
-        # doc "LAMDA" chong len cau noi that. Nhung `chua_trong` da danh dau san:
-        # doan nam gon trong mot doan khac la vat the RIENG, khong phai mot cau.
-        #
-        # Bo no khoi ban long. Van giu tren TIMELINE (nguoi doc can thay).
-        if getattr(s, "chua_trong", -1) >= 0:
+        if s.i in da_dung:
             continue
+        cap = [x for x in segments if min(x.end, s.end) - max(x.start, s.start) > 0.0]
+        for x in cap:
+            da_dung.add(x.i)
 
-        if getattr(s, "layer", "") != LOP_HAI_NGUON:
-            ra.append(s)
-            continue
+        # Uu tien OCR; neu khong co thi ASR.
+        ocr = [x for x in cap if not getattr(x, "suspect", False)]
+        giu = ocr[0] if ocr else cap[0]
+        ra.append(giu)
 
-        # Dong `hai_nguon` nay da co mot dong khac cung cap duoc giu chua?
-        da_co = any(
-            getattr(khac, "layer", "") == LOP_HAI_NGUON
-            and min(khac.end, s.end) - max(khac.start, s.start) > 0.0
-            for khac in ra
-        )
-        if not da_co:
-            ra.append(s)
-            continue
-
-        # Da co dong cung cap trong `ra`. Chi THAY khi dong nay la OCR va dong kia la ASR.
-        if not getattr(s, "suspect", False):
-            for k in range(len(ra) - 1, -1, -1):
-                khac = ra[k]
-                if (getattr(khac, "layer", "") == LOP_HAI_NGUON
-                        and getattr(khac, "suspect", False)
-                        and min(khac.end, s.end) - max(khac.start, s.start) > 0.0):
-                    ra[k] = s
-                    break
     return ra
 
 

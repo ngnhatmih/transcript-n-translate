@@ -25,6 +25,7 @@ import pytest
 from app.adapters.clock_system import SystemClock
 from app.adapters.persist.sqlite_repos import NotFound, SqliteRepos
 from app.domain.models import Job, Segment, Transcript
+from app.domain.nguon_chu import LOP_HAI_NGUON, LOP_MOT_NGUON
 from app.domain.subtitle_format import (
     format_timestamp, to_ass, to_json, to_srt, to_vtt,
 )
@@ -51,7 +52,7 @@ def test_json_has_meta_and_a_flat_segments_array():
     assert [s["i"] for s in out["segments"]] == [0, 1]
     assert set(out["segments"][0]) == {
         "i", "start", "end", "start_timecode", "end_timecode",
-        "text", "translation", "suspect", "qa",
+        "text", "translation", "suspect", "layer", "qa",
     }
 
 
@@ -753,3 +754,78 @@ def test_empty_stem_falls_back_instead_of_raising(repos, tmp_path, transcript_id
     assert (tmp_path / "out" / f"transcript-{transcript_id}.srt").is_file(), (
         sorted(p.name for p in (tmp_path / "out").iterdir())
     )
+
+def test_export_chi_xuat_MOT_dong_moi_cau_khi_OCR_va_ASR_trung(repos, tmp_path):
+    """🔴 UU TIEN LOP 1: tep phu de khong duoc chua hai dong cho cung mot cau.
+
+    Nguoi dung: "khi dung phu de thi uu tien chat dung layer 1".
+
+    `hop_nhat_theo_doan` giu CA HAI dong khi OCR va ASR cung mot cau — dung cho
+    TIMELINE, vi nguoi doc can soat may nghe gi va doc gi. Nhung tep phu de ma chua ca
+    hai thi nguoi xem thay hai dong chu chong nhau o cung mot moc thoi gian.
+
+    Do duoc tren transcript #41: 71/146 doan la `hai_nguon`, tuc 71 cap trung.
+    """
+    source_id = repos.add_source(kind="file", origin="a.mp4", media_path="m.mp4", lang="zh")
+    cap = [
+        Segment(i=0, start=0.0, end=1.14, text="từ ASR", suspect=True,
+                layer=LOP_HAI_NGUON),
+        Segment(i=1, start=0.0, end=1.04, text="từ OCR", suspect=False,
+                layer=LOP_HAI_NGUON),
+        Segment(i=2, start=2.0, end=3.0, text="câu riêng", suspect=False,
+                layer=LOP_MOT_NGUON),
+    ]
+    tid = repos.add_transcript(source_id=source_id, engine="e", lang="zh", segments=cap)
+
+    _handler(repos, tmp_path).run(_job(transcript_id=tid, format="srt"), lambda p, s: None)
+
+    ra = sorted((tmp_path / "out").glob("*.srt"))
+    assert ra, "khong co tep .srt nao duoc ghi"
+    noi_dung = ra[0].read_text(encoding="utf-8")
+
+    assert "từ OCR" in noi_dung, noi_dung
+    assert "câu riêng" in noi_dung, noi_dung
+    assert "từ ASR" not in noi_dung, (
+        "phu de khong duoc chua dong ASR khi da co dong OCR cung cau:\n" + noi_dung)
+
+def test_json_xuat_ra_co_truong_layer_va_no_DOC_LAP_voi_suspect():
+    """🔴 `layer` va `suspect` la HAI TRUC DOC LAP, khong suy ra duoc nhau.
+
+    Do duoc tren transcript #41: 62/75 doan `mot_nguon` la do **ASR** sinh ra.
+    Nghia la:
+
+        layer=mot_nguon + suspect=True   62   <- ASR thuan
+        layer=mot_nguon + suspect=False  13   <- OCR thuan
+
+    Tep xuat truoc day chi co `suspect`, nen nguoi doc KHONG biet doan nao la layer 1 —
+    phai mo lai du lieu goc moi kiem duoc. Them `layer` de tep tu no noi duoc dieu do.
+
+    Bai nay ghim CA HAI: truong co mat, va no giu dung gia tri cua nguon.
+    """
+    d = [
+        Segment(i=0, start=0.0, end=1.0, text="ASR thuan", suspect=True,
+                layer=LOP_MOT_NGUON),
+        Segment(i=1, start=2.0, end=3.0, text="OCR thuan", suspect=False,
+                layer=LOP_MOT_NGUON),
+        Segment(i=2, start=4.0, end=5.0, text="OCR cua cap", suspect=False,
+                layer=LOP_HAI_NGUON),
+    ]
+    ra = json.loads(to_json(d))
+    theo_i = {s["i"]: s for s in ra["segments"]}
+
+    # 1. Truong phai CO MAT o moi doan.
+    for s in ra["segments"]:
+        assert "layer" in s, "thieu truong layer: " + repr(s)
+
+    # 2. Gia tri phai dung cua nguon, khong bi thay bang `suspect`.
+    assert theo_i[0]["layer"] == LOP_MOT_NGUON
+    assert theo_i[0]["suspect"] is True
+    assert theo_i[1]["layer"] == LOP_MOT_NGUON
+    assert theo_i[1]["suspect"] is False
+    assert theo_i[2]["layer"] == LOP_HAI_NGUON
+
+    # 3. Va day la ca mau chot: HAI doan cung layer, KHAC suspect.
+    assert theo_i[0]["layer"] == theo_i[1]["layer"]
+    assert theo_i[0]["suspect"] != theo_i[1]["suspect"]
+
+

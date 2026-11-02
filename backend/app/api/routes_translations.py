@@ -50,6 +50,7 @@ from app.domain.models import Job
 from app.domain.mt_qa import QaLimits, cps_row
 from app.domain.staleness import is_stale, translation_summary_json
 from app.pipeline.export import FORMATS, MEDIA_TYPES, export_meta, render
+from app.pipeline.dub import mot_dong_moi_cap
 from app.registry import by_id
 
 router = APIRouter(prefix="/api/translations", tags=["translations"])
@@ -490,7 +491,27 @@ def export_translation(translation_id: int, format: str = "srt", bilingual: int 
                  f"transcript {transcript.id} có {len(transcript.segments)} đoạn: "
                  f"dịch lại trước khi xuất")
 
-    body = render(fmt, transcript.segments, translations=translations,
+    # 🔴 UU TIEN LOP 1 — CUNG luat voi duong job (`pipeline/export.py`).
+    #
+    # Do duoc: truoc khi sua, hai duong cho HAI ket qua khac nhau tren cung mot ban
+    # dich #43:
+    #
+    #     GET /api/export/142/download   115 doan   (qua mot_dong_moi_cap)
+    #     GET /api/export/43            146 doan   (khong loc)
+    #
+    # Docstring ngay tren noi "cung mot ban dich => cung noi dung", nen day la bat
+    # bien bi pha chu khong phai su lua chon. Do duoc ca trieu chung: tep SRT tra ve
+    # co "00:00:00,000 --> 00:00:01,040" roi ngay sau la
+    # "00:00:00,000 --> 00:00:01,140" — cung mot cau, hai dong.
+    #
+    # `translations` la danh sach SONG SONG voi `transcript.segments`, nen phai loc
+    # CA HAI bang CUNG mot chi so. Loc lech la ban dich gan vao cau khac.
+    giu = {s.i for s in mot_dong_moi_cap(list(transcript.segments))}
+    chi_so = [k for k, s in enumerate(transcript.segments) if s.i in giu]
+    doan = [transcript.segments[k] for k in chi_so]
+    translations = [translations[k] for k in chi_so]
+
+    body = render(fmt, doan, translations=translations,
                   bilingual=bool(bilingual),
                   meta=export_meta(
                       transcript=transcript, translation=translation,

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { Dong } from "@/lib/studio";
-import { viecCuaDong } from "@/lib/studio";
+import { mauLop, viecCuaDong } from "@/lib/studio";
 import { formatTimecode } from "@/lib/timecode";
 import { cn } from "@/lib/utils";
 
@@ -99,16 +99,107 @@ export function Timeline({
    * `rong` toi thieu 2 px: doan dai 0,06 s o 40 px/s chi rong 2,4 px, van phai
    * nhin thay duoc de biet no ton tai.
    */
+  /**
+   * Khoang thoi gian VE cua tung doan — KHAC `s.start`/`s.end` o mot cho duy nhat:
+   * doan OCR nam gon trong mot doan ASR thi keo cho bang doan ASR do.
+   *
+   * Nguoi dung: "timestamp dau cuoi thi keo cho bang cua asr vua swap y".
+   *
+   * Do duoc tren transcript #41: **25 cap ASR bao OCR** (23 cap bao MOT doan, 2 cap bao
+   * HAI doan):
+   *
+   *     ASR i=1  [0.00-1.14]  bao  OCR i=0 [0.00-1.04]   ->  OCR [0.00-1.14]
+   *     ASR i=7  [7.02-9.66]  bao  OCR i=8 [7.50-8.00]   ->  OCR [7.02-8.00]
+   *                                OCR i=9 [8.00-9.10]   ->  OCR [8.00-9.66]
+   *
+   * Quy tac: ASR bao MOT OCR -> OCR lay nguyen [start, end] cua ASR. ASR bao NHIEU OCR
+   * -> OCR dau lay `start` cua ASR, OCR cuoi lay `end` cua ASR, cac OCR giua giu nguyen.
+   *
+   * Chi doi KHOANG VE. `Segment.start`/`end` that giu nguyen — do la moc may do duoc,
+   * ban long va xuat file van dung no.
+   */
+  const khoangVe = (() => {
+    const dungSai = 0.05;
+    const bao = (ngoai: Dong, trong: Dong) =>
+      trong.start >= ngoai.start - dungSai &&
+      trong.end <= ngoai.end + dungSai &&
+      trong.end - trong.start < ngoai.end - ngoai.start;
+
+    const asr = segments.filter((s) => s.suspect);
+    const ocr = segments.filter((s) => !s.suspect);
+    const keo = new Map<number, { start: number; end: number }>();
+
+    for (const a of asr) {
+      const trong = ocr.filter((o) => bao(a, o)).sort((x, y) => x.start - y.start);
+      if (trong.length === 0) continue;
+      trong.forEach((o, k) => {
+        const dau = k === 0 ? a.start : o.start;
+        const cuoi = k === trong.length - 1 ? a.end : o.end;
+        keo.set(o.i, { start: dau, end: Math.max(dau + 0.01, cuoi) });
+      });
+    }
+    return segments.map((s) => keo.get(s.i) ?? { start: s.start, end: s.end });
+  })();
+
   const xepLan = (() => {
     const cuoiMoiLan: number[] = [];
-    return segments.map((s) => {
-      const moc = s.start * pxPerSec;
-      const rong = Math.max(2, (s.end - s.start) * pxPerSec);
+    const lanCua = new Map<number, { lan: number; rong: number; trai: number }>();
+
+    // Xep theo (start, end) nhu cu — GIU NGUYEN thu tu goc.
+    const thuTu = segments
+      .map((s, k) => ({ s, k }))
+      .sort((x, y) => x.s.start - y.s.start || x.s.end - y.s.end);
+
+    for (const { s, k } of thuTu) {
+      const kv = khoangVe[k]!;
+      const moc = kv.start * pxPerSec;
+      const rong = Math.max(2, (kv.end - kv.start) * pxPerSec);
       let lan = 0;
-      while (lan < cuoiMoiLan.length && cuoiMoiLan[lan] > moc + 0.5) lan++;
+      while (lan < cuoiMoiLan.length && cuoiMoiLan[lan]! > moc + 0.5) lan++;
+      if (lan >= cuoiMoiLan.length) cuoiMoiLan.push(0);
       cuoiMoiLan[lan] = moc + rong;
-      return { i: s.i, lan, rong };
-    });
+      lanCua.set(s.i, { lan, rong, trai: moc });
+    }
+
+    // 🔴 SWAP LAN: chi ASR KHONG CO OCR di kem moi duoc o tren.
+    //
+    // Nguoi dung: "KO PHAI asr nao cx cho xuong duoi nha, chi co asr o doan day nhung ko
+    // co ocr thi moi de o tren."
+    //
+    // Nghia la:
+    //   · ASR khong co OCR nao chong len  -> GIU NGUYEN lan (no la nguon DUY NHAT o do).
+    //   · ASR co OCR chong len             -> doi cho: OCR len lan cua ASR, ASR xuong lan OCR.
+    //
+    // Lan truoc toi doi MOI cap, ke ca khi OCR von da o tren — lam ASR tut xuong vo co.
+    const viTri = new Map(segments.map((s, k) => [s.i, k]));
+    const ocrHet = segments.filter((s) => !s.suspect);
+    const doi = new Map<number, number>();
+
+    for (const a of segments.filter((s) => s.suspect)) {
+      const laA = lanCua.get(a.i);
+      if (!laA) continue;
+
+      // ASR nay co OCR nao chong len khong?
+      const coOcr = ocrHet.filter((o) => {
+        const kv = khoangVe[viTri.get(o.i)!]!;
+        return Math.min(kv.end, a.end) - Math.max(kv.start, a.start) > 0;
+      });
+      if (coOcr.length === 0) continue; // ASR don doc -> de nguyen tren.
+
+      for (const o of coOcr) {
+        const laO = lanCua.get(o.i);
+        if (!laO || laO.lan <= laA.lan) continue; // OCR da o tren roi.
+        doi.set(o.i, laA.lan);
+        doi.set(a.i, laO.lan);
+      }
+    }
+
+    for (const [i, lanMoi] of doi) {
+      const cu = lanCua.get(i);
+      if (cu) lanCua.set(i, { ...cu, lan: lanMoi });
+    }
+
+    return segments.map((s, k) => lanCua.get(s.i) ?? { lan: 0, rong: 2, trai: khoangVe[k]!.start * pxPerSec });
   })();
 
   const soLan = xepLan.reduce((m, b) => Math.max(m, b.lan + 1), 1);
@@ -371,6 +462,7 @@ export function Timeline({
             const b = xepLan[k]!;
             const bad = viecCuaDong(s).length > 0;
             const cur = s.i === currentId;
+            const mau = mauLop(s);
             const chu = s.dich === "" ? s.text : s.dich;
             return (
               <div
@@ -379,12 +471,13 @@ export function Timeline({
                   "group absolute overflow-hidden truncate rounded-sm border px-1.5 text-[10.5px] leading-[16px] whitespace-nowrap transition-colors",
                   cur
                     ? "z-10 border-signal bg-signal-soft text-ink-0"
-                    : "border-rule bg-panel-2 text-ink-1 hover:z-10 hover:border-ink-2",
+                    : cn(mau.vien, mau.nen, "text-ink-1 hover:z-10"),
                   s.daDuyet && !cur && "border-ok/60",
                   bad && "hatch-left pl-3",
                 )}
                 style={{
-                  left: s.start * pxPerSec,
+                  // `b.trai`/`b.rong` den tu `xepLan`, da keo theo ASR bao no.
+                  left: b.trai,
                   width: b.rong,
                   top: b.lan * CAO_LAN + 1,
                   height: CAO_LAN - 2,

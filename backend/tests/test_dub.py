@@ -193,18 +193,29 @@ def test_ban_long_giu_ban_OCR_khi_hai_dong_trung_khit():
     assert ra[0].suspect is False, "phai giu ban OCR (suspect=False)"
 
 
-def test_ban_long_BO_logo_long_trong_loi_thoai():
-    """Ca i=109/i=110: ca hai deu mot_nguon, nen loc theo layer KHONG bat duoc.
+def test_ban_long_giu_dong_TREN_cua_layer_1_khi_OCR_va_ASR_cung_cau():
+    """🔴 HOP DONG (nguoi dung chot 2026-11-02): "toi chi bao dung phu de cua cai
+    tren cua layer 1 chu co bao bo cai gi dau".
 
-    Do duoc: neu chi loc theo `layer` thi ham tra ve CA HAI. Phai dung `chua_trong` —
-    no da danh dau san doan nao nam gon trong doan nao.
+    Nghia la: TIMELINE giu CA HAI dong de nguoi doc soat, con PHU DE / BAN LONG chi
+    lay dong cua LOP 1. Khong duoc bo dong nao khoi du lieu — chi chon dong nao duoc
+    dung.
+
+    Ca that tren #41 (nguoi dung gui anh):
+
+        i=7 [7.02-9.66]S "要经常证明自己的作品是有价值的长"   <- ASR (lan duoi)
+        i=8 [7.50-8.00]  "经常要证明"                        <- OCR (lan tren)
+
+    Phai lay i=8. Ban truoc bo i=8 vi no co `chua_trong`, nen ban long doc cau ASR dai
+    — dung ca nguoi dung bao "van bi dung cai duoi".
     """
     d = [
-        _d(109, 219.17, 221.11, "loi noi that", LOP_MOT_NGUON, True),
-        _d(110, 220.00, 220.50, "LOGO", LOP_MOT_NGUON, False, chua_trong=109),
+        _d(7, 7.02, 9.66, "ASR dai", LOP_HAI_NGUON, True),
+        _d(8, 7.50, 8.00, "OCR ngan", LOP_MOT_NGUON, False, chua_trong=7),
     ]
     ra = mot_dong_moi_cap(d)
-    assert [s.text for s in ra] == ["loi noi that"], [s.text for s in ra]
+    assert [s.text for s in ra] == ["OCR ngan"], (
+        "phai lay dong TREN cua layer 1 (OCR), do duoc: " + repr([s.text for s in ra]))
 
 
 def test_ban_long_GIU_CA_HAI_khi_hai_cau_khong_chong_nhau():
@@ -215,11 +226,18 @@ def test_ban_long_GIU_CA_HAI_khi_hai_cau_khong_chong_nhau():
     assert [s.text for s in mot_dong_moi_cap(d)] == ["cau mot", "cau hai"]
 
 
-def test_ban_long_KHONG_dung_toi_du_lieu_cu_khong_co_lop():
-    """Ban ghi tao truoc khi backend co truong `layer` — khong duoc doan bua."""
+def test_ban_long_gop_du_lieu_cu_chong_nhau_thanh_MOT_dong():
+    """Ban ghi tao truoc khi backend co truong `layer`.
+
+    Hai dong chong nhau van la "cung mot cau" theo phep do THOI GIAN, nen chi duoc doc
+    MOT lan. Ban truoc giu ca hai vi doi `layer` — nhung luc do chung se duoc doc hai
+    lan chong len nhau, dung thu ma rang buoc "dong N khong duoc con noi khi N+1 bat
+    dau" cam.
+    """
     d = [
         _d(0, 0.0, 1.0, "cu mot"),
         _d(1, 0.5, 1.5, "cu hai"),
     ]
-    assert len(mot_dong_moi_cap(d)) == 2
+    ra = mot_dong_moi_cap(d)
+    assert len(ra) == 1, [s.text for s in ra]
 

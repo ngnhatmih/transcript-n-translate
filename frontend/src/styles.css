@@ -49,6 +49,8 @@
   --color-signal-soft: var(--signal-soft);
   --color-fault: var(--fault);
   --color-ok: var(--ok);
+  --color-ocr: var(--ocr);
+  --color-asr: var(--asr);
   --color-wave: var(--wave);
   --color-chart-1: var(--chart-1);
   --color-chart-2: var(--chart-2);
@@ -77,6 +79,12 @@
   --ink-2: oklch(0.52 0.014 75);
   --rule: oklch(0.3 0.006 75);
   --signal: oklch(0.8 0.16 75);
+  /* Hai mau PHAN BIET NGUON CHU — yeu cau nguoi dung: "ocr mau xanh la con asr
+     xanh bien". Khong muon token `--ok` (xanh la nhung la trang thai THANH CONG)
+     hay `--wave` (do bao hoa 0.01 nen gan nhu XAM — no danh cho net song).
+     Hai token rieng de doi mau khong keo theo nghia cua token khac. */
+  --ocr: oklch(0.72 0.17 145);
+  --asr: oklch(0.70 0.14 235);
   --signal-soft: color-mix(in oklab, var(--signal) 14%, transparent);
   --fault: oklch(0.66 0.11 25);
   --ok: oklch(0.62 0.06 125);
@@ -132,6 +140,10 @@
   --fault: oklch(0.52 0.15 25);
   --ok: oklch(0.48 0.08 130);
   --wave: oklch(0.72 0.01 75);
+
+  /* Hai mau PHAN BIET NGUON CHU (che do sang) — xem ghi chu o khoi toi. */
+  --ocr: oklch(0.52 0.16 145);
+  --asr: oklch(0.50 0.14 235);
 }
 
 @layer base {

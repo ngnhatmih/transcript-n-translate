@@ -608,7 +608,71 @@ export function Studio(props: StudioProps) {
   const current = dong.find((s) => s.i === currentId) ?? null;
 
   /** Doan dang phat theo thoi gian — dung so do cua trinh phat. */
-  const playingSeg = dong.find((s) => player.time >= s.start && player.time < s.end);
+  // 🔴 PHU DE TREN VIDEO LAY DONG CUA LOP 1 (OCR), khong phai dong dau tien khop gio.
+  //
+  // Do duoc: `.find()` tra phan tu DAU TIEN khop `[start, end)`. Voi cap OCR/ASR cung cau,
+  // ASR dai hon nen dung TRUOC trong mang (`dong` sap theo start, end):
+  //
+  //     i=0 [0.00-1.04]  OCR   "Lam mot nguoi lam nghe thuat"
+  //     i=1 [0.00-1.14]  ASR   "Lam mot nguoi lam nghe thuat"
+  //
+  // Nguoi dung gui anh: phu de hien chu cua dong DUOI (ASR). Nhung tep xuat va ban long
+  // da uu tien lop 1, nen man hinh phai khop voi tep — neu khong, nguoi doc nghe mot dang
+  // va doc mot dang khac.
+  //
+  // Cung mot luat nhu `mot_dong_moi_cap` o backend: trong cac dong dang chay, chon dong
+  // KHONG `suspect` (OCR) neu co; khong co thi lay dong dau.
+  const playingSeg = (() => {
+    const dangChay = dong.filter((s) => player.time >= s.start && player.time < s.end);
+    if (dangChay.length === 0) return undefined;
+
+    // OCR dang chay -> lay luon.
+    const ocrDangChay = dangChay.find((s) => !s.suspect);
+    if (ocrDangChay !== undefined) return ocrDangChay;
+
+    // 🔴 KHONG co OCR nao phu dung `player.time`, nhung co the OCR cua CAP dang bi ASR
+    // bao van la dong phai hien.
+    //
+    // Do duoc (nguoi dung gui anh): khoi OCR xanh la phu NGAN hon khoi ASR xanh bien cua
+    // cung mot cau. Vi du #41:
+    //
+    //     ASR i=7  [7.02-9.66]
+    //     OCR i=8  [7.50-8.00]   <- chi phu 0,5 s trong 2,64 s cua ASR
+    //
+    // Tu 8,00 s den 9,66 s khong con OCR nao phu, nen ban truoc tut ve dong ASR: phu de
+    // doi sang chu cua ASR roi moi nhay lai. Nguoi dung: "van bi doan dau xong 1 luc no
+    // moi doi sang cai tren".
+    //
+    // Sua: ASR nao dang chay ma BAO mot OCR thi lay OCR do — OCR la ban chinh cua cau, no
+    // phai giu man hinh suot thoi gian cua cap, khong phai chi luc no duoc doc ra.
+    // Lay OCR CUOI CUNG ma ASR nay bao — khong phai OCR DAU TIEN.
+    //
+    // Do duoc: ASR i=7 [7.02-9.66] bao HAI OCR la i=8 [7.50-8.00] va i=9 [8.00-9.10].
+    // Ban dau dung `find` (phan tu dau tien), nen tu 9,10 s den 9,66 s — sau khi i=9 het
+    // — no quay lai i=8, tuc phu de LUI VE cau truoc:
+    //
+    //     t=8.9  -> i=9  "Tac pham cua minh co gia"
+    //     t=9.5  -> i=8  "Thuong xuyen phai chung minh"   <- LUI
+    //
+    // Lay OCR co `end` LON NHAT: do la cau dang duoc noi toi.
+    const dungSai = 0.05;
+    for (const a of dangChay) {
+      const trong = dong
+        .filter((o) =>
+          !o.suspect &&
+          // Chi lay OCR DA BAT DAU. Khong co dieu kien nay thi luc 7,10 s —
+          // truoc khi i=8 [7.50-8.00] bat dau — ham nhay toi i=9 [8.00-9.10],
+          // tuc phu de hien cau CHUA NOI.
+          o.start <= player.time &&
+          o.start >= a.start - dungSai &&
+          o.end <= a.end + dungSai &&
+          o.end - o.start < a.end - a.start)
+        .sort((x, y) => x.end - y.end);
+      if (trong.length > 0) return trong[trong.length - 1];
+    }
+
+    return dangChay[0];
+  })();
   useEffect(() => {
     if (player.playing && playingSeg && playingSeg.i !== currentId) setCurrentId(playingSeg.i);
   }, [player.playing, playingSeg, currentId]);

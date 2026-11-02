@@ -54,6 +54,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.domain.models import Segment
+from app.domain.nguon_chu import LOP_HAI_NGUON
 
 
 def _repo_data_dirs() -> list[pathlib.Path]:
@@ -491,3 +492,43 @@ def test_the_spec_route_writes_no_artifact_to_disk(wired):
 #   * "thân phụ đề vẫn được trả về"  -> `test_the_spec_route_writes_no_artifact_to_disk`
 #     khẳng định `r.text` không rỗng: cùng bảo đảm đó, mà không cần một đường ghi
 #     hỏng để chứng minh.
+
+def test_route_spec_cung_UU_TIEN_LOP_1_nhu_duong_job(wired):
+    """🔴 Hai duong xuat phai loc GIONG NHAU tren du lieu CO CAP TRUNG.
+
+    Bai `test_both_export_routes_agree_for_every_format` chi dung `_SOURCE` hai doan
+    KHONG chong nhau, nen no khong cham toi phep loc — no xanh ke ca khi route spec
+    khong loc gi. Do duoc: bo han phep loc o route spec thi bai do van xanh.
+
+    Bai nay dung mot CAP trung that (OCR + ASR cung cau), nen no do dung cho thieu:
+    phai ra MOT dong, va dong do phai la dong OCR (lop 1).
+    """
+    c, repos, _out, _worker = wired
+    sid = repos.add_source(kind="file", origin="cap.mp4", media_path="/m/cap.mp4")
+    goc = [
+        Segment(i=0, start=0.0, end=1.14, text="ASR cung cau", suspect=True,
+                layer=LOP_HAI_NGUON),
+        Segment(i=1, start=0.0, end=1.04, text="OCR cung cau", suspect=False,
+                layer=LOP_HAI_NGUON),
+    ]
+    tid = repos.add_transcript(source_id=sid, engine="e", lang="zh",
+                               segments=list(goc))
+    dich = [dataclasses.replace(s, text="Ban dich " + str(s.i)) for s in goc]
+    tr_id = repos.add_translation(
+        transcript_id=tid, transcript_version=1, engine="opus-mt",
+        target_lang="vi", segments=dich, prompt_version="opus-p1", status="done")
+
+    r = c.get(f"/api/export/{tr_id}?format=srt")
+    assert r.status_code == 200, r.text
+
+    # SRT co ban dich thi in BAN DICH, khong in chu goc — nen kiem theo
+    # chi so cua ban dich: `i=1` la dong OCR (lop 1), `i=0` la dong ASR.
+    so_khoi = r.text.count("--> ")
+    assert so_khoi == 1, (
+        "cap trung phai ra DUNG MOT khoi, do duoc %d:\n%s" % (so_khoi, r.text))
+    assert "Ban dich 1" in r.text, (
+        "phai lay dong OCR (i=1), do duoc:\n" + r.text)
+    assert "Ban dich 0" not in r.text, (
+        "van lay dong ASR (i=0) cua cap trung:\n" + r.text)
+
+

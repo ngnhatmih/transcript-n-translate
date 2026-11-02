@@ -1136,24 +1136,31 @@ describe("lopCua: doc lop tu du lieu may chu", () => {
   });
 });
 
-describe("mauLop: VIEN va NEN cua dong theo lop", () => {
-  it("mot_nguon dung vien signal va co nen", () => {
-    assert.equal(mauLop("mot_nguon").vien, "border-signal/50");
-    assert.equal(mauLop("mot_nguon").nen, "bg-signal-soft/40");
+describe("mauLop: VIEN va NEN theo NGUON CHU (OCR xanh la, ASR xanh bien)", () => {
+  it("OCR (suspect=false) dung xanh LA", () => {
+    assert.equal(mauLop({ suspect: false }).vien, "border-ocr");
+    assert.equal(mauLop({ suspect: false }).nen, "bg-ocr/15");
   });
 
-  it("hai_nguon dung vien rule, KHONG co nen", () => {
-    assert.equal(mauLop("hai_nguon").vien, "border-rule");
-    assert.equal(mauLop("hai_nguon").nen, "");
+  it("ASR (suspect=true) dung xanh BIEN", () => {
+    assert.equal(mauLop({ suspect: true }).vien, "border-asr");
+    assert.equal(mauLop({ suspect: true }).nen, "bg-asr/15");
   });
 
-  it("hai lop KHONG duoc trung vien — day la ca muc dich cua no", () => {
-    assert.notEqual(mauLop("mot_nguon").vien, mauLop("hai_nguon").vien);
+  it("hai nguon KHONG duoc trung mau — day la ca muc dich cua no", () => {
+    assert.notEqual(mauLop({ suspect: false }).vien, mauLop({ suspect: true }).vien);
+    assert.notEqual(mauLop({ suspect: false }).nen, mauLop({ suspect: true }).nen);
   });
 
-  it("null dung mau trung tinh (khong to mau cho cai chua biet)", () => {
-    assert.equal(mauLop(null).vien, "border-rule");
-    assert.equal(mauLop(null).nen, "");
+  it("khong biet (suspect undefined) dung mau trung tinh, khong to mau bia", () => {
+    assert.equal(mauLop({}).vien, "border-rule");
+    assert.equal(mauLop({}).nen, "");
+  });
+
+  it("layer KHONG quyet dinh mau — mot_nguon co the la ASR", () => {
+    // Do duoc tren #41: 62/75 dong `mot_nguon` la do ASR ma ra. Neu to mau theo
+    // `layer` thi ca loat dong do bi to xanh la — sai han y nguoi dung.
+    assert.equal(mauLop({ suspect: true }).vien, "border-asr");
   });
 });
 
