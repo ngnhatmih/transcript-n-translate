@@ -90,6 +90,10 @@ class DubPayload(BaseModel):
     translation_id: int = Field(ge=1)
     voice: str | None = None
     so_dong: int | None = Field(default=None, ge=1)
+    #: Kiểu chữ phụ đề BURN vào video — cùng khối với `POST /api/dubs` và
+    #: `GET /api/export/{id}?style=…`. Vắng mặt = mặc định của định dạng.
+    tron_nen: bool | None = None
+    style: dict | None = None
 
 
 class ExportPayload(BaseModel):

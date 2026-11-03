@@ -304,6 +304,10 @@ class DubHandler:
         tron_nen = payload.get("tron_nen")
         if tron_nen is None:
             tron_nen = self._tron_nen
+        #: Kiểu chữ phụ đề BURN vào video. Đi qua payload để giao diện và đường job dùng
+        #: CÙNG một kiểu với bản xem trước trên web — hai nơi tự đặt kiểu riêng là hai
+        #: nơi trôi khỏi nhau. `None` = mặc định của định dạng (từng byte như cũ).
+        kieu_chu = payload.get("style") or None
 
         ban = self._repos.get_translation(tid)
         # LOC THEO LOP truoc khi long: timeline giu 2 dong de nguoi doc soat, nhung
@@ -379,7 +383,8 @@ class DubHandler:
             # quanh bước burn, nhưng `dub-1.mp4` ra 88,9 MB mà KHÔNG có chữ nào —
             # đúng kiểu hỏng im lặng mà một `except` rộng che mất.
             self._tron_va_remux(tid, ban.transcript_id, master_path, report,
-                                chu_dich=[s.text for s in (ban.segments or [])])
+                                chu_dich=[s.text for s in (ban.segments or [])],
+                                kieu_chu=kieu_chu)
 
         report(0.92, f"xuất {len(self._dinh_dangs)} định dạng")
         xuat_dinh_dang(master_path, self._out_dir, self._dinh_dangs)
@@ -392,7 +397,8 @@ class DubHandler:
 
     def _tron_va_remux(self, tid: int, transcript_id: int,
                        master: pathlib.Path, report,
-                       chu_dich: list[str] | None = None) -> None:
+                       chu_dich: list[str] | None = None,
+                       kieu_chu: dict | None = None) -> None:
         """Trộn nền của VIDEO GỐC với bản lồng, rồi remux vào video.
 
         Chuỗi lấy video: `translation` -> `transcript` -> `source`. `transcript_id` được
@@ -475,7 +481,8 @@ class DubHandler:
                     # đẩy khối chữ XUỐNG để HỘP ĐEN che lấp lớp phụ đề TRUNG CỨNG của
                     # video gốc ở đáy khung — xem `subtitle_format._ASS_OFFSET_DOC_MAC_DINH`.
                     _export.render("ass", transcript.segments,
-                                   translations=list(chu_dich or []), khung=khung),
+                                   translations=list(chu_dich or []), khung=khung,
+                                   style=kieu_chu),
                     encoding="utf-8",
                 )
             except Exception as exc:  # noqa: BLE001 — xem lý do ngay dưới

@@ -156,10 +156,70 @@ def _ass_escape(text: str) -> str:
     return text.replace("\\", "\\\\").replace("{", "\\{").replace("}", "\\}").replace("\n", "\\N")
 
 
+#: Khoá `style` được phép ghi đè. Danh sách TRẮNG, không phải danh sách đen: `style` đi
+#: từ HTTP xuống đây, nên khoá lạ phải bị BỎ chứ không được chèn vào `tham_so`. Chèn bừa
+#: thì một khoá như `rx` sẽ đổi hệ toạ độ và làm chữ tràn khung — đúng thứ
+#: `_ASS_KHUNG_MAC_DINH` sinh ra để chặn.
+_ASS_STYLE_CHO_PHEP = ("co", "vien", "le", "duoi", "kieu_vien", "dam", "nghieng",
+                       "bong", "can_le", "mau_chu", "mau_hop")
+
+
+def _mau_ass(mau: str, *, do_duc: float | None = None) -> str:
+    """Đổi màu sang `&HAABBGGRR` của ASS.
+
+    Nhận HAI dạng, vì hai đầu gửi hai dạng khác nhau: `#RRGGBB`/`#RRGGBBAA` (CSS, giao
+    diện dùng) và `&HAABBGGRR` (ASS, đã đúng thì giữ nguyên).
+
+    🔴 `Alpha` của ASS NGƯỢC với CSS: `00` = ĐỤC hoàn toàn, `FF` = trong suốt. Đây là chỗ
+    dễ sai nhất khi map màu, nên phép đảo nằm ở đúng một dòng và ghim bằng test.
+    """
+    s = str(mau).strip()
+    if s.startswith("&H") or s.startswith("&h"):
+        return s.upper().replace("&H", "&H", 1)
+    if not s.startswith("#") or len(s) not in (7, 9):
+        raise ValueError(f"màu phải là '#RRGGBB', '#RRGGBBAA' hoặc '&HAABBGGRR', đo được {mau!r}")
+    try:
+        r, g, b = int(s[1:3], 16), int(s[3:5], 16), int(s[5:7], 16)
+        a_css = int(s[7:9], 16) if len(s) == 9 else 255
+    except ValueError as exc:
+        raise ValueError(f"màu không phải hex hợp lệ: {mau!r}") from exc
+    if do_duc is not None:
+        a_css = round(min(max(float(do_duc), 0.0), 1.0) * 255)
+    a_ass = 255 - a_css
+    return f"&H{a_ass:02X}{b:02X}{g:02X}{r:02X}"
+
+
+def _style_ass(style: dict) -> dict:
+    """Chuẩn hoá `style` từ ngoài thành các khoá của `_ASS_KHUNG_MAC_DINH`.
+
+    Kẹp mọi số vào khoảng hợp lệ thay vì ném lỗi: một cỡ chữ 5 px hay 900 px vẫn phải ra
+    một tệp ĐỌC ĐƯỢC, không phải một job hỏng. Riêng màu sai định dạng thì ném —
+    im lặng đổi sang màu khác là giấu lỗi của người gọi.
+    """
+    ra: dict = {}
+    if "mau_chu" in style:
+        ra["mau_chu"] = _mau_ass(style["mau_chu"])
+    if "mau_hop" in style:
+        ra["mau_hop"] = _mau_ass(style["mau_hop"], do_duc=style.get("do_duc_hop"))
+    for khoa, thap, cao_ in (("co", 8, 400), ("vien", 0, 20), ("le", 0, 500),
+                             ("duoi", 0, 500)):
+        if khoa in style:
+            ra[khoa] = min(max(int(style[khoa]), thap), cao_)
+    if "kieu_vien" in style:
+        ra["kieu_vien"] = 3 if int(style["kieu_vien"]) == 3 else 1
+    for khoa in ("dam", "nghieng", "bong"):
+        if khoa in style:
+            ra[khoa] = -1 if style[khoa] else 0
+    if "can_le" in style:
+        ra["can_le"] = min(max(int(style["can_le"]), 1), 9)
+    return ra
+
+
 def to_ass(segments: list[Segment], *, translations: list[str] | None = None,
            bilingual: bool = False, title: str = "phu-de-lab",
            khung: tuple[int, int] | None = None,
-           offset_doc: float | None = None) -> str:
+           offset_doc: float | None = None,
+           style: dict | None = None) -> str:
     """Sinh `.ass`. `khung=(rong, cao)` là kích thước VIDEO THẬT mà chữ sẽ nằm lên.
 
     `khung=None` giữ nguyên hệ `1920×1080` từng byte — đường xuất tệp rời không biết
@@ -188,6 +248,14 @@ def to_ass(segments: list[Segment], *, translations: list[str] | None = None,
     """
     _assert_lengths(segments, translations)
     tham_so = dict(_ASS_KHUNG_MAC_DINH)
+    # 🔴 STYLE ÁP **TRƯỚC** KHỐI `khung`, và khối đó NHÂN TỈ LỆ TỪ `tham_so`.
+    #
+    # Thứ tự này là thứ tự duy nhất đúng: người dùng chọn cỡ chữ trong hệ 1920×1080, còn
+    # video có thể dọc 1080×1920. Nếu style áp SAU khối `khung` thì cỡ chữ do người dùng
+    # chọn ĐÈ MẤT phần đã suy theo tỉ lệ, và chữ tràn ra ngoài mép trên khung dọc — đúng
+    # lỗi mà `_ASS_KHUNG_MAC_DINH` sinh ra để chặn.
+    if style:
+        tham_so.update(_style_ass(style))
     #: `None` = không ghi đè vị trí (giữ nguyên hành vi cũ từng byte).
     pos_y: int | None = None
     if khung is not None:
@@ -196,9 +264,9 @@ def to_ass(segments: list[Segment], *, translations: list[str] | None = None,
             # Tỉ lệ theo trục NGẮN: khung dọc 1080×1920 có trục ngắn 1080, nên chữ nhỏ
             # lại đúng bằng 1080/1920 so với hệ gốc — vừa bề ngang, không tràn.
             ti_le = min(rong / 1920, cao / 1080)
-            co = max(12, round(_ASS_KHUNG_MAC_DINH["co"] * ti_le))
-            le = max(8, round(_ASS_KHUNG_MAC_DINH["le"] * ti_le))
-            duoi = max(8, round(_ASS_KHUNG_MAC_DINH["duoi"] * ti_le))
+            co = max(12, round(tham_so["co"] * ti_le))
+            le = max(8, round(tham_so["le"] * ti_le))
+            duoi = max(8, round(tham_so["duoi"] * ti_le))
             # Đáy khối chữ trong hệ `PlayRes`, tính TỈ LỆ THEO CHIỀU CAO KHUNG — không
             # trừ vào `duoi`.
             #
@@ -228,7 +296,7 @@ def to_ass(segments: list[Segment], *, translations: list[str] | None = None,
             tham_so.update(
                 rx=rong, ry=cao, wrap=0,
                 co=co,
-                vien=max(1, round(_ASS_KHUNG_MAC_DINH["vien"] * ti_le)),
+                vien=max(1, round(tham_so["vien"] * ti_le)),
                 le=le, duoi=duoi,
             )
     lines = [_ASS_HEADER.format(title=title, **tham_so)]

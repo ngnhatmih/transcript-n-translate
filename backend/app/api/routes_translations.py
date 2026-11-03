@@ -36,6 +36,7 @@ Bốn quyết định ở đây, và lý do chúng không hiển nhiên:
 from __future__ import annotations
 
 import dataclasses
+import json
 
 from fastapi import APIRouter, Depends, HTTPException, Response
 from fastapi.responses import PlainTextResponse
@@ -447,6 +448,7 @@ export_router = APIRouter(prefix="/api/export", tags=["export"])
 
 @export_router.get("/{translation_id}", response_class=PlainTextResponse)
 def export_translation(translation_id: int, format: str = "srt", bilingual: int = 0,
+                       style: str | None = None,
                        repos=Depends(get_repos)):
     """Xuất THẲNG nội dung phụ đề của một bản dịch (spec §11).
 
@@ -511,15 +513,36 @@ def export_translation(translation_id: int, format: str = "srt", bilingual: int 
     doan = [transcript.segments[k] for k in chi_so]
     translations = [translations[k] for k in chi_so]
 
-    body = render(fmt, doan, translations=translations,
-                  bilingual=bool(bilingual),
-                  meta=export_meta(
-                      transcript=transcript, translation=translation,
-                      # `stale` TÍNH Ở ĐÂY, cùng nguồn với `list_translations`:
-                      # bản dịch dịch từ một version cũ của transcript là dữ liệu
-                      # người dùng PHẢI thấy trong tệp xuất, không chỉ trên màn hình.
-                      stale=is_stale(transcript.version,
-                                     translation.transcript_version)))
+    #: Kiểu chữ phụ đề — CHỈ có nghĩa với `.ass`. Đi qua query như CHUỖI JSON thay vì
+    #: khai từng tham số: một khối `style` là MỘT hợp đồng, còn `&co=&mau_chu=&dam=…`
+    #: là mười hợp đồng rời nhau, và mỗi lần thêm khoá là một lần sửa chữ ký route.
+    #:
+    #: Không gửi `style` thì `render` nhận `None` và tệp ra GIỐNG TỪNG BYTE bản cũ —
+    #: ghim bằng `test_export_ass_khong_style_giong_tung_byte`.
+    kieu_chu: dict | None = None
+    if style:
+        try:
+            moc = json.loads(style)
+        except json.JSONDecodeError as exc:
+            raise HTTPException(422, f"`style` phải là JSON hợp lệ: {exc}") from exc
+        if not isinstance(moc, dict):
+            raise HTTPException(422, "`style` phải là một đối tượng JSON")
+        kieu_chu = moc
+    try:
+        body = render(fmt, doan, translations=translations,
+                      bilingual=bool(bilingual),
+                      style=kieu_chu,
+                      meta=export_meta(
+                          transcript=transcript, translation=translation,
+                          # `stale` TÍNH Ở ĐÂY, cùng nguồn với `list_translations`:
+                          # bản dịch dịch từ một version cũ của transcript là dữ liệu
+                          # người dùng PHẢI thấy trong tệp xuất, không chỉ trên màn hình.
+                          stale=is_stale(transcript.version,
+                                         translation.transcript_version)))
+    except ValueError as exc:
+        # `_style_ass` ném `ValueError` khi màu sai định dạng. Đó là tham số của client,
+        # không phải lỗi máy chủ: 422 nói đúng bên sai.
+        raise HTTPException(422, f"kiểu chữ không hợp lệ: {exc}") from exc
 
     return PlainTextResponse(body, media_type=MEDIA_TYPES.get(fmt, "text/plain"))
 

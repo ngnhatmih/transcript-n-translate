@@ -39,7 +39,8 @@ META_FORMATS = frozenset({"json"})
 def render(fmt: str, segments, *, translations: list[str] | None = None,
            bilingual: bool = False, meta: dict | None = None,
            khung: tuple[int, int] | None = None,
-           offset_doc: float | None = None) -> str:
+           offset_doc: float | None = None,
+           style: dict | None = None) -> str:
     """Sinh nội dung của MỘT định dạng — cửa vào duy nhất của cả hai đường export.
 
     Ba định dạng phụ đề nhận `bilingual`; `json` bỏ qua nó (định dạng đó LUÔN có
@@ -60,9 +61,11 @@ def render(fmt: str, segments, *, translations: list[str] | None = None,
     """
     if fmt in META_FORMATS:
         return FORMATS[fmt](segments, translations=translations, meta=meta or {})
-    if fmt == "ass" and khung is not None:
+    if fmt == "ass":
+        # `style` đi CẢ khi `khung=None`: đường xuất tệp rời cũng phải mang đúng kiểu
+        # chữ người dùng chọn, nếu không thì tệp `.ass` tải về trông khác video đã burn.
         return FORMATS[fmt](segments, translations=translations, bilingual=bilingual,
-                            khung=khung, offset_doc=offset_doc)
+                            khung=khung, offset_doc=offset_doc, style=style)
     return FORMATS[fmt](segments, translations=translations, bilingual=bilingual)
 
 

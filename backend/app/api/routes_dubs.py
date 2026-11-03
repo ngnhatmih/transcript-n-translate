@@ -36,6 +36,10 @@ class DubIn(BaseModel):
     #: bản lồng sạch; `True` = bắt buộc trộn. Đo được giá của `True`: +66 s và 555 MiB
     #: VRAM cho phim 20,8 phút — nên nó là lựa chọn THEO JOB, không phải mặc định ngầm.
     tron_nen: bool | None = None
+    #: Kiểu chữ phụ đề BURN vào `dub-<tid>.mp4`. Cùng khối `style` với
+    #: `GET /api/export/{id}?style=…` và với bản xem trước trên web — một kiểu chữ, ba
+    #: nơi dùng. `None` = mặc định của định dạng, tệp ra giống từng byte bản cũ.
+    style: dict | None = None
 
 
 @router.post("", status_code=201)
@@ -68,7 +72,8 @@ def create_dub(body: DubIn, repos=Depends(get_repos), worker=Depends(get_worker)
     job = Job(id=None, workspace=2, type="dub", engine=ENGINE_TTS,
               phase=f"dub:{ENGINE_TTS}",
               payload={"translation_id": body.translation_id, "voice": body.voice,
-                       "so_dong": body.so_dong, "tron_nen": body.tron_nen})
+                       "so_dong": body.so_dong, "tron_nen": body.tron_nen,
+                       "style": body.style})
     job_id = repos.add_job(job)
     return {"job": {"id": job_id, "type": "dub", "state": repos.get_job(job_id).state,
                     "translation_id": body.translation_id}}
