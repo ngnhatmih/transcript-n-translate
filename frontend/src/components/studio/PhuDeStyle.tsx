@@ -95,8 +95,11 @@ export function PhuDeOverlay({
           ...(hopRieng
             ? (ngangTuDong
                 // ngang = 0: hop OM CHU. `fit-content` + margin auto de van canh giua.
-                ? { left: 0, right: 0, width: "fit-content", marginLeft: "auto",
-                    marginRight: "auto", height: hHop }
+                // `maxWidth` = bề ngang KHUNG: câu dài hơn video phải BẺ DÒNG như libass
+                // (`WrapStyle: 0`). DO ĐƯỢC (ảnh chủ dự án): thiếu nó thì chữ tràn ra hai
+                // bên hộp ở bản xem trước, trong khi bản burn lại xuống dòng — hai bên khác nhau.
+                ? { left: 0, right: 0, width: "fit-content", maxWidth: hop.rong,
+                    marginLeft: "auto", marginRight: "auto", height: hHop }
                 : { left: hop.trai + (hop.rong - wHop) / 2, width: wHop, height: hHop })
             : { left: hop.trai + h.le, width: Math.max(0, hop.rong - 2 * h.le) }),
           ...(hopRieng ? { display: "flex", alignItems: "center",
