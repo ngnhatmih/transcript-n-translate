@@ -464,32 +464,32 @@ GPU. Nó tự ép UTF-8 cho stdout (console Windows mặc định cp1252, còn s
 tiếng Trung/Việt) và tự đặt cache model trước khi nạp `faster_whisper`.
 
 Con số nền của lần chạy mặc định, đo sau khi xoá `__pycache__` (lệnh ở mục
-"Kiểm thử" trên, chạy từ trong `backend\`). Thứ có nghĩa là **1507 / 15**, không
+"Kiểm thử" trên, chạy từ trong `backend\`). Thứ có nghĩa là **1508 / 15**, không
 phải số giây — thời gian trôi giữa các lần chạy (đã thấy 24,00–30,94 s) còn con
 số bài thì không:
 
 ```
-1507 passed, 15 deselected, 3 warnings
+1508 passed, 15 deselected, 3 warnings
 ```
 
 Hai con số đó là SỐ BÀI ĐƯỢC CHỌN, và chúng khớp với số mà `--collect-only` báo
-(`1507/1522`, 15 bài `live` bị bỏ;
+(`1508/1523`, 15 bài `live` bị bỏ;
 `tests/test_backend_readme.py::test_readme_baseline_matches_the_tests_actually_
 collected` đối chiếu mỗi lần chạy).
 
 
-Máy này **CÓ** `ffmpeg 8.1.1` + `ffprobe` trên PATH (đã đo), nên `1507/15` ở trên
+Máy này **CÓ** `ffmpeg 8.1.1` + `ffprobe` trên PATH (đã đo), nên `1508/15` ở trên
 là số THẬT của nó. Máy **không có** `ffmpeg`/`ffprobe` cho một kết quả KHÁC: cả
 `tests/test_ingest.py` bị `skipif` ở cấp module — **9** bài cùng skip một lượt —
-nên dòng tổng kết của máy đó là **`1498 passed, 9 skipped, 15 deselected`** (=
-`1507 − 9`; con số này TỪNG ghi `978`, tức một baseline rất cũ, và nó lệch phép
+nên dòng tổng kết của máy đó là **`1499 passed, 9 skipped, 15 deselected`** (=
+`1508 − 9`; con số này TỪNG ghi `978`, tức một baseline rất cũ, và nó lệch phép
 trừ của chính khối nền ngay trên nó). Đó là
 con số của máy thiếu ffmpeg, **không phải** con số máy này từng in ra; đừng chép
 nó vào khối nền ở trên, và đừng "sửa" số nền xuống chỉ vì thiếu ffmpeg.
 
 ⚠️ Con số `856` ở đây TỪNG không khớp phép trừ của chính nó: `865 − 9 = 856`, tức
 nó là số của lượt TRƯỚC `V1` (+3 bài) còn sót lại. Phép trừ của khối nền hiện tại
-là `1507 − 9` = `1498`.
+là `1508 − 9` = `1499`.
 
 
 (Con số này từng bị ghi là `798`: bài `test_a_failed_translation_leaves_the_
@@ -1676,7 +1676,7 @@ giây không gì lấp được ở layer 1. Đo toàn bộ: chỉ **3/96** dòn
 ### Đo cuối
 
 ```
-pytest (toàn bộ)      1507 passed, 15 deselected   EXIT_PYTEST=0
+pytest (toàn bộ)      1508 passed, 15 deselected   EXIT_PYTEST=0
 ```
 
 ## ERRATA #65 — nới `start`/`end` của OCR theo MỐC ĐOẠN ASR, không theo TỪ
@@ -1743,10 +1743,52 @@ là ca `i=55` ở trên.
     tổng hở              : 102,33 s -> 97,51 s
     số cặp chồng         : 1   — chỉ còn i=138/i=139 (logo `ΛNI`, CÓ SẴN trong dữ liệu gốc)
 
+### Bổ sung — nhóm phải khớp theo TỈ LỆ, không đòi khớp tuyệt đối
+
+Bản đầu của `_nhom_theo_chu` đòi chữ nối lại **BẰNG ĐÚNG** chữ ASR. Chủ dự án chỉ ra ca
+`0:08.00 → 0:09.10` mà `end` ngắn hơn thực tế, và đo được hai nguyên nhân:
+
+**1. Cửa sổ `dung_sai = 0,5 s` quá hẹp.** Lúc `keo_dai_theo_asr` chạy, dòng OCR còn là
+`[8.00-8.50]` (0,5 s), nên cửa sổ chỉ `[7.50, 9.00]`. Tâm của `值` là `9,20` và của `的` là
+`9,33` — NGOÀI cửa sổ. Vòng lặp từ không phủ hết ký tự OCR cần, nên `end` đứng ở `9,10`
+(`价` kết thúc), trong khi lời nói tới `9,66`.
+
+**2. Nhóm không được nhận vì chữ khác thứ tự:**
+
+    OCR nối lại : 经常要证明 + 自己的作品是有价值的
+    ASR nghe    : 要经常证明自己的作品是有价值的长
+
+Khác THỨ TỰ (`经常要` vs `要经常`) và ASR thừa `的长`. So tuyệt đối trượt → luật nới bị bỏ
+qua → `end` không được sửa.
+
+Sửa: so bằng `SequenceMatcher(...).ratio() >= 0.85` (cặp này đo được **0,90**), và chọn nhóm
+**DÀI NHẤT** khớp thay vì nhóm đầu tiên — vì dòng CUỐI của nhóm mới là dòng lấy `end`.
+
+🔴 **KHÔNG dùng `_da_co_chu`** dù nó đã có sẵn: nhánh `a in b or b in a` của nó nhận cả một
+dòng KHÁC CÂU nối vào, và bài `test_dong_OCR_chi_CHAM_MEP_khong_duoc_gan_hai_nguon` ĐỎ ngay:
+
+    ASR  [48.27-50.05] '有时又会显得很荒诞'
+    OCR  [48.50-49.47] '有时又会显得很荒诞'   <- cùng câu
+    OCR  [50.00-51.09] '比如这个搞雕塑的'     <- chỉ CHẠM MÉP
+
+    concat = '有时又会显得很荒诞比如这个搞雕塑的'
+    '有时又会显得很荒诞' in concat -> True -> nhóm 2 dòng -> kéo `start` về 48,27
+
+Tỉ lệ thuần của cặp đó chỉ **0,67** → không khớp. Bài ghim:
+`test_nhom_khop_theo_TI_LE_khong_doi_khop_tuyet_doi`.
+
+Đo lại trên transcript #56:
+
+    i=8  [8.00-9.10] -> [8.00-9.66]     (end nới, chặn bởi i=9 bắt đầu 9,66)
+    i=6  [7.02-8.00] giữ nguyên          (dòng ĐẦU, start = 7,02 = đầu ASR)
+
+    tổng hở      : 97,51 s -> 94,51 s
+    số cặp chồng : 1   — vẫn chỉ `i=138/i=139` (logo `ΛNI`)
+
 ### Đo cuối
 
 ```
-pytest (toàn bộ)      1507 passed, 15 deselected   EXIT_PYTEST=0
+pytest (toàn bộ)      1508 passed, 15 deselected   EXIT_PYTEST=0
 ```
 
 Ba bài ghim mới trong `tests/test_nguon_chu.py`:

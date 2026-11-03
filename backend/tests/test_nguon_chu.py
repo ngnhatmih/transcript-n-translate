@@ -522,3 +522,35 @@ def test_CHU_KHONG_KHOP_thi_KHONG_noi_gi():
     assert d.start == 10.0 and d.end == 10.5, (
         "chữ không khớp thì mốc phải NGUYÊN, đo được " + str((d.start, d.end))
     )
+
+
+def test_nhom_khop_theo_TI_LE_khong_doi_khop_tuyet_doi():
+    """Nhóm khớp theo TỈ LỆ >= 0,85 — ca thật `i=6/i=8` của transcript #56.
+
+        OCR [7.02-8.00] '经常要证明'
+        OCR [8.00-9.10] '自己的作品是有价值的'
+        ASR [7.02-9.66] '要经常证明自己的作品是有价值的长'
+
+    Chữ nối lại KHÁC THỨ TỰ (`经常要` vs `要经常`) và ASR thừa `的长`, nên so
+    TUYỆT ĐỐI trượt — và khi trượt thì `end` của dòng cuối đứng ở 9,10 trong
+    khi lời nói tới 9,66. Tỉ lệ của cặp này là 0,90.
+
+    🔴 KHÔNG dùng `_da_co_chu`: nhánh `a in b or b in a` của nó nhận cả MỘT
+    DÒNG KHÁC CÂU nối vào (bài `test_dong_OCR_chi_CHAM_MEP_...` bắt được).
+    """
+    from app.domain.nguon_chu import hop_nhat_theo_doan
+    ocr = [_seg(0, 7.02, 8.00, "经常要证明"),
+           _seg(1, 8.00, 9.10, "自己的作品是有价值的")]
+    asr = [_seg(0, 7.02, 9.66, "要经常证明自己的作品是有价值的长")]
+    ra, _, _ = hop_nhat_theo_doan(ocr, asr)
+    d1 = next(x for x in ra if x.text == "经常要证明")
+    d2 = next(x for x in ra if x.text == "自己的作品是有价值的")
+    assert abs(d2.end - 9.66) < 0.01, (
+        "dòng CUỐI phải nới tới cuối ASR 9,66, đo được " + str(d2.end)
+    )
+    assert abs(d1.start - 7.02) < 0.01, (
+        "start dòng ĐẦU không được đổi, đo được " + str(d1.start)
+    )
+    assert d2.start == 8.00, (
+        "start dòng CUỐI phải giữ mốc khung 8,00, đo được " + str(d2.start)
+    )

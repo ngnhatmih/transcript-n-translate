@@ -201,16 +201,41 @@ def _nhom_theo_chu(ung_vien: list[tuple[int, Segment]], text_asr: str
     LIÊN TIẾP chứ không lấy cả danh sách.
     """
     ds = sorted(ung_vien, key=lambda t: (t[1].start, t[1].end))
-    dich = _chuan_hoa(text_asr)
-    if not dich:
+    if not _chuan_hoa(text_asr):
         return []
+    # 🔴 SO BẰNG TỈ LỆ >= 0,85, KHÔNG đòi khớp TUYỆT ĐỐI và KHÔNG dùng `_da_co_chu`.
+    #
+    # DO ĐƯỢC — ca thật `i=6/i=8` (transcript #56), nơi so tuyệt đối TRƯỢT:
+    #
+    #     OCR nối lại : 经常要证明 + 自己的作品是有价值的
+    #     ASR nghe    : 要经常证明自己的作品是有价值的长
+    #
+    # Khác THỨ TỰ (`经常要` vs `要经常`) và ASR thừa `的长`. Tỉ lệ 0,90 -> khớp đúng.
+    #
+    # 🔴 VÌ SAO KHÔNG DÙNG `_da_co_chu`: nó có nhánh `a in b or b in a`, và nhánh đó
+    # khiến MỘT DÒNG KHÁC CÂU nối vào vẫn "khớp". Bài test
+    # `test_dong_OCR_chi_CHAM_MEP_khong_duoc_gan_hai_nguon` ĐỎ ngay:
+    #
+    #     ASR  [48.27-50.05] '有时又会显得很荒诞'
+    #     OCR  [48.50-49.47] '有时又会显得很荒诞'   <- cùng câu
+    #     OCR  [50.00-51.09] '比如这个搞雕塑的'     <- CHỈ CHẠM MÉP
+    #
+    #     concat = '有时又会显得很荒诞比如这个搞雕塑的'
+    #     '有时又会显得很荒诞' in concat -> True -> nhóm 2 dòng -> kéo `start` của dòng
+    #     đầu về 48,27 (đầu ASR) — đúng lỗi cần tránh.
+    #
+    # Tỉ lệ thuần thì cặp đó chỉ 0,67 -> không khớp. Chọn nhóm DÀI NHẤT khớp, không phải
+    # nhóm đầu tiên: dòng CUỐI của nhóm mới là dòng lấy `end` của ASR.
+    tot_nhat: list[tuple[int, Segment]] = []
     for a in range(len(ds)):
         gop = ""
         for b in range(a, len(ds)):
             gop += ds[b][1].text
-            if _chuan_hoa(gop) == dich:
-                return ds[a:b + 1]
-    return []
+            if (b - a + 1) > len(tot_nhat):
+                ti = SequenceMatcher(None, _chuan_hoa(gop), _chuan_hoa(text_asr)).ratio()
+                if ti >= 0.85:
+                    tot_nhat = ds[a:b + 1]
+    return tot_nhat
 
 
 def hop_nhat_theo_doan(doan_ocr: list[Segment], doan_asr: list[Segment]
