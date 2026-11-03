@@ -15,9 +15,19 @@ FROM python:3.10-slim
 #
 # `python3-venv` cần cho venv TTS bên dưới (`python:3.10-slim` không kèm `ensurepip` đầy đủ
 # cho `-m venv` ở mọi biến thể).
+ 
 RUN apt-get update \
  && apt-get install -y --no-install-recommends ffmpeg libsndfile1 python3-venv \
  && rm -rf /var/lib/apt/lists/*
+# FONT PHU DE — .ass ghi Fontname: Archivo, libass tra qua fontconfig.
+ #
+ # DO DUOC: image goc KHONG co Archivo (fc-match Archivo -> DejaVuSans.ttf, fc-list grep
+ # = 0), trong khi ban xem truoc tren web dung Archivo that. Khac font thi khac be rong
+ # chu, khac cho be dong — moi con so ve hop deu khong the khop.
+ #
+ # PHAI dat SAU khoi apt-get: c-cache nam trong goi fontconfig, chua cai thi khong co.
+ COPY app/assets/fonts/ /usr/share/fonts/truetype/archivo/
+ RUN fc-cache -f
 
 WORKDIR /app
 
