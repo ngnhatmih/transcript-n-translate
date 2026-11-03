@@ -65,7 +65,8 @@ describe("PhuDeStyleDialog", () => {
   it("mở ra thì có đủ ô điều khiển của kiểu chữ", () => {
     dung();
     for (const nhan of ["Cỡ chữ", "Cỡ chữ (số)", "Màu chữ", "Kiểu nền", "Màu hộp",
-                        "Độ đục của hộp", "Cỡ hộp", "Cỡ hộp (số)", "Canh lề", "Cách đáy khung"]) {
+                        "Độ đục của hộp", "Đệm hộp", "Đệm hộp (số)",
+                        "Cỡ hộp ngang", "Cỡ hộp cao", "Canh lề", "Cách đáy khung"]) {
       assert.ok(co(nhan), `thiếu ô điều khiển "${nhan}"`);
     }
     assert.ok(document.body.querySelector('[role="dialog"]') !== null);

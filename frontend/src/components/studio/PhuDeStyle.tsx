@@ -60,6 +60,11 @@ export function PhuDeOverlay({
 
   const h = hinhHoc(style, hop.rong, hop.cao);
   const coHop = style.kieuVien === 3;
+  //: Cỡ hộp RIÊNG (cùng công thức tỉ lệ với backend): hộp không còn suy từ cỡ chữ.
+  const tiLe = Math.min(hop.rong / 1920, hop.cao / 1080);
+  const hopRieng = coHop && style.rongHop > 0 && style.caoHop > 0;
+  const wHop = style.rongHop * tiLe;
+  const hHop = style.caoHop * tiLe;
   const noiDung = {
     fontSize: `${h.coChu}px`,
     lineHeight: 1.25,
@@ -75,8 +80,11 @@ export function PhuDeOverlay({
         className="absolute"
         style={{
           // Neo trong HỘP VIDEO, không trong khung chứa: `left/top` là viền đen bị bỏ.
-          left: hop.trai + h.le,
-          width: Math.max(0, hop.rong - 2 * h.le),
+          left: hopRieng ? hop.trai + (hop.rong - wHop) / 2 : hop.trai + h.le,
+          width: hopRieng ? wHop : Math.max(0, hop.rong - 2 * h.le),
+          ...(hopRieng ? { height: hHop, display: "flex", alignItems: "center",
+                            justifyContent: style.canLe === 1 ? "flex-start"
+                              : style.canLe === 3 ? "flex-end" : "center" } : {}),
           bottom: khung.cao - (hop.tren + hop.cao) + h.cachDay,
           ...noiDung,
           ...(coHop
@@ -84,7 +92,7 @@ export function PhuDeOverlay({
                 // Độ đục của hộp đi qua `rgba` chứ không qua `opacity` của cả khối:
                 // `opacity` sẽ làm mờ LUÔN chữ, trong khi `.ass` chỉ trong suốt cái hộp.
                 background: rgba(style.mauHop, style.doDucHop),
-                padding: `${Math.max(1, h.vien)}px ${Math.max(2, h.vien * 2)}px`,
+                padding: hopRieng ? 0 : `${Math.max(1, h.vien)}px ${Math.max(2, h.vien * 2)}px`,
                 borderRadius: 2,
               }
             : {
@@ -355,10 +363,8 @@ export function PhuDeStyleDialog({
 
         {/* 🔴 MỘT ô, HAI nghĩa — vì `.ass` chỉ có MỘT trường cho cả hai.
             `Style: … BorderStyle, Outline …`: `Outline` là ĐỘ DÀY VIỀN khi
-            `BorderStyle = 1`, và là ĐỆM CỦA HỘP khi `BorderStyle = 3`. Thêm một ô thứ
-            hai cho "cỡ hộp" sẽ phải bịa ra một trường không tồn tại, và bản burn sẽ
-            không bao giờ khớp với bản xem trước. Nên nhãn đổi theo chế độ, số thì một. */}
-        <Truong nhan={style.kieuVien === 3 ? "Cỡ hộp" : "Độ dày viền"}>
+            `BorderStyle = 1`, và là ĐỆM CỦA HỘP khi `BorderStyle = 3`. */}
+        <Truong nhan={style.kieuVien === 3 ? "Đệm hộp" : "Độ dày viền"}>
           <input
             type="range"
             min={0}
@@ -366,7 +372,7 @@ export function PhuDeStyleDialog({
             value={style.vien}
             onChange={(e) => dat({ vien: Number(e.target.value) })}
             className="w-24 accent-signal"
-            aria-label={style.kieuVien === 3 ? "Cỡ hộp" : "Độ dày viền"}
+            aria-label={style.kieuVien === 3 ? "Đệm hộp" : "Độ dày viền"}
           />
           <input
             type="number"
@@ -375,9 +381,42 @@ export function PhuDeStyleDialog({
             value={style.vien}
             onChange={(e) => dat({ vien: Number(e.target.value) })}
             className={oNhap}
-            aria-label={style.kieuVien === 3 ? "Cỡ hộp (số)" : "Độ dày viền (số)"}
+            aria-label={style.kieuVien === 3 ? "Đệm hộp (số)" : "Độ dày viền (số)"}
           />
         </Truong>
+
+        {/* CỠ HỘP RIÊNG — độc lập với cỡ chữ. Để `0` là TẮT (hộp suy từ đệm như cũ).
+            Backend vẽ hộp bằng vector `\p1`; trần cứng là `PlayResX / 2` = 540 px. */}
+        {style.kieuVien === 3 && (
+          <>
+            <Truong nhan="Cỡ hộp ngang">
+              <input
+                type="number"
+                min={0}
+                max={540}
+                value={style.rongHop}
+                onChange={(e) => dat({ rongHop: Number(e.target.value) })}
+                className={oNhap}
+                aria-label="Cỡ hộp ngang"
+              />
+            </Truong>
+            <Truong nhan="Cỡ hộp cao">
+              <input
+                type="number"
+                min={0}
+                max={540}
+                value={style.caoHop}
+                onChange={(e) => dat({ caoHop: Number(e.target.value) })}
+                className={oNhap}
+                aria-label="Cỡ hộp cao"
+              />
+            </Truong>
+            <p className="mt-1 text-[11px] leading-4 text-ink-2">
+              Để <span className="kbd">0</span> ở một trong hai ô là hộp tự co theo chữ.
+              Tối đa <span className="num">540</span> px.
+            </p>
+          </>
+        )}
 
         <Truong nhan="Canh lề">
           <select

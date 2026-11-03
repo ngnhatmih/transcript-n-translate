@@ -82,6 +82,8 @@ test("styleChoAss dùng TÊN KHOÁ của backend, không phải tên biến giao
     mau_hop: STYLE_MAC_DINH.mauHop,
     do_duc_hop: STYLE_MAC_DINH.doDucHop,
     vien: STYLE_MAC_DINH.vien,
+    rong_hop: 0,
+    cao_hop: 0,
     kieu_vien: 1,
     dam: false,
     nghieng: false,

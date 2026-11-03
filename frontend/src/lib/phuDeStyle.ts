@@ -25,8 +25,19 @@ export interface PhuDeStyle {
   doDucHop: number;
   dam: boolean;
   nghieng: boolean;
-  /** Độ dày viền (`ASS: Outline`). */
+  /** Độ dày viền (`ASS: Outline`) — ở chế độ hộp đục, đây là ĐỆM ĐỀU của hộp. */
   vien: number;
+  /**
+   * Cỡ hộp RIÊNG, theo pixel trong hệ 1920×1080 — độc lập với cỡ chữ.
+   *
+   * `0` = TẮT: hộp suy từ `vien` như cũ. Khác `0` (cả hai số) thì backend vẽ hộp bằng
+   * vector `\p1` và sự kiện chữ nhận `\bord0\shad0` để không tự vẽ hộp thứ hai.
+   *
+   * ĐO ĐƯỢC: hộp khai `400×120` ra đúng `400×120` ở cả `fs54` và `fs200`. Trần cứng
+   * `PlayResX / 2` = 540 px trên hệ 1080 — vượt thì libass CẮT, nên `docStyle` kẹp sẵn.
+   */
+  rongHop: number;
+  caoHop: number;
   /** `3` = hộp đục sau chữ; `1` = chỉ viền quanh nét chữ (`ASS: BorderStyle`). */
   kieuVien: 1 | 3;
   /** Đáy khối chữ cách mép dưới khung bao nhiêu, theo tỉ lệ chiều cao (0..0.5). */
@@ -50,6 +61,8 @@ export const STYLE_MAC_DINH: PhuDeStyle = {
   dam: false,
   nghieng: false,
   vien: 2,
+  rongHop: 0,
+  caoHop: 0,
   kieuVien: 3,
   viTriDoc: 0.06,
   canLe: 2,
@@ -99,6 +112,8 @@ export function docStyle(kho: KhoLuu = khoMacDinh()): PhuDeStyle {
       dam: v.dam === true,
       nghieng: v.nghieng === true,
       vien: so(v.vien, STYLE_MAC_DINH.vien, 0, 20),
+      rongHop: so(v.rongHop, STYLE_MAC_DINH.rongHop, 0, 540),
+      caoHop: so(v.caoHop, STYLE_MAC_DINH.caoHop, 0, 540),
       kieuVien: v.kieuVien === 1 ? 1 : 3,
       viTriDoc: so(v.viTriDoc, STYLE_MAC_DINH.viTriDoc, 0, 0.5),
       canLe: v.canLe === 1 || v.canLe === 3 ? v.canLe : 2,
@@ -131,6 +146,8 @@ export function styleChoAss(s: PhuDeStyle): Record<string, unknown> {
     mau_hop: s.mauHop,
     do_duc_hop: s.doDucHop,
     vien: s.vien,
+    rong_hop: s.rongHop,
+    cao_hop: s.caoHop,
     kieu_vien: s.kieuVien,
     dam: s.dam,
     nghieng: s.nghieng,
