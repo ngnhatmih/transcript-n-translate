@@ -455,19 +455,15 @@ def to_ass(segments: list[Segment], *, translations: list[str] | None = None,
         #: 🔴 ĐO ĐƯỢC trên bảng 18 tổ hợp (burn thật, đếm pixel): đặt `ngang = 300` mà chữ
         #: rộng `560` thì chữ TRÀN `+130 px` mỗi bên. Nên khi đo được, bề rộng hộp KHÔNG BAO
         #: GIỜ nhỏ hơn bề rộng chữ — hộp hẹp hơn chữ không phải "hộp nhỏ", nó là hộp hỏng.
+        #: Bề rộng còn lại cho chữ sau khi trừ lề — dùng để MÔ PHỎNG bẻ dòng.
+        #:
+        #: 🔴 ĐO ĐƯỢC trên video thật (burn khung 0,52 s của nguồn 6): bản trước tính
+        #: `max()` trên TOÀN BỘ 156 đoạn rồi dùng chung một bề rộng, nên câu 26 ký tự
+        #: `Như một tác phẩm nghệ thuật.` nhận hộp gần HẾT bề ngang khung — vì một câu
+        #: khác trong phim dài hơn. Trên nền xám không thấy sai; trên video thật thấy ngay.
+        #:
+        #: Nay bề rộng và chiều cao tính RIÊNG cho từng đoạn, ngay trong vòng lặp.
         rong_kha_dung = max(40, int(tham_so["rx"]) - 2 * int(tham_so["le"]))
-        rong_chu, cao_khoi = 0, 0
-        for pos_, sg_ in enumerate(segments):
-            tr_ = translations[pos_] if translations is not None else None
-            r_, c_, _ = _do_khoi_chu("".join(_lines(sg_, tr_, bilingual)),
-                                     str(tham_so.get("font", "Archivo")),
-                                     int(tham_so["co"]), rong_kha_dung)
-            rong_chu = max(rong_chu, r_)
-            cao_khoi = max(cao_khoi, c_)
-        if rong_chu:
-            rong_hop = max(rong_hop, rong_chu + 2 * int(tham_so.get("vien", 0)))
-        if cao_khoi:
-            cao_hop = max(cao_hop, cao_khoi + 2 * int(tham_so.get("vien", 0)))
         #: 🔴 TRẦN CHIỀU CAO = `ry / 2`. ĐO ĐƯỢC: khai `cao = 1370` thì hình vẽ bị libass
         #: THU còn **454 px** — cùng cơ chế với bề ngang (`rx / 2`). Chưa chia mảnh theo
         #: chiều dọc, nên KẸP lại thay vì để người dùng nhận hộp 454 mà không biết.
@@ -485,6 +481,26 @@ def to_ass(segments: list[Segment], *, translations: list[str] | None = None,
         translated = translations[position] if translations is not None else None
         parts = _lines(seg, translated, bilingual)
         text = _ass_escape("\\N".join(parts))
+        #: Bề rộng / chiều cao của hộp cho CHÍNH ĐOẠN NÀY.
+        rong_dong, cao_dong = rong_hop, cao_hop
+        #: Điều kiện ĐO là "người dùng có đặt cỡ hộp", KHÔNG phải `ve_hop` — vì `ve_hop`
+        #: lúc này đã bị dòng sàn phía trên đặt thành False khi `ngang = 0`, nên dùng nó ở
+        #: đây thì khối đo không bao giờ chạy và hộp không bao giờ được vẽ (đo được: 156
+        #: sự kiện thay vì 312).
+        if int(tham_so.get("kieu_vien", 0)) == 3 and (rong_hop > 0 or cao_hop > 0):
+            r_doan, c_doan, _ = _do_khoi_chu(
+                "".join(parts), str(tham_so.get("font", "Archivo")),
+                int(tham_so["co"]), rong_kha_dung)
+            if r_doan:
+                rong_dong = min(int(tham_so["rx"]),
+                                max(rong_hop, r_doan + 2 * int(tham_so.get("vien", 0))))
+            if c_doan:
+                cao_dong = max(cao_hop, c_doan + 2 * int(tham_so.get("vien", 0)))
+            # 🔴 `ve_hop` PHẢI TÍNH LẠI THEO SỐ CỦA ĐOẠN NÀY. Dòng `ve_hop = rong_hop >= 40
+            # and cao_hop >= 40` ở trên chạy TRƯỚC khối này, nên với `ngang = 0` nó thành
+            # False và KHÔNG đoạn nào được vẽ hộp — đo được: chỉ 156 sự kiện (toàn chữ),
+            # đúng ra phải 312 (chữ + hộp).
+            ve_hop = rong_dong >= 40 and cao_dong >= 40
         # `\an2` = neo ĐÁY-GIỮA, cùng neo với `Alignment: 2` của style, nên `\pos`
         # chỉ DỜI khối chữ chứ không đổi cách nó lớn lên khi xuống dòng.
         #
@@ -504,8 +520,8 @@ def to_ass(segments: list[Segment], *, translations: list[str] | None = None,
         # trên. Dịch chữ lên `(cao_hop − cao_chữ)/2` để nó nằm GIỮA hộp — số `cao_khoi`
         # đã đo sẵn từ `_do_khoi_chu`, chỉ là trước đây chưa dùng.
         y_chu = y
-        if ve_hop and cao_khoi > 0 and cao_hop > cao_khoi:
-            y_chu = y - (cao_hop - cao_khoi) // 2
+        if ve_hop and c_doan > 0 and cao_dong > c_doan:
+            y_chu = y - (cao_dong - c_doan) // 2
         dau = f"{{\\an2\\pos({tham_so['rx'] // 2},{y_chu}){tat_hop}}}" if co_pos else ""
         if ve_hop:
             # 🔴 CHIA HỘP THÀNH NHIỀU MẢNH: MỘT hình vẽ bị libass THU NHỎ khi rộng quá
@@ -526,18 +542,18 @@ def to_ass(segments: list[Segment], *, translations: list[str] | None = None,
             # trong khi chữ ở 1807..1819). `\an2` neo hộp-bao của hình vẽ, và bbox
             # của `m 0 0 l w 0 w -h 0 -h` có đáy ở `-h` chứ không phải 0.
             toi_da = max(1, int(tham_so["rx"]) // 2)
-            so_manh = max(1, -(-rong_hop // toi_da))
-            nen = rong_hop // so_manh
-            du = rong_hop - nen * so_manh
-            trai = (int(tham_so["rx"]) - rong_hop) / 2
+            so_manh = max(1, -(-rong_dong // toi_da))
+            nen = rong_dong // so_manh
+            du = rong_dong - nen * so_manh
+            trai = (int(tham_so["rx"]) - rong_dong) / 2
             for m in range(so_manh):
                 rong_m = nen + (1 if m < du else 0)
                 cx = trai + rong_m / 2
                 lines.append(
                     f"Dialogue: 0,{_ass_timestamp(seg.start)},{_ass_timestamp(seg.end)},"
-                    f"Default,,0,0,0,,{{\\an2\\pos({int(round(cx))},{y + cao_hop})\\p1"
+                    f"Default,,0,0,0,,{{\\an2\\pos({int(round(cx))},{y + cao_dong})\\p1"
                     f"\\1c&H{bgr}&\\1a&H{alpha}&\\bord0\\shad0}}"
-                    f"m 0 0 l {rong_m} 0 {rong_m} {-cao_hop} 0 {-cao_hop}{{\\p0}}"
+                    f"m 0 0 l {rong_m} 0 {rong_m} {-cao_dong} 0 {-cao_dong}{{\\p0}}"
                 )
                 trai += rong_m
         lines.append(
