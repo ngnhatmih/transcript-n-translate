@@ -140,8 +140,25 @@ export function Timeline({
       trong.end <= ngoai.end + dungSai &&
       trong.end - trong.start < ngoai.end - ngoai.start;
 
-    const asr = segmentsLoc.filter((s) => s.suspect);
-    const ocr = segmentsLoc.filter((s) => !s.suspect);
+    // 🔴 LOC TU `segments` (TOAN BO), KHONG phai `segmentsLoc`.
+    //
+    // Do duoc tren DOM: cung mot cau OCR co BE RONG KHAC NHAU tuy lop 2 bat hay tat.
+    //
+    //     chi lop 1    left=0  w=42   "La mot nguoi l"
+    //     ca hai lop   left=0  w=46   "La mot nguoi l"   (+4 px)
+    //                  left=46 w=51   "Dieu kho n"
+    //     chi lop 1    left=60 w=37   "Dieu kho n"       (+14 px)
+    //
+    // Nguyen nhan: `khoangVe` KEO DAI khoi OCR cho khop doan ASR bao no (vong lap
+    // duoi). Ban truoc loc tu `segmentsLoc` — da loc theo lop dang bat — nen tat lop 2
+    // thi khong con dong ASR nao de keo, khoi OCR tro ve do dai goc va NGAN LAI. Chu
+    // bi cat bot, nguoi dung thay khoi "ngan di" chi vi bam tat mot lop.
+    //
+    // Keo tu TOAN BO du lieu thi do dai khoi OCR la MOT SO DO CO DINH, khong phu thuoc
+    // vao viec lop nao dang bat. Do la dieu nguoi dung doi: bat/tat lop chi DOI CAI GI
+    // DUOC VE, khong doi hinh hoc cua cai dang ve.
+    const asr = segments.filter((s) => s.suspect);
+    const ocr = segments.filter((s) => !s.suspect);
     const keo = new Map<number, { start: number; end: number }>();
 
     for (const a of asr) {
@@ -156,7 +173,9 @@ export function Timeline({
     // Tra MAP theo `s.i`, KHONG theo chi so mang: vong ve dung `segmentsLoc` (da loc
     // theo lop), nen chi so hai mang khac nhau. Tra theo khoa `i` thi khong lech.
     const ra = new Map<number, { start: number; end: number }>();
-    for (const s of segmentsLoc) ra.set(s.i, keo.get(s.i) ?? { start: s.start, end: s.end });
+    // Tra MAP theo `s.i`. Dung `segments` (toan bo) chu khong phai `segmentsLoc`, de
+    // khoi nao cung co do dai nhu khi ca hai lop bat.
+    for (const s of segments) ra.set(s.i, keo.get(s.i) ?? { start: s.start, end: s.end });
     return ra;
   })();
 
@@ -532,9 +551,22 @@ export function Timeline({
                   key={s.i}
                   className={cn(
                     "group absolute overflow-hidden truncate rounded-sm border px-1.5 text-[10.5px] leading-[16px] whitespace-nowrap transition-colors",
+                    // 🔴 KHONG DOI MAU LOP KHI DUOC CHON.
+                    //
+                    // Ban truoc: `cur ? "border-signal bg-signal-soft text-ink-0" : mau...`
+                    // — khoi dang chon MAT ca vien lan nen cua lop, thay bang vang `signal`.
+                    // Do duoc tren DOM: cung khoi `"Thuong xuy"` doi tu `border-asr` sang
+                    // `border-signal` chi vi no duoc chon. Nguoi dung gui anh va chi ra su
+                    // khac nhau giua "khi bat lop 2" va "khi tat lop 2".
+                    //
+                    // Nay: mau lop LUON giu, khoi dang chon chi them vong sang ben ngoai
+                    // (`ring`) va noi len tren (`z-10`). Mau la de doc LOP, khong phai de
+                    // bao "dang chon".
+                    mau.vien,
+                    mau.nen,
                     cur
-                      ? "z-10 border-signal bg-signal-soft text-ink-0"
-                      : cn(mau.vien, mau.nen, "text-ink-1 hover:z-10"),
+                      ? "z-10 text-ink-0 ring-1 ring-signal ring-offset-1 ring-offset-panel-0"
+                      : "text-ink-1 hover:z-10",
                     s.daDuyet && !cur && "border-ok/60",
                     bad && "hatch-left pl-3",
                   )}
