@@ -284,7 +284,37 @@ def hop_nhat_theo_doan(doan_ocr: list[Segment], doan_asr: list[Segment]
     so_de = 0
     so_nghi = 0
 
-    for doan in doan_asr:
+    #: Chủ của từng dòng OCR = đoạn ASR khớp **CHỮ** nhất trong các đoạn chồng lên nó.
+    #
+    # 🔴 VÌ SAO PHẢI CÓ (lỗi thật, đo được trên transcript #58): vòng lặp dưới trao dòng
+    # OCR cho đoạn ASR **GẶP TRƯỚC**, chỉ cần chồng quá 0 giây. Đo được nguyên văn:
+    #
+    #     ASR [ 97.33- 99.59] '这天我们在旅游时突然想到'
+    #        chiếm j=16 [ 99.50-100.50] với chồng 0,09 s   '如果能直接把作品'
+    #        (nhóm khớp của CHÍNH NÓ chỉ là j=14, j=15 — j=16 là chiếm NHẦM)
+    #     ASR [ 99.59-101.63] '如果能直接把作品放在大鸡小巷'
+    #        chỉ còn j=17 [100.50-101.39]  ⇒ nhóm khớp = []  ⇒ luật nới KHÔNG chạy
+    #
+    # Nên `end` của '放在大街小巷' đứng ở 101,39 trong khi ASR hết câu ở 101,63. Đây KHÔNG
+    # phải lỗi của luật nới: `start = 99.50` của j=16 là bội số của 0,5 — mốc khung RAW,
+    # và luật nới chỉ kéo `start` về SỚM hơn nên không tạo ra được nó.
+    #
+    # Cùng lý do với `KHOP_TOI_THIEU`: chồng thời gian chỉ là BẰNG CHỨNG PHỤ; chữ mới là
+    # bằng chứng chính về việc "hai thứ này nói cùng một câu".
+    chu_ocr = [_chuan_hoa(o.text) for o in doan_ocr]
+    chu_asr = [_chuan_hoa(d.text) for d in doan_asr]
+    chu_cua: dict[int, int] = {}
+    for j, o in enumerate(doan_ocr):
+        tot_nhat, chu = -1.0, -1
+        for k, d in enumerate(doan_asr):
+            if _giao(d.start, d.end, o.start, o.end, 0.0) <= 0.0:
+                continue
+            diem = SequenceMatcher(None, chu_ocr[j], chu_asr[k]).ratio()
+            if diem > tot_nhat:
+                tot_nhat, chu = diem, k
+        chu_cua[j] = chu
+
+    for k_doan, doan in enumerate(doan_asr):
         # 🔴 DO DUOC: loc bang GIAO DA NOI (`DUNG_SAI_OCR = 0.5`) la mot loi THAT.
         # No khien mot dong OCR cach doan ASR gan NUA GIAAY van bi coi la "ung vien",
         # chiem mat no, roi doan ASR that moi khong con gi de khop:
@@ -303,6 +333,11 @@ def hop_nhat_theo_doan(doan_ocr: list[Segment], doan_asr: list[Segment]
             (j, ocr) for j, ocr in enumerate(doan_ocr)
             if j not in da_dung
             and _giao(doan.start, doan.end, ocr.start, ocr.end, 0.0) > 0.0
+            # 🔴 CHỈ NHẬN DÒNG MÀ MÌNH KHỚP CHỮ NHẤT (xem `chu_cua`). Bỏ điều kiện này thì
+            # một đoạn ASR chỉ chồng 0,09 s vẫn "chiếm" dòng của câu SAU, và đoạn ASR đúng
+            # mất dòng đầu của nhóm mình — đo được trên #58: nhóm khớp = [] nên `end` của
+            # `放在大街小巷` đứng ở 101,39 thay vì 101,63.
+            and chu_cua.get(j) == k_doan
         ]
         if not ung_vien:
             # KHONG khop dong OCR nao. Nhung truoc khi giu, phai kiem: chu cua doan
