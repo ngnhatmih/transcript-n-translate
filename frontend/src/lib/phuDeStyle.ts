@@ -144,6 +144,12 @@ export function styleChoAss(s: PhuDeStyle): Record<string, unknown> {
  *
  * `tiLe = min(W/1920, H/1080)`: trục NGẮN quyết định, nên khung dọc 1080×1920 thu chữ
  * nhỏ lại đúng bằng `1080/1920`, vừa bề ngang mà không tràn mép.
+ *
+ * 🔴 `coChu` có SÀN 8 px, và sàn đó là chỗ bản xem trước KHÔNG còn đúng tỉ lệ. ĐO ĐƯỢC:
+ * khung video của studio chỉ rộng ~132 px (video dọc trong ô 16:9), nên cỡ chữ thật của
+ * một dòng 54/1920 là **3,7 px** — không đọc được, và không thể "chỉnh bằng mắt" nếu vẽ
+ * đúng. Đây là đánh đổi có chủ: thấy được mà lệch tỉ lệ, hơn là đúng tỉ lệ mà không thấy.
+ * Muốn đúng tỉ lệ thì đọc số ở ô "Cỡ chữ" chứ đừng ước lượng bằng mắt trên khung nhỏ.
  */
 export function hinhHoc(s: PhuDeStyle, rong: number, cao: number) {
   const tiLe = Math.min(rong / HE_GOC.rx, cao / HE_GOC.ry);

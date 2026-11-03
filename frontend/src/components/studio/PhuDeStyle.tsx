@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 import { hinhHoc, STYLE_MAC_DINH, type PhuDeStyle } from "@/lib/phuDeStyle";
+import { hopVideo } from "@/lib/hopVideo";
 
 /**
  * Bản xem trước phụ đề ĐÈ LÊN video.
@@ -9,31 +10,55 @@ import { hinhHoc, STYLE_MAC_DINH, type PhuDeStyle } from "@/lib/phuDeStyle";
  * được khai trong hệ `.ass` (1920×1080), và backend nhân tỉ lệ theo trục NGẮN của khung
  * THẬT. Muốn xem trước đúng thì phải biết kích thước thật của khung chứa video, rồi áp
  * CÙNG công thức (`hinhHoc`).
+ *
+ * 🔴 VÀ PHẢI ĐO HỘP HIỂN THỊ THẬT CỦA VIDEO, không phải khung chứa — xem `lib/hopVideo`:
+ * `<video>` dùng `object-contain`, nên video dọc trong khung 16:9 chỉ chiếm ~31 % bề ngang.
+ * Đặt chữ theo khung chứa thì chữ to gấp ~3 lần và trải ra ngoài hình.
  */
-export function PhuDeOverlay({ style, text }: { style: PhuDeStyle; text: string }) {
+export function PhuDeOverlay({
+  style,
+  text,
+  videoRef,
+}: {
+  style: PhuDeStyle;
+  text: string;
+  /** Thẻ `<video>` để đọc tỉ lệ thật. Thiếu nó thì đo theo khung chứa (hành vi cũ). */
+  videoRef?: React.RefObject<HTMLVideoElement | null>;
+}) {
   const hopRef = useRef<HTMLDivElement>(null);
   const [khung, setKhung] = useState({ rong: 0, cao: 0 });
+  const [tiLeVideo, setTiLeVideo] = useState({ rong: 0, cao: 0 });
 
   useLayoutEffect(() => {
     const el = hopRef.current;
     if (el === null) return;
-    const do_ = () => setKhung({ rong: el.clientWidth, cao: el.clientHeight });
+    const do_ = () => {
+      setKhung({ rong: el.clientWidth, cao: el.clientHeight });
+      const v = videoRef?.current;
+      setTiLeVideo({ rong: v?.videoWidth ?? 0, cao: v?.videoHeight ?? 0 });
+    };
     do_();
     // `ResizeObserver` có thể không có trong môi trường test — bỏ qua là an toàn, vì khi đó
     // kích thước đã đọc được một lần ở trên và bản xem trước vẫn hiện (chỉ không tự co giãn).
-    if (typeof ResizeObserver === "undefined") return;
-    const ro = new ResizeObserver(do_);
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, []);
+    const v = videoRef?.current;
+    v?.addEventListener("loadedmetadata", do_);
+    v?.addEventListener("resize", do_);
+    const ro = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(do_);
+    ro?.observe(el);
+    return () => {
+      ro?.disconnect();
+      v?.removeEventListener("loadedmetadata", do_);
+      v?.removeEventListener("resize", do_);
+    };
+  }, [videoRef]);
 
-  if (text === "") return <div ref={hopRef} className="pointer-events-none absolute inset-0" />;
+  const hop = hopVideo(khung.rong, khung.cao, tiLeVideo.rong, tiLeVideo.cao);
 
-  const h = hinhHoc(style, khung.rong, khung.cao);
-  // Chưa đo được khung thì KHÔNG vẽ: vẽ với `coChu = 0` sẽ hiện một chấm chữ ở góc, tệ hơn
-  // là không hiện gì.
-  if (khung.cao === 0) return <div ref={hopRef} className="pointer-events-none absolute inset-0" />;
+  if (text === "" || hop.rong === 0 || hop.cao === 0) {
+    return <div ref={hopRef} className="pointer-events-none absolute inset-0" />;
+  }
 
+  const h = hinhHoc(style, hop.rong, hop.cao);
   const coHop = style.kieuVien === 3;
   const noiDung = {
     fontSize: `${h.coChu}px`,
@@ -42,19 +67,6 @@ export function PhuDeOverlay({ style, text }: { style: PhuDeStyle; text: string 
     fontStyle: style.nghieng ? "italic" : "normal",
     color: style.mauChu,
     textAlign: style.canLe === 1 ? "left" : style.canLe === 3 ? "right" : "center",
-    // `BorderStyle 3` = hộp đục sau chữ. CSS tương đương là nền + đệm; đệm lấy theo độ dày
-    // viền đã nhân tỉ lệ để hộp không sát chữ hơn bản burn.
-    ...(coHop
-      ? { background: style.mauHop, opacity: 1, padding: `${Math.max(1, h.vien)}px ${Math.max(2, h.vien * 2)}px`, borderRadius: 2 }
-      : {
-          // Chỉ viền quanh NÉT chữ: CSS không có viền chữ, nên dựng bằng 4 bóng lệch.
-          textShadow: [
-            `${h.vien}px 0 0 ${style.mauHop}`,
-            `-${h.vien}px 0 0 ${style.mauHop}`,
-            `0 ${h.vien}px 0 ${style.mauHop}`,
-            `0 -${h.vien}px 0 ${style.mauHop}`,
-          ].join(", "),
-        }),
   } as const;
 
   return (
@@ -62,25 +74,50 @@ export function PhuDeOverlay({ style, text }: { style: PhuDeStyle; text: string 
       <div
         className="absolute"
         style={{
-          left: h.le,
-          right: h.le,
-          bottom: h.cachDay,
-          // Độ đục của hộp đi qua `rgba` chứ không qua `opacity` của cả khối: `opacity` sẽ
-          // làm mờ LUÔN chữ, trong khi `.ass` chỉ trong suốt cái hộp.
+          // Neo trong HỘP VIDEO, không trong khung chứa: `left/top` là viền đen bị bỏ.
+          left: hop.trai + h.le,
+          width: Math.max(0, hop.rong - 2 * h.le),
+          bottom: khung.cao - (hop.tren + hop.cao) + h.cachDay,
           ...noiDung,
           ...(coHop
             ? {
+                // Độ đục của hộp đi qua `rgba` chứ không qua `opacity` của cả khối:
+                // `opacity` sẽ làm mờ LUÔN chữ, trong khi `.ass` chỉ trong suốt cái hộp.
                 background: rgba(style.mauHop, style.doDucHop),
                 padding: `${Math.max(1, h.vien)}px ${Math.max(2, h.vien * 2)}px`,
                 borderRadius: 2,
               }
-            : {}),
+            : {
+                // Chỉ viền quanh NÉT chữ: CSS không có viền chữ, nên dựng bằng 4 bóng lệch.
+                textShadow: [
+                  `${h.vien}px 0 0 ${style.mauHop}`,
+                  `-${h.vien}px 0 0 ${style.mauHop}`,
+                  `0 ${h.vien}px 0 ${style.mauHop}`,
+                  `0 -${h.vien}px 0 ${style.mauHop}`,
+                ].join(", "),
+              }),
         }}
       >
         {text}
       </div>
     </div>
   );
+}
+
+/**
+ * Đo hộp hiển thị thật của video trong một phần tử chứa — dùng cho lớp đè KHÔNG phải React
+ * (hộp vùng đọc OCR đặt theo `%` của phần tử cha).
+ *
+ * Trả `null` khi chưa đo được: bên gọi phải coi đó là "chưa vẽ", không phải "hộp 0×0".
+ */
+export function dungHopVideo(
+  chua: HTMLElement | null,
+  video: HTMLVideoElement | null,
+): { trai: number; tren: number; rong: number; cao: number } | null {
+  if (chua === null) return null;
+  const hop = hopVideo(chua.clientWidth, chua.clientHeight, video?.videoWidth ?? 0,
+                       video?.videoHeight ?? 0);
+  return hop.rong > 0 && hop.cao > 0 ? hop : null;
 }
 
 function rgba(hex: string, doDuc: number): string {
@@ -104,21 +141,108 @@ const oNhap =
   "w-16 rounded-sm border border-rule bg-panel-0 px-2 py-1 text-right text-[12.5px] text-ink-0 outline-none focus:border-signal";
 
 /**
+ * Khung xem trước: CHÍNH video đang mở, kèm chữ đè lên nó.
+ *
+ * Vì sao một thẻ `<video>` RIÊNG chứ không dời thẻ của studio vào đây: dời thì mất trạng
+ * thái phát ở khung chính, và đóng hộp thoại là video nhảy về đầu. Thẻ này `muted`, nhảy
+ * tới đúng mốc đang xem khi mở, và có thanh kéo riêng để soi các câu khác nhau.
+ *
+ * Chữ lấy theo CÙNG luật với khung chính (`playingSeg`): đoạn LỚP 1 phủ thời điểm hiện tại,
+ * hiện bản dịch nếu có. Khác luật là bản xem trước dạy người dùng một điều mà video thật
+ * không làm.
+ */
+export function PhuDePreviewPlayer({
+  src,
+  doan,
+  style,
+  batDau,
+}: {
+  src: string | null;
+  doan: Array<{ start: number; end: number; text: string; dich: string; layer: string | null }>;
+  style: PhuDeStyle;
+  batDau: number;
+}) {
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const [luc, setLuc] = useState(batDau);
+  // 🔴 `batDau` chỉ được dùng để ĐẶT MỐC MỘT LẦN khi mở. Không đưa nó vào dependency:
+  // `player.time` đổi MỖI FRAME khi video đang phát, nên effect sẽ chạy lại liên tục và
+  // kéo khung xem trước giật về mốc cũ — không xem được gì.
+  const mocDau = useRef(batDau);
+  mocDau.current = batDau;
+
+  useEffect(() => {
+    const v = videoRef.current;
+    if (v === null) return;
+    const den = () => {
+      try {
+        v.currentTime = mocDau.current;
+      } catch {
+        // Chưa có metadata thì `currentTime` ném; bỏ qua, `loadedmetadata` sẽ gọi lại.
+      }
+    };
+    v.addEventListener("loadedmetadata", den);
+    den();
+    return () => v.removeEventListener("loadedmetadata", den);
+  }, [src]);
+
+  const dang = doan.find((s) => s.layer === "mot_nguon" && luc >= s.start && luc < s.end);
+
+  return (
+    <div className="mb-3">
+      <div className="relative aspect-video w-full overflow-hidden rounded-sm border border-rule bg-panel-0">
+        <video
+          ref={videoRef}
+          src={src ?? undefined}
+          muted
+          playsInline
+          className="size-full object-contain"
+          onTimeUpdate={(e) => setLuc(e.currentTarget.currentTime)}
+        />
+        {dang && (
+          <PhuDeOverlay
+            style={style}
+            text={dang.dich === "" ? dang.text : dang.dich}
+            videoRef={videoRef}
+          />
+        )}
+      </div>
+      <div className="mt-1 flex items-center gap-2">
+        <button
+          onClick={() => {
+            const v = videoRef.current;
+            if (v === null) return;
+            if (v.paused) void v.play();
+            else v.pause();
+          }}
+          className="rounded-sm border border-rule px-2 py-0.5 text-[11.5px] text-ink-1 hover:border-ink-1"
+        >
+          phát / dừng
+        </button>
+        <span className="tabular-nums text-[11px] text-ink-2">{luc.toFixed(2)} s</span>
+      </div>
+    </div>
+  );
+}
+
+/**
  * Hộp thoại chỉnh phụ đề hiển thị. Mở bằng lệnh "Chỉnh phụ đề hiển thị" trong bảng lệnh.
  *
- * Mọi thay đổi gọi `onChange` NGAY (không có nút Lưu): người dùng đang nhìn bản xem trước
- * phía sau hộp thoại, nên thấy kết quả tức thì là cách duy nhất để chỉnh bằng mắt.
+ * Mọi thay đổi gọi `onChange` NGAY (không có nút Lưu): người dùng đang nhìn khung xem trước
+ * ngay trên các ô điều khiển, nên thấy kết quả tức thì là cách duy nhất để chỉnh bằng mắt.
  */
 export function PhuDeStyleDialog({
   open,
   onClose,
   style,
   onChange,
+  preview,
 }: {
   open: boolean;
   onClose: () => void;
   style: PhuDeStyle;
   onChange: (s: PhuDeStyle) => void;
+  /** Khung xem trước (video + chữ) đặt ngay dưới tiêu đề. */
+  preview?: React.ReactNode;
 }) {
   useEffect(() => {
     if (!open) return;
@@ -138,7 +262,7 @@ export function PhuDeStyleDialog({
       onClick={onClose}
     >
       <div
-        className="w-[420px] max-w-[92vw] rounded-sm border border-rule bg-panel-1 p-4 shadow-2xl"
+        className="w-[460px] max-w-[92vw] rounded-sm border border-rule bg-panel-1 p-4 shadow-2xl"
         onClick={(e) => e.stopPropagation()}
         role="dialog"
         aria-label="Chỉnh phụ đề hiển thị"
@@ -152,6 +276,11 @@ export function PhuDeStyleDialog({
             về mặc định
           </button>
         </div>
+
+        {/* KHUNG XEM TRƯỚC — video THẬT đang mở, cùng thẻ `<video>` với chữ đè lên nó.
+            Chỉnh tham số mà không thấy kết quả trên chính khung hình thì phải đoán, và
+            đoán sai phải quay lại sửa — vòng lặp đó là lý do khung này tồn tại. */}
+        {preview}
 
         <Truong nhan="Cỡ chữ">
           <input

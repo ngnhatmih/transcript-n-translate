@@ -32,7 +32,7 @@ import { Timeline, type BaoSong } from "./Timeline";
 import { SegmentRow, type ViewMode } from "./SegmentRow";
 import { PipelineBar } from "./PipelineBar";
 import { CommandPalette, type Command } from "./CommandPalette";
-import { PhuDeOverlay, PhuDeStyleDialog } from "./PhuDeStyle";
+import { PhuDeOverlay, PhuDePreviewPlayer, PhuDeStyleDialog, dungHopVideo } from "./PhuDeStyle";
 import { docStyle, luuStyle, type PhuDeStyle } from "@/lib/phuDeStyle";
 import { VungDocKhung, type VungDoc } from "./VungDoc";
 
@@ -179,6 +179,13 @@ export function Studio(props: StudioProps) {
   //: từ mặc định sang kiểu đã lưu.
   const [kieuPhuDe, setKieuPhuDe] = useState<PhuDeStyle>(() => docStyle());
   const [styleOpen, setStyleOpen] = useState(false);
+  //: Khung chứa video (ô 16:9) và HỘP HIỂN THỊ THẬT của hình trong đó.
+  //:
+  //: 🔴 Vì sao phải có: `<video>` dùng `object-contain`, nên video dọc trong khung 16:9 chỉ
+  //: chiếm ~31 % bề ngang và hai bên là viền đen. Hộp vùng đọc OCR đặt theo `%` của KHUNG
+  //: CHỨA nên trải hết bề ngang panel và TRÀN ra ngoài hình — đúng lỗi chủ dự án thấy.
+  const khungVideoRef = useRef<HTMLDivElement | null>(null);
+  const [hopHinh, setHopHinh] = useState<{ trai: number; tren: number; rong: number; cao: number } | null>(null);
   const [theme, setTheme] = useState<"dark" | "light">("dark");
   const [flashId, setFlashId] = useState<number | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -250,6 +257,23 @@ export function Studio(props: StudioProps) {
 
   const media: string | null = source === null ? null : mediaUrl(source.id);
   const player = usePlayer(media);
+  //: Do HOP HIEN THI THAT cua video moi khi khung hoac video doi kich thuoc.
+  useEffect(() => {
+    const chua = khungVideoRef.current;
+    if (chua === null) return;
+    const do_ = () => setHopHinh(dungHopVideo(chua, player.videoRef.current));
+    do_();
+    const v = player.videoRef.current;
+    v?.addEventListener("loadedmetadata", do_);
+    v?.addEventListener("resize", do_);
+    const ro = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(do_);
+    ro?.observe(chua);
+    return () => {
+      ro?.disconnect();
+      v?.removeEventListener("loadedmetadata", do_);
+      v?.removeEventListener("resize", do_);
+    };
+  }, [player.videoRef, player.src]);
   const rowRefs = useRef(new Map<number, HTMLLIElement>());
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -1397,7 +1421,10 @@ export function Studio(props: StudioProps) {
             351 px. Ban cu de chung tran ra ngoai khung va bi cat.
           */}
           <div className="flex shrink-0 flex-col gap-3 bg-panel-0 p-2.5 sm:flex-row sm:gap-4 sm:p-3">
-            <div className="relative aspect-video w-full shrink-0 overflow-hidden rounded-sm border border-rule bg-panel-1 sm:w-[min(42%,420px)]">
+            <div
+              ref={khungVideoRef}
+              className="relative aspect-video w-full shrink-0 overflow-hidden rounded-sm border border-rule bg-panel-1 sm:w-[min(42%,420px)]"
+            >
               {player.src ? (
                 <video ref={player.videoRef} src={player.src} className="size-full object-contain" playsInline />
               ) : (
@@ -1416,6 +1443,7 @@ export function Studio(props: StudioProps) {
                 <PhuDeOverlay
                   style={kieuPhuDe}
                   text={playingSeg.dich === "" ? playingSeg.text : playingSeg.dich}
+                  videoRef={player.videoRef}
                 />
               )}
               {/*
@@ -1426,7 +1454,30 @@ export function Studio(props: StudioProps) {
                 hoặc phụ đề thật bị cắt, cả hai đều im lặng.
                 Chỉ hiện khi ĐÃ có video: chưa có hình thì không có gì để chọn vùng.
               */}
-              {player.src !== null && <VungDocKhung vung={vungDoc} onChange={onVungDoc} />}
+              {/* Hộp vùng đọc đặt trong HỘP VIDEO, không trong khung chứa: `%` của
+                  `VungDocKhung` lúc đó là `%` của hình, nên tay kéo nằm đúng trên hình.
+
+                  🔴 CHƯA ĐO ĐƯỢC thì lùi về `inset-0` (hành vi cũ), KHÔNG bỏ vẽ: môi
+                  trường không có layout (jsdom) hoặc khoảnh khắc trước `ResizeObserver`
+                  vẫn phải thấy hộp. Bản đầu tôi gate bằng `hopHinh !== null` và đo được
+                  4 bài `vung_doc` ĐỎ — hộp biến mất hẳn. */}
+              {player.src !== null && (
+                <div
+                  className="absolute z-20"
+                  style={
+                    hopHinh === null
+                      ? { inset: 0 }
+                      : {
+                          left: hopHinh.trai,
+                          top: hopHinh.tren,
+                          width: hopHinh.rong,
+                          height: hopHinh.cao,
+                        }
+                  }
+                >
+                  <VungDocKhung vung={vungDoc} onChange={onVungDoc} />
+                </div>
+              )}
             </div>
             <div className="flex min-w-0 flex-1 flex-col justify-between py-1">
               <div>
@@ -1674,6 +1725,14 @@ export function Studio(props: StudioProps) {
         open={styleOpen}
         onClose={() => setStyleOpen(false)}
         style={kieuPhuDe}
+        preview={
+          <PhuDePreviewPlayer
+            src={player.src}
+            doan={dong}
+            style={kieuPhuDe}
+            batDau={player.time}
+          />
+        }
         // Ghi `localStorage` NGAY trong `onChange`, không qua `useEffect`: URL xuất và
         // payload lồng tiếng đọc thẳng từ `localStorage`, nên nếu chỉ ghi sau khi vẽ lại
         // thì một lượt bấm xuất ngay sau khi kéo thanh trượt có thể dùng kiểu CŨ.
