@@ -300,13 +300,60 @@ def to_ass(segments: list[Segment], *, translations: list[str] | None = None,
                 le=le, duoi=duoi,
             )
     lines = [_ASS_HEADER.format(title=title, **tham_so)]
+    #: Hộp vẽ bằng VECTOR (`\p1`) — cho hộp RỘNG/CAO **độc lập với cỡ chữ**.
+    #:
+    #: Vì sao phải vẽ chứ không dùng `Style`: `Outline` là đệm ĐỀU bốn phía, nên muốn hộp
+    #: to hơn thì chữ cũng bị đẩy ra theo. `\p1` cho toạ độ tuyệt đối.
+    #:
+    #: ĐO ĐƯỢC (burn thật bằng `ffmpeg -vf ass=` lên nền xám, đo pixel):
+    #:
+    #:     khai  200 -> đo  200        khai  600 -> đo  540
+    #:     khai  300 -> đo  300        khai  800 -> đo  540
+    #:     khai  500 -> đo  500        khai 1000 -> đo  540
+    #:
+    #:   · tỉ lệ **1:1 tuyệt đối** tới `500 px`, chiều cao đúng ở mọi mức đã thử
+    #:     (`80/100/120/200`) — và KHÔNG phụ thuộc `Fontsize`: hộp khai `600×120` ra
+    #:     **y hệt nhau** với chữ `fs54` và `fs200`.
+    #:   · **TRẦN CỨNG `PlayResX / 2`** (đo được `540` trên hệ 1080), KHÔNG phải do lề
+    #:     (thử `MarginL/R = 0` vẫn 540). Khai hơn thì libass CẮT, không báo lỗi — nên
+    #:     phải kẹp ở đây thay vì để người dùng nhận một hộp cụt mà không biết.
+    rong_hop = int(style.get("rong_hop") or 0) if style else 0
+    cao_hop = int(style.get("cao_hop") or 0) if style else 0
+    ve_hop = (rong_hop > 0 and cao_hop > 0
+              and int(tham_so.get("kieu_vien", 0)) == 3)
+    if ve_hop:
+        rong_hop = min(rong_hop, int(tham_so["rx"]) // 2)
+        cao_hop = min(cao_hop, int(tham_so["ry"]) // 2)
     for position, seg in enumerate(segments):
         translated = translations[position] if translations is not None else None
         parts = _lines(seg, translated, bilingual)
         text = _ass_escape("\\N".join(parts))
         # `\an2` = neo ĐÁY-GIỮA, cùng neo với `Alignment: 2` của style, nên `\pos`
         # chỉ DỜI khối chữ chứ không đổi cách nó lớn lên khi xuống dòng.
-        dau = f"{{\\an2\\pos({tham_so['rx'] // 2},{pos_y})}}" if pos_y is not None else ""
+        #
+        # Chưa truyền `khung` (`pos_y is None`) mà CÓ hộp thì vẫn phải neo: hộp vector cần
+        # một mốc tuyệt đối, và chữ phải nằm trong hộp — nên lấy đáy theo `MarginV`.
+        y = pos_y if pos_y is not None else int(tham_so["ry"]) - int(tham_so["duoi"])
+        co_pos = pos_y is not None or ve_hop
+        # 🔴 KHI ĐÃ VẼ HỘP VECTOR THÌ SỰ KIỆN CHỮ PHẢI TẮT HỘP CỦA CHÍNH NÓ.
+        #
+        # `Style` để `BorderStyle: 3`, nên libass tự vẽ một hộp đục quanh chữ theo
+        # `Outline`. ĐO ĐƯỢC hậu quả khi quên: hộp khai `400×120` mà đo ra **432×241** với
+        # `fs54` và **517×241** với `fs200` — tức vùng đen là HỢP của hộp vector và hộp
+        # tự động, và nó lại phụ thuộc cỡ chữ. `\bord0\shad0` tắt hộp đó, chỉ còn vector.
+        tat_hop = "\\bord0\\shad0" if ve_hop else ""
+        dau = f"{{\\an2\\pos({tham_so['rx'] // 2},{y}){tat_hop}}}" if co_pos else ""
+        if ve_hop:
+            nua = rong_hop // 2
+            # `mau_hop` là `&HAABBGGRR`: 2 ký tự đầu sau `&H` là Alpha, phần còn lại là BGR.
+            # `\1c` nhận BGR KHÔNG kèm alpha; alpha đi riêng bằng `\1a`.
+            bgr, alpha = tham_so["mau_hop"][4:], tham_so["mau_hop"][2:4]
+            lines.append(
+                f"Dialogue: 0,{_ass_timestamp(seg.start)},{_ass_timestamp(seg.end)},"
+                f"Default,,0,0,0,,{{\\an2\\pos({tham_so['rx'] // 2},{y})\\p1"
+                f"\\1c&H{bgr}&\\1a&H{alpha}&\\bord0\\shad0}}"
+                f"m {-nua} 0 l {nua} 0 {nua} {-cao_hop} {-nua} {-cao_hop}{{\\p0}}"
+            )
         lines.append(
             f"Dialogue: 0,{_ass_timestamp(seg.start)},{_ass_timestamp(seg.end)},"
             f"Default,,0,0,0,,{dau}{text}"
