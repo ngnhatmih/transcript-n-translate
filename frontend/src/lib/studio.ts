@@ -341,6 +341,14 @@ export interface DauVaoDuongOng {
   asrState: "queued" | "running" | "done" | "failed" | "interrupted" | "cancelled" | null;
   /** Có bản dịch nào `done` chưa. */
   coBanDich: boolean;
+  /**
+   * Trạng thái job `translate` của bản ghi đang mở — `null` khi không có job nào.
+   *
+   * 🔴 VÌ SAO CẦN (đo được): bước `Dịch` trước đây chỉ suy từ `coBanDich`, nên bấm "Dịch"
+   * xong thanh bước ĐỨNG YÊN — không có gì nói job đã được gửi, và người dùng bấm lại.
+   * Cùng loại lỗi đã đo được ở bước `asr` (xem `asrState`), và cùng cách sửa.
+   */
+  dichState: "queued" | "running" | "done" | "failed" | "interrupted" | "cancelled" | null;
   /** Engine của bản dịch đang xem — `null` khi chưa có. */
   engineMt: string | null;
   /** Số việc cần xử lý còn lại. */
@@ -423,9 +431,21 @@ export function duongOng(d: DauVaoDuongOng): BuocDuongOng[] {
                 ? { id: "asr", name: "Phiên âm", note: "đang nạp lại…", state: "running" }
                 : { id: "asr", name: "Phiên âm", note: "chưa nạp", state: "todo" };
 
-  const buocDich: BuocDuongOng = d.coBanDich
-    ? { id: "dich", name: "Dịch", note: d.engineMt ?? "", state: "done" }
-    : { id: "dich", name: "Dịch", note: d.coBanGhi ? "chưa dịch" : "chờ phiên âm", state: d.coBanGhi ? "blocked" : "todo" };
+  // 🔴 `dichState` XÉT TRƯỚC `coBanDich`. Bấm "Dịch" trên bản ĐÃ CÓ bản dịch (dịch lại)
+  // thì `coBanDich` vẫn `true` cho tới khi job xong — nếu xét `coBanDich` trước thì bước
+  // giữ dấu tích `done` suốt lúc chạy, tức nói dối đúng lúc người dùng cần biết nhất.
+  const buocDich: BuocDuongOng =
+    d.dichState === "running"
+      ? { id: "dich", name: "Dịch", note: "đang dịch…", state: "running" }
+      : d.dichState === "queued"
+        ? { id: "dich", name: "Dịch", note: "chờ tới lượt", state: "running" }
+        : d.dichState === "failed"
+          ? { id: "dich", name: "Dịch", note: "lỗi — xem hàng đợi", state: "blocked" }
+          : d.dichState === "interrupted"
+            ? { id: "dich", name: "Dịch", note: "bị ngắt — chạy lại được", state: "blocked" }
+            : d.coBanDich
+              ? { id: "dich", name: "Dịch", note: d.engineMt ?? "", state: "done" }
+              : { id: "dich", name: "Dịch", note: d.coBanGhi ? "chưa dịch" : "chờ phiên âm", state: d.coBanGhi ? "blocked" : "todo" };
 
   // GỢI Ý, không phải cổng: `blocked` ở đây chỉ nói "còn việc nên xem", và
   // `lyDoChuaXuatDuoc` KHÔNG đọc bước này (xem dưới).

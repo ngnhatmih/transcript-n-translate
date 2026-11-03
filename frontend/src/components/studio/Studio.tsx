@@ -498,6 +498,26 @@ export function Studio(props: StudioProps) {
   }, [jobs, banDich]);
 
   /**
+   * JOB `translate` của BẢN GHI đang mở — nguồn của trạng thái bước "Dịch".
+   *
+   * Lọc theo `payload.transcript_id` (không theo `translation_id`): lúc job vừa được gửi
+   * thì HÀNG `translations` chưa tồn tại, nên `translation_id` chưa có gì để khớp. Đo
+   * được trong payload thật: `{"translation_id": 1, "transcript_id": 1, "engine_id": ...}`.
+   *
+   * Bản ghi `null` ⇒ không có gì để lọc ⇒ `null`. Lấy job MỚI NHẤT theo `id`, cùng lý do
+   * với `jobAsr`: hai job trong cùng một giây thì so `created_at` cho kết quả tuỳ ý.
+   */
+  const jobDich = useMemo(() => {
+    if (transcript === null) return null;
+    const ds = jobs.filter(
+      (j) =>
+        j.type === "translate" &&
+        (j.payload?.["transcript_id"] as number | undefined) === transcript.id,
+    );
+    return ds.length === 0 ? null : ds.reduce((a, b) => (b.id > a.id ? b : a));
+  }, [jobs, transcript]);
+
+  /**
    * JOB `ingest`/`asr` của NGUỒN đang mở — nguồn của trạng thái bước "Phiên âm".
    *
    * 🔴 VÌ SAO CẦN (lỗi thật, người dùng báo "phần phiên âm cũng ghi là chưa nạp chứ ko
@@ -552,13 +572,14 @@ export function Studio(props: StudioProps) {
         engineAsr: transcript === null ? null : transcript.engine,
         asrState: trangThai("asr", jobAsr === null ? null : jobAsr.state),
         coBanDich: banDich !== null,
+        dichState: trangThai("dich", jobDich === null ? null : jobDich.state),
         engineMt: banDich === null ? null : banDich.engine,
         soViec: issues.length,
         dubState: trangThai("long", jobDub === null ? null : jobDub.state),
         ghepState: trangThai("ghep", jobGhep === null ? null : jobGhep.state),
         coFileXuat: jobGhep !== null && jobGhep.state === "done",
       }),
-    [transcript, banDich, issues.length, jobDub, jobGhep, jobAsr, trangThai],
+    [transcript, banDich, issues.length, jobDub, jobGhep, jobAsr, jobDich, trangThai],
   );
 
   // TỰ TAN trạng thái lạc quan khi `/api/jobs` đã mang tin THẬT về job này.
@@ -580,6 +601,7 @@ export function Studio(props: StudioProps) {
     // Cặp `(id bước, job thật)` — job nào tới với trạng thái THẬT thì cờ của bước đó tan.
     const cap: Array<[string, JobState | null]> = [
       ["asr", jobAsr === null ? null : jobAsr.state],
+      ["dich", jobDich === null ? null : jobDich.state],
       ["long", jobDub === null ? null : jobDub.state],
       ["ghep", jobGhep === null ? null : jobGhep.state],
     ];
@@ -593,7 +615,7 @@ export function Studio(props: StudioProps) {
       }
       return moi.size === cu.size ? cu : moi;
     });
-  }, [jobAsr, jobDub, jobGhep]);
+  }, [jobAsr, jobDich, jobDub, jobGhep]);
 
   /**
    * GẮN ƯỚC LƯỢNG vào bước đang chạy — tính NGOÀI `duongOng` vì hàm đó là THUẦN và
@@ -921,28 +943,27 @@ export function Studio(props: StudioProps) {
       }
       if (id === "dich") {
         setView("compare");
-        // 🔴 BẤM KHI **CHƯA DỊCH** LÀ YÊU CẦU DỊCH — không chỉ đổi góc nhìn.
+        // 🔴 BẤM LÀ DỊCH — kể cả khi ĐÃ CÓ bản dịch (dịch lại). Chủ dự án chốt: *"dùng lại
+        // nút dịch ở trên này nè"*.
         //
-        // ĐO ĐƯỢC (chủ dự án báo: *"tôi muốn ấn cái này để dịch lại nhưng mà có vẻ chưa
-        // làm"*): bước `Dịch` đứng ở `state: "blocked"`, ghi chú **"chưa dịch"**, mà bấm
-        // vào thì chỉ `setView("compare")`. Bước `blocked` ở đây KHÔNG phải cổng chặn —
-        // `lib/studio.ts` ghi rõ "GỢI Ý, không phải cổng: `blocked` chỉ nói còn việc nên
-        // xem". Nên nó trông như bấm được mà không làm gì, và người dùng bấm mãi.
-        //
-        // Nay: chưa có bản dịch ⇒ gửi job dịch thật (`App.onBuoc("dich")` gọi
-        // `createTranslation`) và đặt trạng thái lạc quan ngay, cùng cơ chế với bước
-        // `asr` ở dưới — để bấm xong thấy bước chuyển màu chứ không đứng yên.
-        //
-        // ĐÃ CÓ bản dịch thì GIỮ nguyên hành vi cũ (chỉ mở màn đối chiếu): dịch lại là
-        // tạo một HÀNG MỚI, và một cú bấm nhầm không được sinh ra bản dịch thừa.
-        if (banDich === null) {
-          if (transcript === null) {
-            setNotice("Chưa có bản ghi — bước này cần bóc băng trước");
-            return;
-          }
-          datLacQuan(id);
-          onBuoc(id);
+        // ĐO ĐƯỢC, hai lỗi liên tiếp ở đúng một nút:
+        //   1. Bản đầu `onStep` chỉ `setView("compare")` rồi `return` ⇒ không job nào được
+        //      gửi, bấm mãi không có gì xảy ra (chủ dự án: "có vẻ chưa làm").
+        //   2. Bản sửa thứ nhất chỉ dịch khi `banDich === null` ⇒ dịch LẠI vẫn không có
+        //      đường nào, vì `createTranslation` chỉ được gọi từ đúng nhánh này của `App`.
+        // Mỗi lần bấm là MỘT HÀNG `translations` MỚI (backend không có "dịch đè"), nên phải
+        // chặn bấm chồng: đang chạy thì nói đang chạy, không gửi thêm job.
+        if (transcript === null) {
+          setNotice("Chưa có bản ghi — bước này cần bóc băng trước");
+          return;
         }
+        const buocDich = cacBuoc.find((b) => b.id === "dich");
+        if (buocDich !== undefined && buocDich.state === "running") {
+          setNotice("Đang dịch — chờ lượt này xong đã");
+          return;
+        }
+        datLacQuan(id);
+        onBuoc(id);
         return;
       }
       setView("edit");
@@ -960,7 +981,7 @@ export function Studio(props: StudioProps) {
       datLacQuan(id);
       onBuoc(id);
     },
-    [issues.length, diViec, lyDoXuat, onXuatVideo, onBuoc, banDich, transcript, datLacQuan],
+    [issues.length, diViec, lyDoXuat, onXuatVideo, onBuoc, banDich, transcript, datLacQuan, cacBuoc],
   );
 
   const commands: Command[] = [

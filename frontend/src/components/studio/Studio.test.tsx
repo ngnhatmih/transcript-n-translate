@@ -405,24 +405,43 @@ describe("Studio: bước 'duyet' trên thanh đường ống PHẢI gọi onBuo
   });
 });
 
-describe("Studio: bước Dịch — CHƯA dịch thì chạy job, ĐÃ dịch thì chỉ mở màn", () => {
-  it("đã có bản dịch: bấm bước Dịch KHÔNG gọi onBuoc (không sinh bản dịch thừa)", () => {
-    const { props, goi } = dungThu();
-    render(<Studio {...props} />);
-    fireEvent.click(q().getByRole("button", { name: /^Dịch/ }));
-    assert.ok(!tenDaGoi(goi).includes("onBuoc"));
-  });
-
-  it("CHƯA có bản dịch: bấm bước Dịch PHẢI gọi onBuoc('dich')", () => {
-    // 🔴 ĐO ĐƯỢC (chủ dự án báo: "tôi muốn ấn cái này để dịch lại nhưng mà có vẻ chưa
-    // làm"). Bước `Dịch` đứng ở `blocked` + ghi chú "chưa dịch" — mà `blocked` ở đây chỉ
-    // là GỢI Ý, không phải cổng chặn. Bản trước `onStep` chỉ `setView("compare")` rồi
-    // `return`, nên bấm mãi cũng không có job dịch nào.
+describe("Studio: bước Dịch — bấm là DỊCH, kể cả dịch lại", () => {
+  it("CHƯA có bản dịch: bấm bước Dịch gọi onBuoc('dich')", () => {
+    // 🔴 ĐO ĐƯỢC (chủ dự án: "tôi muốn ấn cái này để dịch lại nhưng mà có vẻ chưa làm").
+    // Bước `Dịch` đứng ở `blocked` + "chưa dịch" — mà `blocked` ở đây chỉ là GỢI Ý, không
+    // phải cổng chặn. Bản đầu `onStep` chỉ `setView("compare")` rồi `return`.
     const { props, goi } = dungThu({ banDich: null });
     render(<Studio {...props} />);
     fireEvent.click(q().getByRole("button", { name: /^Dịch/ }));
     const buoc = goi.filter((g) => g.ten === "onBuoc").map((g) => g.args[0]);
     assert.deepEqual(buoc, ["dich"], `phải gửi đúng một onBuoc('dich'), đo được ${JSON.stringify(buoc)}`);
+  });
+
+  it("ĐÃ có bản dịch: bấm bước Dịch VẪN gọi onBuoc('dich') — đây là đường DỊCH LẠI", () => {
+    // Chủ dự án chốt: "dùng lại nút dịch ở trên này nè". `createTranslation` chỉ được gọi
+    // từ đúng một chỗ (`App.onBuoc("dich")`), nên nếu bước này không gọi thì KHÔNG có
+    // đường nào dịch lại. Mỗi lần bấm là một hàng `translations` mới — backend không có
+    // "dịch đè" — nên đó là hành vi phải nói ra, không phải hành vi phải giấu.
+    const { props, goi } = dungThu();
+    render(<Studio {...props} />);
+    fireEvent.click(q().getByRole("button", { name: /^Dịch/ }));
+    const buoc = goi.filter((g) => g.ten === "onBuoc").map((g) => g.args[0]);
+    assert.deepEqual(buoc, ["dich"], `phải gửi đúng một onBuoc('dich'), đo được ${JSON.stringify(buoc)}`);
+  });
+
+  it("ĐANG dịch: KHÔNG gửi thêm job, và NÓI đang dịch", () => {
+    // Bấm chồng lúc job đang chạy sẽ tạo thêm hàng `translations` — cùng loại lỗi đã đo
+    // được ở bước `asr` (job #95/#96, #98/#99, #101/#102 cách nhau vài giây vì giao diện
+    // không phản hồi). Nên bước đang chạy phải TỪ CHỐI, kèm lời giải thích.
+    const dangDich = {
+      id: 99, workspace: 1, type: "translate", engine: "opus-mt", phase: "translate",
+      state: "running", progress: 0.4, payload: { transcript_id: 2 },
+    } as unknown as Job;
+    const { props, goi } = dungThu({ jobs: [dangDich] });
+    render(<Studio {...props} />);
+    fireEvent.click(q().getByRole("button", { name: /^Dịch/ }));
+    assert.ok(!tenDaGoi(goi).includes("onBuoc"), "đang dịch thì không gửi thêm job");
+    assert.ok(q().getByText(/Đang dịch/), "phải nói đang dịch, không im lặng");
   });
 
   it("chưa có bản ghi: KHÔNG gọi onBuoc, và NÓI LÝ DO", () => {

@@ -284,6 +284,7 @@ describe("duongOng: sau buoc, bon trang thai", () => {
       engineAsr: null,
       asrState: null,
       coBanDich: false,
+      dichState: null,
       engineMt: null,
       soViec: 0,
       dubState: null,
@@ -304,6 +305,22 @@ describe("duongOng: sau buoc, bon trang thai", () => {
    * `queued` KHÔNG được vẽ như `todo`: job đã nằm trong hàng đợi, bấm lại không được, nên
    * hiện "chưa nạp" là nói sai và mời người dùng bấm một nút không có tác dụng.
    */
+  /**
+   * BƯỚC "DỊCH" PHẢI NÓI ĐANG CHẠY, KỂ CẢ KHI ĐÃ CÓ BẢN DỊCH CŨ.
+   *
+   * 🔴 LỖI THẬT, ĐO ĐƯỢC: bấm "Dịch" trên bản ĐÃ dịch (tức dịch lại) thì `coBanDich` vẫn
+   * `true` cho tới khi job xong. Xét `coBanDich` trước `dichState` thì bước giữ dấu tích
+   * `done` suốt lúc chạy — bước nói "xong rồi" đúng lúc người dùng vừa bảo nó chạy lại.
+   */
+  it("dich dang chay tren ban DA co ban dich: van la running, KHONG phai done", () => {
+    const b = duongOng(vao({ coBanGhi: true, coBanDich: true, engineMt: "opus-mt",
+                             dichState: "running" }));
+    const d = b.find((x) => x.id === "dich");
+    assert.ok(d !== undefined, "phải có bước dich");
+    assert.equal(d.state, "running", `state phải là running, đo được ${d.state}`);
+    assert.equal(d.note, "đang dịch…");
+  });
+
   it("asr dang chay: 'dang phien am', state running — KHONG phai 'chua nap'", () => {
     const b = duongOng(vao({ asrState: "running" }));
     assert.equal(b[0].state, "running", `state phải là running, đo được ${b[0].state}`);
