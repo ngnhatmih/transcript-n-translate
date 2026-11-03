@@ -353,7 +353,21 @@ export function PhuDeStyleDialog({
           </>
         )}
 
-        <Truong nhan="Độ dày viền">
+        {/* 🔴 MỘT ô, HAI nghĩa — vì `.ass` chỉ có MỘT trường cho cả hai.
+            `Style: … BorderStyle, Outline …`: `Outline` là ĐỘ DÀY VIỀN khi
+            `BorderStyle = 1`, và là ĐỆM CỦA HỘP khi `BorderStyle = 3`. Thêm một ô thứ
+            hai cho "cỡ hộp" sẽ phải bịa ra một trường không tồn tại, và bản burn sẽ
+            không bao giờ khớp với bản xem trước. Nên nhãn đổi theo chế độ, số thì một. */}
+        <Truong nhan={style.kieuVien === 3 ? "Cỡ hộp" : "Độ dày viền"}>
+          <input
+            type="range"
+            min={0}
+            max={20}
+            value={style.vien}
+            onChange={(e) => dat({ vien: Number(e.target.value) })}
+            className="w-24 accent-signal"
+            aria-label={style.kieuVien === 3 ? "Cỡ hộp" : "Độ dày viền"}
+          />
           <input
             type="number"
             min={0}
@@ -361,7 +375,7 @@ export function PhuDeStyleDialog({
             value={style.vien}
             onChange={(e) => dat({ vien: Number(e.target.value) })}
             className={oNhap}
-            aria-label="Độ dày viền"
+            aria-label={style.kieuVien === 3 ? "Cỡ hộp (số)" : "Độ dày viền (số)"}
           />
         </Truong>
 
