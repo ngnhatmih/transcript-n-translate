@@ -64,7 +64,12 @@ function q() {
 // ---------------------------------------------------------------------------
 
 function doan(p: Partial<Segment> & { i: number }): Segment {
-  return { start: 0, end: 1, text: "", suspect: false, ...p };
+  // 🔴 `layer` MAC DINH `"mot_nguon"`, khong phai `null`.
+  //
+  // `Timeline` loc `s.layer !== null && lopBat[s.layer]`. Fixture cu khong co `layer`,
+  // nen `lopCua` tra `null` va MOI doan bi loai — 39 bai do voi "chua co o phu de nao".
+  // Backend #50 gan `layer` cho CA 158 doan, nen fixture phai mo ta dung du lieu that.
+  return { start: 0, end: 1, text: "", suspect: false, layer: "mot_nguon", ...p };
 }
 
 function banGhi(segments: Segment[]): Transcript {

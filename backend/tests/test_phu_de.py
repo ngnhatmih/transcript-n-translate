@@ -19,8 +19,8 @@ from app.domain.phu_de import (
 CAO = 720
 
 
-def _hop(text="xin chào", x0=100.0, y0=630.0, x1=400.0, y1=680.0, t=0.0, diem=0.9):
-    return Hop(text=text, x0=x0, y0=y0, x1=x1, y1=y1, t=t, diem=diem)
+def _hop(text="xin chào", x0=100.0, y0=630.0, x1=400.0, y1=680.0, t=0.0, diem=0.9, goc=0.0):
+    return Hop(text=text, x0=x0, y0=y0, x1=x1, y1=y1, t=t, diem=diem, goc=goc)
 
 
 def test_tim_dai_phu_de_tra_ti_le_khong_phai_pixel():
@@ -119,6 +119,135 @@ def test_loc_hinh_dang_bo_dong_lap_lien_tiep():
                         _hop(text="好好好", t=1.0), _hop(text="下一句", t=1.5)])
     texts = [h.text for h in ra]
     assert texts.count("好好好") <= 1, f"dòng lặp y nguyên phải gộp, đo được {texts}"
+
+
+def test_noi_manh_cung_dong_CHEP_goc():
+    """`goc` phải sống sót qua `noi_manh_cung_dong` — chỗ ĐỨT ĐẦU TIÊN của đường thật.
+
+    ĐO ĐƯỢC (job asr #154, transcript #47): sau khi chỉ sửa `gop_thanh_dong`, vẫn còn
+    `0/158` đoạn mang `goc`. Nguyên nhân: `doc_phu_de` gọi `noi_manh_cung_dong` TRƯỚC, và
+    hàm đó tạo `Hop` MỚI ở cả hai nhánh — góc bị xoá ngay tại đây, chưa tới `gop_thanh_dong`.
+
+    Bài này ghim CẢ HAI nhánh:
+      · nhánh không nối được vào chuỗi nào -> `Hop` mới mang `goc` của chính nó;
+      · nhánh nối vào chuỗi có sẵn -> giữ `goc` của hộp ĐẦU chuỗi.
+    """
+    from app.domain.phu_de import noi_manh_cung_dong
+
+    # Nhanh 1: mot hop duy nhat, khong noi vao dau.
+    mot = noi_manh_cung_dong([_hop(text="福州烟台山", goc=-9.5, t=193.0)])
+    assert len(mot) == 1
+    assert abs(mot[0].goc - (-9.5)) < 0.01, (
+        "nhanh tao moi phai chep goc, do duoc %r" % mot[0].goc)
+
+    # Nhanh 2: hai hop cung chu cach nhau mot nhip -> noi vao chuoi, giu goc hop DAU.
+    hai = noi_manh_cung_dong([
+        _hop(text="福州烟台山", goc=-9.5, t=193.0),
+        _hop(text="福州烟台山", goc=-9.5, t=193.5),
+    ])
+    assert len(hai) == 1, "hai hop cung chu phai noi, do duoc %d" % len(hai)
+    assert abs(hai[0].goc - (-9.5)) < 0.01, (
+        "nhanh noi phai giu goc hop dau, do duoc %r" % hai[0].goc)
+
+
+def test_gop_thanh_dong_CHEP_goc_tu_Hop():
+    """`goc` phải SỐNG SÓT qua `gop_thanh_dong` — đây là chỗ nó TỪNG bị vứt.
+
+    ĐO ĐƯỢC (job asr #150, nguồn 6): `_doc_khung` đã tính `goc` bằng `goc_hop`, `Hop` đã
+    mang `goc`, nhưng `gop_thanh_dong` tạo `Segment(...)` MỚI mà không chép trường đó —
+    nên transcript #45 vẫn có **0/158** đoạn mang `goc`, và 6 khối poster vẫn nằm trong
+    lớp 1. Luật ở `loc_hinh_dang` và `nguon_chu` đúng nhưng KHÔNG CÓ DỮ LIỆU để chạy.
+
+    Bài này ghim đúng chỗ đứt: `Hop(goc=-10)` -> `Segment.goc == -10`.
+    """
+    hops = [_hop(text="福州烟台山", goc=-10.0, t=193.0),
+            _hop(text="福州烟台山", goc=-10.0, t=193.5)]
+    segs = gop_thanh_dong(hops, fps=2.0)
+    assert len(segs) == 1, "hai hop cung chu phai gop thanh mot, do duoc %d" % len(segs)
+    assert abs(segs[0].goc - (-10.0)) < 0.01, (
+        "gop_thanh_dong phai CHEP goc tu Hop, do duoc %r" % segs[0].goc)
+
+
+def test_goc_hop_tinh_tu_bon_diem():
+    """`goc_hop` phải trả đúng độ nghiêng của CẠNH TRÊN, không phải của hộp bao.
+
+    ĐO ĐƯỢC trên nguồn 6 (bốn điểm RapidOCR trả về, khung 193.0-194.0 s):
+
+        goc =   0.0   'biibili'              watermark, nam ngang
+        goc =  -9.5   '9福州烟台山'           POSTER, nghieng
+        goc = -16.9   '2026-10-2027·1'      POSTER, nghieng
+        goc = -14.6   '开2026见'             POSTER, nghieng
+
+    Tra 0.0 khi thieu diem — an toan: bo nham phu de la mat chu that.
+    """
+    import math
+    from app.domain.phu_de import goc_hop
+
+    # canh tren nghieng -10 do
+    diem = [[100.0, 200.0], [200.0, 200.0 + 100 * math.tan(math.radians(-10))],
+            [200.0, 260.0], [100.0, 260.0]]
+    assert abs(goc_hop(diem) - (-10.0)) < 0.01, "do duoc %r" % goc_hop(diem)
+
+    # nam ngang
+    ngang = [[0.0, 0.0], [100.0, 0.0], [100.0, 50.0], [0.0, 50.0]]
+    assert goc_hop(ngang) == 0.0, "do duoc %r" % goc_hop(ngang)
+
+    # thieu diem -> 0.0, KHONG nem
+    assert goc_hop([]) == 0.0
+    assert goc_hop([[0.0, 0.0], [1.0, 1.0]]) == 0.0
+
+
+def test_loc_hinh_dang_KHONG_bo_hop_nghieng():
+    """`loc_hinh_dang` KHÔNG được bỏ hộp nghiêng — đó là việc của `nguon_chu`.
+
+    🔴 ĐO ĐƯỢC, VÀ ĐÂY LÀ LẦN SỬA THỨ HAI (ghi lại để không ai làm lại lần nữa).
+
+    Lần đầu tôi đặt `if abs(h.goc) > GOC_TOI_DA: continue` NGAY TRONG hàm này. Hậu quả đo
+    được (job asr #152): 6 khối poster BIẾN MẤT khỏi transcript (#46 còn 152 đoạn thay vì
+    158) — tức XOÁ DỮ LIỆU, không khôi phục được.
+
+    Người dùng chốt: "neu bi nghieng thi ko doc" NHƯNG "van co luu nha dung xoa may cai
+    nghieng chi la ko cho vao layer nao thoi". Hai vế đó chia việc làm HAI chỗ:
+
+        loc_hinh_dang  ->  chỉ lọc NỘI DUNG CHỮ, KHÔNG đụng tới góc
+        nguon_chu      ->  gán `layer = ""` cho hộp nghiêng, dữ liệu VẪN CÒN
+
+    Bài này ghim vế thứ nhất: hộp nghiêng phải ĐI QUA hàm này.
+    """
+    ra = loc_hinh_dang([
+        _hop(text="9福州烟台山", goc=-9.5),
+        _hop(text="2026-10-2027·1", goc=-16.9),
+        _hop(text="开2026见", goc=-14.6),
+        _hop(text="你怎么骑", goc=0.0),
+    ])
+    texts = [h.text for h in ra]
+    # "2026-10-2027·1" KHONG co mat: no co 4 cum so (2026/10/2027/1), vuot
+    # SO_CUM_SO_TOI_DA=2 — luat NOI DUNG cu, dung va khong lien quan goc.
+    # Bai nay chi ghim GOC: hop nghieng khong bi bo VI GOC.
+    assert texts == ["9福州烟台山", "开2026见", "你怎么骑"], (
+        "hop nghieng phai DI QUA loc_hinh_dang, do duoc %r" % texts)
+
+    # Nhung luat NOI DUNG van ap: hop nghieng ma toan chu Latinh van bi bo.
+    ra2 = loc_hinh_dang([_hop(text="biibili", goc=-9.5)])
+    assert ra2 == [], "logo Latinh nghieng van phai bi bo, do duoc %r" % [h.text for h in ra2]
+
+
+def test_hop_nghieng_VAN_DUOC_GIU_chi_khong_vao_lop():
+    """Hộp nghiêng KHÔNG bị xoá — chỉ `layer = ""`. Người dùng chốt cả hai vế:
+
+        "neu bi nghieng thi ko doc"
+        "van co luu nha dung xoa may cai nghieng chi la ko cho vao layer nao thoi"
+
+    Nên `hop_nhat_theo_doan` phải TRẢ VỀ đoạn đó, với `layer` rỗng.
+    """
+    from app.domain.nguon_chu import hop_nhat_theo_doan
+    from app.domain.models import Segment
+
+    ocr = [Segment(i=0, start=193.0, end=193.5, text="福州烟台山", goc=-9.5)]
+    asr: list[Segment] = []
+    ra, _de, _nghi = hop_nhat_theo_doan(ocr, asr)
+    assert len(ra) == 1, "hop nghieng phai DUOC GIU, do duoc %d" % len(ra)
+    assert ra[0].layer == "", "hop nghieng khong duoc vao lop nao, do duoc %r" % ra[0].layer
 
 
 def test_loc_theo_asr_bo_dong_khong_co_tieng_noi():

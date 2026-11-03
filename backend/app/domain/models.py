@@ -27,6 +27,28 @@ class Word:
         return cls(w=d["w"], s=float(d["s"]), e=float(d["e"]))
 
 
+#: Goc nghieng TOI DA (do) cua mot dong phu de cung. Qua nguong nay thi do la chu tren
+#: poster/bien hieu chup xien trong canh, khong phai phu de.
+#:
+#: DO DUOC tren nguon 6, khung 193.0-194.0 s:
+#:
+#:     goc =   0.0   'biibili'              watermark, nam ngang
+#:     goc =   0.0   '想想工作室'            watermark, nam ngang
+#:     goc =   0.0   '中仑山区民族器乐学'     bien hieu, nam ngang
+#:     goc =  -5.9   '想想'                 bien hieu, hoi nghieng
+#:     goc =  -9.5   '9福州烟台山'           POSTER, nghieng
+#:     goc = -16.9   '2026-10-2027·1'      POSTER, nghieng
+#:     goc = -14.6   '开2026见'             POSTER, nghieng
+#:
+#: Khoang trong 0.0 -> -5.9 do rong, khong ca nao o giua. Nguong 3 nam trong khoang do,
+#: khong phai so may man.
+#:
+#: Nguoi dung chot: "neu bi nghieng thi ko doc" VA "van co luu nha dung xoa may cai
+#: nghieng chi la ko cho vao layer nao thoi". Nen hop nghieng VAN duoc tra ve, chi khong
+#: duoc gan lop — xem `nguon_chu.hop_nhat_theo_doan`.
+GOC_TOI_DA = 3.0
+
+
 @dataclass
 class Segment:
     i: int
@@ -63,6 +85,21 @@ class Segment:
     #: mat dong chu that tren hinh (logo, dong ghi cong), bo doan ngoai la mat loi noi that.
     #: `-1` chu khong phai `None` de so sanh `>= 0` la du, khong phai kiem hai lan.
     chua_trong: int = -1
+
+    #: Goc NGHIENG cua hop OCR, do. `0.0` = nam ngang (phu de cung); am = nghieng sang
+    #: phai (poster/bien hieu chup xien trong canh).
+    #:
+    #: DO DUOC tren nguon 6, khung 193.0-194.0 s:
+    #:
+    #:     goc =   0.0   'biibili'              watermark, nam ngang
+    #:     goc =   0.0   '想想工作室'            watermark, nam ngang
+    #:     goc =  -9.5   '9福州烟台山'           POSTER, nghieng
+    #:     goc = -16.9   '2026-10-2027·1'      POSTER, nghieng
+    #:
+    #: `hop_nhat_theo_doan` gan `layer = ""` cho doan co `|goc| > GOC_TOI_DA`, nen doan
+    #: do KHONG vao lan nao tren timeline — dung y nguoi dung: "neu bi nghieng thi ko doc"
+    #: nhung "van co luu nha dung xoa". Xem `GOC_TOI_DA` ngay tren.
+    goc: float = 0.0
 
     @property
     def duration(self) -> float:
@@ -103,6 +140,10 @@ class Segment:
             d["layer"] = self.layer
         if self.chua_trong >= 0:
             d["chua_trong"] = self.chua_trong
+        # Chi ghi khi KHAC 0: du lieu cu doc len khong co truong nay, va `0.0` la
+        # mac dinh dung (hop nam ngang). Ghi `0.0` cho moi doan se lam phinh JSON vo ich.
+        if self.goc:
+            d["goc"] = round(self.goc, 2)
         return d
 
     @classmethod
@@ -124,6 +165,7 @@ class Segment:
             qa=list(d.get("qa") or []),
             layer=str(d.get("layer") or ""),
             chua_trong=int(d.get("chua_trong", -1)),
+            goc=float(d.get("goc") or 0.0),
         )
 
 

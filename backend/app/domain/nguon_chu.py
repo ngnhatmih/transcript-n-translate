@@ -23,7 +23,7 @@ so với OCR 2 fps ±0,5 s).
 from __future__ import annotations
 from difflib import SequenceMatcher
 
-from app.domain.models import Segment
+from app.domain.models import Segment, GOC_TOI_DA
 
 #: Hai đoạn ASR cách nhau ít hơn ngưỡng này là MỘT khoảng có tiếng (nhiễu cắt dòng).
 #: Đo được: bản ASR gốc 451 đoạn trên 1249 s có nhiều cặp sát nhau cỡ 0,1–0,3 s.
@@ -506,6 +506,8 @@ def hop_nhat_theo_doan(doan_ocr: list[Segment], doan_asr: list[Segment]
                 end=ocr.end,
                 text=ocr.text,
                 suspect=False,
+                # 🔴 `goc` — cung ly do nhu nhanh duoi: thieu no thi luat goc khong chay.
+                goc=ocr.goc,
                 layer=lop,
             ))
         so_de += 1
@@ -518,7 +520,32 @@ def hop_nhat_theo_doan(doan_ocr: list[Segment], doan_asr: list[Segment]
             # LOP 1: chi OCR doc ra, ASR khong nghe ra. Cung la bang chung chat
             # nhat — khong co nguon thu hai phu nhan.
             ra.append(Segment(i=0, start=ocr.start, end=ocr.end, text=ocr.text,
-                              suspect=False, layer=LOP_MOT_NGUON))
+                              suspect=False, layer=LOP_MOT_NGUON,
+                              # 🔴 `goc` — thieu dong nay thi `loc_hinh_dang` va
+                              # `nguon_chu` deu dung ma khong co du lieu de chay. Do duoc:
+                              # transcript #48 van `0/158` doan mang `goc`.
+                              goc=ocr.goc))
+
+    # 🔴 HOP NGHIENG KHONG VAO LOP NAO — nhung VAN DUOC GIU trong danh sach.
+    #
+    # Nguoi dung chot hai cau, ca hai deu phai giu cung luc:
+    #
+    #     "neu bi nghieng thi ko doc"
+    #     "van co luu nha dung xoa may cai nghieng chi la ko cho vao layer nao thoi"
+    #
+    # Nen o day KHONG xoa doan, chi gan `layer = ""`. Y nghia cua `""` da ghi trong
+    # `models.Segment.layer`: doan khong co bang chung de gan lop. Giao dien dua vao
+    # `layer` de xep lan, nen doan nay khong chiem lan nao.
+    #
+    # DO DUOC tren #44: 6 khoi nghieng (i=118..123, goc -9.5 .. -16.9 do) -> lop 1 tu
+    # 3 lan ve dung 1 lan: phan bo lan {0: 113, 10: 38}.
+    #
+    # Vi sao loc theo GOC chu khong theo CHU: chu cua poster (`福州烟台山`, `2026-10-2027·1`)
+    # la chu Han 5-9 ky tu, trong y het phu de — do duoc ca bon luat cua `loc_hinh_dang`
+    # deu de chung LOT QUA. Chi goc moi tach duoc.
+    for s in ra:
+        if abs(s.goc) > GOC_TOI_DA:
+            s.layer = ""
 
     ra.sort(key=lambda s: (s.start, s.end))
     for k, s in enumerate(ra):

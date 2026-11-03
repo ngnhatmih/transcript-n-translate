@@ -19,7 +19,7 @@ import tempfile
 
 from app.domain.models import Segment
 from app.domain.phu_de import (
-    Hop, gop_thanh_dong, loc_hinh_dang, loc_on_dinh, loc_theo_asr, noi_manh_cung_dong,
+        Hop, goc_hop, gop_thanh_dong, loc_hinh_dang, loc_on_dinh, loc_theo_asr, noi_manh_cung_dong,
     tim_dai_phu_de,
 )
 
@@ -136,9 +136,14 @@ class RapidOCREngine:
                 continue
             xs = [p[0] for p in diem_anh]
             ys = [p[1] for p in diem_anh]
+            # 🔴 `goc` TINH TU BON DIEM, ngay tai day — vi mot khi da thanh `Hop` thi
+            # chi con `x0/y0/x1/y1` (hinh chu nhat bao) va goc nghieng BI MAT.
+            # Do duoc tren nguon 6: phu de cung luon `0.0`, poster chup xien trong canh
+            # thi `-9.5` den `-16.9`. Xem `phu_de.goc_hop`.
             hops.append(Hop(text=str(text).strip(), x0=min(xs), y0=min(ys),
                             x1=max(xs), y1=max(ys), t=t,
-                            diem=float(diem) if diem is not None else 0.0))
+                            diem=float(diem) if diem is not None else 0.0,
+                            goc=goc_hop(diem_anh)))
         return hops
 
     def doc_phu_de(self, video_path: str, *, fps: float = 2.0,

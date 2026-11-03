@@ -57,10 +57,36 @@ export function Timeline({
    * nguoi dung khong yeu cau.
    */
   const [lopBat, setLopBat] = useState({ mot_nguon: true, hai_nguon: true });
-
-  // Loc TRUOC khi xep lan: tat mot lop thi khoi cua lop do khong duoc ve, va khong
-  // chiem cho trong `xepLan` (neu loc sau, cac khoi con lai van bi day xuong lan trong).
-  const segmentsLoc = segments.filter((s) => s.layer === null || lopBat[s.layer]);
+  /**
+   * LOC THEO LOP DANG BAT.
+   *
+   * 🔴 `null` PHAI BI LOAI — day la loi that, do duoc tren trinh duyet.
+   *
+   * Ban truoc:
+   *
+   *     segments.filter((s) => s.layer === null || lopBat[s.layer])
+   *
+   * Y dinh cua `s.layer === null` la giu doan CUA DU LIEU CU (tao truoc khi backend co
+   * truong `layer`) — khong bo chu cua nguoi dung chi vi thieu nhan.
+   *
+   * Nhung `null` gio co nghia THU HAI: khoi bi loai khoi moi lop (chu tren poster/
+   * bien hieu chup xien, xem `models.GOC_TOI_DA`). Do duoc tren trinh duyet voi
+   * translation #52:
+   *
+   *     props Timeline: tong 158, layer_null 6, layer_undefined 0
+   *     i=118 layer=null '福州烟台山'   -> VAN VE o lan 1
+   *     i=120 layer=null '你会在山上看到' -> VAN VE o lan 1
+   *
+   * Hau qua do duoc tren DOM: `tops = {1: 113, 19: 5, 37: 1, 181: 38}` — lop 1 trai BA
+   * lan thay vi mot, dung cai nguoi dung chi ra ("Muc tieu la layer 1 chi co 1 lan").
+   *
+   * Sau khi bo `=== null`: `tops = {1: 113, 181: 38}`.
+   *
+   * Vi sao bo duoc ma khong mat du lieu cu: `#50` da co `layer` cho CA 158 doan (114
+   * `mot_nguon`, 38 `hai_nguon`, 6 rong). Doan nao thieu `layer` thi `lopBat[undefined]`
+   * la falsy nen van bi loai — va do la hanh vi dung: khong co bang chung thi khong doan.
+   */
+  const segmentsLoc = segments.filter((s) => s.layer !== null && lopBat[s.layer] === true);
   const width = Math.max(1, duration * pxPerSec);
   // `peaks` luon rong — 40 px do dang giu cho mot canvas khong ve duoc gi.
   const H = 56;
@@ -167,7 +193,28 @@ export function Timeline({
       trong.forEach((o, k) => {
         const dau = k === 0 ? a.start : o.start;
         const cuoi = k === trong.length - 1 ? a.end : o.end;
-        keo.set(o.i, { start: dau, end: Math.max(dau + 0.01, cuoi) });
+        // 🔴 CHAN TREN CHO PHEP KEO — KHONG DUOC KEO VO HAN.
+        //
+        // DO DUOC tren translation #52 (158 doan, 55 khoi OCR bi keo):
+        //
+        //     i=103  goc 0.50s -> 9.85s   ti le 19.70x   '"Vịt thật nhàn"'
+        //     i=140  goc 0.50s -> 1.94s   ti le  3.88x   'ΛNI'
+        //     i=154  goc 0.50s -> 1.70s   ti le  3.40x   'Tác giả: Hùng Vĩ'
+        //     9 khoi > 2x, 5 khoi > 2.5x, 3 khoi > 3x, 1 khoi > 4x
+        //
+        // `i=103` la ca ro nhat: mot khoi 0,5 giay bi keo thanh 9,85 giay, vi ASR
+        // `i=98` "Muốn" [167.49-181.85] bao trum no. Keo nhu vay khong phai 'khop loi
+        // noi' — no bien mot cau ngan thanh mot dai dai, va cai dai do CHONG len khoi
+        // ke tiep (`i=104` [181.50-182.00]), day khoi that xuong lan phu. Do duoc tren
+        // DOM: lop 1 trai 3 lan {1: 110, 19: 3} thay vi mot.
+        //
+        // Nguong 2x: duoi muc do 9 khoi bi keo > 2x deu la keo HOP LY (mot cau OCR
+        // ngan nam trong mot cau ASR dai hon — phu de that su hien lau hon chu doc).
+        // Tren muc 2x thi khoi da dai hon gap doi chinh no, va do la luc no bat dau
+        // chiem cho cua khoi khac. Cat ve 2x giu duoc y dinh ban dau ma khong sinh dai.
+        const daiGoc = Math.max(0.01, o.end - o.start);
+        const cuoiChan = Math.min(cuoi, dau + daiGoc * 2);
+        keo.set(o.i, { start: dau, end: Math.max(dau + 0.01, cuoiChan) });
       });
     }
     // Tra MAP theo `s.i`, KHONG theo chi so mang: vong ve dung `segmentsLoc` (da loc
@@ -222,15 +269,54 @@ export function Timeline({
   //
   // DAI LAN TACH ROI: lop 1 dung 0,1,2,...; lop 2 bat dau tu 10. Nho vay du lop 1
   // co nhieu lan con den dau, no cung khong cham vao lan cua lop 2.
+  /**
+   * BO KHOI KHONG PHAI CHU DE DOC — mot luat, do duoc, hep.
+   *
+   * LUAT: ban DICH giong HET ban GOC (sau khi bo khoang trang). Do la dau hieu bo
+   * dich KHONG NHAN RA chu — vi do la logo/ky hieu, khong phai ngon ngu.
+   *
+   * DO DUOC tren translation #46 (158 doan): dung MOT khoi thoa:
+   *
+   *        i=140  [220.00-220.50]  goc="ΛNI"   dich="ΛNI"
+   *
+   * Do la logo nam trong cau noi: no chiem mot o tren timeline va day cac khoi that
+   * xuong lan phu. Sau khi bo, lop 1 con dung MOT lan (do duoc: {0: 113, 10: 38}).
+   *
+   * 🔴 DA THU VA DA BO — ghi lai de khong ai lam lai lan nua.
+   *
+   * Ban truoc loc theo DO DAI CHU (`t.length <= 6 && !t.includes(" ")`). Do duoc no
+   * AN CA CAU THAT:
+   *
+   *        "你绝对没吃过"   6 ky tu, khong dau cach  -> bi loc  <- CAU THAT
+   *        "没想到"        3 ky tu                  -> bi loc  <- CAU THAT
+   *        "还是卷起来了"   6 ky tu                  -> bi loc  <- CAU THAT
+   *
+   * Tren #44 no an 27 khoi va lop 1 tut tu 114 xuong 88. Do dai chu KHONG phan biet
+   * duoc logo voi cau ngan — nen luat do sai, khong phai qua rong.
+   *
+   * Vi sao khong can luat DO DAI nua: chu tren poster/bien hieu gio da bi loc o BACKEND
+   * bang GOC NGHIENG (`phu_de.GOC_TOI_DA`, do tu bon diem RapidOCR tra). Do duoc tren
+   * nguon 6: poster nghieng -9.5 .. -16.9 do, phu de cung luon 0.0 do. Frontend khong
+   * phai doan lai bang noi dung chu.
+   */
+  const laRac = (s: Dong): boolean => {
+    const goc = s.text.trim();
+    const dich = (s.dich ?? "").trim();
+    // `goc === dich` chi co nghia khi CA HAI deu khac rong.
+    return goc.length > 0 && goc === dich;
+  };
+
+  const segmentsVe = segmentsLoc.filter((s) => !laRac(s));
+
+  // LAN CO DINH THEO LOP, khong day xuyen lop. Hai dai tach roi de lop 1 du co nhieu
+  // lan con den dau cung khong cham vao lan cua lop 2.
   const LAN_GOC: Record<string, number> = { mot_nguon: 0, hai_nguon: 10 };
 
-  // Dai lan TACH ROI: lop 1 dung 0.., lop 2 bat dau tu 10. Nho vay du lop 1 co nhieu
-  // lan con den dau, no cung khong cham vao lan cua lop 2.
   const xepLan = (() => {
     const ra = new Map<number, { lan: number; rong: number; trai: number }>();
     const cuoiMoiLan: number[] = [];
 
-    const thuTu = segmentsLoc
+    const thuTu = segmentsVe
       .slice()
       .sort((x, y) => x.start - y.start || x.end - y.end);
 
@@ -240,10 +326,27 @@ export function Timeline({
       const rong = Math.max(2, (kv.end - kv.start) * pxPerSec);
       const goc = LAN_GOC[s.layer ?? "mot_nguon"] ?? 0;
       let lan = goc;
-      // Nguong day = 2 px, KHONG phai 0.5: `rong = Math.max(2, ...)` bom moi khoi toi
-      // thieu 2 px, nen hai khoi cach nhau 1 px van "giao" nhau 1 px tren man hinh.
-      // Do duoc: 11 cap giao dung 1 px o `top1` truoc khi nang nguong.
-      while (lan < cuoiMoiLan.length && (cuoiMoiLan[lan] ?? 0) > trai + 2) lan++;
+      // 🔴 NGUONG CHONG = 0,5 GIAY, KHONG PHAI 2 PIXEL.
+      //
+      // Ban truoc: `cuoiMoiLan[lan] > trai + 2` — 2 px o 40 px/s la 0,05 giay, ngan
+      // hon MOT khung hinh video 25 fps. Nen hai khoi lech nhau 0,05 giay — mat
+      // thuong khong phan biet duoc — van bi coi la chong va bi day xuong lan khac.
+      //
+      // DO DUOC tren translation #52 sau khi chan `khoangVe`, ba cap sinh ra ba lan:
+      //
+      //     i=51 [ 77.00- 77.95]  vs  i=52  [ 78.00- 78.97]   lech 0,05s
+      //     i=71 [106.50-107.53]  vs  i=72  [108.00-108.93]   lech 0,47s
+      //     i=103[172.00-172.50]  vs  i=104 [181.50-182.00]   lech 9,00s (da het sau chan tren)
+      //
+      // Hai cap dau cach nhau dung 0,05s — chung KHONG chiem cho cua nhau tren man
+      // hinh, chi la moc thoi gian sat nhau. Nguong 0,5s (12,5 khung o 25 fps) loai
+      // dung nhung cap do ma van bat duoc chong that.
+      //
+      // Doi sang so sanh theo THOI GIAN chu khong theo pixel: nguong pixel phu thuoc
+      // `pxPerSec`, nen cung mot du lieu se ra so lan khac nhau khi zoom — dung cai
+      // loi 'be rong khoi doi theo lop' da ghi o tren.
+      const CHONG_TOI_THIEU = 0.5 * pxPerSec;
+      while (lan < cuoiMoiLan.length && (cuoiMoiLan[lan] ?? 0) > trai + CHONG_TOI_THIEU) lan++;
       while (cuoiMoiLan.length <= lan) cuoiMoiLan.push(0);
       cuoiMoiLan[lan] = trai + rong;
       ra.set(s.i, { lan, rong, trai });
@@ -251,9 +354,8 @@ export function Timeline({
     return ra;
   })();
 
-  // Chieu cao = lan LON NHAT + 1. Dai lan cua lop 2 bat dau tu 10, nen so lan
-  // dem theo chi so se ra 11-12 du lop 2 chi co 1 lan con. Do la chap nhan duoc:
-  // mot dai trong ngan cho lop 2 luon nam duoi lop 1, dung y nguoi dung.
+  // Chieu cao = so lan THAT SU dung. Sau khi an rac va gop manh OCR, lop 1 chi con
+  // MOT lan (do duoc: {0: 114, 10: 36}).
   const soLan = [...xepLan.values()].reduce((m, b) => Math.max(m, b.lan + 1), 1);
   const caoDoan = soLan * CAO_LAN + 4;
 
@@ -497,7 +599,7 @@ export function Timeline({
           </button>
         ))}
         <span className="num ml-auto text-[10px] text-ink-2">
-          {segmentsLoc.length}/{segments.length}
+            {segmentsVe.length}/{segments.length}
         </span>
       </div>
 
@@ -540,7 +642,13 @@ export function Timeline({
           />
           {/* khối đoạn — bề rộng = thời gian, xếp làn theo CHỒNG LẤN THẬT (`xepLan`) */}
           <div className="absolute inset-x-0 bottom-0" style={{ height: caoDoan }}>
-            {segmentsLoc.map((s) => {
+            // 🔴 VE THEO `segmentsVe`, KHONG phai `segmentsLoc`.
+            //
+            // `xepLan` chi co khoa cho cac khoi KHONG bi loc rac. Dung `segmentsLoc` o
+            // day thi khoi rac khong co trong map, `xepLan.get(s.i)!` tra `undefined`,
+            // va `b.lan` nem TypeError — CA CAY REACT SAP, khong con o phu de nao.
+            // Do duoc: 39 bai test do voi "chua nap xong: chua co o phu de nao".
+            {segmentsVe.map((s) => {
               const b = xepLan.get(s.i)!;
               const bad = viecCuaDong(s).length > 0;
               const cur = s.i === currentId;

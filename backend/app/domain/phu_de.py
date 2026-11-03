@@ -19,9 +19,34 @@ sau lọc 3 tầng còn 627 (bỏ 69 = 10 %). Tầng 4 (tuỳ chọn, cần ASR)
 """
 from __future__ import annotations
 
+import math
+
 from dataclasses import dataclass
 
-from app.domain.models import Segment, Word
+from app.domain.models import Segment, Word, GOC_TOI_DA
+
+
+def goc_hop(diem: list) -> float:
+    """Goc NGHIENG cua hop, do — am la nghieng sang phai (chieu kim dong ho).
+
+    `diem` la bon diem `[[x,y], ...]` theo thu tu goc tren-trai, tren-phai, duoi-phai,
+    duoi-trai (thu tu RapidOCR tra ve). Lay canh TREN (`p0 -> p1`) lam chieu chu.
+
+    Vi sao can: `x0/y0/x1/y1` la HINH CHU NHAT BAO, no xoa mat goc nghieng. Do duoc tren
+    nguon 6: phu de cung luon `0.0`, con poster chup xien trong canh thi `-9.5` den
+    `-16.9`. Khong co goc thi khong phan biet duoc hai thu do.
+
+    Tra `0.0` khi khong du bon diem — coi nhu nam ngang, KHONG loai hop. The la an toan:
+    hinh dang lai la mot phep do co the sai, con bo nham phu de thi mat chu that.
+    """
+    if not diem or len(diem) < 4:
+        return 0.0
+    p0, p1 = diem[0], diem[1]
+    dx = float(p1[0]) - float(p0[0])
+    dy = float(p1[1]) - float(p0[1])
+    if dx == 0.0 and dy == 0.0:
+        return 0.0
+    return math.degrees(math.atan2(dy, dx))
 
 
 @dataclass
@@ -38,6 +63,21 @@ class Hop:
     y1: float
     t: float
     diem: float
+
+    #: Goc NGHIENG cua hop, do. Xem `loc_hinh_dang` — day la phep do HINH HOC duy nhat
+    #: trong ca file, va no la thu phan biet phu de cung voi chu tren poster/bien hieu.
+    #:
+    #: DO DUOC tren nguon 6, khung 193.0-194.0 s:
+    #:
+    #:     goc =   0.0   'biibili'              watermark, nam ngang
+    #:     goc =   0.0   '想想工作室'            watermark, nam ngang
+    #:     goc =   0.0   '中仑山区民族器乐学'     bien hieu, nam ngang
+    #:     goc =  -9.5   '9福州烟台山'           POSTER, nghieng
+    #:     goc = -16.9   '2026-10-2027·1'      POSTER, nghieng
+    #:     goc = -14.6   '开2026见'             POSTER, nghieng
+    #:
+    #: Khoang trong 0.0 -> -5.9 do rong, khong ca nao o giua, nen nguong 3 do tach sach.
+    goc: float = 0.0
 
 
 #: Bề dày tối đa của dải phụ đề, theo tỉ lệ chiều cao khung. Đo được ở video thật:
@@ -215,6 +255,20 @@ def loc_hinh_dang(hops: list[Hop]) -> list[Hop]:
     """
     ra: list[Hop] = []
     for h in hops:
+        # 🔴 HOP NGHIENG: KHONG `continue` — KHONG XOA.
+        #
+        # Nguoi dung chot: "neu bi nghieng thi ko doc" NHUNG "van co luu nha dung xoa
+        # may cai nghieng chi la ko cho vao layer nao thoi".
+        #
+        # Ban dau toi dat `continue` o day — SAI, no xoa han hop khoi du lieu. Do duoc
+        # hau qua (job asr #152): transcript #46 con 152 doan thay vi 158, va 6 khoi
+        # poster bien mat khoi ban ghi, khong khoi phuc duoc.
+        #
+        # Gio hop nghieng di het pipeline (gop dong, chon nguon) roi `nguon_chu`
+        # gan `layer = ""` — van luu, khong vao lan nao. Do goc: xem `nguon_chu`.
+        #
+        # Cac luat NOI DUNG ben duoi VAN ap cho hop nghieng: mot logo nghieng ngan hon
+        # 3 ky tu van bi bo vi no khong phai chu de doc.
         t = h.text.strip()
         if not (DAI_MIN <= len(t) <= DAI_MAX):
             continue
@@ -342,6 +396,14 @@ def noi_manh_cung_dong(hops: list[Hop]) -> list[Hop]:
     # `t_cuoi[k]` = `t` của hộp CUỐI CÙNG đã gộp vào chuỗi `k`. Phải nhớ riêng: `ra[k].t`
     # là `t` của hộp ĐẦU (dùng để tính `start`), và so ngưỡng nối với hộp ĐẦU là SAI.
     t_cuoi: list[float] = []
+    # 🔴 `goc` PHAI DUOC CHEP O CA HAI NHANH DUOI DAY.
+    #
+    # Ham nay chay TRUOC `gop_thanh_dong` trong `doc_phu_de`, va no tao `Hop` MOI. Ban dau
+    # toi chi sua `gop_thanh_dong` — do duoc ket qua (job asr #154, transcript #47): van
+    # `0/158` doan mang truong `goc`, 6 khoi poster van o lop 1. Vi goc da bi xoa TU DAY.
+    #
+    # Nhanh 1 (khong noi vao chuoi nao): chep `goc` cua chinh hop do.
+    # Nhanh 2 (noi vao chuoi co san): giu `goc` cua hop DAU chuoi.
     for h in hops:
         noi_vao: int | None = None
         for k in range(len(ra) - 1, -1, -1):
@@ -364,12 +426,12 @@ def noi_manh_cung_dong(hops: list[Hop]) -> list[Hop]:
             break
         if noi_vao is None:
             ra.append(Hop(text=h.text, x0=h.x0, y0=h.y0, x1=h.x1, y1=h.y1,
-                          t=h.t, diem=h.diem))
+                          t=h.t, diem=h.diem, goc=h.goc))
             t_cuoi.append(h.t)
         else:
             ung = ra[noi_vao]
             ra[noi_vao] = Hop(text=ung.text, x0=ung.x0, y0=ung.y0, x1=ung.x1, y1=ung.y1,
-                              t=ung.t, diem=max(ung.diem, h.diem))
+                              t=ung.t, diem=max(ung.diem, h.diem), goc=ung.goc)
             t_cuoi[noi_vao] = h.t
     return ra
 
@@ -405,9 +467,15 @@ def gop_thanh_dong(hops: list[Hop], *, fps: float) -> list[Segment]:
         if h.text == truoc.text:
             truoc = h
             continue
-        ra.append(Segment(i=len(ra), start=dau, end=truoc.t + buoc, text=truoc.text))
+        # 🔴 `goc=truoc.goc` — KHONG duoc bo. `Hop` co goc nhung `Segment` tao moi o day,
+        # nen thieu dong nay thi goc bi vut DUNG tai day va `nguon_chu` khong con gi de
+        # loc. Do duoc: job asr 150 chay tren ma da co `goc_hop` nhung transcript #45 van
+        # co 0/158 doan mang truong `goc`, va 6 khoi poster van nam trong lop 1.
+        ra.append(Segment(i=len(ra), start=dau, end=truoc.t + buoc, text=truoc.text,
+                          goc=truoc.goc))
         dau, truoc = h.t, h
-    ra.append(Segment(i=len(ra), start=dau, end=truoc.t + buoc, text=truoc.text))
+    ra.append(Segment(i=len(ra), start=dau, end=truoc.t + buoc, text=truoc.text,
+                      goc=truoc.goc))
     return ra
 
 
@@ -535,6 +603,16 @@ def keo_dai_theo_asr(doan: list[Segment], tu_asr: list[Word],
         # dòng SONG SONG, không phải nối tiếp, và chúng không tranh nhau chỗ nói.
         if k + 1 < len(doan) and doan[k + 1].start > s.start:
             end_moi = min(end_moi, doan[k + 1].start)
+        # 🔴 CHEP `goc` — cho dut THU NAM cua cung mot loi.
+        #
+        # DO DUOC: `doc_phu_de` tra ve 6 khoi deu co goc (`你会在山上看到` goc=-12.40),
+        # nhung transcript #49 chi con 4 khoi mang goc. Hai khoi mat goc la hai khoi bi
+        # ham nay KEO DAI (`end` 193.50 -> 193.81 va 194.50 -> 194.75) — vi ham nay tao
+        # `Segment` MOI ma ban dau khong chep `goc`.
+        #
+        # Chep ca `layer` va `chua_trong` cho day du: day la tao lai CUNG mot doan, chi
+        # khac `end`, nen moi truong khac phai giu nguyen.
         ra.append(Segment(i=s.i, start=s.start, end=max(s.end, end_moi), text=s.text,
-                          suspect=s.suspect))
+                          suspect=s.suspect, layer=s.layer, goc=s.goc,
+                          chua_trong=s.chua_trong))
     return ra
