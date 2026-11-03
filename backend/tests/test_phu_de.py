@@ -534,8 +534,23 @@ def _word(w, s, e):
     return Word(w=w, s=s, e=e)
 
 
-def test_keo_dai_lay_end_tu_tu_asr_cuoi_cung_khop():
-    """Ca THẬT của #13: OCR `你会在山上看到` 0,50 s, lời nói thật tới 193,81."""
+def test_keo_dai_lay_CA_start_lan_end_tu_tu_asr():
+    """Ca THAT cua #13: OCR `你会在山上看到` 0,50 s, loi noi that 192,53 -> 193,81.
+
+    🔴 BAI NAY TUNG GHIM `start` KHONG DOI, VA DIEU DO SAI.
+
+    Chu thich cu viet: "start KHONG doi — do la cho phu de bat dau hien". Nhung
+    `193,0` KHONG phai cho phu de bat dau hien: do la moc KHUNG HINH cua OCR 2 fps.
+    Loi noi that bat dau o `192,53` (tu ASR dau tien). Giu `193,0` chinh la thu tao ra
+    do tre ma chu du an thay: vach chay da cham khoi nhung current chua toi.
+
+    DO DUOC tren translation #52 (18 cap OCR-ASR cung cau):
+
+        OCR bat dau SAU ASR : 17 / 18 cap
+        OCR bat dau TRUOC   :  0 / 18 cap
+        lech trung binh     : +0,28 s
+        lech lon nhat       : +0,95 s
+    """
     from app.domain.phu_de import keo_dai_theo_asr
     doan = [_doan(0, 193.0, 193.5, "你会在山上看到")]
     tu = [_word("你", 192.53, 193.13), _word("会", 193.13, 193.25),
@@ -543,8 +558,10 @@ def test_keo_dai_lay_end_tu_tu_asr_cuoi_cung_khop():
           _word("上", 193.51, 193.63), _word("看到", 193.63, 193.81)]
     ra = keo_dai_theo_asr(doan, tu)
     assert len(ra) == 1
-    assert abs(ra[0].end - 193.81) < 0.01, f"end phải là 193,81, đo được {ra[0].end}"
-    assert ra[0].start == 193.0, "start KHÔNG đổi — đó là chỗ phụ đề bắt đầu hiện"
+    assert abs(ra[0].end - 193.81) < 0.01, f"end phai la 193,81, do duoc {ra[0].end}"
+    assert abs(ra[0].start - 192.53) < 0.01, (
+        "start phai LUI ve moc ASR dau tien 192,53, do duoc " + str(ra[0].start)
+    )
 
 
 def test_keo_dai_KHONG_keo_khi_ASR_noi_chuyen_khac():
@@ -676,3 +693,71 @@ def test_keo_dai_KHONG_keo_khi_khop_chi_MOT_PHAN():
     assert ra[0].end == 10.5, (
         f"khớp 1/6 = 0,167 dưới ngưỡng 0,5 thì KHÔNG được kéo (bỏ ngưỡng sẽ ra 10,9), "
         f"đo được end={ra[0].end}")
+
+
+def test_keo_start_KHONG_chong_khi_dong_khac_chen_giua():
+    """DO DUOC tren transcript #51 (ban that, sau khi them luat noi `start`):
+
+        i=49  [76.79-77.95]  '经常通过拉踩的方式'
+        i=51  [77.73-78.97]  '来体现作品的价值'   CHONG 0,22 s
+
+    Nguyen nhan: `i=50` chen giua hai dong nay TRONG DANH SACH, nen chan bang
+    `doan[k - 1]` la chan SAI doi tuong. Phai chan bang dong TRUOC DA XU LY.
+
+    🔴 FIXTURE DAU TIEN CUA BAI NAY SAI: toi dat dong chen giua o 95,00 s (each xa
+    17 giay), nen `ra[-1].end <= s.start` thanh `95,00 <= 78,00` = SAI va khong chan
+    gi ca — bai do voi `do duoc 77.6`. Trong du lieu THAT, dong chen giua nam CUNG
+    vung thoi gian (no la mot dong SONG SONG, khac dai `y`), nen fixture phai dat no
+    trong cung khoang do.
+    """
+    from app.domain.phu_de import keo_dai_theo_asr
+    # Dong i=1 chen GIUA trong danh sach va nam CUNG vung thoi gian (song song).
+    doan = [_doan(0, 76.79, 77.95, "经常通过拉踩的方式"),
+            _doan(1, 76.79, 77.20, "dong song song khac dai y"),
+            _doan(2, 78.00, 78.97, "来体现作品的价值")]
+    tu = [_word("经常", 76.60, 76.95), _word("通过", 76.95, 77.30),
+          _word("拉踩", 77.30, 77.60), _word("的方式", 77.60, 77.95),
+          _word("来", 77.73, 77.85), _word("体现", 77.85, 78.20),
+          _word("作品", 78.20, 78.55), _word("的价值", 78.55, 78.97)]
+    ra = keo_dai_theo_asr(doan, tu)
+    cuoi = next(s for s in ra if "来体现" in s.text)
+    assert cuoi.start >= 77.95 - 0.01, (
+        "start KHONG duoc lui qua end cua dong TRUOC DA XU LY (77,95), do duoc "
+        + str(cuoi.start)
+    )
+    chong = sum(1 for a, b in zip(ra, ra[1:]) if b.start < a.end - 0.01)
+
+
+def test_keo_start_moc_cua_LAYER_KHAC_khong_duoc_chan():
+    """DO DUOC tren transcript #52: `i=1` la ASR layer 2 nam GIUA hai dong layer 1.
+
+        i=0  layer 1  [76.79-77.95]
+        i=1  layer 2  [76.79-78.17]   <- chen giua, KHONG tranh cho voi layer 1
+        i=2  layer 1  [78.50-79.47]
+
+    Neu `moc_da_dung` tinh ca dong layer 2 thi no = 78,17 va chan `start` cua `i=2`
+    o 78,17 thay vi de no lui ve moc ASR 78,00. Hai lop la hai BAN cua cung mot cau,
+    hien o hai dai khac nhau — khong tranh cho.
+
+    PHAI doi layer thi RESET moc: neu khong, moc 78,17 cua layer 2 con lai khi quay
+    ve layer 1 va chan SAI.
+    """
+    from app.domain.phu_de import keo_dai_theo_asr
+    doan = [_doan(0, 76.79, 77.95, "经常通过拉踩的方式"),
+            _doan(1, 76.79, 78.17, "经常通过拉踩的方式"),
+            _doan(2, 78.50, 79.47, "来体现作品的价值")]
+    doan[0].layer = "mot_nguon"
+    doan[1].layer = "hai_nguon"
+    doan[1].suspect = True
+    doan[2].layer = "mot_nguon"
+    tu = [_word("来", 78.00, 78.20), _word("体现", 78.20, 78.60),
+          _word("作品", 78.60, 79.00), _word("的价值", 79.00, 79.47)]
+    ra = keo_dai_theo_asr(doan, tu)
+    s2 = next(x for x in ra if x.i == 2)
+    assert abs(s2.start - 78.00) < 0.01, (
+        "start phai la moc ASR 78,00 (KHONG bi moc layer 2 78,17 chan), do duoc "
+        + str(s2.start)
+    )
+    l1 = sorted([x for x in ra if x.layer == "mot_nguon"], key=lambda x: x.start)
+    chong = [(a.i, b.i) for a, b in zip(l1, l1[1:]) if b.start < a.end - 0.01]
+    assert chong == [], f"layer 1 khong duoc chong, do duoc {chong}"

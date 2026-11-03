@@ -464,32 +464,32 @@ GPU. Nó tự ép UTF-8 cho stdout (console Windows mặc định cp1252, còn s
 tiếng Trung/Việt) và tự đặt cache model trước khi nạp `faster_whisper`.
 
 Con số nền của lần chạy mặc định, đo sau khi xoá `__pycache__` (lệnh ở mục
-"Kiểm thử" trên, chạy từ trong `backend\`). Thứ có nghĩa là **1500 / 15**, không
+"Kiểm thử" trên, chạy từ trong `backend\`). Thứ có nghĩa là **1502 / 15**, không
 phải số giây — thời gian trôi giữa các lần chạy (đã thấy 24,00–30,94 s) còn con
 số bài thì không:
 
 ```
-1500 passed, 15 deselected, 3 warnings
+1502 passed, 15 deselected, 3 warnings
 ```
 
 Hai con số đó là SỐ BÀI ĐƯỢC CHỌN, và chúng khớp với số mà `--collect-only` báo
-(`1500/1515`, 15 bài `live` bị bỏ;
+(`1502/1517`, 15 bài `live` bị bỏ;
 `tests/test_backend_readme.py::test_readme_baseline_matches_the_tests_actually_
 collected` đối chiếu mỗi lần chạy).
 
 
-Máy này **CÓ** `ffmpeg 8.1.1` + `ffprobe` trên PATH (đã đo), nên `1500/15` ở trên
+Máy này **CÓ** `ffmpeg 8.1.1` + `ffprobe` trên PATH (đã đo), nên `1502/15` ở trên
 là số THẬT của nó. Máy **không có** `ffmpeg`/`ffprobe` cho một kết quả KHÁC: cả
 `tests/test_ingest.py` bị `skipif` ở cấp module — **9** bài cùng skip một lượt —
-nên dòng tổng kết của máy đó là **`1491 passed, 9 skipped, 15 deselected`** (=
-`1500 − 9`; con số này TỪNG ghi `978`, tức một baseline rất cũ, và nó lệch phép
+nên dòng tổng kết của máy đó là **`1493 passed, 9 skipped, 15 deselected`** (=
+`1502 − 9`; con số này TỪNG ghi `978`, tức một baseline rất cũ, và nó lệch phép
 trừ của chính khối nền ngay trên nó). Đó là
 con số của máy thiếu ffmpeg, **không phải** con số máy này từng in ra; đừng chép
 nó vào khối nền ở trên, và đừng "sửa" số nền xuống chỉ vì thiếu ffmpeg.
 
 ⚠️ Con số `856` ở đây TỪNG không khớp phép trừ của chính nó: `865 − 9 = 856`, tức
 nó là số của lượt TRƯỚC `V1` (+3 bài) còn sót lại. Phép trừ của khối nền hiện tại
-là `1500 − 9` = `1491`.
+là `1502 − 9` = `1493`.
 
 
 (Con số này từng bị ghi là `798`: bài `test_a_failed_translation_leaves_the_
@@ -1521,15 +1521,112 @@ Audio **im lặng** làm job `asr` thành `FAILED`, **không** sinh transcript r
 (xem `tests/test_silent_audio.py`). Một transcript rỗng trông y hệt một lần bóc
 băng thành công, nên nó giấu mất lỗi thật.
 
+## ERRATA #64 — `keo_dai_theo_asr` chỉ kéo `end`, nên `start` của OCR trễ hơn ASR
 
+**Phát hiện lúc:** chủ dự án gửi ảnh timeline, vạch vàng đã chạm khối `Cho n...` ở `1:15.00`
+nhưng khối đó CHƯA được tô vàng.
 
+### Đo được — OCR trễ, không bao giờ sớm
 
+Translation #52, 158 đoạn. Đếm `start` là bội số `0,5` (nhịp khung của OCR 2 fps):
 
+    OCR (suspect=False)  62 đoạn — start là bội số 0,5s:  62 / 62
+    ASR (suspect=True)   96 đoạn — start là bội số 0,5s:   1 / 96
 
+Toàn bộ 62 dòng OCR bắt đầu đúng vào mốc khung hình. ASR thì gần như không bao giờ
+(`1.14`, `2.42`, `3.38`, `5.68`).
 
+So 18 cặp OCR–ASR cùng câu (độ giống chữ ≥ 0,85):
 
+    OCR bắt đầu SAU ASR : 17 / 18 cặp
+    OCR bắt đầu TRƯỚC  :  0 / 18 cặp
+    lệch trung bình     : +0,28 s
+    lệch lớn nhất       : +0,95 s
 
+Đúng ca trong ảnh:
 
+    ASR i=48  bắt đầu 75,31   <- giọng nói thật bắt đầu
+    OCR i=49  bắt đầu 75,50   <- khung hình gần nhất SAU đó, trễ 0,19 s
 
+### Lỗi thật
 
+`keo_dai_theo_asr` (viết từ trước) chỉ kéo `end` tới hết lời nói. `start` giữ nguyên mốc
+khung. Bài test cũ còn GHIM hành vi đó:
 
+    assert ra[0].start == 193.0, "start KHÔNG đổi — đó là chỗ phụ đề bắt đầu hiện"
+
+Chú thích đó sai: `193,0` không phải chỗ phụ đề bắt đầu hiện, mà là mốc khung hình. Lời
+nói thật bắt đầu ở `192,53`.
+
+### Sửa
+
+Kéo cả `start` lùi về từ ASR ĐẦU TIÊN có đóng góp ký tự OCR cần, với hai ràng buộc:
+
+1. Không lùi qua `end` của dòng TRƯỚC — hai dòng không được chồng nhau (ràng buộc CỨNG
+   của dự án). Chỉ chặn khi dòng trước kết thúc trước dòng này; hai dòng SONG SONG (cùng
+   `start`, khác dải `y`) không tranh nhau chỗ.
+2. Không lùi qua `start` hiện tại (chỉ lùi, không đẩy tới).
+
+Đo lại trên cùng dữ liệu:
+
+    nới START : 25 dòng, +6,44 s
+    nới END   : 17 dòng, +7,04 s
+    tổng hở   : 112,25 s -> 99,77 s   (giảm 12,48 s)
+
+### Ba lần chặn chồng lấn — hai lần đầu SAI, đo được
+
+Ràng buộc "hai dòng không chồng nhau" phải chặn `start` lùi. Tôi viết sai hai lần, mỗi lần
+đều bị dữ liệu thật bắt:
+
+**Lần 1 — `doan[k - 1].end`.** Transcript #51 (chạy lại pipeline thật) sinh ra cặp chồng:
+
+    i=49  [76.79-77.95]  '经常通过拉踩的方式'
+    i=51  [77.73-78.97]  '来体现作品的价值'   CHỒNG 0,22 s
+
+`i=50` chen giữa hai dòng trong danh sách, nên `doan[k - 1]` là `i=50` chứ không phải `i=49`
+— chặn sai đối tượng.
+
+**Lần 2 — `ra[-1].end`.** Chặn theo dòng cuối ĐÃ XỬ LÝ. Vẫn sai, vì dòng SONG SONG trong
+danh sách có `end` nhỏ hơn:
+
+    i=0  [76.79-77.95]
+    i=1  [76.79-77.20]   <- kết thúc SỚM hơn i=0
+    i=2  [78.00-78.97]
+
+`ra[-1]` là `i=1` (`77,20`), nên chặn thành `77,20` và `start` lùi về `77,60` — chồng lên
+`i=0`. Đo được: `assert 77.6 >= (77.95 - 0.01)` ĐỎ.
+
+**Lần 3 — `moc_da_dung` = `max(end)` của mọi dòng đã xử lý.** Đúng. Chặn `start` tại mốc
+MUỘN NHẤT đã dùng, không phải dòng cuối danh sách.
+
+Lần sửa này cũng tự gây một lỗi khác, `tsc`-tương đương của Python bắt ngay:
+`UnboundLocalError: local variable 'moc_da_dung' referenced before assignment` — tôi chèn
+khai báo sau chuỗi `ra: list[Segment] = []`, mà chuỗi đó xuất hiện ở BA hàm; khai báo rơi
+vào `gop_thanh_dong`. Sửa bằng cách neo theo `def keo_dai_theo_asr` trước.
+
+Kết quả cuối trên dữ liệu thật (transcript #53):
+
+    start là bội số 0,5s : 22 / 114   (trước: 62 / 62)
+    tổng hở              : 102,33 s   (trước: 112,25 s)
+    số cặp chồng         : 2 -> phải về 0 sau lần sửa thứ 3
+
+### Giới hạn — và vì sao KHÔNG hứa nhiều hơn
+
+**Đúng mốc `1:15.00` trong ảnh VẪN trống sau khi sửa.** `i=49` mượn được `start` của ASR
+là `75,31`, không phải `75,00`. Khoảng `75,00 → 75,31` là im lặng thật, ASR cũng không có
+gì ở đó.
+
+Hai việc đã đo và KHÔNG làm:
+
+**Nới bằng ASR để lấp hở:** chỉ lấp được **10,11 / 65,34 giây**. 55 giây còn lại không có
+ASR cùng câu để bám — câu chỉ có ở layer 1.
+
+**Sửa dòng ASR hỏng:** `i=98 "Muốn"` dài **14,36 s** cho 4 chữ (`cps = 0,3`), tạo lỗ 9
+giây không gì lấp được ở layer 1. Đo toàn bộ: chỉ **3/96** dòng ASR có `cps < 3` và dài
+> 2 s; hai dòng còn lại là credit cuối phim (`phụ đề`, `Lý Tông Thịnh`), không phải lỗi.
+
+### Đo cuối
+
+```
+pytest (toàn bộ)      1502 passed, 15 deselected   EXIT_PYTEST=0
+```

@@ -557,21 +557,117 @@ def keo_dai_theo_asr(doan: list[Segment], tu_asr: list[Word],
     if not doan:
         return []
     ra: list[Segment] = []
+
+    #: `end` LON NHAT trong cac dong DA XU LY — dung de chan `start` cua dong sau, sao cho
+    #: hai dong khong bao gio chong nhau du thu tu trong danh sach co xao tron.
+    #: `end` LON NHAT trong cac dong DA XU LY **CUNG LAYER** — dung de chan `start`
+    #: cua dong sau, sao cho hai dong cung lop khong bao gio chong nhau du thu tu trong
+    #: danh sach co xao tron.
+    #:
+    #: 🔴 CHI CUNG LAYER. DO DUOC (transcript #52): `i=50` la ASR layer 2
+    #: [76.79-78.17] nam GIUA `i=49` [76.79-77.95] va `i=51` [77.73-78.97] cua layer 1.
+    #: Neu tinh ca no thi `moc_da_dung` = 78,17 > `start` cua `i=51` (77,73), dieu kien
+    #: chan thanh SAI va `i=51` lui ve 77,73 — CHONG 0,22 s len `i=49`. Hai lop khong
+    #: tranh cho nhau: chung la hai BAN cua cung mot cau, hien o hai dai khac nhau.
+    moc_da_dung: float | None = None
+    #: Lop cua dong dang xu ly — `moc_da_dung` chi tinh trong lop nay.
+    layer_dang_xu_ly: str | None = None
     for k, s in enumerate(doan):
+        # 🔴 DOI LAYER THI RESET `moc_da_dung`. DO DUOC: neu khong reset, moc cua layer 2
+        # con lai khi quay ve layer 1, va no chan SAI. Vi du (transcript #52, vung 76-79 s):
+        # `i=1` la layer 2 ket thuc 78,17; `i=2` la layer 1 bat dau 78,50 — moc 78,17 con lai
+        # nen `start` cua `i=2` bi chan o 78,17 thay vi 77,95 (end cua `i=0` cung layer 1).
+        if s.layer != layer_dang_xu_ly:
+            layer_dang_xu_ly = s.layer
+            moc_da_dung = None
         tu = _tu_trong_khoang(tu_asr, s.start, s.end, dung_sai)
         if not tu:
             ra.append(s)
+            if s.layer == layer_dang_xu_ly:
+                moc_da_dung = s.end if moc_da_dung is None else max(moc_da_dung, s.end)
             continue
         ocr_chu = _chu(s.text)
         if not ocr_chu:
             ra.append(s)
+            if s.layer == layer_dang_xu_ly:
+                moc_da_dung = s.end if moc_da_dung is None else max(moc_da_dung, s.end)
             continue
         asr_chu: set[str] = set()
         for w in tu:
             asr_chu |= _chu(w.w)
         if len(ocr_chu & asr_chu) / len(ocr_chu) < KHOP_TOI_THIEU:
             ra.append(s)
+            if s.layer == layer_dang_xu_ly:
+                moc_da_dung = s.end if moc_da_dung is None else max(moc_da_dung, s.end)
             continue
+
+        # KEO CA `start` LUI, khong chi `end` toi.
+        #
+        # Day la phan con THIEU, va no dung la thu chu du an thay: vach chay da cham
+        # roi nhung current van chua toi cai phu de.
+        #
+        # DO DUOC tren translation #52 (158 doan): `start` cua CA 62/62 dong OCR la boi
+        # so cua 0,5 s, vi OCR chay 2 fps va chi biet dong nay hien o KHUNG nao. ASR can
+        # theo mau am thanh nen co moc that. So 18 cap cung cau:
+        #
+        #     OCR bat dau SAU ASR : 17 / 18 cap
+        #     OCR bat dau TRUOC   :  0 / 18 cap
+        #     lech trung binh     : +0,28 s
+        #     lech lon nhat       : +0,95 s
+        #
+        # Vi du nguoi dung chup anh: vach o 1:15.00, khoi `Cho n...` chua to vang.
+        #     ASR i=48  bat dau 75,31
+        #     OCR i=49  bat dau 75,50   <- tre 0,19 s
+        #
+        # Do lai sau khi sua (cung du lieu): ho giam 112,25 s -> 99,77 s, va so cap CHONG
+        # NHAU sau khi noi la 0.
+        #
+        # Rang buoc: `start` khong duoc lui qua `end` cua dong TRUOC (hai dong khong duoc
+        # chong nhau — rang buoc CUNG cua du an), va khong lui qua tu ASR dau tien.
+        start_moi = s.start
+        for tu_dau in sorted(tu, key=lambda x: x.s):
+            if not (_chu(tu_dau.w) & ocr_chu):
+                continue
+            start_moi = min(start_moi, tu_dau.s)
+            break
+        # Chi chan khi dong TRUOC ket thuc truoc dong nay — hai dong SONG SONG (cung
+        # `start`, khac dai `y`) khong tranh nhau cho, y het ly do o phan chan `end`.
+        #
+        # 🔴 KHONG dat ten bien vong lap la `k`: no GHI DE chi so doan `k` cua vong
+        # ngoai, va dong chan `end` o duoi (`doan[k + 1]`) doc phai gia tri rac. Do
+        # duoc ngay khi vua viet: `for w in ...` roi `if k + 1 < len(doan)` — `k` luc do
+        # la mot `Word`, khong phai so.
+        # 🔴 CHAN THEO DONG TRUOC DA XU LY, KHONG theo `doan[k - 1]`.
+        #
+        # Ban dau toi chan bang `doan[k - 1].end` va DO DUOC mot cap chong con lai
+        # (transcript #51):
+        #
+        #     i=49  [76.79-77.95]  '经常通过拉踩的方式'
+        #     i=51  [77.73-78.97]  '来体现作品的价值'   CHONG 0,22 s
+        #
+        # `i=50` chen giua hai dong nay trong danh sach, nen `doan[k - 1]` la `i=50` chu
+        # khong phai `i=49` — chan sai doi tuong. Phai chan bang dong TRUOC DA XU LY,
+        # tuc phan tu cuoi cua `ra`.
+        #
+        # Chi chan khi dong truoc ket thuc truoc dong nay — hai dong SONG SONG (cung
+        # `start`, khac dai `y`) khong tranh nhau cho, y het ly do o phan chan `end`.
+        # 🔴 CHAN BANG `end` LON NHAT cua cac dong DA XU LY, khong phai `ra[-1]`.
+        #
+        # Ban dung `ra[-1]` va DO DUOC (bai test do voi 'do duoc 77.6'):
+        #
+        #     i=0  [76.79-77.95]  '经常通过拉踩的方式'
+        #     i=1  [76.79-77.20]  'dong song song khac dai y'   <- ket thuc SOM hon i=0
+        #     i=2  [78.00-78.97]  '来体现作品的价值'
+        #
+        # `ra[-1]` la `i=1` (ket thuc 77,20), nen chan thanh 77,20 va `start` lui ve 77,60 —
+        # CHONG len `i=0` (ket thuc 77,95). Dong song song trong danh sach KHONG co nghia
+        # la dong co `end` nho nhat; phai chan bang moc MUON NHAT da dung.
+        #
+        # Chi chan khi moc do ket thuc truoc dong nay — hai dong SONG SONG (cung `start`,
+        # khac dai `y`) khong tranh nhau cho, y het ly do o phan chan `end`.
+        if moc_da_dung is not None and moc_da_dung <= s.start:
+            start_moi = max(start_moi, moc_da_dung)
+        start_moi = min(start_moi, s.start)
 
         # Đi từng từ theo thời gian, dừng ở từ đầu tiên KHÔNG đóng góp ký tự mới nào mà
         # OCR cần. `da_co` tích luỹ để `比如` ở cuối (ký tự đã có) không kéo dài thêm.
@@ -612,7 +708,9 @@ def keo_dai_theo_asr(doan: list[Segment], tu_asr: list[Word],
         #
         # Chep ca `layer` va `chua_trong` cho day du: day la tao lai CUNG mot doan, chi
         # khac `end`, nen moi truong khac phai giu nguyen.
-        ra.append(Segment(i=s.i, start=s.start, end=max(s.end, end_moi), text=s.text,
+        ra.append(Segment(i=s.i, start=start_moi, end=max(s.end, end_moi), text=s.text,
                           suspect=s.suspect, layer=s.layer, goc=s.goc,
                           chua_trong=s.chua_trong))
+        if s.layer == layer_dang_xu_ly:
+            moc_da_dung = s.end if moc_da_dung is None else max(moc_da_dung, s.end)
     return ra
