@@ -174,35 +174,67 @@ export function Timeline({
   // Nen lan va mau phai bam theo LOP, khong theo nguon chu. Trong cung mot lop, neu hai
   // khoi chong thoi gian (mot cau co ca OCR lan ASR cung thuoc lop do) thi khoi sau xuong
   // lan phu — nhung do la ngoai le, khong phai luat chia lan.
+  // XEP LAN: LOP 1 o dai lan 0.., LOP 2 o dai lan 10..
+  //
+  // 🔴 HAI LAN SUA, MOI LAN CO SO DO.
+  //
+  // Lan 1 — `while (lan < cuoiMoiLan.length && ...) lan++`: day XUYEN LOP. Do tren
+  // #44: 8 dong lop 1 bi day sang lan cua lop 2, va mot lan thu ba xuat hien.
+  //
+  // Lan 2 — moi lop MOT lan co dinh, chong nhau thi ve DE. Do tren DOM that:
+  //
+  //     22 cap khoi DE CHU len nhau, tat ca TRONG CUNG MOT LAN
+  //       top1  : 20 cap   (lop 1)
+  //       top19 :  2 cap   (lop 2)
+  //
+  //     cap nang nhat: "Thuong xuyen phai chung" @281+106
+  //                    "Tac pham cua minh la"    @320+66    -> chong 67 px
+  //
+  // Nguoi dung nhin anh va noi dung: "cai nay van khop ve thoi gian, cai de chi la
+  // hien thi do chu dai". Dung — nen khong duoc cat chu, chi can CHO NO CHO.
+  //
+  // Chuyen that trong cung lop (do tren #44):
+  //
+  //     i=7  [7.02-9.66]  lop 1  ASR  "Thuong xuyen phai chung minh"
+  //     i=8  [7.50-8.00]  lop 1  OCR  "Thuong xuyen phai chung minh"
+  //
+  // Cung mot cau, OCR nam gon trong ASR. Chung phai duoc thay CA HAI de soat, nen
+  // khoi sau xuong lan phu — nhung KHONG BAO GIO sang dai lan cua lop kia.
+  //
+  // DAI LAN TACH ROI: lop 1 dung 0,1,2,...; lop 2 bat dau tu 10. Nho vay du lop 1
+  // co nhieu lan con den dau, no cung khong cham vao lan cua lop 2.
+  const LAN_GOC: Record<string, number> = { mot_nguon: 0, hai_nguon: 10 };
+
+  // Dai lan TACH ROI: lop 1 dung 0.., lop 2 bat dau tu 10. Nho vay du lop 1 co nhieu
+  // lan con den dau, no cung khong cham vao lan cua lop 2.
   const xepLan = (() => {
     const ra = new Map<number, { lan: number; rong: number; trai: number }>();
+    const cuoiMoiLan: number[] = [];
 
-    // LAN CO DINH THEO LOP: lop 1 -> 0, lop 2 -> 1, chua ro -> 0.
-    //
-    // 🔴 BAN TRUOC SAI: `while (lan < cuoiMoiLan.length && ...) lan++` day XUYEN LOP.
-    // Do tren #44 (146 doan):
-    //
-    //     ca hai lop  146 khoi
-    //       top1  : 115 khoi = 52 OCR + 63 ASR
-    //       top19 :  30 khoi =  8 OCR + 22 ASR   <- 8 dong LOP 1 nam o lan LOP 2
-    //       top37 :   1 khoi =  1 OCR            <- lan thu ba, khong lop nao can
-    //
-    // Nguyen nhan: lop 1 co 7 cap dong CHONG THOI GIAN. Gap cap do, vong `while` day
-    // khoi xuong `lan=1` — dung bang lan cua LOP 2. Nen lop 1 tran sang lan lop 2.
-    //
-    // LUAT DUNG: moi lop MOT lan rieng, khong bao gio day sang lan cua lop khac.
-    // Trong cung lop ma hai khoi chong nhau thi khoi sau ve DE len khoi truoc — cung
-    // lop chong nhau la chuyen that (mot cau co ca OCR lan ASR cung lop), va nguoi doc
-    // can thay no de soat.
-    for (const s of segmentsLoc) {
+    const thuTu = segmentsLoc
+      .slice()
+      .sort((x, y) => x.start - y.start || x.end - y.end);
+
+    for (const s of thuTu) {
       const kv = khoangVe.get(s.i) ?? { start: s.start, end: s.end };
       const trai = kv.start * pxPerSec;
       const rong = Math.max(2, (kv.end - kv.start) * pxPerSec);
-      ra.set(s.i, { lan: s.layer === "hai_nguon" ? 1 : 0, rong, trai });
+      const goc = LAN_GOC[s.layer ?? "mot_nguon"] ?? 0;
+      let lan = goc;
+      // Nguong day = 2 px, KHONG phai 0.5: `rong = Math.max(2, ...)` bom moi khoi toi
+      // thieu 2 px, nen hai khoi cach nhau 1 px van "giao" nhau 1 px tren man hinh.
+      // Do duoc: 11 cap giao dung 1 px o `top1` truoc khi nang nguong.
+      while (lan < cuoiMoiLan.length && (cuoiMoiLan[lan] ?? 0) > trai + 2) lan++;
+      while (cuoiMoiLan.length <= lan) cuoiMoiLan.push(0);
+      cuoiMoiLan[lan] = trai + rong;
+      ra.set(s.i, { lan, rong, trai });
     }
     return ra;
   })();
 
+  // Chieu cao = lan LON NHAT + 1. Dai lan cua lop 2 bat dau tu 10, nen so lan
+  // dem theo chi so se ra 11-12 du lop 2 chi co 1 lan con. Do la chap nhan duoc:
+  // mot dai trong ngan cho lop 2 luon nam duoi lop 1, dung y nguoi dung.
   const soLan = [...xepLan.values()].reduce((m, b) => Math.max(m, b.lan + 1), 1);
   const caoDoan = soLan * CAO_LAN + 4;
 

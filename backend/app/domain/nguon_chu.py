@@ -88,8 +88,27 @@ LOP_HAI_NGUON = LOP_2
 
 
 
+    # 🔴 `dung_sai = 0.5`, KHONG phai 0.3 — docstring duoi day da ghi 0.5 tu truoc, nhung
+    # chu ky khai 0.3. Do tren 6 cap that:
+    #
+    #     ca             lotDau  lotCuoi  ds=0.3   ds=0.5   dung
+    #     #32 LNI        0.17    -0.11    False    False    GIU CA HAI
+    #     #32 作者        0.19     0.11    False    False    GIU CA HAI
+    #     fixture 10.5   0.00     1.50    False    False    OCR THANG
+    #     fixture 20.5   0.00     2.50    False    False    OCR THANG
+    #     #32 cap 7      0.00     1.00    False    False    OCR THANG
+    #     that i=7       0.48     1.66    True     False    PHAI LA LOP 2
+    #
+    # Voi 0.3, ca that `i=7` bi coi la "vat the khac bi ASR bao tron" nen dong ASR duoc
+    # giu o LOP 1 — trong khi no co OCR di kem va PHAI o LOP 2. Do duoc tren #44:
+    #
+    #     i=7 [7.02-9.66] lop 1 ASR "Thuong xuyen phai chung minh"
+    #     i=8 [7.50-8.00] lop 1 OCR "Thuong xuyen phai chung minh"
+    #
+    # Hai dong cung cau, cung lop 1, chong nhau 0.5 s — dung loi nguoi dung chi ra:
+    # "tai sao lai lop 1 lai co 2 cai trung nhau? da bao asr ma co ocr dat o lop 2 ma".
 def _bao(trong_start: float, trong_end: float, ngoai_start: float, ngoai_end: float,
-         dung_sai: float = 0.3) -> bool:
+         dung_sai: float = 0.5) -> bool:
     """`(trong_start, trong_end)` co nam GON BEN TRONG `(ngoai_start, ngoai_end)` khong?
 
     ## Hai dieu kien, ca hai deu DO DUOC
@@ -363,9 +382,33 @@ def hop_nhat_theo_doan(doan_ocr: list[Segment], doan_asr: list[Segment]
         i_troi = giao.index(max(giao))
         giao_lon_nhi = sorted(giao)[-2] if len(giao) > 1 else 0.0
         troi_han = max(giao) >= 2 * giao_lon_nhi if giao_lon_nhi > 0 else True
+        # 🔴 PHAI SO CHU, KHONG CHI SO THOI GIAN.
+        #
+        # `_bao` tra True khi mot dong OCR lot GON trong doan ASR (lot dau >= 0.5 va
+        # lot cuoi >= 0.5). Nhung "lot gon" chua du de ket luan do la VAT THE KHAC
+        # (logo, ghi cong). Do duoc tren #44, ca `i=7`:
+        #
+        #     ASR [7.02-9.66] "要经常证明自己的作品是有价值的长"
+        #       OCR [7.50-8.00] "经常要证明"           giao 0.50
+        #       OCR [8.00-9.10] "自己的作品是有价值的"  giao 1.10  lot dau 0.98, lot cuoi 0.56
+        #
+        # Dong OCR thu hai lot gon => `_bao` True => dong ASR bi coi la vat the khac va
+        # giu o LOP 1. SAI: no la NUA SAU cua cung cau, dong OCR thu nhat la nua dau.
+        # Nguoi dung chi ra dung: "tai sao lai lop 1 lai co 2 cai trung nhau? da bao asr
+        # ma co ocr dat o lop 2 ma".
+        #
+        # Do ti le ky tu chung:
+        #
+        #     OCR "自己的作品是有价值的" nam TRONG chu ASR  -> _da_co_chu True
+        #     gop hai OCR voi ASR                          -> ti le 0.903
+        #
+        # Nen chi coi la vat the khac khi CHU KHONG khop. Chu khop thi day la cung mot
+        # cau, va dong ASR phai sang LOP 2 (no co OCR doi chieu).
+        _ocr_troi = ung_vien[i_troi][1]
+        _chu_khop = _da_co_chu(_ocr_troi.text, [doan.text])
         co_dong_bao = troi_han and _bao(
-            ung_vien[i_troi][1].start, ung_vien[i_troi][1].end, doan.start, doan.end
-        )
+            _ocr_troi.start, _ocr_troi.end, doan.start, doan.end
+        ) and not _chu_khop
         if co_dong_bao:
             ra.append(Segment(
                 i=0,
@@ -392,7 +435,22 @@ def hop_nhat_theo_doan(doan_ocr: list[Segment], doan_asr: list[Segment]
         # Tru hai ca da xu ly o tren:
         #   · `co_dong_bao`  -> vat the khac (logo, ghi cong): ASR da duoc giu rieng
         #   · nhieu dong OCR -> ASR gop nhieu cau: khong co mot dong ASR tuong ung
-        giu_asr = (not co_dong_bao) and len(ung_vien) == 1
+        # 🔴 `len(ung_vien) == 1` LA SAI — do duoc tren #44, ca `i=7`:
+        #
+        #     ASR [7.02-9.66] "要经常证明自己的作品是有价值的长"
+        #       OCR [7.50-8.00] "经常要证明"            <- nua dau
+        #       OCR [8.00-9.10] "自己的作品是有价值的"   <- nua sau
+        #
+        # Hai dong OCR, khong phai mot. Dieu kien cu doi DUNG MOT dong OCR, nen ca nay
+        # roi vao khoang trong: `co_dong_bao` False (chu khop), `giu_asr` False (hai OCR)
+        # — dong ASR KHONG duoc them o nhanh nao va BIEN MAT khoi ket qua. Do duoc:
+        #
+        #     truoc khi sua: 2 dong ra (hai OCR), dong ASR [7.02-9.66] mat han
+        #
+        # Luat dung: ASR sang LOP 2 moi khi tai cho do DA CO OCR va khong phai vat the
+        # khac. So luong dong OCR khong lien quan — ASR gop hai cau phu de van la ASR co
+        # OCR doi chieu.
+        giu_asr = (not co_dong_bao) and len(ung_vien) >= 1
         if giu_asr:
             ra.append(Segment(
                 i=0,

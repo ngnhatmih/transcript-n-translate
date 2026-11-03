@@ -113,11 +113,33 @@ def test_doan_asr_co_ocr_de_len_thi_giu_CA_HAI():
 
 
 def test_mot_doan_asr_chua_hai_dong_ocr_thi_giu_ca_hai():
-    """Yêu cầu nguyên văn: "1 đoạn asr có 2 đoạn ocr thì ưu tiên dùng 2 đoạn ocr đó"."""
+    """Yêu cầu nguyên văn: "1 đoạn asr có 2 đoạn ocr thì ưu tiên dùng 2 đoạn ocr đó".
+
+    🔴 LUẬT LỚP ĐỔI HÀNH VI Ở ĐÂY — đo lại, không suy đoán.
+
+    Người dùng chốt: "lớp 1 = mặc định ocr + asr những chỗ ocr ko có.
+    lớp 2 = asr đoạn ocr có". Nên ASR gộp hai câu KHÔNG bị bỏ nữa: nó sang LỚP 2,
+    còn hai dòng OCR ở LỚP 1. Đo được:
+
+        [20.00-20.50] OCR  lớp 1  "câu thứ nhất"
+        [20.00-23.00] ASR  lớp 2  "hai câu gộp làm một"
+        [21.00-21.50] OCR  lớp 1  "câu thứ hai"
+
+    Bài này kiểm HAI điều: hai dòng OCR đều còn, và dòng ASR nằm ở lớp 2 — không
+    phải bị xoá, cũng không phải chen vào lớp 1.
+    """
     asr = [_seg(0, 20.0, 23.0, "hai câu gộp làm một")]
     ocr = [_seg(0, 20.0, 20.5, "câu thứ nhất"), _seg(1, 21.0, 21.5, "câu thứ hai")]
     doan, _ = chon_nguon(ocr, asr)
-    assert [s.text for s in doan] == ["câu thứ nhất", "câu thứ hai"], [s.text for s in doan]
+    chu_ocr = [s for s in doan if s.text in ("câu thứ nhất", "câu thứ hai")]
+    assert [s.text for s in chu_ocr] == ["câu thứ nhất", "câu thứ hai"], \
+        [s.text for s in doan]
+    assert all(s.layer == LOP_MOT_NGUON for s in chu_ocr), \
+        [(s.text, s.layer) for s in doan]
+    asr_ra = [s for s in doan if s.text == "hai câu gộp làm một"]
+    assert len(asr_ra) == 1, [(s.text, s.layer) for s in doan]
+    assert asr_ra[0].layer == LOP_HAI_NGUON, \
+        "ASR gộp hai câu phải ở lớp 2, không bị xoá: " + repr((asr_ra[0].text, asr_ra[0].layer))
 
 
 def test_doan_asr_khong_co_ocr_thi_giu_va_danh_dau_nghi_ngo():
@@ -404,6 +426,21 @@ def test_dong_OCR_chi_CHAM_MEP_khong_duoc_gan_hai_nguon():
         "dong OCR luon lop 1, du cung cau voi ASR"
     assert the["比如这个搞雕塑的"].layer == LOP_MOT_NGUON, \
         "chi cham mep => cung lop 1 (ASR khong doc ra no)"
-    assert all(x.layer == LOP_MOT_NGUON for x in ra), (
-        "khong dong OCR nao duoc gan lop 2: " + repr([(x.text, x.layer) for x in ra])
+    # 🔴 LUAT LOP: dong OCR LUON lop 1; chi dong ASR moi vao lop 2, va chi khi tai cho
+    # do DA CO OCR. Do lai ca nay sau khi sua `giu_asr` (bo `len(ung_vien) == 1`):
+    #
+    #     [48.27-50.05] ASR lop 2 "有时又会显得很荒诞"
+    #     [48.50-49.47] OCR lop 1 "有时又会显得很荒诞"
+    #     [50.00-51.09] OCR lop 1 "比如这个搞雕塑的"
+    #
+    # Bai nay kiem dung mot dieu: KHONG dong OCR nao bi gan lop 2 chi vi no nam canh
+    # mot doan ASR. Dong lop 2 duy nhat duoc phep la dong ASR (`suspect=True`).
+    ocr_ra = [x for x in ra if x.suspect is False]
+    assert len(ocr_ra) == 2, [(x.text, x.suspect, x.layer) for x in ra]
+    assert all(x.layer == LOP_MOT_NGUON for x in ocr_ra), (
+        "khong dong OCR nao duoc gan lop 2: " + repr([(x.text, x.layer) for x in ocr_ra])
+    )
+    lop2 = [x for x in ra if x.layer == LOP_HAI_NGUON]
+    assert all(x.suspect is True for x in lop2), (
+        "lop 2 chi chua ASR: " + repr([(x.text, x.suspect) for x in lop2])
     )
