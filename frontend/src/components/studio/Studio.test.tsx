@@ -842,3 +842,43 @@ describe("Studio: buoc dang chay co thanh uoc luong tien do", () => {
     assert.equal(q().queryAllByRole("progressbar").length, 0);
   });
 });
+
+
+// 🔴 KY TU LA khong phai loi noi — do duoc tren translation #52.
+//
+// Quet TUNG KY TU cua 158 doan: dung MOT ky tu la trong toan bo, va no la logo
+// 'ΛNI' (U+039B GREEK CAPITAL LETTER LAMDA) nam trong cau noi. No chiem mot o
+// tren timeline va day cac khoi that xuong lan phu.
+//
+// Ba mien phai GIU: Han (chu goc Trung), ASCII (chu Viet khong dau + so), va
+// Latinh mo rong (chu Viet CO DAU). Mien thu ba la bat buoc — mot luat 'chi cho
+// ASCII' se xoa sach moi phu de tieng Viet.
+it("bo khoi chi chua KY TU LA (logo) khoi TIMELINE, giu chu Viet co dau", async () => {
+  // 🔴 Kiem tren TIMELINE, khong phai o nhap cua bang ben duoi.
+  //
+  // Ban dau toi viet `queryAllByDisplayValue("ΛNI")` va no DO voi `actual: 1` —
+  // nhung do la o nhap trong bang, thu ma `laRac` KHONG dieu khien. Khoi tren
+  // timeline moi la thu bi loc. Do lai cho dung doi tuong.
+  const { props } = dungThu({
+    transcript: banGhi([
+      doan({ i: 0, start: 0, end: 1, text: "ΛNI" }),
+      doan({ i: 1, start: 1, end: 2, text: "你会在山上看到" }),
+    ]),
+    banDich: banDichCua([
+      doan({ i: 0, start: 0, end: 1, text: "ΛNI" }),
+      doan({ i: 1, start: 1, end: 2, text: "Bạn sẽ thấy trên núi" }),
+    ]),
+  });
+  const { container } = render(<Studio {...props} />);
+  await waitFor(() => {
+    assert.ok(q().queryAllByDisplayValue("Bạn sẽ thấy trên núi").length > 0,
+      "chua nap xong: chua co o phu de nao");
+  });
+  // Khoi tren timeline la `div` co `title` chua khoang thoi gian.
+  const tieuDe = [...container.querySelectorAll("div[title]")]
+    .map((e) => e.getAttribute("title") || "");
+  assert.ok(!tieuDe.some((x) => x.includes("ΛNI")),
+    "logo ΛNI phai bi bo khoi timeline, do duoc: " + JSON.stringify(tieuDe.slice(0, 6)));
+  assert.ok(tieuDe.some((x) => x.includes("Bạn sẽ thấy trên núi")),
+    "chu Viet co dau phai CON tren timeline, do duoc: " + JSON.stringify(tieuDe.slice(0, 6)));
+});

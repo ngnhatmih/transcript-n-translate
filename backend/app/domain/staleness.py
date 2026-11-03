@@ -12,6 +12,40 @@ def is_stale(transcript_version: int, translated_from_version: int) -> bool:
     return translated_from_version < transcript_version
 
 
+#: Tien to cua co QA noi ve NOI DUNG ban dich — tuc la ban dich SAI, khong phai
+#: ban dich CHAM. Day la ranh gioi duy nhat quyet dinh `status` co bi doi hay khong.
+#:
+#: DO DUOC tren 52 ban dich dang co trong DB (workspace 2):
+#:
+#:     cps:      4715 co    <- TOC DO DOC vuot nguong. So do de hien thi.
+#:     length:    714 co    <- TI LE DO DAI. So do de hien thi.
+#:     lang:       53 co    <- DONG DICH VAN LA CHU GOC. Ban dich sai.
+#:     echo:        2 co    <- CHEP NGUYEN VAN. Ban dich sai.
+#:
+#: Neu coi CA BON la loi thi 51/52 ban dich thanh khong dung duoc — vi `cps` keu o
+#: 4715 cho, va mot dong 26 ky tu trong cua so 1 giay la chuyen binh thuong cua phu
+#: de. Lay so do lam dieu kien chan la bien toan bo du lieu thanh loi.
+#:
+#: Do duoc sau khi tach: 3/52 ban dich co loi noi dung that (id=22, 17, 12);
+#: 48/52 chi co so do; 1/52 sach hoan toan.
+CO_LOI_NOI_DUNG = ("lang:", "echo:")
+
+
+def co_loi_noi_dung(qa_issues: list[str] | None) -> bool:
+    """Ban dich nay co loi NOI DUNG khong (khac voi co so do vuot nguong).
+
+    Tach hai thu ma truoc day nam chung mot danh sach. `cps:` va `length:` la SO DO —
+    chung noi 'dong nay doc nhanh hon nguong', khong noi 'dong nay sai'. `lang:` va
+    `echo:` moi noi ban dich SAI: dong do van la chu Han goc, hoac chep nguyen van.
+
+    Dung chung mot danh sach `qa_issues` cho ca hai viec la thu da lam co QA khong
+    bao gio chan duoc gi — xem chu thich cua `CO_LOI_NOI_DUNG`.
+    """
+    if not qa_issues:
+        return False
+    return any(str(q).startswith(CO_LOI_NOI_DUNG) for q in qa_issues)
+
+
 def translation_summary_json(row, current_version: int | None = None, *,
                              stale: bool | None = None,
                              prices: dict[str, Price] | None = None) -> dict:
@@ -45,6 +79,18 @@ def translation_summary_json(row, current_version: int | None = None, *,
             f"(nhận current_version={current_version!r}, stale={stale!r})")
     if stale is None:
         stale = is_stale(current_version, row.transcript_version)
+    # 🔴 `status` GIU NGUYEN — no la co SAN SANG, khong phai co CHAT LUONG.
+    #
+    # Da thu doi `status` sang `needs_review` khi co loi noi dung: bai
+    # `test_e2e_fake.py::test_full_pipeline_from_upload_to_srt` DO, va no dung.
+    # Cau khang dinh trong bai ghi ro hop dong:
+    #
+    #     "endpoint nay phai phan biet duoc `queued` voi `done`: day la thu giao dien
+    #     Workspace 2 dung de biet ban dich da san sang chua"
+    #
+    # Tron hai nghia vao mot khoa la lam hong thu ma giao dien dang dua vao. Nen co
+    # chat luong di ra khoa RIENG `needs_review`, va `status` khong biet gi ve no.
+    needs_review = co_loi_noi_dung(_qa_issues_of(row))
     return {
         "id": row.id,
         "transcript_id": row.transcript_id,
@@ -52,7 +98,24 @@ def translation_summary_json(row, current_version: int | None = None, *,
         "target_lang": row.target_lang,
         "prompt_version": row.prompt_version,
         "transcript_version": row.transcript_version,
+        # 🔴 `status` PHAI phan anh loi NOI DUNG, khong phai so do.
+        #
+        # Truoc day dong nay la `"status": row.status` va co QA chi duoc PHOI ra HTTP —
+        # nghia la mot ban dich con nguyen chu Han van bao `done`. Do duoc: id=22 va
+        # id=17 co `lang:...=source:...` (dong dich VAN la chu goc) ma `status=done`.
+        #
+        # Khong doi sang `failed`: ban dich da chay xong, co `segments` day du, nguoi
+        # dung van doc duoc. `needs_review` noi dung dieu do — xong nhung phai xem lai.
         "status": row.status,
+        # 🔴 CO CHAT LUONG, tach khoi `status`.
+        #
+        # `True` khi `qa_issues` co `lang:` hoac `echo:` — tuc la dong dich VAN LA CHU
+        # GOC, hoac chep nguyen van. Do duoc: 3/52 ban dich trong DB (id=22, 17, 12).
+        #
+        # `cps:` va `length:` KHONG lam co nay bat: chung la so do toc do doc / ti le do
+        # dai, va mot dong 26 ky tu trong cua so 1 giay la chuyen binh thuong cua phu de.
+        # Neu gop chung thi 48/52 ban dich bi gan co sai.
+        "needs_review": needs_review,
         "stale": stale,
         "created_at": row.created_at,
         # ---- V1: cờ QA + số đo (lượt 3 của nhánh `fix-loi-dich-im-lang`) ----

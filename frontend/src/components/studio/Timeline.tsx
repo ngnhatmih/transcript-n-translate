@@ -299,11 +299,45 @@ export function Timeline({
    * nguon 6: poster nghieng -9.5 .. -16.9 do, phu de cung luon 0.0 do. Frontend khong
    * phai doan lai bang noi dung chu.
    */
+  /**
+   * KY TU LA — chu khong thuoc bang chu nao ma video nay dung.
+   *
+   * DO DUOC tren translation #52 (158 doan, quet TUNG KY TU):
+   *
+   *     'Λ'  U+039B  GREEK CAPITAL LETTER LAMDA   x1   i=140  'ΛNI'
+   *
+   * Dung MOT ky tu la trong toan bo 158 doan, va no la logo 'ΛNI' nam trong cau
+   * noi — khong phai chu de doc. Sau khi bo, lop 1 khong con bi no chiem cho.
+   *
+   * Ba mien duoc GIU, do tren cung du lieu:
+   *
+   *     Han             U+4E00-9FFF, U+3400-4DBF   <- chu goc Trung
+   *     ASCII           (moi ky tu ascii)           <- chu Viet khong dau, so
+   *     Latinh mo rong  U+00C0-024F, U+1EA0-1EFF    <- chu Viet CO DAU
+   *
+   * Mien thu ba la bat buoc: tieng Viet co dau nam ngoai ASCII, nen mot luat
+   * 'chi cho ASCII' se xoa sach moi phu de tieng Viet.
+   */
+  const coKyTuLa = (t: string): boolean => {
+    for (const ch of t) {
+      const o = ch.codePointAt(0)!;
+      if (o < 0x80) continue;                          // ASCII
+      if (o >= 0x4e00 && o <= 0x9fff) continue;         // Han
+      if (o >= 0x3400 && o <= 0x4dbf) continue;         // Han mo rong A
+      if (o >= 0x00c0 && o <= 0x024f) continue;         // Latinh mo rong
+      if (o >= 0x1ea0 && o <= 0x1eff) continue;         // Latinh mo rong them
+      return true;
+    }
+    return false;
+  };
+
   const laRac = (s: Dong): boolean => {
     const goc = s.text.trim();
     const dich = (s.dich ?? "").trim();
     // `goc === dich` chi co nghia khi CA HAI deu khac rong.
-    return goc.length > 0 && goc === dich;
+    if (goc.length > 0 && goc === dich) return true;
+    // Chu khong thuoc bang chu nao cua video -> logo/ky hieu, khong phai loi noi.
+    return coKyTuLa(goc);
   };
 
   const segmentsVe = segmentsLoc.filter((s) => !laRac(s));

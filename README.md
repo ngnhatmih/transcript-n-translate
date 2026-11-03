@@ -1491,3 +1491,120 @@ Dữ liệu thật: transcript `#50` **158 đoạn**, 6 khối poster vẫn còn
 Số nền README giữ nguyên `1497` — không thêm bài test nào trong lượt này (hai bài ghim
 `goc` đã thêm ở lượt trước: `test_gop_thanh_dong_CHEP_goc_tu_Hop`,
 `test_noi_manh_cung_dong_CHEP_goc`, `test_goc_hop_tinh_tu_bon_diem`).
+
+## ERRATA #63 — `needs_review` tách khỏi `status`, ký tự lạ, và BA giả thuyết bị bác bỏ
+
+**Phát hiện lúc:** làm nốt ba việc còn treo sau `4bc96d5`.
+
+### 1. Cờ QA: `status` là cờ SẴN SÀNG, không phải cờ CHẤT LƯỢNG
+
+Việc treo ghi là *"`qa_issues` tới được HTTP nhưng `status` không đổi"*. Đo trước khi sửa
+(52 bản dịch trong DB, workspace 2):
+
+    cps:      4715 cờ    <- TỐC ĐỘ ĐỌC vượt ngưỡng
+    length:    714 cờ    <- TỈ LỆ ĐỘ DÀI
+    lang:       53 cờ    <- DÒNG DỊCH VẪN LÀ CHỮ GỐC
+    echo:        2 cờ    <- CHÉP NGUYÊN VĂN
+
+Nếu coi cả bốn là lỗi thì **51/52 bản dịch thành không dùng được**, vì `cps` kêu ở 4715
+chỗ và một dòng 26 ký tự trong cửa sổ 1 giây là chuyện bình thường của phụ đề. Tách theo
+bản chất: **3/52** có lỗi nội dung thật (id=22, 17, 12); 48/52 chỉ có số đo.
+
+**Giả định bị bác bỏ (lần 1):** tôi đổi `status` thành `needs_review` khi có lỗi nội dung.
+`test_e2e_fake.py::test_full_pipeline_from_upload_to_srt` **ĐỎ**, và nó đúng — câu khẳng
+định trong bài ghi rõ hợp đồng:
+
+    "endpoint này phải phân biệt được `queued` với `done`: đây là thứ giao diện
+    Workspace 2 dùng để biết bản dịch đã sẵn sàng chưa"
+
+Trộn hai nghĩa vào một khoá là làm hỏng thứ giao diện đang dựa vào. Sửa: `status` giữ
+nguyên, cờ chất lượng đi ra khoá riêng `needs_review` (`co_loi_noi_dung()` trong
+`staleness.py`). Ba bài test ghim ranh giới này.
+
+### 2. Ký tự lạ — luật hẹp, đo được
+
+Quét TỪNG KÝ TỰ của translation #52 (158 đoạn): đúng **một** ký tự nằm ngoài Hán / ASCII /
+Latinh mở rộng — `Λ` U+039B GREEK CAPITAL LETTER LAMDA, trong logo `ΛNI` ở `i=140`.
+
+Luật `coKyTuLa` trong `Timeline.tsx` bỏ khối như vậy khỏi timeline. Ba miền phải GIỮ:
+
+    Han             U+4E00-9FFF, U+3400-4DBF
+    ASCII           (mọi ký tự ascii)
+    Latinh mở rộng  U+00C0-024F, U+1EA0-1EFF    <- chữ Việt CÓ DẤU
+
+Miền thứ ba là bắt buộc: một luật "chỉ cho ASCII" sẽ xoá sạch mọi phụ đề tiếng Việt.
+
+Đo trên DOM sau khi sửa: `tops = {1: 105, 181: 38}` — lớp 1 vẫn đúng một làn, bớt 8 khối.
+`ΛNI` không còn trên timeline nhưng **vẫn còn trong bảng việc cần xử lý** bên dưới — đúng
+ý: không vẽ, nhưng không giấu dòng dữ liệu.
+
+**Giả định bị bác bỏ (lần 2):** bài test đầu tiên tôi viết dùng
+`queryAllByDisplayValue("ΛNI")` và nó ĐỎ với `actual: 1` — nhưng đó là **ô nhập trong
+bảng**, thứ `laRac` không điều khiển. Phải kiểm khối trên timeline (`div[title]`).
+
+### 3. `khoangVe` so độ giống chữ — ĐO XONG, KHÔNG LÀM
+
+Việc treo: `bao()` chỉ so thời gian nên `i=103` bị coi là "nằm trong" ASR `i=98`.
+
+Đo độ giống chữ của **55 cặp** ASR-bao-OCR trên #52, tách theo "cặp rác" (khối có `goc`
+nghiêng, hoặc logo) và "cặp phụ đề thật":
+
+    ngưỡng 0.3: bỏ 5/7 rác, giữ 39/48 thật, CẮT OAN 9
+    ngưỡng 0.6: bỏ 7/7 rác, giữ 34/48 thật, CẮT OAN 14
+
+Muốn chặn hết rác phải cắt oan **14 cặp phụ đề thật**. Ba ca tệ nhất:
+
+    0.105  asr i=98 ocr i=103 '"Vịt thật nhàn"'      <- PHỤ ĐỀ THẬT
+    0.148  asr i=98 ocr i=99  '"Mây khói vào rừng sâu' <- PHỤ ĐỀ THẬT
+    0.000  asr i=139 ocr i=140 'ΛNI'                 <- RÁC
+
+`i=103` và `i=140` có độ giống **gần bằng nhau**. Không ngưỡng nào tách được: `i=98` chỉ
+là một từ ("Muốn"), nên so với bất kỳ chuỗi dài nào cũng ra số thấp.
+
+Chặn 2× đã có từ ERRATA #62 giữ thiệt hại ở 1,0 s thay vì 9,85 s. **Không thêm ngưỡng
+giống chữ** — dừng ở đây thay vì đặt một con số tuỳ ý.
+
+### 4. Ba dòng "nén" — nguyên nhân là OCR ĐỌC SAI, không phải thuật toán gộp
+
+Đo lại sau #62: **3** dòng nén > 3× (trước ghi 2):
+
+    i=66   [102.00-102.50]  0.50s  51 ký tự  nén 4.86x
+    i=67   [102.50-103.17]  0.67s  51 ký tự  nén 3.62x
+    i=113  [189.50-190.00]  0.50s  47 ký tự  nén 4.48x
+
+Tưởng là `noi_manh_cung_dong` bỏ sót. Đo trực tiếp trong container thì hàm **chạy đúng**:
+hai hộp cùng chữ, cùng dải `y` (tâm lệch 1,0 px, bề dày 75 px), cách 0,5 s → **nối thành
+một**. Kiểm riêng: 2 hộp vào → 1 hộp ra.
+
+Nguyên nhân thật, đọc từ transcript #50:
+
+    i=66  [102.00-102.50]  '那岁不是处处都是c位'   <- OCR đọc '岂' thành '岁'
+    i=67  [102.50-103.17]  '那不是处处都是c位'     <- đúng
+
+Hai bản OCR của **cùng một dòng phụ đề**, khác nhau một ký tự do đọc sai. Luật đòi `text`
+bằng tuyệt đối nên không nối — đúng theo thiết kế.
+
+**Giả định bị bác bỏ (lần 3):** nới ngưỡng nối theo độ giống chữ. Đo 17 cặp "gần giống"
+trong 15 giây:
+
+    0.947  102.0 -> 103.0  '那岂不是处处都是c位' | '那不是处处都是c位'
+
+Hai câu **khác nhau thật** (`岂不是` vs `不是`) đạt 0,947 — cao hơn cả cặp OCR-sai cần nối.
+Nới ngưỡng sẽ nối chúng và **mất chữ**. 14/17 cặp còn lại là watermark `想想工作室…`.
+
+Kết luận: `noi_manh_cung_dong` đòi `text` bằng tuyệt đối là ĐÚNG. Dòng nén là hệ quả của
+OCR đọc sai, không sửa được ở tầng gộp mà không phá câu thật.
+
+### Đo cuối
+
+```
+pytest (toàn bộ)      1500 passed, 15 deselected   EXIT_PYTEST=0
+npx tsc --noEmit                                   EXIT_TS=0
+npm test              238 tests, 238 pass, 0 fail  EXIT_TEST=0
+npm run build                                      EXIT_BUILD=0
+docker compose build web                           EXIT_IMG=0
+```
+
+DOM sau cả ba việc: `tops = {1: 105, 181: 38}` — lớp 1 một làn, lớp 2 một làn.
+
+Số nền README: `1497` → **`1500`** (+3 bài `needs_review`/`status`).
