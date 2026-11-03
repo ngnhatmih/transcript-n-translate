@@ -499,7 +499,14 @@ def to_ass(segments: list[Segment], *, translations: list[str] | None = None,
         # `fs54` và **517×241** với `fs200` — tức vùng đen là HỢP của hộp vector và hộp
         # tự động, và nó lại phụ thuộc cỡ chữ. `\bord0\shad0` tắt hộp đó, chỉ còn vector.
         tat_hop = "\\bord0\\shad0" if ve_hop else ""
-        dau = f"{{\\an2\\pos({tham_so['rx'] // 2},{y}){tat_hop}}}" if co_pos else ""
+        # 🔴 CĂN GIỮA DỌC trong hộp: `\an2` neo ĐÁY chữ, nên đặt chữ ở đáy hộp thì khi
+        # hộp cao hơn chữ (vd `cao = 400` cho câu 1 dòng) sẽ thừa một khoảng trống phía
+        # trên. Dịch chữ lên `(cao_hop − cao_chữ)/2` để nó nằm GIỮA hộp — số `cao_khoi`
+        # đã đo sẵn từ `_do_khoi_chu`, chỉ là trước đây chưa dùng.
+        y_chu = y
+        if ve_hop and cao_khoi > 0 and cao_hop > cao_khoi:
+            y_chu = y - (cao_hop - cao_khoi) // 2
+        dau = f"{{\\an2\\pos({tham_so['rx'] // 2},{y_chu}){tat_hop}}}" if co_pos else ""
         if ve_hop:
             # 🔴 CHIA HỘP THÀNH NHIỀU MẢNH: MỘT hình vẽ bị libass THU NHỎ khi rộng quá
             # `PlayResX / 2` (đo được 600→540, 800→540, 2400→540; đổi `\an`, thêm
