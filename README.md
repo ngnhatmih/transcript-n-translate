@@ -1397,3 +1397,97 @@ npm test                              196 tests, 196 pass, 0 fail  EXIT_TEST=0
 ```
 
 Số nền README: `1451` → **`1460`** (+8 bài `nguon_chu`, +1 bài `transcribe`).
+
+## ERRATA #62 — `goc` bị vứt ở SÁU chỗ, và chú thích trần trong JSX hiện ra giao diện
+
+**Phát hiện lúc:** chủ dự án gửi ảnh chụp timeline có dải chữ chạy ngang, sau commit `6a345bc`.
+
+### Việc đang làm
+
+Chủ dự án chỉ ra hai ảnh chụp cạnh nhau: bật/tắt lớp 2 thì **độ dài khối thay đổi**, và
+**lớp 1 trải nhiều làn** thay vì một. Mục tiêu chốt: *"layer 1 chỉ có 1 làn"*.
+
+Nguyên nhân gốc đã đo được trước đó: chữ trên poster bị OCR đọc thành phụ đề, vì bốn luật
+cũ của `loc_hinh_dang` đều là luật NỘI DUNG CHỮ (dài 3–40, ≤2 cụm số, không toàn Latinh,
+không lặp liền tiếp) và cả sáu khối poster đều lọt qua. Cách tách duy nhất là **góc
+nghiêng**, đo từ bốn điểm RapidOCR trả về.
+
+### Giả định bị bác bỏ (lần 1 — XOÁ DỮ LIỆU)
+
+Chủ dự án chốt hai vế cùng lúc:
+
+    "neu bi nghieng thi ko doc"
+    "van co luu nha dung xoa may cai nghieng chi la ko cho vao layer nao thoi"
+
+Tôi đọc vế đầu rồi đặt `continue` ngay trong `loc_hinh_dang`. **Sai.** Đo được (job asr
+`#152`): transcript `#46` còn **152 đoạn** thay vì 158 — sáu khối poster biến mất khỏi bản
+ghi, không khôi phục được. Vế thứ hai của chủ dự án nói rõ phải GIỮ.
+
+Sửa: bỏ `continue`, để hộp nghiêng đi hết pipeline rồi `nguon_chu` gán `layer = ""`.
+
+### Giả định bị bác bỏ (lần 2 — cùng một lỗi, sáu chỗ)
+
+Sau khi bỏ `continue`, tôi sửa `gop_thanh_dong` và đo unit test thấy giữ góc. Nhưng chạy
+job thật vẫn `0/158` đoạn có `goc`. Truy từng tầng trong container mới thấy **sáu** chỗ tạo
+`Hop`/`Segment` MỚI mà không chép `goc`:
+
+| Chỗ | Job đo | Kết quả |
+|---|---|---|
+| `noi_manh_cung_dong` (2 nhánh) | `#154` → `#47` | `0/158` đoạn có `goc` |
+| `gop_thanh_dong` (2 dòng) | `#152` → `#46` | 6 khối poster biến mất |
+| `nguon_chu` (2 nhánh `Segment(...)`) | `#158` → `#49` | chỉ 4/6 khối có `goc` |
+| `keo_dai_theo_asr` | `#160` → `#50` | đủ 6/6 khối |
+
+Bài học: `Segment` là `@dataclass` **thuần**, nên mọi chỗ `Segment(...)` là một chỗ có thể
+làm rơi trường. Sửa một chỗ rồi đo unit test **không đủ** — phải chạy job thật và đếm
+`co truong 'goc'` trên JSON trả về.
+
+### Giả định bị bác bỏ (lần 3 — frontend, ba chỗ)
+
+Backend đúng rồi mà DOM vẫn ba làn. Ba chỗ nữa, mỗi chỗ đo riêng:
+
+1. `segmentsLoc` giữ `s.layer === null` với ý định "dữ liệu cũ chưa có `layer`". Nhưng
+   `null` giờ có nghĩa thứ hai: khối bị loại khỏi mọi lớp. Đo props React trên trình duyệt:
+   `{tong: 158, layer_null: 6}` và `tops = {1: 113, 19: 5, 37: 1}`.
+2. `khoangVe` kéo không chặn trên. `i=103 '"Vịt thật nhàn"'` gốc **0,50 s** bị kéo thành
+   **9,85 s** (19,70×) vì ASR `i=98` `"Muốn"` [167.49–181.85] bao trùm; cái dải đó chồng lên
+   `i=104`. Chặn 2×.
+3. `xepLan` coi chồng **2 px** là phải xuống làn khác. Ở 40 px/s đó là 0,05 s — ngắn hơn
+   một khung 25 fps. Đổi ngưỡng sang **0,5 s theo THỜI GIAN**, không theo pixel: ngưỡng
+   pixel phụ thuộc `pxPerSec` nên cùng dữ liệu ra số làn khác nhau khi zoom.
+
+Kết quả đo trên DOM:
+
+    trước:  tops = {1: 113, 19: 5, 37: 1, 181: 38}
+    sau  :  tops = {1: 113, 181: 38}
+
+### Giả định bị bác bỏ (lần 4 — chú thích trần trong JSX)
+
+Sau khi sửa xong, tôi thêm sáu dòng chú thích giải thích ngay sau thẻ mở
+`<div className="absolute inset-x-0 bottom-0" ...>` — **không bọc trong `{/* */}`**.
+
+Trong JSX, chữ nằm giữa các thẻ được React in ra như **VĂN BẢN**. Cả đoạn hiện thành một
+dải chữ chạy ngang timeline. Chủ dự án phải chụp ảnh mới phát hiện.
+
+`tsc --noEmit` **không báo** vì chữ trần trong JSX là cú pháp hợp lệ — nó chỉ render ra thứ
+không ai muốn. Đã quét toàn bộ `src/**/*.tsx`: 0 dòng còn lại.
+
+    document.body.innerText.includes('VE THEO')  ->  false
+    tops                                          ->  {1: 113, 181: 38}
+
+### Đo cuối
+
+```
+pytest (toàn bộ)      1497 passed, 15 deselected   EXIT_PYTEST=0
+npx tsc --noEmit                                   EXIT_TS=0
+npm test              237 tests, 237 pass, 0 fail  EXIT_TEST=0
+npm run build                                      EXIT_BUILD=0
+docker compose build web                           EXIT_IMG=0
+```
+
+Dữ liệu thật: transcript `#50` **158 đoạn**, 6 khối poster vẫn còn với `goc` thật
+(`-12,05 … -14,80°`) và `layer = None`. Không khối nào bị xoá.
+
+Số nền README giữ nguyên `1497` — không thêm bài test nào trong lượt này (hai bài ghim
+`goc` đã thêm ở lượt trước: `test_gop_thanh_dong_CHEP_goc_tu_Hop`,
+`test_noi_manh_cung_dong_CHEP_goc`, `test_goc_hop_tinh_tu_bon_diem`).
