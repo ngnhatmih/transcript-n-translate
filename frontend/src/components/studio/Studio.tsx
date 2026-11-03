@@ -32,6 +32,8 @@ import { Timeline, type BaoSong } from "./Timeline";
 import { SegmentRow, type ViewMode } from "./SegmentRow";
 import { PipelineBar } from "./PipelineBar";
 import { CommandPalette, type Command } from "./CommandPalette";
+import { PhuDeOverlay, PhuDeStyleDialog } from "./PhuDeStyle";
+import { docStyle, luuStyle, type PhuDeStyle } from "@/lib/phuDeStyle";
 import { VungDocKhung, type VungDoc } from "./VungDoc";
 
 /**
@@ -173,6 +175,10 @@ export function Studio(props: StudioProps) {
   const [pxPerSec, setPxPerSec] = useState(40);
   const [bao, setBao] = useState<BaoSong>({ tren: [], duoi: [] });
   const [paletteOpen, setPaletteOpen] = useState(false);
+  //: Kiểu chữ phụ đề — nạp từ `localStorage` ngay lần vẽ đầu, để bản xem trước không nháy
+  //: từ mặc định sang kiểu đã lưu.
+  const [kieuPhuDe, setKieuPhuDe] = useState<PhuDeStyle>(() => docStyle());
+  const [styleOpen, setStyleOpen] = useState(false);
   const [theme, setTheme] = useState<"dark" | "light">("dark");
   const [flashId, setFlashId] = useState<number | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -924,6 +930,15 @@ export function Studio(props: StudioProps) {
     { id: "v3", label: "Xem: Long tieng", hint: "3", run: () => setView("dub") },
     { id: "only", label: onlyIssues ? "Hien moi doan" : "Chi hien doan co van de", run: () => setOnlyIssues((v) => !v) },
     { id: "srt", label: "Tai phu de .srt", run: exportSrt },
+    {
+      id: "phu-de-hien-thi",
+      label: "Chỉnh phụ đề hiển thị",
+      hint: "Style",
+      // Mở hộp thoại kiểu chữ. Kiểu này đi CẢ ba nơi: bản xem trước đè lên video, tệp
+      // `.ass` tải về, và phụ đề burn vào video lồng tiếng (`api/endpoints.ts` đọc
+      // `localStorage` khi dựng URL xuất và payload lồng tiếng).
+      run: () => setStyleOpen(true),
+    },
     { id: "open", label: "Mo video...", run: () => fileRef.current?.click() },
     { id: "theme", label: theme === "dark" ? "Che do sang" : "Che do toi", run: () => setTheme((t) => (t === "dark" ? "light" : "dark")) },
   ];
@@ -1398,9 +1413,10 @@ export function Studio(props: StudioProps) {
                 </button>
               )}
               {playingSeg && (
-                <p className="pointer-events-none absolute inset-x-4 bottom-3 z-30 text-center text-[14px] leading-5 text-ink-0 [text-shadow:0_1px_3px_var(--panel-0),0_0_8px_var(--panel-0)]">
-                  {playingSeg.dich === "" ? playingSeg.text : playingSeg.dich}
-                </p>
+                <PhuDeOverlay
+                  style={kieuPhuDe}
+                  text={playingSeg.dich === "" ? playingSeg.text : playingSeg.dich}
+                />
               )}
               {/*
                 KHUNG VÙNG ĐỌC OCR — đè lên chính khung hình.
@@ -1654,6 +1670,18 @@ export function Studio(props: StudioProps) {
         </div>
       )}
       <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} commands={commands} />
+      <PhuDeStyleDialog
+        open={styleOpen}
+        onClose={() => setStyleOpen(false)}
+        style={kieuPhuDe}
+        // Ghi `localStorage` NGAY trong `onChange`, không qua `useEffect`: URL xuất và
+        // payload lồng tiếng đọc thẳng từ `localStorage`, nên nếu chỉ ghi sau khi vẽ lại
+        // thì một lượt bấm xuất ngay sau khi kéo thanh trượt có thể dùng kiểu CŨ.
+        onChange={(s) => {
+          setKieuPhuDe(s);
+          luuStyle(s);
+        }}
+      />
     </div>
   );
 }

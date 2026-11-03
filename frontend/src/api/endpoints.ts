@@ -10,6 +10,7 @@
  * duyệt đi qua proxy 3100 như mọi request khác.
  */
 import { api, BASE } from "./client.ts";
+import { docStyle, styleChoAss } from "@/lib/phuDeStyle.ts";
 import type {
   AffectedPreview,
   ChimeraCost,
@@ -423,7 +424,16 @@ export function exportUrl(
   bilingual = false,
 ): string {
   // `bilingual` là `int` ở backend (0/1), không phải `bool` chuỗi.
-  return `${BASE}/export/${translationId}${query({ format, bilingual: bilingual ? 1 : 0 })}`;
+  const tham: Record<string, string | number | undefined> = {
+    format,
+    bilingual: bilingual ? 1 : 0,
+  };
+  // Kiểu chữ CHỈ có nghĩa với `.ass` — ba định dạng kia là chữ trần, gắn thêm tham số vào
+  // chỉ làm URL dài mà backend cũng bỏ qua. Đọc từ `localStorage` tại ĐÂY thay vì bắt mọi
+  // chỗ gọi truyền vào: cùng một kiểu chữ đang hiện trên bản xem trước, và không có đường
+  // nào để nút xuất dùng kiểu khác với mắt người dùng.
+  if (format === "ass") tham.style = JSON.stringify(styleChoAss(docStyle()));
+  return `${BASE}/export/${translationId}${query(tham)}`;
 }
 
 /**
@@ -451,7 +461,10 @@ export function exportUrl(
  */
 export const makeDub = (translationId: number, voice: string | null) =>
   api.post<{ job: { id: number; type: string; state: string; translation_id: number } }>(
-    "/dubs", { translation_id: translationId, voice });
+    // `style` đi cùng payload: phụ đề BURN vào video là thứ người dùng đã nhìn thấy trong
+    // bản xem trước, nên hai bên phải cùng một kiểu. Backend đọc `payload["style"]`
+    // (`pipeline/dub.py`), vắng mặt thì dùng mặc định của định dạng.
+    "/dubs", { translation_id: translationId, voice, style: styleChoAss(docStyle()) });
 
 /**
  * Kế hoạch tốc độ của lượt lồng GẦN NHẤT — số đo TỪNG dòng cho bảng ở màn Lồng tiếng.
