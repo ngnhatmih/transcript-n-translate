@@ -285,6 +285,52 @@ def _do_cao_chu(font: str, co: int) -> int:
         return 0
 
 
+def _do_khoi_chu(chu: str, font: str, co: int, rong_kha_dung: int) -> tuple[int, int, int]:
+    """`(rộng, cao, số_dòng)` của khối chữ SAU KHI BẺ DÒNG theo `rong_kha_dung`.
+
+    🔴 VÌ SAO CẦN (đo được, ảnh chủ dự án gửi): câu dài bị libass bẻ thành 3 dòng, nhưng
+    sàn chiều cao của tôi chỉ đo **một dòng** — nên hộp cao 1 dòng trong khi chữ 3 dòng,
+    và chữ thò lên trên lẫn xuống dưới. Cùng lúc, bề rộng đo trên câu CHƯA bẻ (1427 px)
+    rộng hơn nhiều so với dòng thật dài nhất (909) — nên hộp rộng quá.
+
+    Bẻ dòng kiểu THAM LAM theo TỪ, đúng như libass làm với `WrapStyle: 0` (bẻ ở khoảng
+    trắng gần nhất). Từ nào dài hơn cả dòng thì để nguyên trên dòng riêng — thà tràn một
+    từ còn hơn cắt chữ.
+
+    `(0, 0, 0)` = không đo được (máy test không có font) ⇒ bên gọi BỎ các sàn này.
+    """
+    duong = _FONT_CHO_DUONG.get(font)
+    if duong is None:
+        return (0, 0, 0)
+    try:
+        from PIL import ImageFont
+        f = ImageFont.truetype(duong, max(8, int(co)))
+
+        def rong(s: str) -> float:
+            hop = f.getbbox(s or " ")
+            return (hop[2] - hop[0]) * _TI_LE_CHU
+
+        def cao_dong() -> float:
+            hop = f.getbbox("Ạ")
+            return (hop[3] - hop[1]) * _TI_LE_CHU
+
+        dai_nhat = 0.0
+        so_dong = 1
+        hien = ""
+        for tu in (chu or " ").split(" "):
+            thu = f"{hien} {tu}" if hien else tu
+            if hien and rong(thu) > rong_kha_dung:
+                dai_nhat = max(dai_nhat, rong(hien))
+                so_dong += 1
+                hien = tu
+            else:
+                hien = thu
+        dai_nhat = max(dai_nhat, rong(hien))
+        return (int(dai_nhat), int(cao_dong() * so_dong), so_dong)
+    except Exception:  # noqa: BLE001
+        return (0, 0, 0)
+
+
 def to_ass(segments: list[Segment], *, translations: list[str] | None = None,
            bilingual: bool = False, title: str = "phu-de-lab",
            khung: tuple[int, int] | None = None,
@@ -409,14 +455,19 @@ def to_ass(segments: list[Segment], *, translations: list[str] | None = None,
         #: 🔴 ĐO ĐƯỢC trên bảng 18 tổ hợp (burn thật, đếm pixel): đặt `ngang = 300` mà chữ
         #: rộng `560` thì chữ TRÀN `+130 px` mỗi bên. Nên khi đo được, bề rộng hộp KHÔNG BAO
         #: GIỜ nhỏ hơn bề rộng chữ — hộp hẹp hơn chữ không phải "hộp nhỏ", nó là hộp hỏng.
-        do_rong = 0
+        rong_kha_dung = max(40, int(tham_so["rx"]) - 2 * int(tham_so["le"]))
+        rong_chu, cao_khoi = 0, 0
         for pos_, sg_ in enumerate(segments):
             tr_ = translations[pos_] if translations is not None else None
-            do_rong = max(do_rong, _do_rong_chu(
-                "".join(_lines(sg_, tr_, bilingual)),
-                str(tham_so.get("font", "Archivo")), int(tham_so["co"])))
-        if do_rong:
-            rong_hop = max(rong_hop, do_rong + 2 * int(tham_so.get("vien", 0)))
+            r_, c_, _ = _do_khoi_chu("".join(_lines(sg_, tr_, bilingual)),
+                                     str(tham_so.get("font", "Archivo")),
+                                     int(tham_so["co"]), rong_kha_dung)
+            rong_chu = max(rong_chu, r_)
+            cao_khoi = max(cao_khoi, c_)
+        if rong_chu:
+            rong_hop = max(rong_hop, rong_chu + 2 * int(tham_so.get("vien", 0)))
+        if cao_khoi:
+            cao_hop = max(cao_hop, cao_khoi + 2 * int(tham_so.get("vien", 0)))
         #: 🔴 TRẦN CHIỀU CAO = `ry / 2`. ĐO ĐƯỢC: khai `cao = 1370` thì hình vẽ bị libass
         #: THU còn **454 px** — cùng cơ chế với bề ngang (`rx / 2`). Chưa chia mảnh theo
         #: chiều dọc, nên KẸP lại thay vì để người dùng nhận hộp 454 mà không biết.
