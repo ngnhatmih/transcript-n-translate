@@ -160,71 +160,45 @@ export function Timeline({
     return ra;
   })();
 
+  // XEP LAN THEO LOP — lop 1 la lan tren, lop 2 la lan duoi.
+  //
+  // Nguoi dung: "Bam theo LOP — lop 1 lan tren, lop 2 lan duoi".
+  //
+  // 🔴 BAN TRUOC SAI O DAY: `xepLan` chia lan theo CHONG LAN THOI GIAN, roi con doi cho
+  // ASR/OCR theo `suspect`. Ket qua do duoc: tat lop 1 di (con 52 khoi cua lop 2) thi
+  // timeline VAN con hai lan, vi lop 2 chua ca OCR lan ASR cua cung nhung cau do.
+  //
+  //     lop 1: 94 dong = 35 OCR + 59 ASR
+  //     lop 2: 52 dong = 27 OCR + 25 ASR
+  //
+  // Nen lan va mau phai bam theo LOP, khong theo nguon chu. Trong cung mot lop, neu hai
+  // khoi chong thoi gian (mot cau co ca OCR lan ASR cung thuoc lop do) thi khoi sau xuong
+  // lan phu — nhung do la ngoai le, khong phai luat chia lan.
   const xepLan = (() => {
-    const cuoiMoiLan: number[] = [];
-    const lanCua = new Map<number, { lan: number; rong: number; trai: number }>();
-
-    // Xep theo (start, end) — chi tren cac doan DANG BAT (da loc theo lop).
-    const thuTu = segmentsLoc
-      .slice()
-      .sort((x, y) => x.start - y.start || x.end - y.end);
-
-    for (const s of thuTu) {
-      const kv = khoangVe.get(s.i)!;
-      const moc = kv.start * pxPerSec;
-      const rong = Math.max(2, (kv.end - kv.start) * pxPerSec);
-      let lan = 0;
-      while (lan < cuoiMoiLan.length && cuoiMoiLan[lan]! > moc + 0.5) lan++;
-      if (lan >= cuoiMoiLan.length) cuoiMoiLan.push(0);
-      cuoiMoiLan[lan] = moc + rong;
-      lanCua.set(s.i, { lan, rong, trai: moc });
-    }
-
-    // 🔴 SWAP LAN: chi ASR KHONG CO OCR di kem moi duoc o tren.
-    //
-    // Nguoi dung: "KO PHAI asr nao cx cho xuong duoi nha, chi co asr o doan day nhung ko
-    // co ocr thi moi de o tren."
-    //
-    // Nghia la:
-    //   · ASR khong co OCR nao chong len  -> GIU NGUYEN lan (no la nguon DUY NHAT o do).
-    //   · ASR co OCR chong len             -> doi cho: OCR len lan cua ASR, ASR xuong lan OCR.
-    //
-    // Lan truoc toi doi MOI cap, ke ca khi OCR von da o tren — lam ASR tut xuong vo co.
-    const ocrHet = segmentsLoc.filter((s) => !s.suspect);
-    const doi = new Map<number, number>();
-
-    for (const a of segmentsLoc.filter((s) => s.suspect)) {
-      const laA = lanCua.get(a.i);
-      if (!laA) continue;
-
-      // ASR nay co OCR nao chong len khong?
-      const coOcr = ocrHet.filter((o) => {
-        const kv = khoangVe.get(o.i)!;
-        return Math.min(kv.end, a.end) - Math.max(kv.start, a.start) > 0;
-      });
-      if (coOcr.length === 0) continue; // ASR don doc -> de nguyen tren.
-
-      for (const o of coOcr) {
-        const laO = lanCua.get(o.i);
-        if (!laO || laO.lan <= laA.lan) continue; // OCR da o tren roi.
-        doi.set(o.i, laA.lan);
-        doi.set(a.i, laO.lan);
-      }
-    }
-
-    for (const [i, lanMoi] of doi) {
-      const cu = lanCua.get(i);
-      if (cu) lanCua.set(i, { ...cu, lan: lanMoi });
-    }
-
-    // Tra MAP theo `s.i` — vong ve dung `segmentsLoc`, chi so hai mang khac nhau.
     const ra = new Map<number, { lan: number; rong: number; trai: number }>();
+
+    // LAN CO DINH THEO LOP: lop 1 -> 0, lop 2 -> 1, chua ro -> 0.
+    //
+    // 🔴 BAN TRUOC SAI: `while (lan < cuoiMoiLan.length && ...) lan++` day XUYEN LOP.
+    // Do tren #44 (146 doan):
+    //
+    //     ca hai lop  146 khoi
+    //       top1  : 115 khoi = 52 OCR + 63 ASR
+    //       top19 :  30 khoi =  8 OCR + 22 ASR   <- 8 dong LOP 1 nam o lan LOP 2
+    //       top37 :   1 khoi =  1 OCR            <- lan thu ba, khong lop nao can
+    //
+    // Nguyen nhan: lop 1 co 7 cap dong CHONG THOI GIAN. Gap cap do, vong `while` day
+    // khoi xuong `lan=1` — dung bang lan cua LOP 2. Nen lop 1 tran sang lan lop 2.
+    //
+    // LUAT DUNG: moi lop MOT lan rieng, khong bao gio day sang lan cua lop khac.
+    // Trong cung lop ma hai khoi chong nhau thi khoi sau ve DE len khoi truoc — cung
+    // lop chong nhau la chuyen that (mot cau co ca OCR lan ASR cung lop), va nguoi doc
+    // can thay no de soat.
     for (const s of segmentsLoc) {
-      ra.set(s.i, lanCua.get(s.i) ?? {
-        lan: 0,
-        rong: 2,
-        trai: (khoangVe.get(s.i) ?? { start: s.start }).start * pxPerSec,
-      });
+      const kv = khoangVe.get(s.i) ?? { start: s.start, end: s.end };
+      const trai = kv.start * pxPerSec;
+      const rong = Math.max(2, (kv.end - kv.start) * pxPerSec);
+      ra.set(s.i, { lan: s.layer === "hai_nguon" ? 1 : 0, rong, trai });
     }
     return ra;
   })();

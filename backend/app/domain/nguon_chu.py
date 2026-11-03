@@ -419,24 +419,28 @@ def hop_nhat_theo_doan(doan_ocr: list[Segment], doan_asr: list[Segment]
         # chung chi co MOT nguon doc ra. Nhan noi sai su that, va mau tren giao dien vi
         # the cung sai theo.
         #
-        # Dieu kien dung: dong OCR chi la LOP 2 khi no THUC SU ung voi doan ASR nay —
-        # tuc giao THO lon, khong phai vai phan tram giay. Do la cung nguong dung cho
-        # `ung_vien` va cho `_da_co_chu`.
+        # Dong OCR chi CHAM MEP van duoc GIU (no la phu de that), va van la LOP 1 — OCR
+        # la ban mac dinh, khong phan biet chạm mep hay khong.
         #
-        # Dong chi cham mep van duoc GIU (no la phu de that), nhung la LOP 1: ASR khong
-        # doc ra no.
+        # `NGUONG_UNG` van dung cho `ung_vien` va `_da_co_chu` (nhan dien CUNG CAU), chi
+        # khong con dung de gan LOP nua.
         for j, ocr in ung_vien:
             da_dung.add(j)
 
-            ung_that = _giao(doan.start, doan.end, ocr.start, ocr.end, 0.0) >= NGUONG_UNG
-
-            if co_dong_bao or not ung_that:
-                # `co_dong_bao`: OCR bao tron ASR => vat the khac (logo, ghi cong).
-                # `not ung_that`: chi cham mep => khong phai cau nay.
-                # Ca hai deu la MOT nguon.
-                lop = LOP_MOT_NGUON
-            else:
-                lop = LOP_HAI_NGUON
+            # 🔴 DONG OCR LUON THUOC LOP 1.
+            #
+            # Nguoi dung chot: "lop 1 = mac dinh ocr + asr nhung cho ocr ko co.
+            # lop 2 = asr doan ocr co".
+            #
+            # Do duoc tren #43 TRUOC khi sua: 27 dong OCR bi gan `hai_nguon`, vi ban cu
+            # gan lop 2 moi khi `ung_that` (OCR va ASR cung cau). Nhung OCR la BAN MAC
+            # DINH — no khong bao gio thuoc lop 2. Chi dong ASR moi vao lop 2, va chi khi
+            # tai cho do DA CO OCR.
+            #
+            # Hau qua cua ban cu: hai dong cung lop 2 chong nhau (i=0 [0.00-1.04] OCR va
+            # i=1 [0.00-1.14] ASR), nen mot lop phai trai hai lan tren timeline. Do la loi
+            # nguoi dung chi ra: "the tai sao lop 2 van hien dong dau".
+            lop = LOP_MOT_NGUON
 
             ra.append(Segment(
                 i=0,

@@ -283,14 +283,19 @@ def test_doan_asr_SAI_MOT_CHU_so_voi_ocr_van_la_ban_sao():
 
     doan, _ = chon_nguon(ocr, asr)
 
-    # HOP DONG MOI (2026-11-02): giu CA HAI dong, khong bo dong ASR nua. Nhung
-    # phep so CHU van phai nhan ra chung la BAN SAO — do moi la thu bai nay kiem.
-    # Ban cu kiem qua `len(doan) == 1` (vi dong ASR bi bo); nay kiem qua `layer`,
-    # va `layer == hai_nguon` chinh la bang chung "cung mot cau".
+    # LUAT MOI (nguoi dung chot): lop 1 = OCR mac dinh + ASR nhung cho OCR KHONG co;
+    # lop 2 = ASR o doan OCR CO. Nen dong OCR LUON lop 1, va bang chung "cung mot
+    # cau" la su co mat cua mot dong ASR o LOP 2.
     assert len(doan) == 2, [(s.start, s.text, s.layer) for s in doan]
 
-    assert all(s.layer == LOP_HAI_NGUON for s in doan), (
-        "sai mot chu van la BAN SAO => ca hai deu hai_nguon: "
+    # LUAT MOI (nguoi dung chot): lop 1 = OCR mac dinh + ASR nhung cho OCR KHONG co;
+    # lop 2 = ASR o doan OCR CO. Nen dong OCR LUON lop 1, va bang chung "cung mot
+    # cau" la su co mat cua mot dong ASR o LOP 2.
+    assert all(s.layer == LOP_MOT_NGUON for s in doan if not s.suspect), (
+        "dong OCR luon lop 1: " + repr([(s.text, s.layer) for s in doan if not s.suspect])
+    )
+    assert any(s.layer == LOP_HAI_NGUON for s in doan if s.suspect), (
+        "sai mot chu van la BAN SAO => co dong ASR o lop 2: "
         + repr([(s.text, s.layer) for s in doan])
     )
 
@@ -383,9 +388,22 @@ def test_dong_OCR_chi_CHAM_MEP_khong_duoc_gan_hai_nguon():
     ra, _, _ = hop_nhat_theo_doan(ocr, asr)
     the = {x.text: x for x in ra}
 
-    assert the["有时又会显得很荒诞"].layer == LOP_HAI_NGUON, \
-        "cung cau voi ASR => hai nguon"
+    # LUAT MOI: dong OCR LUON lop 1 — ke ca khi cung cau voi ASR.
+    #
+    # 🔴 DO DUOC (khong phai gia thiet): o ca nay KHONG co dong ASR nao duoc giu.
+    # `giu_asr` doi `len(ung_vien) == 1`, ma o day `ung_vien` co HAI dong OCR (mot
+    # cau that + mot dong chi cham mep), nen ASR bi bo. Do truc tiep:
+    #
+    #     so dong ra: 2   so_de: 1   so_nghi: 0
+    #     i=0 [48.50-49.47] OCR lop 1  "有时又会显得很荒诞"
+    #     i=1 [50.00-51.09] OCR lop 1  "比如这个搞雕塑的"
+    #
+    # Do la hanh vi CO TU TRUOC, khong phai do doi luat lop. Bai nay chi kiem mot
+    # dieu: KHONG dong OCR nao bi gan lop 2 chi vi no nam canh mot doan ASR.
+    assert the["有时又会显得很荒诞"].layer == LOP_MOT_NGUON, \
+        "dong OCR luon lop 1, du cung cau voi ASR"
     assert the["比如这个搞雕塑的"].layer == LOP_MOT_NGUON, \
-        "chi cham mep => MOT nguon (ASR khong doc ra no)"
-
-
+        "chi cham mep => cung lop 1 (ASR khong doc ra no)"
+    assert all(x.layer == LOP_MOT_NGUON for x in ra), (
+        "khong dong OCR nao duoc gan lop 2: " + repr([(x.text, x.layer) for x in ra])
+    )

@@ -169,22 +169,20 @@ export function App() {
    */
   const soJob = useMemo(() => dauVanTay(jobs), [jobs]);
 
+  // 🔴 EFFECT NAY TUNG BI XOA NHAM — ghi lai de khong lap lai.
+  //
+  // Luc sua loi chon transcript theo `version`, toi viet lai ca mot khoi `useEffect`
+  // va cat luon effect nay. Hau qua do duoc: App chi goi `GET /api/status`,
+  // `GET /api/jobs`, `GET /api/registry` — KHONG he goi `GET /api/sources`. Nen
+  // `sourceId` mai la `null`, khong bao gio nap transcript, va 14 bai test doi o phu
+  // de deu do voi "chua nap xong: chua co o phu de nao".
+  //
+  // `soJob` trong deps: job `ingest` xong la luc `audio_path`/`duration` doi, va khong
+  // co gi khac bao cho effect nay biet.
   useEffect(() => {
     void napKenh();
   }, [napKenh, soJob]);
 
-  /**
-   * BAN GHI cua kenh dang chon.
-   *
-   * `GET /api/transcripts` tra TOM TAT (khong co `segments`), nen phai di tiep mot
-   * buoc `getTranscript`. Chon ban ghi MOI NHAT (`version` lon nhat) — do la ban
-   * backend vua ghi, khong phai mot ban cu con `stale`.
-   *
-   * 🔴 `soJob` CUNG phai co trong deps: job `asr` xong là lúc một bản ghi MỚI xuất hiện,
-   * và không có gì khác báo cho effect này biết. Thiếu nó thì bản ghi mới chỉ hiện sau
-   * khi F5 — đúng triệu chứng người dùng báo ("mở video mới phải refresh trang").
-   * Không dùng `jobs` trực tiếp: mảng mới mỗi 2 giây sẽ nạp lại liên tục.
-   */
   useEffect(() => {
     if (sourceId === null) {
       setTranscript(null);
@@ -199,7 +197,21 @@ export function App() {
           if (!huy) setTranscript(null);
           return;
         }
-        const moiNhat = cuaKenh.reduce((a, b) => (b.version > a.version ? b : a));
+        // 🔴 CHON THEO `id`, KHONG THEO `version` — loi that, do duoc 2026-11-02.
+        //
+        // `version` la SO LAN SUA cua ban ghi, khong phai so thu tu ban ghi. Do
+        // tren nguon 6 ngay sau khi chay lai phien am:
+        //
+        //     #42  version=1   created=2026-11-02T17:14:42Z   <- BAN MOI NHAT
+        //     #41  version=2   created=2026-11-01T18:46:33Z   <- ban CU, bi sua 2 lan
+        //
+        // Ban truoc dung `reduce((a,b) => b.version > a.version ? b : a)`, nen no chon
+        // #41 — ban CU — chi vi ban do tung bi chinh tay hai lan. Hau qua do duoc: chay
+        // lai phien am sinh ra #42 nhung giao dien VAN mo #41 (va ban dich #43 cua no),
+        // nen moi phep do tren man hinh deu ra so lieu cu (94/52 thay vi 124/22).
+        //
+        // `id` la so tu tang cua lan ghi, nen `id` lon nhat = ban ghi moi nhat.
+        const moiNhat = cuaKenh.reduce((a, b) => (b.id > a.id ? b : a));
         const day = await getTranscript(moiNhat.id);
         if (!huy) setTranscript(day);
       } catch (e) {
