@@ -240,7 +240,7 @@ def _style_ass(style: dict) -> dict:
 #: ⚠️ Lần đo ĐẦU của tôi ra 0,36 và SAI: câu thử dài 50 ký tự nên libass đã bẻ dòng
 #: (`WrapStyle: 0`), và tôi đo bề rộng MỘT DÒNG ĐÃ BẺ chứ không phải cả câu.
 
-_TI_LE_CHU = 0.628
+_TI_LE_CHU = 0.637
 
 #: File font trong IMAGE BURN — phải khớp `_style_ass`/`FONT_CHO_PHEP`.
 _FONT_CHO_DUONG = {
@@ -404,16 +404,24 @@ def to_ass(segments: list[Segment], *, translations: list[str] | None = None,
             rong_hop = 0
         if 0 < cao_hop < 40:
             cao_hop = 0
-        #: `ngang = 0` ⇒ đo bề rộng chữ của DÒNG DÀI NHẤT rồi dùng chung cho mọi dòng, để
-        #: các dòng có hộp ĐỀU NHAU. Không đo được ⇒ 0 ⇒ bỏ hộp vector (giữ hộp tự động).
-        if rong_hop == 0:
-            do_rong = 0
-            for pos_, sg_ in enumerate(segments):
-                tr_ = translations[pos_] if translations is not None else None
-                do_rong = max(do_rong, _do_rong_chu(
-                    "".join(_lines(sg_, tr_, bilingual)),
-                    str(tham_so.get("font", "Archivo")), int(tham_so["co"])))
-            rong_hop = do_rong + 2 * int(tham_so.get("vien", 0)) if do_rong else 0
+        #: Bề rộng chữ của DÒNG DÀI NHẤT — dùng cho cả hai việc dưới đây.
+        #:
+        #: 🔴 ĐO ĐƯỢC trên bảng 18 tổ hợp (burn thật, đếm pixel): đặt `ngang = 300` mà chữ
+        #: rộng `560` thì chữ TRÀN `+130 px` mỗi bên. Nên khi đo được, bề rộng hộp KHÔNG BAO
+        #: GIỜ nhỏ hơn bề rộng chữ — hộp hẹp hơn chữ không phải "hộp nhỏ", nó là hộp hỏng.
+        do_rong = 0
+        for pos_, sg_ in enumerate(segments):
+            tr_ = translations[pos_] if translations is not None else None
+            do_rong = max(do_rong, _do_rong_chu(
+                "".join(_lines(sg_, tr_, bilingual)),
+                str(tham_so.get("font", "Archivo")), int(tham_so["co"])))
+        if do_rong:
+            rong_hop = max(rong_hop, do_rong + 2 * int(tham_so.get("vien", 0)))
+        #: 🔴 TRẦN CHIỀU CAO = `ry / 2`. ĐO ĐƯỢC: khai `cao = 1370` thì hình vẽ bị libass
+        #: THU còn **454 px** — cùng cơ chế với bề ngang (`rx / 2`). Chưa chia mảnh theo
+        #: chiều dọc, nên KẸP lại thay vì để người dùng nhận hộp 454 mà không biết.
+        if cao_hop > int(tham_so["ry"]) // 2:
+            cao_hop = int(tham_so["ry"]) // 2
         #: 🔴 SÀN CHIỀU CAO = CHIỀU CAO CHỮ + 2 đệm. ĐO ĐƯỢC (chủ dự án gửi ảnh): đặt
         #: `cao` nhỏ hơn chữ thì chữ TRÀN lên/xuống khỏi hộp — hộp không còn che được gì.
         #: Không đo được (máy test) thì bỏ qua sàn, giữ số người dùng đặt.
