@@ -464,32 +464,32 @@ GPU. Nó tự ép UTF-8 cho stdout (console Windows mặc định cp1252, còn s
 tiếng Trung/Việt) và tự đặt cache model trước khi nạp `faster_whisper`.
 
 Con số nền của lần chạy mặc định, đo sau khi xoá `__pycache__` (lệnh ở mục
-"Kiểm thử" trên, chạy từ trong `backend\`). Thứ có nghĩa là **1502 / 15**, không
+"Kiểm thử" trên, chạy từ trong `backend\`). Thứ có nghĩa là **1507 / 15**, không
 phải số giây — thời gian trôi giữa các lần chạy (đã thấy 24,00–30,94 s) còn con
 số bài thì không:
 
 ```
-1502 passed, 15 deselected, 3 warnings
+1507 passed, 15 deselected, 3 warnings
 ```
 
 Hai con số đó là SỐ BÀI ĐƯỢC CHỌN, và chúng khớp với số mà `--collect-only` báo
-(`1502/1517`, 15 bài `live` bị bỏ;
+(`1507/1522`, 15 bài `live` bị bỏ;
 `tests/test_backend_readme.py::test_readme_baseline_matches_the_tests_actually_
 collected` đối chiếu mỗi lần chạy).
 
 
-Máy này **CÓ** `ffmpeg 8.1.1` + `ffprobe` trên PATH (đã đo), nên `1502/15` ở trên
+Máy này **CÓ** `ffmpeg 8.1.1` + `ffprobe` trên PATH (đã đo), nên `1507/15` ở trên
 là số THẬT của nó. Máy **không có** `ffmpeg`/`ffprobe` cho một kết quả KHÁC: cả
 `tests/test_ingest.py` bị `skipif` ở cấp module — **9** bài cùng skip một lượt —
-nên dòng tổng kết của máy đó là **`1493 passed, 9 skipped, 15 deselected`** (=
-`1502 − 9`; con số này TỪNG ghi `978`, tức một baseline rất cũ, và nó lệch phép
+nên dòng tổng kết của máy đó là **`1498 passed, 9 skipped, 15 deselected`** (=
+`1507 − 9`; con số này TỪNG ghi `978`, tức một baseline rất cũ, và nó lệch phép
 trừ của chính khối nền ngay trên nó). Đó là
 con số của máy thiếu ffmpeg, **không phải** con số máy này từng in ra; đừng chép
 nó vào khối nền ở trên, và đừng "sửa" số nền xuống chỉ vì thiếu ffmpeg.
 
 ⚠️ Con số `856` ở đây TỪNG không khớp phép trừ của chính nó: `865 − 9 = 856`, tức
 nó là số của lượt TRƯỚC `V1` (+3 bài) còn sót lại. Phép trừ của khối nền hiện tại
-là `1502 − 9` = `1493`.
+là `1507 − 9` = `1498`.
 
 
 (Con số này từng bị ghi là `798`: bài `test_a_failed_translation_leaves_the_
@@ -1596,19 +1596,67 @@ danh sách có `end` nhỏ hơn:
 `ra[-1]` là `i=1` (`77,20`), nên chặn thành `77,20` và `start` lùi về `77,60` — chồng lên
 `i=0`. Đo được: `assert 77.6 >= (77.95 - 0.01)` ĐỎ.
 
-**Lần 3 — `moc_da_dung` = `max(end)` của mọi dòng đã xử lý.** Đúng. Chặn `start` tại mốc
-MUỘN NHẤT đã dùng, không phải dòng cuối danh sách.
+**Lần 3 — `moc_da_dung` = `max(end)` của mọi dòng đã xử lý.** Đúng về ý, nhưng CHỈ ĐÚNG
+MỘT NỬA — hai lỗi còn lại xem dưới. Chặn `start` tại mốc MUỘN NHẤT đã dùng, không phải dòng
+cuối danh sách.
 
 Lần sửa này cũng tự gây một lỗi khác, `tsc`-tương đương của Python bắt ngay:
 `UnboundLocalError: local variable 'moc_da_dung' referenced before assignment` — tôi chèn
 khai báo sau chuỗi `ra: list[Segment] = []`, mà chuỗi đó xuất hiện ở BA hàm; khai báo rơi
 vào `gop_thanh_dong`. Sửa bằng cách neo theo `def keo_dai_theo_asr` trước.
 
-Kết quả cuối trên dữ liệu thật (transcript #53):
+### Lần 4 và 5 — lỗi chỉ lộ khi chạy TOÀN BỘ 156 đoạn
 
+Ba lần trên đều được kiểm bằng fixture 3–4 đoạn. Nhưng thứ tự dòng trong dữ liệu thật có
+layer 1 và layer 2 **xen kẽ**, và fixture nhỏ không tái hiện được. Chạy đúng hàm đó trên
+toàn bộ 156 đoạn của transcript #53 mới thấy:
+
+    số cặp chồng: 9   (dữ liệu gốc chỉ có 2)
+
+Hai lỗi, cùng bản chất: **so sánh với dòng kế trong DANH SÁCH thay vì dòng kế CÙNG LAYER**.
+
+**Lần 4 — chặn `end` bằng `doan[k + 1].start`.** Với `i=55`, `doan[k + 1]` là `i=56`
+(layer 2) bắt đầu `94,23` — không lớn hơn `94,23` nên **không chặn gì**, và `end` chạy tới
+`96,03` chồng lên `i=57` (`96,00`, layer 1, mới là dòng nối tiếp thật):
+
+    i=0   [0.00-1.14]      >< i=2   [1.04-2.42]      chồng 0,10
+    i=55  [94.23-96.03]    >< i=57  [96.00-96.93]    chồng 0,03
+    i=64  [101.55-102.75]  >< i=66  [102.07-103.17]  chồng 0,68
+
+Sửa: lấy `start` NHỎ NHẤT của mọi dòng SAU, **CÙNG LAYER**, bắt đầu sau dòng này.
+
+**Lần 5 — `moc_da_dung` là MỘT biến, bị reset khi đổi layer.** `i=65` là layer 2, nên khi
+xử lý nó, mốc `102,50` của `i=64` (layer 1) **bị xoá**; `i=66` quay lại layer 1 không còn
+gì để chặn và lùi về `102,07`. Đồng thời mốc được cập nhật bằng `s.end` **GỐC** thay vì
+`end` **SAU KHI NÓI**, nên dòng trước vừa kéo dài vẫn bị coi là kết thúc sớm.
+
+    i=64  layer 1  [101.55-102.50]
+    i=65  layer 2  [101.55-103.17]   <- chen giua
+    i=66  layer 1  [102.07-103.17]   <- start lui ve 102,07, CHONG 0,43
+
+Sửa: `moc_theo_layer` là **dict theo layer** (mốc của layer 1 sống sót qua các dòng layer 2
+chen giữa), cập nhật bằng `end_that = max(s.end, end_moi)`.
+
+**Một lần hỏng nặng, và cách thoát:** vá dần bằng script sửa-văn-bản đã làm tệp mất cấu
+trúc — `156 đoạn vào, 164 đoạn ra` (hàm sinh thêm 8 đoạn trùng). Thoát bằng
+`git checkout -- backend/app/domain/phu_de.py` (khôi phục `603701b`) rồi áp lại hai sửa đổi
+bằng phép thay thế NHẮM CHÍNH XÁC, kiểm sau mỗi phép: `import OK`, số `ra.append` = 4,
+156 vào = 156 ra.
+
+Kết quả cuối, đo trên toàn bộ 156 đoạn của transcript #53:
+
+    156 đoạn vào -> 156 đoạn ra
     start là bội số 0,5s : 22 / 114   (trước: 62 / 62)
     tổng hở              : 102,33 s   (trước: 112,25 s)
-    số cặp chồng         : 2 -> phải về 0 sau lần sửa thứ 3
+    số cặp chồng         : 2   — ĐÚNG hai cặp CÓ SẴN trong dữ liệu gốc:
+                                 i=49/i=51  chồng 0,22
+                                 i=138/i=139 chồng 1,11
+
+  `i=55` trước `[94.23-95.55]` -> sau `[94.23-96.00]`  (end nới 0,45 s)
+
+Hai cặp còn lại KHÔNG do luật nới tạo ra: `i=51` gốc bắt đầu `77,73` đã nằm trong `i=49`
+(`76,79–77,95`); `i=139` là logo `ΛNI`. Không luật chặn `start` nào sửa được thứ đã chồng sẵn
+— muốn hết phải sửa dữ liệu nguồn, việc đó chưa làm.
 
 ### Giới hạn — và vì sao KHÔNG hứa nhiều hơn
 
@@ -1628,5 +1676,80 @@ giây không gì lấp được ở layer 1. Đo toàn bộ: chỉ **3/96** dòn
 ### Đo cuối
 
 ```
-pytest (toàn bộ)      1502 passed, 15 deselected   EXIT_PYTEST=0
+pytest (toàn bộ)      1507 passed, 15 deselected   EXIT_PYTEST=0
 ```
+
+## ERRATA #65 — nới `start`/`end` của OCR theo MỐC ĐOẠN ASR, không theo TỪ
+
+**Phát hiện lúc:** chủ dự án chỉ ra hai ảnh timeline. Lần đầu: *"còn end chưa được nới hay
+sao ý"*. Lần sau, nguyên văn luật:
+
+> "khi mà bạn thay asr với ocr. Mà ocr nó có 2 đoạn thì. Lấy đoạn ocr đầu tiên nới phần đầu
+> trùng với đầu asr. OCR đoạn thứ 2 thì nới cái cuối với cuối của asr"
+
+### Lỗi thật
+
+`keo_dai_theo_asr` (`domain/phu_de.py`) nới theo **TỪ ASR nằm trong cửa sổ `dung_sai = 0,5`
+quanh dòng OCR**. Dòng OCR dài đúng `0,5 s` ở `fps = 2`, nên cửa sổ chỉ rộng `1,5 s` — từ ở
+cuối câu nằm NGOÀI cửa sổ và `end` dừng non.
+
+ĐO ĐƯỢC trên transcript #55:
+
+    i=55  [ 94.23- 95.55]  '怎么才能让创作回归纯粹'     <- end dừng ở từ `回`
+    i=56  [ 94.23- 96.03]  ASR cùng câu                  <- lời nói tới 96,03
+
+Thiếu `0,48 s`. Vòng lặp từ dừng ở `回` vì `da_co >= ocr_chu` chỉ đúng sau khi gom đủ ký tự,
+mà `归 纯 粹` có tâm nằm ngoài cửa sổ.
+
+Và một hệ quả tệ hơn: **kết quả ĐÚNG ở ca hai dòng chỉ là MAY MẮN**, nhờ hai clamp trong
+`keo_dai_theo_asr` tình cờ trùng nhau — không có luật nào phát biểu điều chủ dự án muốn:
+
+    i=61  [ 99.50-100.47]  '如果能直接把作品'          <- dòng ĐẦU
+    i=63  [100.50-101.55]  '放在大街小巷'              <- dòng CUỐI
+    i=62  [ 99.51-101.63]  ASR cùng câu
+
+### Sửa — luật viết ra thành luật
+
+Thêm `_nhom_theo_chu` (`domain/nguon_chu.py`): dãy LIÊN TIẾP các dòng OCR mà CHỮ NỐI LẠI
+bằng chữ của đoạn ASR. Duyệt mọi dãy con liên tiếp, vì `ung_vien` có thể chứa dòng chỉ CHẠM
+MÉP và không thuộc câu này.
+
+Rồi trong `hop_nhat_theo_doan`, với nhóm tìm được:
+
+    · dòng ĐẦU  : start = min(start, doan.start)      (chỉ khi nhóm >= 2 dòng)
+    · dòng CUỐI : end   = max(end,   doan.end)
+    · dòng GIỮA : không đụng
+    · chặn dưới bằng `end` của dòng OCR NGAY TRƯỚC, chặn trên bằng `start` của dòng NGAY SAU
+
+### 🔴 Nới ĐẦU chỉ khi nhóm có ≥ 2 dòng — đo được, không phải phòng xa
+
+Bài test cũ ĐỎ ngay khi tôi bỏ điều kiện đó:
+
+    ASR [48.27-50.05] '有时又会显得很荒诞'
+    OCR [48.50-49.47] '有时又会显得很荒诞'
+    -> start kéo về 48,27
+
+Dòng OCR trải `0,23 s` TRƯỚC khung hình đầu tiên đọc được nó, và hai dòng trùng `start`. Với
+MỘT dòng, `start` là mốc khung — dữ liệu, không suy ra được. `end` thì vẫn nới, và đó chính
+là ca `i=55` ở trên.
+
+### Đo cuối — transcript #55, chạy lại toàn bộ qua `hop_nhat_theo_doan`
+
+    i=55  [ 94.23- 96.00]   end nới 95,55 -> 96,00 (chặn bởi i=57 bắt đầu 96,00)
+    i=61  [ 99.50-100.47]   dòng ĐẦU, start giữ mốc khung
+    i=63  [100.50-101.55]   dòng CUỐI, end = cuối ASR
+
+    layer 1: 114 dòng
+    tổng hở              : 102,33 s -> 97,51 s
+    số cặp chồng         : 1   — chỉ còn i=138/i=139 (logo `ΛNI`, CÓ SẴN trong dữ liệu gốc)
+
+### Đo cuối
+
+```
+pytest (toàn bộ)      1507 passed, 15 deselected   EXIT_PYTEST=0
+```
+
+Ba bài ghim mới trong `tests/test_nguon_chu.py`:
+`test_noi_DAU_dong_dau_va_CUOI_dong_cuoi_theo_ASR`,
+`test_MOT_dong_chi_noi_CUOI_khong_keo_DAU_ve_ASR`,
+`test_CHU_KHONG_KHOP_thi_KHONG_noi_gi`.

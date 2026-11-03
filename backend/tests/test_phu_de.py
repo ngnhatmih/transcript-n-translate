@@ -761,3 +761,71 @@ def test_keo_start_moc_cua_LAYER_KHAC_khong_duoc_chan():
     l1 = sorted([x for x in ra if x.layer == "mot_nguon"], key=lambda x: x.start)
     chong = [(a.i, b.i) for a, b in zip(l1, l1[1:]) if b.start < a.end - 0.01]
     assert chong == [], f"layer 1 khong duoc chong, do duoc {chong}"
+
+
+def test_keo_end_chan_boi_dong_SAU_cung_layer():
+    """DO DUOC tren transcript #53: chan `end` bang `doan[k + 1]` la SAI.
+
+        i=55  layer 1  [94.23-95.55]   '怎么才能让创作回归纯粹'
+        i=56  layer 2  [94.23-96.03]   <- cung cau, chen NGAY SAU trong danh sach
+        i=57  layer 1  [96.00-96.93]   <- dong NOI TIEP that cua layer 1
+
+    ASR keo `end` cua `i=55` toi 96,03 (het cau). Nhung `i=57` bat dau 96,00, nen
+    `i=55` phai dung o 96,00 — neu khong thi chong 0,03 s.
+
+    Ban dung `doan[k + 1]` nhin thay `i=56` bat dau 94,23, KHONG lon hon 94,23,
+    nen khong chan gi va `i=55` chay toi 96,03. Chay lai toan bo 156 doan thi
+    sinh 9 cap chong, khong phai 2.
+    """
+    from app.domain.phu_de import keo_dai_theo_asr
+    doan = [_doan(0, 94.23, 95.55, "怎么才能让创作回归纯粹"),
+            _doan(1, 94.23, 96.03, "怎么才能让创作回归纯粹"),
+            _doan(2, 96.00, 96.93, "不考虑什么价值呢")]
+    doan[0].layer = "mot_nguon"
+    doan[1].layer = "hai_nguon"
+    doan[1].suspect = True
+    doan[2].layer = "mot_nguon"
+    # Tu ASR chay tu 94,23 toi 96,03, dung nhu i=56.
+    chu = '怎么才能让创作回归纯粹'
+    buoc = (96.03 - 94.23) / len(chu)
+    tu = [_word(c, 94.23 + k * buoc, 94.23 + (k + 1) * buoc) for k, c in enumerate(chu)]
+    ra = keo_dai_theo_asr(doan, tu)
+    d55 = next(x for x in ra if x.i == 0)
+    assert abs(d55.end - 96.00) < 0.01, (
+        "end cua i=55 phai bi chan boi i=57 (cung layer, 96,00), do duoc "
+        + str(d55.end)
+    )
+    l1 = sorted([x for x in ra if x.layer == "mot_nguon"], key=lambda x: x.start)
+    chong = [(a.i, b.i) for a, b in zip(l1, l1[1:]) if b.start < a.end - 0.01]
+    assert chong == [], f"layer 1 khong duoc chong, do duoc {chong}"
+
+
+def test_keo_start_giu_moc_RIENG_tung_layer():
+    """DO DUOC tren transcript #53: moc phai la dict, va la `end` SAU KHI NOI.
+
+        i=64  layer 1  [101.55-102.50]
+        i=65  layer 2  [101.55-103.17]   <- chen giua
+        i=66  layer 1  [102.07-103.17]
+
+    Mot bien duy nhat bi reset khi doi layer thi moc 102,50 cua `i=64` BI XOA khi
+    xu ly `i=65`, nen `i=66` lui ve 102,07 — chong 0,43 len `i=64`. Moc cua layer 1
+    phai song sot qua cac dong layer 2 chen giua.
+    """
+    from app.domain.phu_de import keo_dai_theo_asr
+    doan = [_doan(0, 101.55, 102.50, "那岁不是处处都是c位"),
+            _doan(1, 101.55, 103.17, "那岂不是处处都是C位"),
+            _doan(2, 102.50, 103.17, "那不是处处都是c位")]
+    doan[0].layer = "mot_nguon"
+    doan[1].layer = "hai_nguon"
+    doan[1].suspect = True
+    doan[2].layer = "mot_nguon"
+    chu = '那不是处处都是c位'
+    buoc = (103.17 - 102.07) / len(chu)
+    tu = [_word(c, 102.07 + k * buoc, 102.07 + (k + 1) * buoc) for k, c in enumerate(chu)]
+    ra = keo_dai_theo_asr(doan, tu)
+    d66 = next(x for x in ra if x.i == 2)
+    d64 = next(x for x in ra if x.i == 0)
+    assert d66.start >= d64.end - 0.01, (
+        "start cua i=66 khong duoc lui vao i=64 (end " + str(d64.end)
+        + "), do duoc " + str(d66.start)
+    )

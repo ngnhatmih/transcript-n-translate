@@ -189,6 +189,30 @@ def _da_co_chu(chu: str, da_dung: list[str]) -> bool:
     return False
 
 
+def _nhom_theo_chu(ung_vien: list[tuple[int, Segment]], text_asr: str
+                   ) -> list[tuple[int, Segment]]:
+    """Dãy LIÊN TIẾP các dòng OCR mà CHỮ NỐI LẠI bằng chữ của đoạn ASR.
+
+    Dùng để biết đoạn ASR này được OCR đọc thành MẤY dòng, và dòng nào là ĐẦU, dòng nào là
+    CUỐI. Trả `[]` khi không có dãy nào khớp — khi đó KHÔNG áp luật nới.
+
+    `ung_vien` có thể chứa dòng chỉ CHẠM MÉP đoạn ASR và không thuộc câu này (đo được ở
+    #38: `OCR [50.00-51.09]` chỉ chạm mép `ASR [48.27-50.05]`), nên phải duyệt mọi dãy con
+    LIÊN TIẾP chứ không lấy cả danh sách.
+    """
+    ds = sorted(ung_vien, key=lambda t: (t[1].start, t[1].end))
+    dich = _chuan_hoa(text_asr)
+    if not dich:
+        return []
+    for a in range(len(ds)):
+        gop = ""
+        for b in range(a, len(ds)):
+            gop += ds[b][1].text
+            if _chuan_hoa(gop) == dich:
+                return ds[a:b + 1]
+    return []
+
+
 def hop_nhat_theo_doan(doan_ocr: list[Segment], doan_asr: list[Segment]
                        ) -> tuple[list[Segment], int, int]:
     """Hợp nhất OCR và ASR THEO TỪNG ĐOẠN. Trả `(đoạn, số đè, số nghi ngờ)`.
@@ -482,6 +506,74 @@ def hop_nhat_theo_doan(doan_ocr: list[Segment], doan_asr: list[Segment]
         #
         # `NGUONG_UNG` van dung cho `ung_vien` va `_da_co_chu` (nhan dien CUNG CAU), chi
         # khong con dung de gan LOP nua.
+        # 🔴 NỚI ĐẦU/CUỐI THEO MỐC CỦA ĐOẠN ASR — luật chủ dự án đặt, nguyên văn:
+        #
+        #   "khi mà bạn thay asr với ocr. Mà ocr nó có 2 đoạn thì. Lấy đoạn ocr đầu tiên
+        #    nới phần đầu trùng với đầu asr. OCR đoạn thứ 2 thì nới cái cuối với cuối của
+        #    asr"
+        #
+        # Nghĩa là: đoạn ASR C được OCR đọc thành N dòng (xen kẽ, không phải N câu khác
+        # nhau — nhận biết bằng CHỮ NỐI LẠI, xem `_nhom_theo_chu`). Khi đó:
+        #
+        #   · dòng ĐẦU  lấy `start` = `C.start`   (nới phần ĐẦU)
+        #   · dòng CUỐI lấy `end`   = `C.end`     (nới phần CUỐI)
+        #   · dòng GIỮA không đụng `start`/`end`
+        #
+        # 🔴 VÌ SAO PHẢI VIẾT THÀNH LUẬT, KHÔNG ĐỂ TỰ SUY RA TỪ CLAMP.
+        #
+        # Trước dòng này, kết quả ĐÚNG chỉ nhờ hai clamp tình cờ trùng nhau trong
+        # `keo_dai_theo_asr` — đo được trên transcript #54/#55:
+        #
+        #     i=61 [ 99.50-100.47] '如果能直接把作品'      <- dòng ĐẦU, đúng
+        #     i=63 [100.50-101.55] '放在大街小巷'          <- dòng CUỐI, đúng
+        #
+        # nhưng `i=55` cùng cơ chế thì SAI:
+        #
+        #     i=55 [ 94.23- 95.55] '怎么才能让创作回归纯粹'
+        #     i=56 [ 94.23- 96.03] ASR cung cau           <- đuôi 95,55 -> 96,03 KHÔNG nới
+        #
+        # Vì `keo_dai_theo_asr` chỉ với tới từ ASR CUỐI NẰM TRONG cửa sổ `dung_sai = 0,5`
+        # quanh dòng OCR dài 0,5 s — nó dừng ở `回` (95,55), không thấy `归 纯 粹` (tới
+        # 96,03). Đó là lý do phải dùng `end` của cả ĐOẠN ASR, không phải của từ.
+        #
+        # Luật chỉ chạy khi TÌM ĐƯỢC nhóm khớp chữ; không khớp thì giữ nguyên, để không
+        # gán mốc của câu khác cho dòng này (cùng lý do `KHOP_TOI_THIEU` ở `phu_de`).
+        dau_moi: dict[int, float] = {}
+        cuoi_moi: dict[int, float] = {}
+        nhom = _nhom_theo_chu(ung_vien, doan.text)
+        if nhom:
+            j_dau, o_dau = nhom[0]
+            j_cuoi, o_cuoi = nhom[-1]
+            # 🔴 NỚI ĐẦU **CHỈ KHI NHÓM CÓ ≥ 2 DÒNG** — đúng chữ chủ dự án: "Mà ocr nó
+            # có 2 đoạn thì". Với MỘT dòng, kéo `start` về `doan.start` là BỊA: nó trải
+            # dòng phụ đề ra sau lưng khung hình đã đọc được nó.
+            #
+            # DO ĐƯỢC (bài test đỏ ngay khi tôi bỏ điều kiện này):
+            #
+            #     ASR [48.27-50.05] "有时又会显得很荒诞"
+            #     OCR [48.50-49.47] "有时又会显得很荒诞"
+            #     -> kéo `start` về 48,27 (đầu ASR), dòng OCR trải 0,23 s trước khung
+            #        đầu tiên đọc được nó, và hai dòng trùng `start`
+            if len(nhom) >= 2:
+                s_moi = min(o_dau.start, doan.start)
+                # Chặn dưới: `end` của dòng OCR NGAY TRƯỚC dòng đầu, nếu nó kết thúc
+                # trước dòng này — hai dòng không được chồng nhau (ràng buộc CỨNG).
+                for jj in range(j_dau - 1, -1, -1):
+                    if doan_ocr[jj].end <= o_dau.start:
+                        s_moi = max(s_moi, doan_ocr[jj].end)
+                        break
+                dau_moi[j_dau] = s_moi
+            # NỚI CUỐI áp cho CẢ nhóm một dòng: đây chính là ca "end chưa được nới" mà
+            # chủ dự án báo (i=55 dừng ở 95,55 trong khi ASR hết câu ở 96,03, vì vòng
+            # lặp từ ở `keo_dai_theo_asr` chỉ với tới `回`).
+            e_moi = max(o_cuoi.end, doan.end)
+            # Chặn trên: `start` của dòng OCR NGAY SAU dòng cuối, nếu nó bắt đầu sau.
+            for jj in range(j_cuoi + 1, len(doan_ocr)):
+                if doan_ocr[jj].start >= o_cuoi.end:
+                    e_moi = min(e_moi, doan_ocr[jj].start)
+                    break
+            cuoi_moi[j_cuoi] = e_moi
+
         for j, ocr in ung_vien:
             da_dung.add(j)
 
@@ -502,8 +594,8 @@ def hop_nhat_theo_doan(doan_ocr: list[Segment], doan_asr: list[Segment]
 
             ra.append(Segment(
                 i=0,
-                start=ocr.start,
-                end=ocr.end,
+                start=dau_moi.get(j, ocr.start),
+                end=cuoi_moi.get(j, ocr.end),
                 text=ocr.text,
                 suspect=False,
                 # 🔴 `goc` — cung ly do nhu nhanh duoi: thieu no thi luat goc khong chay.

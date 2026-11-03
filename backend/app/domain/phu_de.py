@@ -558,47 +558,45 @@ def keo_dai_theo_asr(doan: list[Segment], tu_asr: list[Word],
         return []
     ra: list[Segment] = []
 
-    #: `end` LON NHAT trong cac dong DA XU LY — dung de chan `start` cua dong sau, sao cho
-    #: hai dong khong bao gio chong nhau du thu tu trong danh sach co xao tron.
-    #: `end` LON NHAT trong cac dong DA XU LY **CUNG LAYER** — dung de chan `start`
-    #: cua dong sau, sao cho hai dong cung lop khong bao gio chong nhau du thu tu trong
-    #: danh sach co xao tron.
+    #: `end` LON NHAT da dung, TINH RIENG CHO TUNG LAYER.
     #:
-    #: 🔴 CHI CUNG LAYER. DO DUOC (transcript #52): `i=50` la ASR layer 2
-    #: [76.79-78.17] nam GIUA `i=49` [76.79-77.95] va `i=51` [77.73-78.97] cua layer 1.
-    #: Neu tinh ca no thi `moc_da_dung` = 78,17 > `start` cua `i=51` (77,73), dieu kien
-    #: chan thanh SAI va `i=51` lui ve 77,73 — CHONG 0,22 s len `i=49`. Hai lop khong
-    #: tranh cho nhau: chung la hai BAN cua cung mot cau, hien o hai dai khac nhau.
-    moc_da_dung: float | None = None
-    #: Lop cua dong dang xu ly — `moc_da_dung` chi tinh trong lop nay.
-    layer_dang_xu_ly: str | None = None
+    #: 🔴 PHAI LA DICT, va phai cap nhat bang `end` SAU KHI NOI. DO DUOC tren
+    #: transcript #53 (chay lai toan bo 156 doan):
+    #:
+    #:     i=64  layer 1  [101.55-102.50]
+    #:     i=65  layer 2  [101.55-103.17]   <- chen giua
+    #:     i=66  layer 1  [102.07-103.17]   <- start lui ve 102,07, CHONG 0,43
+    #:
+    #: Hai loi lam nen ca nay:
+    #:
+    #: 1. Mot bien duy nhat bi RESET khi doi layer. `i=65` la layer 2 nen moc cua
+    #:    layer 1 bi xoa, va `i=66` khong con gi de chan. Moc cua layer 1 phai song sot
+    #:    qua cac dong layer 2 chen giua — nen phai la dict, khong phai mot so.
+    #: 2. Cap nhat bang `s.end` GOC thay vi `end` SAU KHI NOI. Dong truoc vua bi keo
+    #:    dai thi moc phai la `end` MOI, neu khong `start` cua dong sau lui vao trong no.
+    #:
+    #: Cung loi o `i=67`/`i=69` (0,40) va `i=93`/`i=95` (0,33).
+    moc_theo_layer: dict[str, float] = {}
     for k, s in enumerate(doan):
-        # 🔴 DOI LAYER THI RESET `moc_da_dung`. DO DUOC: neu khong reset, moc cua layer 2
-        # con lai khi quay ve layer 1, va no chan SAI. Vi du (transcript #52, vung 76-79 s):
-        # `i=1` la layer 2 ket thuc 78,17; `i=2` la layer 1 bat dau 78,50 — moc 78,17 con lai
-        # nen `start` cua `i=2` bi chan o 78,17 thay vi 77,95 (end cua `i=0` cung layer 1).
-        if s.layer != layer_dang_xu_ly:
-            layer_dang_xu_ly = s.layer
-            moc_da_dung = None
         tu = _tu_trong_khoang(tu_asr, s.start, s.end, dung_sai)
         if not tu:
             ra.append(s)
-            if s.layer == layer_dang_xu_ly:
-                moc_da_dung = s.end if moc_da_dung is None else max(moc_da_dung, s.end)
+            truoc = moc_theo_layer.get(s.layer)
+            moc_theo_layer[s.layer] = s.end if truoc is None else max(truoc, s.end)
             continue
         ocr_chu = _chu(s.text)
         if not ocr_chu:
             ra.append(s)
-            if s.layer == layer_dang_xu_ly:
-                moc_da_dung = s.end if moc_da_dung is None else max(moc_da_dung, s.end)
+            truoc = moc_theo_layer.get(s.layer)
+            moc_theo_layer[s.layer] = s.end if truoc is None else max(truoc, s.end)
             continue
         asr_chu: set[str] = set()
         for w in tu:
             asr_chu |= _chu(w.w)
         if len(ocr_chu & asr_chu) / len(ocr_chu) < KHOP_TOI_THIEU:
             ra.append(s)
-            if s.layer == layer_dang_xu_ly:
-                moc_da_dung = s.end if moc_da_dung is None else max(moc_da_dung, s.end)
+            truoc = moc_theo_layer.get(s.layer)
+            moc_theo_layer[s.layer] = s.end if truoc is None else max(truoc, s.end)
             continue
 
         # KEO CA `start` LUI, khong chi `end` toi.
@@ -665,8 +663,9 @@ def keo_dai_theo_asr(doan: list[Segment], tu_asr: list[Word],
         #
         # Chi chan khi moc do ket thuc truoc dong nay — hai dong SONG SONG (cung `start`,
         # khac dai `y`) khong tranh nhau cho, y het ly do o phan chan `end`.
-        if moc_da_dung is not None and moc_da_dung <= s.start:
-            start_moi = max(start_moi, moc_da_dung)
+        moc = moc_theo_layer.get(s.layer)
+        if moc is not None and moc <= s.start:
+            start_moi = max(start_moi, moc)
         start_moi = min(start_moi, s.start)
 
         # Đi từng từ theo thời gian, dừng ở từ đầu tiên KHÔNG đóng góp ký tự mới nào mà
@@ -697,8 +696,26 @@ def keo_dai_theo_asr(doan: list[Segment], tu_asr: list[Word],
         # `start`, khác dải `y`); dòng kế tiếp trong danh sách bắt đầu ĐÚNG LÚC dòng này
         # bắt đầu, nên `min` kéo `end` về bằng `start` — dòng dài 0 giây. Đó là hai
         # dòng SONG SONG, không phải nối tiếp, và chúng không tranh nhau chỗ nói.
-        if k + 1 < len(doan) and doan[k + 1].start > s.start:
-            end_moi = min(end_moi, doan[k + 1].start)
+        # 🔴 CHAN BANG DONG SAU **CUNG LAYER**, khong phai `doan[k + 1]`.
+        #
+        # Ban dung `doan[k + 1]` va DO DUOC 9 cap chong tren transcript #53 khi chay lai
+        # toan bo 156 doan:
+        #
+        #     i=0   [0.00-1.14]      >< i=2   [1.04-2.42]      chong 0,10
+        #     i=55  [94.23-96.03]    >< i=57  [96.00-96.93]    chong 0,03
+        #     i=64  [101.55-102.75]  >< i=66  [102.07-103.17]  chong 0,68
+        #
+        # Voi `i=55`, `doan[k + 1]` la `i=56` (layer 2) bat dau 94,23 — KHONG lon hon
+        # 94,23 nen khong chan gi. Nhung `i=57` (layer 1) bat dau 96,00 moi la dong noi
+        # tiep that. Phai tim `start` NHO NHAT cua moi dong SAU, CUNG LAYER.
+        #
+        # Giu nguyen y do cu: chi chan khi dong do bat dau SAU dong nay — hai dong SONG
+        # SONG (cung `start`, khac dai `y`) khong tranh nhau cho noi.
+        sau_cung_layer = [
+            x.start for x in doan[k + 1:] if x.layer == s.layer and x.start > s.start
+        ]
+        if sau_cung_layer:
+            end_moi = min(end_moi, min(sau_cung_layer))
         # 🔴 CHEP `goc` — cho dut THU NAM cua cung mot loi.
         #
         # DO DUOC: `doc_phu_de` tra ve 6 khoi deu co goc (`你会在山上看到` goc=-12.40),
@@ -708,9 +725,10 @@ def keo_dai_theo_asr(doan: list[Segment], tu_asr: list[Word],
         #
         # Chep ca `layer` va `chua_trong` cho day du: day la tao lai CUNG mot doan, chi
         # khac `end`, nen moi truong khac phai giu nguyen.
-        ra.append(Segment(i=s.i, start=start_moi, end=max(s.end, end_moi), text=s.text,
+        end_that = max(s.end, end_moi)
+        ra.append(Segment(i=s.i, start=start_moi, end=end_that, text=s.text,
                           suspect=s.suspect, layer=s.layer, goc=s.goc,
                           chua_trong=s.chua_trong))
-        if s.layer == layer_dang_xu_ly:
-            moc_da_dung = s.end if moc_da_dung is None else max(moc_da_dung, s.end)
+        truoc = moc_theo_layer.get(s.layer)
+        moc_theo_layer[s.layer] = end_that if truoc is None else max(truoc, end_that)
     return ra

@@ -444,3 +444,81 @@ def test_dong_OCR_chi_CHAM_MEP_khong_duoc_gan_hai_nguon():
     assert all(x.suspect is True for x in lop2), (
         "lop 2 chi chua ASR: " + repr([(x.text, x.suspect) for x in lop2])
     )
+
+
+def test_noi_DAU_dong_dau_va_CUOI_dong_cuoi_theo_ASR():
+    """Luật chủ dự án đặt, nguyên văn:
+
+        "khi mà bạn thay asr với ocr. Mà ocr nó có 2 đoạn thì. Lấy đoạn ocr đầu
+         tiên nới phần đầu trùng với đầu asr. OCR đoạn thứ 2 thì nới cái cuối với
+         cuối của asr"
+
+    DO ĐƯỢC trên transcript #54/#55, vùng 1:39.5–1:41.63:
+
+        OCR  [ 99.60-100.47] '如果能直接把作品'      <- dòng ĐẦU
+        OCR  [100.50-101.55] '放在大街小巷'          <- dòng CUỐI
+        ASR  [ 99.51-101.63] '如果能直接把作品放在大街小巷'
+
+    Dòng đầu lấy `start` của ASR (99,51); dòng cuối lấy `end` của ASR (101,63);
+    và `start` của dòng cuối PHẢI GIỮ 100,50 — không được kéo về đầu ASR.
+    """
+    from app.domain.nguon_chu import hop_nhat_theo_doan
+    s = "如果能直接把作品放在大街小巷"
+    ocr = [_seg(0, 99.60, 100.47, "如果能直接把作品"),
+           _seg(1, 100.50, 101.55, "放在大街小巷")]
+    asr = [_seg(0, 99.51, 101.63, s)]
+    ra, _, _ = hop_nhat_theo_doan(ocr, asr)
+    d1 = next(x for x in ra if x.text == "如果能直接把作品")
+    d2 = next(x for x in ra if x.text == "放在大街小巷")
+    assert abs(d1.start - 99.51) < 0.01, (
+        "dòng ĐẦU phải lấy start của ASR 99,51, đo được " + str(d1.start)
+    )
+    assert abs(d2.end - 101.63) < 0.01, (
+        "dòng CUỐI phải lấy end của ASR 101,63, đo được " + str(d2.end)
+    )
+    assert abs(d2.start - 100.50) < 0.01, (
+        "start dòng CUỐI KHÔNG được kéo về đầu ASR, đo được " + str(d2.start)
+    )
+
+
+def test_MOT_dong_chi_noi_CUOI_khong_keo_DAU_ve_ASR():
+    """Ca MỘT dòng: chỉ nới `end`, KHÔNG kéo `start` về đầu ASR.
+
+    🔴 ĐO ĐƯỢC — bài test cũ ĐỎ ngay khi tôi bỏ điều kiện `len(nhom) >= 2`:
+
+        ASR [48.27-50.05] '有时又会显得很荒诞'
+        OCR [48.50-49.47] '有时又会显得很荒诞'
+        -> start kéo về 48,27: dòng OCR trải 0,23 s TRƯỚC khung hình đầu
+           tiên đọc được nó, và hai dòng trùng `start`
+
+    Còn `end` thì PHẢI nới — đây đúng là ca chủ dự án báo (i=55 dừng ở 95,55
+    trong khi ASR hết câu ở 96,03, vì vòng lặp từ ở `keo_dai_theo_asr` chỉ với
+    tới `回` — từ ASR cuối nằm trong cửa sổ `dung_sai = 0,5`).
+    """
+    from app.domain.nguon_chu import hop_nhat_theo_doan
+    ocr = [_seg(0, 48.50, 49.47, "有时又会显得很荒诞")]
+    asr = [_seg(0, 48.27, 50.05, "有时又会显得很荒诞")]
+    ra, _, _ = hop_nhat_theo_doan(ocr, asr)
+    d = next(x for x in ra if x.suspect is False)
+    assert abs(d.start - 48.50) < 0.01, (
+        "MỘT dòng thì KHÔNG được kéo start về đầu ASR, đo được " + str(d.start)
+    )
+    assert abs(d.end - 50.05) < 0.01, (
+        "end phải nới tới cuối ASR 50,05, đo được " + str(d.end)
+    )
+
+
+def test_CHU_KHONG_KHOP_thi_KHONG_noi_gi():
+    """Không tìm được nhóm khớp chữ ⇒ KHÔNG đụng mốc — không gán mốc câu khác.
+
+    Cùng lý do `KHOP_TOI_THIEU` bên `phu_de`: kéo theo một câu khác là gán mốc
+    của câu đó cho dòng này.
+    """
+    from app.domain.nguon_chu import hop_nhat_theo_doan
+    ocr = [_seg(0, 10.0, 10.5, "完全不同的文字")]
+    asr = [_seg(0, 10.1, 12.0, "另一个句子的内容")]
+    ra, _, _ = hop_nhat_theo_doan(ocr, asr)
+    d = next(x for x in ra if x.suspect is False)
+    assert d.start == 10.0 and d.end == 10.5, (
+        "chữ không khớp thì mốc phải NGUYÊN, đo được " + str((d.start, d.end))
+    )
