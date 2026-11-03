@@ -60,11 +60,18 @@ export function PhuDeOverlay({
 
   const h = hinhHoc(style, hop.rong, hop.cao);
   const coHop = style.kieuVien === 3;
-  //: Cỡ hộp RIÊNG (cùng công thức tỉ lệ với backend): hộp không còn suy từ cỡ chữ.
-  const tiLe = Math.min(hop.rong / 1920, hop.cao / 1080);
+  //: Cỡ hộp RIÊNG — quy đổi bằng tỉ lệ CỦA CHÍNH VIDEO, không phải hệ 1920×1080.
+  //
+  // 🔴 ĐO ĐƯỢC (chủ dự án: *"cái tôi cần là cái bề ngang kìa"*): `rongHop` là pixel của
+  // VIDEO, còn `hinhHoc` tính theo hệ thiết kế 1920×1080. Video DỌC 1080×1920 hiện trong
+  // khung 16:9 cho `tiLe = min(200/1920, 356/1080) = 0,104`, nên hộp khai 1080 chỉ vẽ
+  // `1080 × 0,104 = 112 px` trên bề ngang hiển thị 200 px — hụt còn 56 %. Quy đổi đúng là
+  // `hop.rong / videoWidth`, tức bề ngang hộp bằng ĐÚNG tỉ lệ so với khung hình.
+  const sx = tiLeVideo.rong > 0 ? hop.rong / tiLeVideo.rong : 1;
+  const sy = tiLeVideo.cao > 0 ? hop.cao / tiLeVideo.cao : 1;
   const hopRieng = coHop && style.rongHop > 0 && style.caoHop > 0;
-  const wHop = style.rongHop * tiLe;
-  const hHop = style.caoHop * tiLe;
+  const wHop = style.rongHop * sx;
+  const hHop = style.caoHop * sy;
   const noiDung = {
     fontSize: `${h.coChu}px`,
     lineHeight: 1.25,
