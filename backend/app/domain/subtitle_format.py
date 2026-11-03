@@ -514,6 +514,10 @@ def to_ass(segments: list[Segment], *, translations: list[str] | None = None,
             #
             # Nên mỗi mảnh vẽ trong hệ `0..w`, và `\an2` canh GIỮA hộp-bao mảnh vào `pos.x`.
             bgr, alpha = tham_so["mau_hop"][4:], tham_so["mau_hop"][2:4]
+            # 🔴 `y + cao_hop`, KHONG phai `y`. ĐO ĐƯỢC trên bảng 18 ca: hộp vector
+            # bị đẩy LÊN đúng bằng chiều cao của nó (`cao=150` -> hộp ở 1524..1673
+            # trong khi chữ ở 1807..1819). `\an2` neo hộp-bao của hình vẽ, và bbox
+            # của `m 0 0 l w 0 w -h 0 -h` có đáy ở `-h` chứ không phải 0.
             toi_da = max(1, int(tham_so["rx"]) // 2)
             so_manh = max(1, -(-rong_hop // toi_da))
             nen = rong_hop // so_manh
@@ -524,7 +528,7 @@ def to_ass(segments: list[Segment], *, translations: list[str] | None = None,
                 cx = trai + rong_m / 2
                 lines.append(
                     f"Dialogue: 0,{_ass_timestamp(seg.start)},{_ass_timestamp(seg.end)},"
-                    f"Default,,0,0,0,,{{\\an2\\pos({int(round(cx))},{y})\\p1"
+                    f"Default,,0,0,0,,{{\\an2\\pos({int(round(cx))},{y + cao_hop})\\p1"
                     f"\\1c&H{bgr}&\\1a&H{alpha}&\\bord0\\shad0}}"
                     f"m 0 0 l {rong_m} 0 {rong_m} {-cao_hop} 0 {-cao_hop}{{\\p0}}"
                 )
