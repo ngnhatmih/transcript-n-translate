@@ -642,12 +642,14 @@ export function Timeline({
           />
           {/* khối đoạn — bề rộng = thời gian, xếp làn theo CHỒNG LẤN THẬT (`xepLan`) */}
           <div className="absolute inset-x-0 bottom-0" style={{ height: caoDoan }}>
-            // 🔴 VE THEO `segmentsVe`, KHONG phai `segmentsLoc`.
-            //
-            // `xepLan` chi co khoa cho cac khoi KHONG bi loc rac. Dung `segmentsLoc` o
-            // day thi khoi rac khong co trong map, `xepLan.get(s.i)!` tra `undefined`,
-            // va `b.lan` nem TypeError — CA CAY REACT SAP, khong con o phu de nao.
-            // Do duoc: 39 bai test do voi "chua nap xong: chua co o phu de nao".
+            {/*
+              🔴 VE THEO `segmentsVe`, KHONG phai `segmentsLoc`.
+              
+              `xepLan` chi co khoa cho cac khoi KHONG bi loc rac. Dung `segmentsLoc` o
+              day thi khoi rac khong co trong map, `xepLan.get(s.i)!` tra `undefined`,
+              va `b.lan` nem TypeError — CA CAY REACT SAP, khong con o phu de nao.
+              Do duoc: 39 bai test do voi "chua nap xong: chua co o phu de nao".
+            */}
             {segmentsVe.map((s) => {
               const b = xepLan.get(s.i)!;
               const bad = viecCuaDong(s).length > 0;
