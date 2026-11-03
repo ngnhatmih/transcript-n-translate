@@ -96,7 +96,7 @@ PlayResY: {ry}
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default,Archivo,{co},{mau_chu},{mau_chu},&H00000000,{mau_hop},{dam},{nghieng},0,0,100,100,0,0,{kieu_vien},{vien},{bong},{can_le},{le},{le},{duoi},1
+Style: Default,{font},{co},{mau_chu},{mau_chu},&H00000000,{mau_hop},{dam},{nghieng},0,0,100,100,0,0,{kieu_vien},{vien},{bong},{can_le},{le},{le},{duoi},1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -135,6 +135,10 @@ _ASS_KHUNG_MAC_DINH = {"rx": 1920, "ry": 1080, "co": 54, "vien": 2, "le": 60,
                        # `BorderStyle: 3` = hộp đục phía sau chữ (kiểu "opaque box"),
                        # thay cho `1` = chỉ viền quanh nét chữ.
                        "kieu_vien": 3, "dam": 0, "nghieng": 0, "bong": 0, "can_le": 2,
+                       # Font phai co o CA HAI noi: image burn (`fc-match`) va trinh duyet.
+                       # DO DUOC truoc khi sua: container khong co Archivo nen chữ burn
+                       # ra DejaVu Sans, lech han so voi ban xem truoc.
+                       "font": "Archivo",
                        "mau_chu": _ASS_MAU_CHU, "mau_hop": _ASS_MAU_HOP}
 
 #: Dịch khối chữ XUỐNG bao nhiêu, tính theo tỉ lệ chiều cao khung.
@@ -160,6 +164,10 @@ def _ass_escape(text: str) -> str:
 #: từ HTTP xuống đây, nên khoá lạ phải bị BỎ chứ không được chèn vào `tham_so`. Chèn bừa
 #: thì một khoá như `rx` sẽ đổi hệ toạ độ và làm chữ tràn khung — đúng thứ
 #: `_ASS_KHUNG_MAC_DINH` sinh ra để chặn.
+#: Font duoc phep chon — CHI nhung font co o CA image burn (fontconfig) VA trinh duyet.
+#: Them mot ten vao day ma khong cai font vao image la burn ra font khac ban xem truoc.
+FONT_CHO_PHEP = ("Archivo", "IBM Plex Mono")
+
 _ASS_STYLE_CHO_PHEP = ("co", "vien", "le", "duoi", "kieu_vien", "dam", "nghieng",
                        "bong", "can_le", "mau_chu", "mau_hop")
 
@@ -197,6 +205,10 @@ def _style_ass(style: dict) -> dict:
     im lặng đổi sang màu khác là giấu lỗi của người gọi.
     """
     ra: dict = {}
+    #: Chi nhan font CO THAT o ca image burn lan trinh duyet. Font la khai niem cua MOI
+    #: TRUONG, khong phai cua mot khoa JSON, nen nhan bua mot ten la burn ra font khac.
+    if "font" in style and str(style["font"]) in FONT_CHO_PHEP:
+        ra["font"] = str(style["font"])
     if "mau_chu" in style:
         ra["mau_chu"] = _mau_ass(style["mau_chu"])
     if "mau_hop" in style:

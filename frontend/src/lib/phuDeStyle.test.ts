@@ -77,6 +77,7 @@ test("styleChoAss dùng TÊN KHOÁ của backend, không phải tên biến giao
   // Backend bỏ qua khoá lạ IM LẶNG, nên một khoá sai tên không gây lỗi — chỉ không có
   // tác dụng. Đó là lý do phải ghim đúng tên.
   assert.deepEqual(khoi, {
+    font: "Archivo",
     co: 60,
     mau_chu: STYLE_MAC_DINH.mauChu,
     mau_hop: STYLE_MAC_DINH.mauHop,

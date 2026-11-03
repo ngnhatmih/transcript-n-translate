@@ -15,6 +15,12 @@
 export const HE_GOC = { rx: 1920, ry: 1080 } as const;
 
 export interface PhuDeStyle {
+  /**
+   * Font chữ. CHỈ những font có ở CẢ image burn lẫn trình duyệt — xem `FONT_CHO_PHEP`
+   * bên backend. Chọn một font không có trong image burn thì chữ burn khác chữ xem trước,
+   * đúng thứ đang sửa.
+   */
+  font: string;
   /** Cỡ chữ trong hệ 1920×1080 (`ASS: Fontsize`). */
   co: number;
   /** Màu chữ `#rrggbb`. */
@@ -54,6 +60,7 @@ export interface PhuDeStyle {
  * alpha ASS NGƯỢC với CSS, nên alpha CSS = `255 − 160 = 95`, và `95/255 = 0,3725`.
  */
 export const STYLE_MAC_DINH: PhuDeStyle = {
+  font: "Archivo",
   co: 54,
   mauChu: "#ffffff",
   mauHop: "#000000",
@@ -70,6 +77,9 @@ export const STYLE_MAC_DINH: PhuDeStyle = {
 
 /** Khoá `localStorage`. Đổi khoá là mất kiểu chữ của mọi người dùng đang có. */
 export const KHOA_LUU = "phu-de-lab:phu-de-style";
+
+/** Font chọn được — PHẢI trùng `FONT_CHO_PHEP` của backend (`subtitle_format.py`). */
+export const FONT_CHO_PHEP: readonly string[] = ["Archivo", "IBM Plex Mono"];
 
 function so(v: unknown, macDinh: number, thap: number, cao: number): number {
   const n = typeof v === "number" ? v : Number(v);
@@ -105,6 +115,7 @@ export function docStyle(kho: KhoLuu = khoMacDinh()): PhuDeStyle {
     if (!raw) return { ...STYLE_MAC_DINH };
     const v = JSON.parse(raw) as Partial<PhuDeStyle>;
     return {
+      font: FONT_CHO_PHEP.includes(String(v.font)) ? String(v.font) : STYLE_MAC_DINH.font,
       co: so(v.co, STYLE_MAC_DINH.co, 8, 400),
       mauChu: mau(v.mauChu, STYLE_MAC_DINH.mauChu),
       mauHop: mau(v.mauHop, STYLE_MAC_DINH.mauHop),
@@ -144,6 +155,7 @@ export function luuStyle(s: PhuDeStyle, kho: KhoLuu = khoMacDinh()): void {
  */
 export function styleChoAss(s: PhuDeStyle): Record<string, unknown> {
   return {
+    font: s.font,
     co: s.co,
     mau_chu: s.mauChu,
     mau_hop: s.mauHop,

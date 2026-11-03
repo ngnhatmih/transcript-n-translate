@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
-import { hinhHoc, STYLE_MAC_DINH, type PhuDeStyle } from "@/lib/phuDeStyle";
+import { FONT_CHO_PHEP, hinhHoc, STYLE_MAC_DINH, type PhuDeStyle } from "@/lib/phuDeStyle";
 import { hopVideo } from "@/lib/hopVideo";
 
 /**
@@ -73,6 +73,7 @@ export function PhuDeOverlay({
   const wHop = style.rongHop * sx;
   const hHop = style.caoHop * sy;
   const noiDung = {
+    fontFamily: style.font + ", system-ui, sans-serif",
     fontSize: `${h.coChu}px`,
     lineHeight: 1.25,
     fontWeight: style.dam ? 700 : 400,
@@ -308,6 +309,19 @@ export function PhuDeStyleDialog({
             Chỉnh tham số mà không thấy kết quả trên chính khung hình thì phải đoán, và
             đoán sai phải quay lại sửa — vòng lặp đó là lý do khung này tồn tại. */}
         {preview}
+
+        <Truong nhan="Font">
+          <select
+            value={style.font}
+            onChange={(e) => dat({ font: e.target.value })}
+            className="rounded-sm border border-rule bg-panel-0 px-2 py-1 text-[12.5px] text-ink-0 outline-none"
+            aria-label="Font"
+          >
+            {FONT_CHO_PHEP.map((f) => (
+              <option key={f} value={f}>{f}</option>
+            ))}
+          </select>
+        </Truong>
 
         <Truong nhan="Cỡ chữ">
           <input
