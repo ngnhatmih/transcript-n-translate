@@ -115,8 +115,8 @@ export function docStyle(kho: KhoLuu = khoMacDinh()): PhuDeStyle {
       // 🔴 DƯỚI 40 px COI NHƯ TẮT. ĐO ĐƯỢC: nhập `1` thì hộp co còn ~0 px và chữ bị ép
       // thành một cột dọc (ảnh chủ dự án gửi). Một hộp nhỏ hơn một ký tự không phải là
       // "hộp nhỏ", nó là hộp hỏng — nên quy về 0 (tự co theo chữ) thay vì vẽ ra rác.
-      rongHop: so(v.rongHop, 0, 0, 1080) < 40 ? 0 : so(v.rongHop, 0, 0, 1080),
-      caoHop: so(v.caoHop, 0, 0, 1080) < 40 ? 0 : so(v.caoHop, 0, 0, 1080),
+      rongHop: so(v.rongHop, 0, 0, 3840) < 40 ? 0 : so(v.rongHop, 0, 0, 3840),
+      caoHop: so(v.caoHop, 0, 0, 3840) < 40 ? 0 : so(v.caoHop, 0, 0, 3840),
       kieuVien: v.kieuVien === 1 ? 1 : 3,
       viTriDoc: so(v.viTriDoc, STYLE_MAC_DINH.viTriDoc, 0, 0.5),
       canLe: v.canLe === 1 || v.canLe === 3 ? v.canLe : 2,

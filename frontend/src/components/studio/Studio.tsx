@@ -1776,6 +1776,8 @@ export function Studio(props: StudioProps) {
             batDau={player.time}
           />
         }
+        toiDaNgang={player.videoRef.current?.videoWidth || 1920}
+        toiDaCao={player.videoRef.current?.videoHeight || 1080}
         // Ghi `localStorage` NGAY trong `onChange`, không qua `useEffect`: URL xuất và
         // payload lồng tiếng đọc thẳng từ `localStorage`, nên nếu chỉ ghi sau khi vẽ lại
         // thì một lượt bấm xuất ngay sau khi kéo thanh trượt có thể dùng kiểu CŨ.

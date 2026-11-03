@@ -244,6 +244,8 @@ export function PhuDeStyleDialog({
   style,
   onChange,
   preview,
+  toiDaNgang = 1920,
+  toiDaCao = 1080,
 }: {
   open: boolean;
   onClose: () => void;
@@ -251,6 +253,16 @@ export function PhuDeStyleDialog({
   onChange: (s: PhuDeStyle) => void;
   /** Khung xem trước (video + chữ) đặt ngay dưới tiêu đề. */
   preview?: React.ReactNode;
+  /**
+   * Trần CỦA CHÍNH VIDEO, tính bằng pixel thật (`videoWidth`/`videoHeight`).
+   *
+   * 🔴 ĐO ĐƯỢC (chủ dự án: *"kéo max ngang rồi mà chưa thấy khớp cỡ video lắm"*): trần
+   * từng là hằng số 1080. Video 1920 px rộng thì 1080 chỉ còn **56 %** bề ngang — kéo max
+   * vẫn hụt. Trần phải là bề ngang THẬT, và `to_ass` cũng kẹp theo `PlayResX` = bề ngang
+   * đó, nên hai đầu khớp nhau.
+   */
+  toiDaNgang?: number;
+  toiDaCao?: number;
 }) {
   useEffect(() => {
     if (!open) return;
@@ -393,7 +405,7 @@ export function PhuDeStyleDialog({
               <input
                 type="number"
                 min={0}
-                max={1080}
+                max={toiDaNgang}
                 step={10}
                 value={style.rongHop}
                 onChange={(e) => dat({ rongHop: Number(e.target.value) })}
@@ -405,7 +417,7 @@ export function PhuDeStyleDialog({
               <input
                 type="number"
                 min={0}
-                max={1080}
+                max={toiDaCao}
                 step={10}
                 value={style.caoHop}
                 onChange={(e) => dat({ caoHop: Number(e.target.value) })}
@@ -415,7 +427,7 @@ export function PhuDeStyleDialog({
             </Truong>
             <p className="mt-1 text-[11px] leading-4 text-ink-2">
               Để <span className="kbd">0</span> là hộp tự co theo chữ (dưới 40 px cũng coi là tắt).
-              Tối đa <span className="num">1080</span> px (bề ngang khung).
+              Tối đa <span className="num">{toiDaNgang}</span> × <span className="num">{toiDaCao}</span> px (bằng cỡ video).
             </p>
           </>
         )}
