@@ -1017,3 +1017,41 @@ it("PHAI CHON LAI khi currentId dang null va pause trong vung CO layer 1", async
     assert.equal(sau.length, 1, "phai chon lai duoc khoi layer 1, do duoc: " + sau.length);
   });
 });
+
+
+describe("usePlayer — dong ho KHONG duoc phu thuoc requestAnimationFrame", () => {
+  it("timeupdate phai cap nhat thoi gian du rAF khong chay", async () => {
+    // 🔴 DO DUOC tren Chrome that, tab bi an (`document.hidden = true`):
+    //
+    //     RAF: {"so_frame": 0, "ms": "timeout", "hidden": true}
+    //
+    // Khong mot frame nao trong 3 giay. Ban dau `usePlayer` cap nhat `time` CHI
+    // trong vong `requestAnimationFrame`, nen khi tab an thi `player.time` dung yen
+    // trong khi video van chay — khoi duoc to va `currentId` tre theo. Do dung la
+    // thu chu du an thay: vach da cham khoi nhung current chua toi.
+    //
+    // `timeupdate` la su kien cua CHINH the video, ban ~4 lan/giay bat ke rAF.
+    // jsdom KHONG tu ban su kien nay, nen bai test phai ban tay — va dieu do cung
+    // chung minh rang chi co listener moi lam no chay.
+    const { props } = dungThu({ source: KENH });
+    const { container } = render(<Studio {...props} />);
+    const video = container.querySelector("video");
+    assert.ok(video !== null, "phai co the video");
+
+    // Ban `timeupdate` voi currentTime = 4.5 (nam trong doan i=1, 4.36-5.58).
+    Object.defineProperty(video, "currentTime", { value: 4.5, configurable: true, writable: true });
+    fireEvent(video, new Event("timeupdate"));
+
+    await waitFor(() => {
+      const chon = [...container.querySelectorAll("div[title]")].filter((e) =>
+        (e.className || "").toString().includes("ring-signal"),
+      );
+      assert.ok(chon.length > 0, "phai co khoi duoc to sau timeupdate");
+      const tieuDe = chon.map((e) => e.getAttribute("title") || "").join("|");
+      assert.ok(
+        tieuDe.includes("4:36") || tieuDe.includes("0:04"),
+        `khoi duoc to phai la doan quanh 4.5 s, do duoc: ${tieuDe}`,
+      );
+    });
+  });
+});

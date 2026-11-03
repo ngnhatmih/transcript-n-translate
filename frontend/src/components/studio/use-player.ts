@@ -116,12 +116,30 @@ export function usePlayer(media: string | null) {
     raf = requestAnimationFrame(tick);
 
     const onMeta = () => docMeta();
+    // 🔴 `tick` chay bang `requestAnimationFrame`, va rAF DUNG HOAN TOAN khi tab bi
+    // an. DO DUOC tren Chrome that (`document.hidden = true`):
+    //
+    //     RAF: {"so_frame": 0, "ms": "timeout", "hidden": true}
+    //
+    // Khong mot frame nao trong 3 giay. Khi do `setTime` khong bao gio duoc goi,
+    // `player.time` dung yen trong khi video van chay — va khoi duoc to, `currentId`,
+    // tu dong phat deu tre theo. Do dung la thu chu du an thay: vach da cham khoi nhung
+    // current chua toi.
+    //
+    // `timeupdate` la su kien cua CHINH the video, trinh duyet ban ~4 lan/giay BAT KE
+    // rAF va bat ke tab an. No la luoi an toan cho `tick`, khong thay `tick`: rAF cho
+    // do muot 60 fps khi tab hien, `timeupdate` giu time dung khi tab an.
+    const onTime = () => {
+      timeRef.current = v.currentTime;
+      setTime(v.currentTime);
+    };
     const onPlay = () => setPlaying(true);
     const onPause = () => setPlaying(false);
     v.addEventListener("loadedmetadata", onMeta);
     v.addEventListener("durationchange", onMeta);
     v.addEventListener("play", onPlay);
     v.addEventListener("pause", onPause);
+    v.addEventListener("timeupdate", onTime);
     // Trình duyệt có thể đã tải xong metadata trước lượt effect này.
     if (v.readyState >= 1) docMeta();
 
@@ -131,6 +149,7 @@ export function usePlayer(media: string | null) {
       v.removeEventListener("durationchange", onMeta);
       v.removeEventListener("play", onPlay);
       v.removeEventListener("pause", onPause);
+      v.removeEventListener("timeupdate", onTime);
     };
   }, [src]);
 
