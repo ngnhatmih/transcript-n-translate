@@ -405,12 +405,32 @@ describe("Studio: bước 'duyet' trên thanh đường ống PHẢI gọi onBuo
   });
 });
 
-describe("Studio: bước Dịch và Lồng tiếng chỉ ĐỔI GÓC NHÌN, không chạy job", () => {
-  it("bấm bước Dịch không gọi onBuoc", () => {
+describe("Studio: bước Dịch — CHƯA dịch thì chạy job, ĐÃ dịch thì chỉ mở màn", () => {
+  it("đã có bản dịch: bấm bước Dịch KHÔNG gọi onBuoc (không sinh bản dịch thừa)", () => {
     const { props, goi } = dungThu();
     render(<Studio {...props} />);
     fireEvent.click(q().getByRole("button", { name: /^Dịch/ }));
     assert.ok(!tenDaGoi(goi).includes("onBuoc"));
+  });
+
+  it("CHƯA có bản dịch: bấm bước Dịch PHẢI gọi onBuoc('dich')", () => {
+    // 🔴 ĐO ĐƯỢC (chủ dự án báo: "tôi muốn ấn cái này để dịch lại nhưng mà có vẻ chưa
+    // làm"). Bước `Dịch` đứng ở `blocked` + ghi chú "chưa dịch" — mà `blocked` ở đây chỉ
+    // là GỢI Ý, không phải cổng chặn. Bản trước `onStep` chỉ `setView("compare")` rồi
+    // `return`, nên bấm mãi cũng không có job dịch nào.
+    const { props, goi } = dungThu({ banDich: null });
+    render(<Studio {...props} />);
+    fireEvent.click(q().getByRole("button", { name: /^Dịch/ }));
+    const buoc = goi.filter((g) => g.ten === "onBuoc").map((g) => g.args[0]);
+    assert.deepEqual(buoc, ["dich"], `phải gửi đúng một onBuoc('dich'), đo được ${JSON.stringify(buoc)}`);
+  });
+
+  it("chưa có bản ghi: KHÔNG gọi onBuoc, và NÓI LÝ DO", () => {
+    const { props, goi } = dungThu({ banDich: null, transcript: null });
+    render(<Studio {...props} />);
+    fireEvent.click(q().getByRole("button", { name: /^Dịch/ }));
+    assert.ok(!tenDaGoi(goi).includes("onBuoc"), "chưa có bản ghi thì không gửi job");
+    assert.ok(q().getByText(/cần bóc băng trước/), "phải nói lý do, không im lặng");
   });
 
   it("bấm bước Lồng tiếng không gọi onBuoc", () => {

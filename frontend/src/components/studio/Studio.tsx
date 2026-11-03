@@ -921,6 +921,28 @@ export function Studio(props: StudioProps) {
       }
       if (id === "dich") {
         setView("compare");
+        // 🔴 BẤM KHI **CHƯA DỊCH** LÀ YÊU CẦU DỊCH — không chỉ đổi góc nhìn.
+        //
+        // ĐO ĐƯỢC (chủ dự án báo: *"tôi muốn ấn cái này để dịch lại nhưng mà có vẻ chưa
+        // làm"*): bước `Dịch` đứng ở `state: "blocked"`, ghi chú **"chưa dịch"**, mà bấm
+        // vào thì chỉ `setView("compare")`. Bước `blocked` ở đây KHÔNG phải cổng chặn —
+        // `lib/studio.ts` ghi rõ "GỢI Ý, không phải cổng: `blocked` chỉ nói còn việc nên
+        // xem". Nên nó trông như bấm được mà không làm gì, và người dùng bấm mãi.
+        //
+        // Nay: chưa có bản dịch ⇒ gửi job dịch thật (`App.onBuoc("dich")` gọi
+        // `createTranslation`) và đặt trạng thái lạc quan ngay, cùng cơ chế với bước
+        // `asr` ở dưới — để bấm xong thấy bước chuyển màu chứ không đứng yên.
+        //
+        // ĐÃ CÓ bản dịch thì GIỮ nguyên hành vi cũ (chỉ mở màn đối chiếu): dịch lại là
+        // tạo một HÀNG MỚI, và một cú bấm nhầm không được sinh ra bản dịch thừa.
+        if (banDich === null) {
+          if (transcript === null) {
+            setNotice("Chưa có bản ghi — bước này cần bóc băng trước");
+            return;
+          }
+          datLacQuan(id);
+          onBuoc(id);
+        }
         return;
       }
       setView("edit");
@@ -938,7 +960,7 @@ export function Studio(props: StudioProps) {
       datLacQuan(id);
       onBuoc(id);
     },
-    [issues.length, diViec, lyDoXuat, onXuatVideo, onBuoc],
+    [issues.length, diViec, lyDoXuat, onXuatVideo, onBuoc, banDich, transcript, datLacQuan],
   );
 
   const commands: Command[] = [
