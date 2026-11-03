@@ -13,6 +13,7 @@ Ba điều phải ghim, vì cả ba đều là chỗ dễ hỏng im lặng:
 """
 from __future__ import annotations
 
+import re
 import pytest
 
 from app.domain.models import Segment
@@ -120,3 +121,110 @@ def test_style_mau_SAI_thi_nem():
     """Màu sai là lỗi của bên gọi — im lặng đổi màu là giấu lỗi."""
     with pytest.raises(ValueError):
         to_ass([_doan()], style={"mau_chu": "đỏ"})
+
+
+# ─────────────────────── hộp vector: chia mảnh theo HAI trục ───────────────────────
+#
+# libass THU NHỎ một hình vẽ vector khi nó vượt `PlayResX / 2` (đo được 600→540,
+# 800→540, 2400→540 trên khung 1080) và cả khi nó quá cao (`cao = 960` → **864**, tức
+# còn 0,9). Nên hộp được chia thành nhiều mảnh ≤ `rx/2` × `ry/4`.
+#
+# 🔴 VỊ TRÍ: đo được trên ảnh burn, một mảnh cao `h` neo `\pos(x, p)` (hệ `\an2`, toạ độ
+# dương) hiện ra ở `[p − 2h, p − h]` — ĐÁY THẬT là `p − h`, KHÔNG phải `p`. Hai công
+# thức dưới đây là hệ quả của phép đo đó; nếu libass đổi thì các test này phải đổi theo
+# ảnh burn mới, không phải sửa cho vừa code.
+#
+# Vì sao các test dưới truyền `rong_hop = 600`: máy chạy test KHÔNG có
+# `/usr/share/fonts/truetype/archivo/Archivo.ttf`, nên `_do_khoi_chu` trả `(0, 0, 0)` và
+# `ngang = 0` ("bám chữ") không đo được ⇒ `ve_hop` False ⇒ không có mảnh nào để kiểm.
+# Chiều cao thì không cần đo, nên đặt sẵn bề rộng là đủ để kiểm hình học dọc.
+
+
+def _manh_hop(ass: str) -> list[tuple[int, int, int, int]]:
+    """`(x, y, rộng, cao)` của TỪNG mảnh hộp vector trong tệp."""
+    ra = []
+    for line in ass.splitlines():
+        if "\\p1" not in line:
+            continue
+        x, y = (int(v) for v in line.split("\\pos(")[1].split(")")[0].split(","))
+        # `m 0 0 l {rong} 0 {rong} -{cao} 0 -{cao}`: lấy hai số ĐẦU của cạnh thứ nhất.
+        rong, cao = re.search(r"m 0 0 l (\d+) 0 \d+ (-?\d+)", line).groups()
+        ra.append((x, y, int(rong), -int(cao)))
+    return ra
+
+
+def _khung_hop(ass: str) -> tuple[int, int]:
+    """`(đỉnh, đáy)` của hộp trên khung, theo hình học ĐÃ ĐO của libass."""
+    manh = _manh_hop(ass)
+    assert manh, "không có mảnh hộp nào trong tệp"
+    return (min(y - 2 * h for _, y, _, h in manh), max(y - h for _, y, _, h in manh))
+
+
+def _dong_chu(ass: str) -> str:
+    for line in ass.splitlines():
+        if line.startswith("Dialogue:") and "\\p1" not in line:
+            return line
+    raise AssertionError("không có sự kiện chữ trong tệp")
+
+
+_THU = "Chi phi hien tai cua ban la bao nhieu, khong tinh phi nhap la 2000"
+
+
+def test_hop_CAO_chia_thanh_nhieu_hang_nho():
+    """`cao = 960` phải ra 2 hàng ≤ `ry/4`, KHÔNG phải một hình vẽ bị thu còn 864."""
+    ass = to_ass([_doan(text=_THU)], khung=(1080, 1920), offset_doc=0.05,
+                 style={"rong_hop": 600, "cao_hop": 960, "kieu_vien": 3, "co": 41})
+    manh = _manh_hop(ass)
+    assert len(manh) >= 2, "hộp cao 960 phải chia thành nhiều hàng, đo được %d" % len(manh)
+    assert max(h for _, _, _, h in manh) <= 1920 // 4, "mỗi hàng phải ≤ ry/4"
+    dinh, day = _khung_hop(ass)
+    assert (day - dinh) == 960, "hộp phải CAO ĐÚNG 960, đo được %d" % (day - dinh)
+
+
+def test_hop_RAT_cao_van_chia_duoc_vao_trong_khung():
+    """`cao = 1300` (> `ry/2`) trước đây bị KẸP; nay chia 3 hàng và vẫn trong khung."""
+    ass = to_ass([_doan(text=_THU)], khung=(1080, 1920), offset_doc=0.05,
+                 style={"rong_hop": 600, "cao_hop": 1300, "kieu_vien": 3, "co": 41})
+    dinh, day = _khung_hop(ass)
+    assert (day - dinh) == 1300, "hộp phải cao đúng 1300, đo được %d" % (day - dinh)
+    assert dinh >= 0, "hộp không được tràn lên trên khung, đỉnh đo được %d" % dinh
+
+
+def test_hop_MOT_hang_thi_day_hong_dung_bang_y():
+    """Một hàng: `\\pos.y = y + cao` để ĐÁY hộp rơi đúng `y` — mốc cũ, không được lệch."""
+    ass = to_ass([_doan(text=_THU)], khung=(1080, 1920), offset_doc=0.05,
+                 style={"rong_hop": 600, "cao_hop": 400, "kieu_vien": 3, "co": 41})
+    dinh, day = _khung_hop(ass)
+    assert day == 1824, "đáy hộp phải là `pos_y` của khung (1824), đo được %d" % day
+    assert (day - dinh) == 400
+
+
+def test_chu_NAM_TRONG_hop_khi_hop_cao():
+    """Neo chữ phải rơi vào KHOẢNG của hộp, dù hộp 1 hàng hay 3 hàng.
+
+    Đây chính là lỗi đã xảy ra: đổi `\\pos` của mảnh làm hộp trôi khỏi chữ, và trên nền
+    xám thì không thấy vì cả hai đều trắng.
+    """
+    for cao_hop in (400, 960, 1300):
+        ass = to_ass([_doan(text=_THU)], khung=(1080, 1920), offset_doc=0.05,
+                     style={"rong_hop": 600, "cao_hop": cao_hop,
+                            "kieu_vien": 3, "co": 41})
+        dinh, day = _khung_hop(ass)
+        y_chu = int(_dong_chu(ass).split("\\pos(")[1].split(")")[0].split(",")[1])
+        assert dinh <= y_chu <= day, (
+            "cao %d: chữ ở %d nằm ngoài hộp [%d, %d]" % (cao_hop, y_chu, dinh, day)
+        )
+
+
+def test_KHONG_DO_DUOC_chu_thi_khong_ve_hop(monkeypatch):
+    """`ngang = 0` là "bám chữ" — không đo được chữ thì KHÔNG vẽ hộp, chứ không vẽ hộp rỗng.
+
+    Đây là đường dự phòng đã ghi trong `_do_khoi_chu`; ghim lại vì chính máy chạy test là
+    ca "không có font", và nếu nó đổi thì các test hình học ở trên sẽ im lặng bỏ qua.
+    """
+    from app.domain import subtitle_format as sf
+
+    monkeypatch.setattr(sf, "_FONT_CHO_DUONG", {})
+    ass = to_ass([_doan(text=_THU)], khung=(1080, 1920),
+                 style={"cao_hop": 960, "kieu_vien": 3, "co": 41})
+    assert _manh_hop(ass) == []

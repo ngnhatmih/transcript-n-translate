@@ -464,32 +464,32 @@ GPU. Nó tự ép UTF-8 cho stdout (console Windows mặc định cp1252, còn s
 tiếng Trung/Việt) và tự đặt cache model trước khi nạp `faster_whisper`.
 
 Con số nền của lần chạy mặc định, đo sau khi xoá `__pycache__` (lệnh ở mục
-"Kiểm thử" trên, chạy từ trong `backend\`). Thứ có nghĩa là **1516 / 15**, không
+"Kiểm thử" trên, chạy từ trong `backend\`). Thứ có nghĩa là **1521 / 15**, không
 phải số giây — thời gian trôi giữa các lần chạy (đã thấy 24,00–30,94 s) còn con
 số bài thì không:
 
 ```
-1516 passed, 15 deselected, 3 warnings
+1521 passed, 15 deselected, 3 warnings
 ```
 
 Hai con số đó là SỐ BÀI ĐƯỢC CHỌN, và chúng khớp với số mà `--collect-only` báo
-(`1516/1531`, 15 bài `live` bị bỏ;
+(`1521/1536`, 15 bài `live` bị bỏ;
 `tests/test_backend_readme.py::test_readme_baseline_matches_the_tests_actually_
 collected` đối chiếu mỗi lần chạy).
 
 
-Máy này **CÓ** `ffmpeg 8.1.1` + `ffprobe` trên PATH (đã đo), nên `1516/15` ở trên
+Máy này **CÓ** `ffmpeg 8.1.1` + `ffprobe` trên PATH (đã đo), nên `1521/15` ở trên
 là số THẬT của nó. Máy **không có** `ffmpeg`/`ffprobe` cho một kết quả KHÁC: cả
 `tests/test_ingest.py` bị `skipif` ở cấp module — **9** bài cùng skip một lượt —
 nên dòng tổng kết của máy đó là **`1507 passed, 9 skipped, 15 deselected`** (=
-`1516 − 9`; con số này TỪNG ghi `978`, tức một baseline rất cũ, và nó lệch phép
+`1521 − 9`; con số này TỪNG ghi `978`, tức một baseline rất cũ, và nó lệch phép
 trừ của chính khối nền ngay trên nó). Đó là
 con số của máy thiếu ffmpeg, **không phải** con số máy này từng in ra; đừng chép
 nó vào khối nền ở trên, và đừng "sửa" số nền xuống chỉ vì thiếu ffmpeg.
 
 ⚠️ Con số `856` ở đây TỪNG không khớp phép trừ của chính nó: `865 − 9 = 856`, tức
 nó là số của lượt TRƯỚC `V1` (+3 bài) còn sót lại. Phép trừ của khối nền hiện tại
-là `1516 − 9` = `1507`.
+là `1521 − 9` = `1512`.
 
 
 (Con số này từng bị ghi là `798`: bài `test_a_failed_translation_leaves_the_
@@ -1795,3 +1795,72 @@ Ba bài ghim mới trong `tests/test_nguon_chu.py`:
 `test_noi_DAU_dong_dau_va_CUOI_dong_cuoi_theo_ASR`,
 `test_MOT_dong_chi_noi_CUOI_khong_keo_DAU_ve_ASR`,
 `test_CHU_KHONG_KHOP_thi_KHONG_noi_gi`.
+
+## ERRATA #66 — hộp cao phải chia mảnh theo CẢ HAI trục, và `\pos.y` của mảnh là `đáy + cao`
+
+**Phát hiện lúc:** chủ dự án kéo "Cỡ hộp cao" lên gần hết khung và thấy hộp KHÔNG cao thêm.
+
+**Giả thuyết bị bác bỏ (commit `bafd1ef`):** "chỉ cần chia mảnh theo NGANG; chiều cao thì
+kẹp ở `ry / 2` là đủ". Sai ở cả hai vế.
+
+**Đo 1 — trần chiều cao không phải `ry / 2`.** Trên khung 1080×1920, burn nền xám
+(`color=c=0x303030`, `-ss 1`), đo vùng trắng sau khi đặt `mau_hop = #ffffff`:
+
+| đặt `cao_hop` | hình vẽ MỘT mảnh đo được |
+|---|---|
+| 400 | **400** |
+| 960 (`= ry / 2`) | **864** — mất 10 %, tức libass đã thu |
+| 1370 | **454** |
+
+Nên trần `ry / 2` vừa không đủ an toàn, vừa chặn oan. Sửa: chia hộp thành nhiều HÀNG, mỗi
+hàng ≤ `ry / 4` (480 — dưới ngưỡng đã thấy), giống cách đã làm với bề ngang (`rx / 2`).
+Trần chiều cao còn lại chỉ là "hộp không cao hơn khung".
+
+**Đo 2 — hệ quả phụ, và nó là lỗi thật:** `\pos.y = y + cao_dong` chỉ ĐÚNG khi hộp có MỘT
+hàng. Đo hình học đặt của libass: một mảnh cao `h` neo `\pos(x, p)` hiện ra ở
+`[p − 2h, p − h]` — **đáy thật là `p − h`, không phải `p`**. Với `h = cao_dong` (một hàng)
+thì `p − h = y`, tình cờ đúng. Có hai hàng thì mỗi hàng tụt xuống đúng `h`, và hộp tràn
+qua đáy khung: đo được `cao_hop = 700` cho hộp dừng ở **1919** (mép khung) trong khi đáy
+đúng phải là **1824**.
+
+Sửa: đáy hộp là `y`, và `\pos.y` của từng mảnh là `đáy_mảnh + cao_mảnh`.
+
+Đo lại sau khi sửa (cùng phép đo, cùng khung):
+
+| đặt `cao_hop` | trước | sau | đáy | tâm chữ − tâm hộp |
+|---|---|---|---|---|
+| 400 | 400 | **400** | 1823 | −3,5 |
+| 700 | 456 (tràn đáy) | **700** | 1823 | −3,5 |
+| 960 | 864 | **960** | 1823 | −3,5 |
+| 1300 | 960 (bị kẹp) | **1300** | 1823 | −3,5 |
+| rộng 600 × cao 960 | — | **600×960** | 1823 | −3,5 |
+
+Lệch 3,5 px ở cột cuối là làm tròn `(cao_hop − cao_chữ) / 2`, không phải lỗi neo.
+
+**Trên video thật** (nguồn 6, `translation 61`, câu `Như một tác phẩm nghệ thuật.`, khung
+1080×1920, `offset_doc = 0,06`, `co = 54`, burn ở 0,52 s, hộp đen đục):
+
+| đặt `cao_hop` | bề rộng hộp | tâm | đáy | cách đáy khung |
+|---|---|---|---|---|
+| 200 | **262** | 539 | 1804 | 115 |
+| 960 | **262** | 539 | 1804 | 115 |
+
+Hai chiều cao cho CÙNG một bề rộng và CÙNG một đáy — tức hộp cao lên phía TRÊN, và bề rộng
+vẫn bám câu của chính đoạn đó (đáy `1920 × (1 − 0,06) = 1805`, đo được 1804).
+
+**Không hồi quy:** hộp MỘT hàng phải ra giống từng byte bản cũ. Đo bằng cách nạp song song
+bản `HEAD` và bản mới rồi so chuỗi `.ass`: `cao = 200` và `400` (kiểu viền `3`), `cao = 0`
+(kiểu `1`), và `cao = 200` với `IBM Plex Mono` — cả 5 ca `GIONG_TUNG_BYTE=True`.
+
+Năm bài ghim trong `tests/test_phu_de_style.py`:
+`test_hop_CAO_chia_thanh_nhieu_hang_nho`,
+`test_hop_RAT_cao_van_chia_duoc_vao_trong_khung`,
+`test_hop_MOT_hang_thi_day_hong_dung_bang_y`,
+`test_chu_NAM_TRONG_hop_khi_hop_cao`,
+`test_KHONG_DO_DUOC_chu_thi_khong_ve_hop`.
+
+### Đo cuối
+
+```
+pytest (toàn bộ)      1521 passed, 15 deselected   EXIT_PYTEST=0
+```

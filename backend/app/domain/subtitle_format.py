@@ -464,11 +464,13 @@ def to_ass(segments: list[Segment], *, translations: list[str] | None = None,
         #:
         #: Nay bề rộng và chiều cao tính RIÊNG cho từng đoạn, ngay trong vòng lặp.
         rong_kha_dung = max(40, int(tham_so["rx"]) - 2 * int(tham_so["le"]))
-        #: 🔴 TRẦN CHIỀU CAO = `ry / 2`. ĐO ĐƯỢC: khai `cao = 1370` thì hình vẽ bị libass
-        #: THU còn **454 px** — cùng cơ chế với bề ngang (`rx / 2`). Chưa chia mảnh theo
-        #: chiều dọc, nên KẸP lại thay vì để người dùng nhận hộp 454 mà không biết.
-        if cao_hop > int(tham_so["ry"]) // 2:
-            cao_hop = int(tham_so["ry"]) // 2
+        #: 🔴 TRẦN CHIỀU CAO = HẾT KHUNG. ĐO ĐƯỢC trước khi chia mảnh dọc: khai
+        #: `cao = 1370` thì MỘT hình vẽ bị libass THU còn **454 px**, và `cao = 960`
+        #: (đúng `ry / 2`) vẫn bị thu còn **864** — nên từng phải kẹp ở `ry / 2`.
+        #: Nay hộp được chia thành nhiều hàng ≤ `ry / 4`, mỗi hình vẽ đều nhỏ, nên trần
+        #: chỉ còn là chiều cao khung: hộp cao hơn khung thì không có nghĩa.
+        if cao_hop > int(tham_so["ry"]):
+            cao_hop = int(tham_so["ry"])
         #: 🔴 SÀN CHIỀU CAO = CHIỀU CAO CHỮ + 2 đệm. ĐO ĐƯỢC (chủ dự án gửi ảnh): đặt
         #: `cao` nhỏ hơn chữ thì chữ TRÀN lên/xuống khỏi hộp — hộp không còn che được gì.
         #: Không đo được (máy test) thì bỏ qua sàn, giữ số người dùng đặt.
@@ -541,21 +543,42 @@ def to_ass(segments: list[Segment], *, translations: list[str] | None = None,
             # bị đẩy LÊN đúng bằng chiều cao của nó (`cao=150` -> hộp ở 1524..1673
             # trong khi chữ ở 1807..1819). `\an2` neo hộp-bao của hình vẽ, và bbox
             # của `m 0 0 l w 0 w -h 0 -h` có đáy ở `-h` chứ không phải 0.
-            toi_da = max(1, int(tham_so["rx"]) // 2)
-            so_manh = max(1, -(-rong_dong // toi_da))
-            nen = rong_dong // so_manh
-            du = rong_dong - nen * so_manh
-            trai = (int(tham_so["rx"]) - rong_dong) / 2
-            for m in range(so_manh):
-                rong_m = nen + (1 if m < du else 0)
-                cx = trai + rong_m / 2
-                lines.append(
-                    f"Dialogue: 0,{_ass_timestamp(seg.start)},{_ass_timestamp(seg.end)},"
-                    f"Default,,0,0,0,,{{\\an2\\pos({int(round(cx))},{y + cao_dong})\\p1"
-                    f"\\1c&H{bgr}&\\1a&H{alpha}&\\bord0\\shad0}}"
-                    f"m 0 0 l {rong_m} 0 {rong_m} {-cao_dong} 0 {-cao_dong}{{\\p0}}"
-                )
-                trai += rong_m
+            #: Trần MỖI MẢNH theo cả hai trục. ĐO ĐƯỢC: một hình vẽ bị libass THU NHỎ
+            #: khi vượt `rx/2` theo ngang (600→540, 800→540) hoặc khi quá cao
+            #: (`cao = 960` ra **864**, tức bị thu còn 0,9). Nên chia mảnh theo CẢ HAI
+            #: trục, mỗi mảnh ≤ `rx/2` × `ry/4` — `ry/4 = 480` nằm dưới ngưỡng đã thấy
+            #: (`cao = 400` ra đúng 400).
+            toi_da_ngang = max(1, int(tham_so["rx"]) // 2)
+            toi_da_doc = max(1, int(tham_so["ry"]) // 4)
+            so_manh_ngang = max(1, -(-rong_dong // toi_da_ngang))
+            so_manh_doc = max(1, -(-cao_dong // toi_da_doc))
+            nen = rong_dong // so_manh_ngang
+            du = rong_dong - nen * so_manh_ngang
+            cao_manh = cao_dong // so_manh_doc
+            du_cao = cao_dong - cao_manh * so_manh_doc
+            trai_goc = (int(tham_so["rx"]) - rong_dong) / 2
+            #: 🔴 ĐÁY HỘP LÀ `y`. ĐO ĐƯỢC cách libass đặt một mảnh cao `h` neo tại
+            #: `pos.y = p`: nó hiện ở `[p - 2h, p - h]`, tức ĐÁY THẬT = `p - h`.
+            #: Đời trước dùng `pos = y + cao_dong` và chỉ đúng vì lúc đó luôn có MỘT
+            #: hàng (`h = cao_dong` ⇒ đáy = `y`). Có hai hàng thì mỗi hàng lệch xuống
+            #: đúng `h` — đo được: `cao = 960` vẽ ra hộp tràn quá đáy khung.
+            day_hop = y
+            cao_da_ve = 0
+            for hang in range(so_manh_doc):
+                cao_m = cao_manh + (1 if hang < du_cao else 0)
+                day_m = day_hop - cao_da_ve
+                trai = trai_goc
+                for m in range(so_manh_ngang):
+                    rong_m = nen + (1 if m < du else 0)
+                    cx = trai + rong_m / 2
+                    lines.append(
+                        f"Dialogue: 0,{_ass_timestamp(seg.start)},{_ass_timestamp(seg.end)},"
+                        f"Default,,0,0,0,,{{\\an2\\pos({int(round(cx))},{int(round(day_m + cao_m))})\\p1"
+                        f"\\1c&H{bgr}&\\1a&H{alpha}&\\bord0\\shad0}}"
+                        f"m 0 0 l {rong_m} 0 {rong_m} {-cao_m} 0 {-cao_m}{{\\p0}}"
+                    )
+                    trai += rong_m
+                cao_da_ve += cao_m
         lines.append(
             f"Dialogue: 0,{_ass_timestamp(seg.start)},{_ass_timestamp(seg.end)},"
             f"Default,,0,0,0,,{dau}{text}"
