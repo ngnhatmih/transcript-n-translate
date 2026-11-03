@@ -511,6 +511,10 @@ export function App() {
    */
   const [engineCount, setEngineCount] = useState<number | null>(null);
   const [engineAsr, setEngineAsr] = useState<string | null>(null);
+  //: Id các engine DỊCH của registry (`GET /api/registry` -> `mt`). Cần DANH SÁCH chứ không
+  //: chỉ phần tử đầu: bước `Dịch` phải kiểm được engine của bản dịch đang xem còn hợp lệ
+  //: không trước khi dùng lại nó (xem `onBuoc("dich")`).
+  const [engineMt, setEngineMt] = useState<string[]>([]);
   useEffect(() => {
     void (async () => {
       try {
@@ -518,10 +522,12 @@ export function App() {
         // `Registry` co hai mang theo KIND: `asr` va `mt`. Khong co truong `engines`.
         setEngineCount(r.asr.length + r.mt.length);
         setEngineAsr(r.asr.length > 0 ? r.asr[0].id : null);
+        setEngineMt(r.mt.map((e) => e.id));
       } catch {
         // Doc khong duoc thi `null` = CHUA DOC DUOC, khac 0 engine.
         setEngineCount(null);
         setEngineAsr(null);
+        setEngineMt([]);
       }
     })();
   }, []);
@@ -628,9 +634,36 @@ export function App() {
         return;
       }
       if (id === "dich") {
+        // 🔴 `engine` phải là ENGINE DỊCH lấy từ registry — KHÔNG phải `transcript.engine`.
+        //
+        // ĐO ĐƯỢC (chủ dự án báo ngay sau khi nút Dịch được nối): bấm Dịch ->
+        // **422: engine 'ocr+asr' không có trong registry**. `transcript.engine` là nhãn
+        // NGUỒN CHỮ (`"ocr+asr"` khi OCR và ASR cùng đọc ra), không phải một engine dịch.
+        // Danh mục thật (`GET /api/registry`) có `mt: ['opus-mt', 'qwen2.5-3b',
+        // 'qwen2.5-7b', 'hy-mt-1.5-7b', 'deepseek-web']` — `ocr+asr` không nằm trong đó.
+        //
+        // Chọn engine, ưu tiên giữ ĐÚNG engine người dùng đã dùng cho bản ghi này — kể cả
+        // khi lượt gần nhất HỎNG (đó chính là ca đang sửa: lượt `deepseek-web` hỏng vì 429,
+        // và rơi về `opus-mt` là đổi engine mà không ai yêu cầu, chất lượng khác hẳn).
+        //
+        //   1. engine của bản dịch MỚI NHẤT còn trong registry (bất kể `status`);
+        //   2. engine của bản dịch đang mở;
+        //   3. engine MT ĐẦU TIÊN của registry — cùng nguyên tắc với `engineAsr`: danh mục
+        //      là dữ liệu, không viết cứng tên engine trong giao diện.
+        const daDung = transcript.translations.filter((t) => engineMt.includes(t.engine));
+        const moiNhat = daDung.reduce<(typeof daDung)[number] | null>(
+          (a, b) => (a === null || b.id > a.id ? b : a), null);
+        const engine = moiNhat?.engine
+          ?? (banDich !== null && engineMt.includes(banDich.engine)
+            ? banDich.engine
+            : engineMt[0]);
+        if (engine === undefined) {
+          setLoi("chưa đọc được danh mục engine dịch — thử tải lại trang");
+          return;
+        }
         void (async () => {
           try {
-            await createTranslation({ transcript_id: transcript.id, engine: transcript.engine });
+            await createTranslation({ transcript_id: transcript.id, engine });
           } catch (e) {
             setLoi(e instanceof Error ? e.message : String(e));
           }
@@ -704,7 +737,8 @@ export function App() {
     // de cai kia la lap lai dung loi vua sua.
     //
     // Luat: bat ky gia tri nao doc TRONG callback deu phai co trong deps cua no.
-    [source, engineAsr, transcript, banDich],
+    // `engineMt` theo đúng luật đó: bước `Dịch` đọc nó để chọn engine.
+    [source, engineAsr, engineMt, transcript, banDich],
   );
 
   /** Long lai MOT doan — backend long ca ban dich, nen day la long lai CA BAN. */

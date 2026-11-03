@@ -15,7 +15,7 @@
 import { afterEach, beforeEach, describe, it } from "node:test";
 import assert from "node:assert/strict";
 
-import { cleanup, render, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, waitFor, within } from "@testing-library/react";
 
 import { App } from "./App.tsx";
 import type { Source } from "@/api/types";
@@ -180,7 +180,18 @@ function traMacDinh(duong: string, method: string): unknown {
           capabilities: {}, opts: {},
         },
       ],
-      mt: [],
+      // 🔴 `mt` PHAI khac RONG — cùng lý do với `asr` ở trên, và lần này đã ĐO ĐƯỢC hậu
+      // quả thật: fixture cũ trả `mt: []`, nên không bài test nào từng có engine DỊCH để
+      // gửi, và lỗi trên sản phẩm là **422 "engine 'ocr+asr' không có trong registry"**
+      // khi bấm "Dịch" (`App.onBuoc` gửi nhầm `transcript.engine`). Một fixture rỗng lại
+      // che đúng một lớp lỗi.
+      mt: [
+        {
+          id: "deepseek-web", label: "DeepSeek (web)", kind: "mt",
+          runtime: "remote", model_ref: "deepseek-web", vram_mb: 0, langs: ["zh", "vi"],
+          capabilities: { available: true }, opts: {},
+        },
+      ],
     };
   }
   if (duong.startsWith("/dubs/") && duong.endsWith("/plan") && method === "GET") return null;
@@ -537,6 +548,50 @@ describe("App: vùng đọc OCR đọc từ nguồn, ghi qua PATCH", () => {
       cleanup();
       traFetch();
     }
+  });
+});
+
+/**
+ * BẤM "DỊCH" PHẢI GỬI ENGINE DỊCH, KHÔNG PHẢI NHÃN NGUỒN CHỮ.
+ *
+ * 🔴 LỖI THẬT, ĐO ĐƯỢC (chủ dự án báo ngay sau khi nút Dịch được nối):
+ *
+ *     422: engine 'ocr+asr' không có trong registry
+ *
+ * `App.onBuoc` gửi `engine: transcript.engine`, mà `transcript.engine` là nhãn NGUỒN CHỮ
+ * (`"ocr+asr"` khi OCR và ASR cùng đọc ra câu) — không phải một engine dịch. Danh mục thật
+ * `GET /api/registry` có `mt: ['opus-mt', 'qwen2.5-3b', 'qwen2.5-7b', 'hy-mt-1.5-7b',
+ * 'deepseek-web']`, và `ocr+asr` không nằm trong đó.
+ *
+ * Bài này ghim CẢ HAI vế: gửi đúng engine của `registry.mt`, và KHÔNG gửi nhãn nguồn chữ.
+ */
+describe("App: bấm 'Dịch' gửi engine DỊCH lấy từ registry", () => {
+  it("POST /translations với engine của registry.mt, KHÔNG phải 'ocr+asr'", async () => {
+    const bang = chanFetch((duong, method) => {
+      if (duong === "/translations" && method === "POST") {
+        return { id: 9, transcript_id: 2, engine: "deepseek-web", target_lang: "vi", segments: [] };
+      }
+      return traMacDinh(duong, method);
+    });
+    render(<App />);
+    await doiNapXong();
+    fireEvent.click(q().getByRole("button", { name: /^Dịch/ }));
+    await waitFor(
+      () => {
+        assert.ok(
+          bang.goi.some((g) => g.url.endsWith("/api/translations") && g.method === "POST"),
+          "chưa gửi POST /api/translations",
+        );
+      },
+      { timeout: 3000 },
+    );
+    const goi = bang.goi.filter(
+      (g) => g.url.endsWith("/api/translations") && g.method === "POST",
+    );
+    assert.equal(goi.length, 1, `phải gửi đúng một lần, đo được ${goi.length}`);
+    const than = JSON.parse(goi[0].body ?? "{}") as { engine?: string };
+    assert.equal(than.engine, "deepseek-web", `engine phải lấy từ registry.mt, đo được ${than.engine}`);
+    assert.notEqual(than.engine, "ocr+asr", "KHÔNG được gửi nhãn nguồn chữ làm engine dịch");
   });
 });
 
