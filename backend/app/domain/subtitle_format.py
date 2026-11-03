@@ -227,6 +227,21 @@ def _style_ass(style: dict) -> dict:
     return ra
 
 
+#: Hệ số quy đổi **Pillow → libass** cho bề rộng chữ.
+#:
+#: 🔴 ĐO ĐƯỢC bằng burn thật (nền xám, đo pixel), chuỗi NGẮN để libass không tự bẻ dòng:
+#:
+#:     khai co=30 (hiệu dụng 17)  libass= 87  pillow=139  tỉ lệ=0,6259
+#:     khai co=40 (hiệu dụng 22)  libass=113  pillow=180  tỉ lệ=0,6278
+#:     khai co=60 (hiệu dụng 34)  libass=175  pillow=277  tỉ lệ=0,6318
+#:
+#: Tỉ lệ ĐỀU (lệch 0,001) nên là HẰNG SỐ, không phải hàm của cỡ chữ.
+#:
+#: ⚠️ Lần đo ĐẦU của tôi ra 0,36 và SAI: câu thử dài 50 ký tự nên libass đã bẻ dòng
+#: (`WrapStyle: 0`), và tôi đo bề rộng MỘT DÒNG ĐÃ BẺ chứ không phải cả câu.
+
+_TI_LE_CHU = 0.628
+
 #: File font trong IMAGE BURN — phải khớp `_style_ass`/`FONT_CHO_PHEP`.
 _FONT_CHO_DUONG = {
     "Archivo": "/usr/share/fonts/truetype/archivo/Archivo.ttf",
@@ -251,8 +266,22 @@ def _do_rong_chu(chu: str, font: str, co: int) -> int:
         from PIL import ImageFont
         f = ImageFont.truetype(duong, max(8, int(co)))
         hop = f.getbbox(chu or " ")
-        return int(hop[2] - hop[0])
+        return int((hop[2] - hop[0]) * _TI_LE_CHU)
     except Exception:  # noqa: BLE001 — thiếu font/Pillow thì bỏ đo, KHÔNG làm hỏng đường xuất
+        return 0
+
+
+def _do_cao_chu(font: str, co: int) -> int:
+    """Chiều cao một dòng chữ, cùng hệ số với `_do_rong_chu`. `0` = không đo được."""
+    duong = _FONT_CHO_DUONG.get(font)
+    if duong is None:
+        return 0
+    try:
+        from PIL import ImageFont
+        f = ImageFont.truetype(duong, max(8, int(co)))
+        hop = f.getbbox("Ạ")          # chữ có dấu, cao nhất trong bộ Latinh
+        return int((hop[3] - hop[1]) * _TI_LE_CHU)
+    except Exception:  # noqa: BLE001
         return 0
 
 
@@ -385,6 +414,13 @@ def to_ass(segments: list[Segment], *, translations: list[str] | None = None,
                     "".join(_lines(sg_, tr_, bilingual)),
                     str(tham_so.get("font", "Archivo")), int(tham_so["co"])))
             rong_hop = do_rong + 2 * int(tham_so.get("vien", 0)) if do_rong else 0
+        #: 🔴 SÀN CHIỀU CAO = CHIỀU CAO CHỮ + 2 đệm. ĐO ĐƯỢC (chủ dự án gửi ảnh): đặt
+        #: `cao` nhỏ hơn chữ thì chữ TRÀN lên/xuống khỏi hộp — hộp không còn che được gì.
+        #: Không đo được (máy test) thì bỏ qua sàn, giữ số người dùng đặt.
+        if cao_hop > 0:
+            cao_chu = _do_cao_chu(str(tham_so.get("font", "Archivo")), int(tham_so["co"]))
+            if cao_chu:
+                cao_hop = max(cao_hop, cao_chu + 2 * int(tham_so.get("vien", 0)))
         ve_hop = rong_hop >= 40 and cao_hop >= 40
     for position, seg in enumerate(segments):
         translated = translations[position] if translations is not None else None
