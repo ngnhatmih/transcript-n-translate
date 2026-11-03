@@ -930,3 +930,90 @@ it("KHONG con khoang trang giua hai lan — cao theo so lan DANG DUNG", async ()
   const khe = tops[1] - tops[0];
   assert.ok(khe <= 20, "khe giua hai lan phai <= 20 px, do duoc " + khe + " px");
 });
+
+
+// 🔴 TU DONG CHON KHONG DUOC ROI XUONG LAYER 2.
+//
+// `dongDangChon` truoc day loc tu `dong` (TOAN BO) va chi uu tien `suspect === false`.
+// No khong biet gi ve `layer`, nen khi layer 1 trong thi no chon mot khoi layer 2.
+//
+// DO DUOC tren translation #52 (moc 0,5 s, ca video 245 s): **50 moc** nhu vay.
+//     t=  9.5  layer1 TRONG -> chon i=7  [ 7.02- 9.66] hai_nguon
+//     t= 33.0  layer1 TRONG -> chon i=23 [31.81-33.25] hai_nguon
+//
+// Nguoi dung doc ra ngay: "toi thay no van di theo thu tu luc truoc khi loc theo layer".
+//
+// Bai nay ghim: o mot moc chi co layer 2, KHONG khoi nao duoc to vang.
+it("tu dong chon KHONG roi xuong layer 2 khi layer 1 trong", async () => {
+  // 🔴 Phai co `source` thi `<video>` moi ton tai: `media = source === null ? null :
+  // mediaUrl(source.id)` (`Studio.tsx:245`). Fixture mac dinh de `source: null`, nen the
+  // video khong duoc render va bai test do voi "phai co the video".
+  const { props } = dungThu({
+    source: KENH,
+    transcript: banGhi([
+      doan({ i: 0, start: 0, end: 1, text: "你会在山上看到", layer: "hai_nguon" }),
+    ]),
+    banDich: banDichCua([
+      doan({ i: 0, start: 0, end: 1, text: "Bạn sẽ thấy trên núi" }),
+    ]),
+  });
+  const { container } = render(<Studio {...props} />);
+  await waitFor(() => {
+    assert.ok(q().queryAllByDisplayValue("Bạn sẽ thấy trên núi").length > 0,
+      "chua nap xong: chua co o phu de nao");
+  });
+  // Doc khoi "Doan #" — thu duy nhat trong UI phu thuoc thang `currentId`.
+  const nhan = [...container.querySelectorAll("div")]
+    .map((e) => (e.textContent || "").trim())
+    .filter((x) => x.startsWith("Đoạn #"));
+  assert.equal(nhan.length, 0,
+    "layer 1 trong thi khong khoi nao duoc chon, do duoc: " + JSON.stringify(nhan));
+});
+
+
+// 🔴 DANG PAUSE + `currentId === null` PHAI CHON LAI.
+//
+// Ban truoc `return` ngay khi `currentId === null`, nen khi playhead dung trong
+// mot quang layer 1 TRONG roi nguoi dung seek toi mot doan CO phu de thi khong
+// khoi nao duoc to vang — mai mai, vi `null` khong bao gio thoat khoi nhanh do.
+//
+// DO DUOC tren DOM that (translation #52): `currentTime = 110.2`, `paused = true`.
+// Khoi `"toi da tim duoc · 1:50.00 -> 1:50.50"` CO tren timeline va 110,2 nam TRONG
+// no, nhung `ring-signal` khong co — `chon=0`.
+it("PHAI CHON LAI khi currentId dang null va pause trong vung CO layer 1", async () => {
+  // Doan 0 la layer 2 (khong duoc tu dong chon), doan 1 la layer 1.
+  // 🔴 Phai co `source` thi `<video>` moi ton tai: `media = source === null ? null :
+  // mediaUrl(source.id)` (`Studio.tsx:245`). Fixture mac dinh de `source: null`, nen the
+  // video khong duoc render va bai test do voi "phai co the video".
+  const { props } = dungThu({
+    source: KENH,
+    transcript: banGhi([
+      doan({ i: 0, start: 0, end: 1, text: "你会在山上看到", layer: "hai_nguon" }),
+      doan({ i: 1, start: 1, end: 2, text: "这样一个雷霆大海豹", layer: "mot_nguon" }),
+    ]),
+    banDich: banDichCua([
+      doan({ i: 0, start: 0, end: 1, text: "Bạn sẽ thấy trên núi" }),
+      doan({ i: 1, start: 1, end: 2, text: "Một tấm poster lớn" }),
+    ]),
+  });
+  const { container } = render(<Studio {...props} />);
+  await waitFor(() => {
+    assert.ok(q().queryAllByDisplayValue("Một tấm poster lớn").length > 0,
+      "chua nap xong: chua co o phu de nao");
+  });
+  // Luc nay currentId = null (chi co layer 2 o doan 0).
+  const lucDau = [...container.querySelectorAll("div[title]")]
+    .filter((e) => (e.className || "").toString().includes("ring-signal"));
+  assert.equal(lucDau.length, 0, "luc dau khong khoi nao duoc chon");
+  // Gia lap playhead nhay vao vung CO layer 1, dang PAUSE.
+  const video = container.querySelector("video");
+  assert.ok(video, "phai co the video");
+  Object.defineProperty(video, "currentTime", { value: 1.5, configurable: true });
+  Object.defineProperty(video, "paused", { value: true, configurable: true });
+  fireEvent.timeUpdate(video);
+  await waitFor(() => {
+    const sau = [...container.querySelectorAll("div[title]")]
+      .filter((e) => (e.className || "").toString().includes("ring-signal"));
+    assert.equal(sau.length, 1, "phai chon lai duoc khoi layer 1, do duoc: " + sau.length);
+  });
+});

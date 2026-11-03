@@ -256,7 +256,14 @@ export function Studio(props: StudioProps) {
   useEffect(() => {
     if (daChonDau.current || dong.length === 0) return;
     daChonDau.current = true;
-    setCurrentId(dong[0].i);
+    // 🔴 LAY DONG DAU CUA LAYER 1, khong phai `dong[0]`.
+    //
+    // `dong[0]` la dong dau cua TOAN BO danh sach, va thu tu mang khong theo lop. Do
+    // duoc tren #52: khoang 7,02-9,66 s chi co layer 2, nen mo video se to vang mot khoi
+    // layer 2 — dung cai nguoi dung bao ("van di theo thu tu luc truoc khi loc layer").
+    //
+    // Layer 1 trong suot thi `null`: khong to khoi nao, playhead chay tu do.
+    setCurrentId(dong.find((s) => s.layer === "mot_nguon")?.i ?? null);
   }, [dong]);
 
   useEffect(() => {
@@ -370,7 +377,7 @@ export function Studio(props: StudioProps) {
    * cụ thể. Reset chúng khi đổi kênh là cướp công cụ họ vừa bật.
    */
   useEffect(() => {
-    setCurrentId(dong.length === 0 ? null : dong[0].i);
+    setCurrentId(dong.find((s) => s.layer === "mot_nguon")?.i ?? null);
     // Chỉ khi ĐỔI KÊNH, không phải mỗi lần `dong` đổi (gõ một chữ cũng làm `dong` đổi, và
     // lúc đó cướp dòng đang chọn là hành vi sai).
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -678,7 +685,25 @@ export function Studio(props: StudioProps) {
   // Nhung `find` duyet MANG GOC, khong duyet lan — i=19 dung truoc nen no thang. Do tren
   // DOM: khoi vang o top=19 (ASR), con cung cau o top=1 (OCR, vien xanh la) khong duoc
   // chon. Nguoi dung: "current doan no nhe ra phai la cai tren ko phai cai duoi".
-  const dangPhu = dong.filter((s) => player.time >= s.start && player.time < s.end);
+  // 🔴 CHI LAY LAYER 1 — giong `playingSeg`, KHONG roi xuong layer 2.
+  //
+  // Do duoc tren translation #52 (moc 0,5 s, ca video 245 s): **50 moc** ma layer 1
+  // TRONG nhung `currentId` van chon mot khoi layer 2, vi `dangPhu` loc tu `dong`
+  // (toan bo) chu khong theo `layer`:
+  //
+  //     t=   9.5  layer1 TRONG -> chon i=7   [ 7.02- 9.66] hai_nguon
+  //     t=  33.0  layer1 TRONG -> chon i=23  [31.81-33.25] hai_nguon
+  //     t=  49.5  layer1 TRONG -> chon i=34  [48.27-50.05] hai_nguon
+  //
+  // Nguoi dung: "toi thay no van di theo thu tu luc truoc khi loc theo layer".
+  // Dung — `suspect === false` chi uu tien BAN OCR, no khong biet gi ve lop.
+  //
+  // Layer 1 trong thi KHONG to khoi nao. Do la hanh vi dung: playhead dang o mot
+  // quang khong co phu de, va to vang mot khoi layer 2 se noi doi rang "day la cau
+  // dang doc" trong khi tren video khong co chu nao.
+  const dangPhu = dong.filter(
+    (s) => s.layer === "mot_nguon" && player.time >= s.start && player.time < s.end,
+  );
   const dongDangChon = dangPhu.find((s) => s.suspect === false) ?? dangPhu[0];
   // Dong dang chon phai la dong DANG PHAT, ke ca khi dang PAUSE va vua seek tay.
   //
@@ -704,14 +729,21 @@ export function Studio(props: StudioProps) {
   //
   // Do duoc (nguoi dung gui anh): playhead o ~7 s, layer 1 trong, nhung khoi vien vang
   // van la i=0 [0.00-1.04] — dong cu tu luc playhead con o dau phim.
-  // Chon khoi theo `dongDangChon` (TOAN BO dong), KHONG theo `playingSeg`.
-  //
+  // Chon khoi theo `dongDangChon` (LAYER 1), KHONG theo `playingSeg`.
   // `playingSeg` chi doc layer 1, nen o 7,02-9,66 s no la undefined va truoc day keo
   // theo `currentId = null` — playhead chay qua ma khong khoi nao duoc to vang.
   // Do duoc tren DOM that: time=7.34 so_chon=0, time=9.36 so_chon=0.
   //
-  // `dongDangChon` tim trong ca hai layer, nen luon co khoi de to vang khi playhead
-  // dang o trong mot doan co tieng noi.
+  // `dongDangChon` tim TRONG LAYER 1. Khi layer 1 trong thi `i === null` va khoi dang
+  // chon bi BO — playhead chay qua quang khong co phu de ma khong to vang khoi nao.
+  //
+  // 🔴 KHONG roi xuong layer 2 khi layer 1 trong. Do duoc tren #52: ban truoc roi xuong
+  // layer 2 o **50 moc** (moi 0,5 s), va nguoi dung doc ra ngay: "toi thay no van di theo
+  // thu tu luc truoc khi loc theo layer". To vang mot khoi layer 2 se noi doi rang "day la
+  // cau dang doc" trong khi tren video khong co chu nao.
+  //
+  // Nguoi dung BAM mot khoi layer 2 thi van chon duoc — do la `select()`, y muon ro rang.
+  // Chi rieng su TU DONG bam theo playhead moi bi gioi han o layer 1.
   useEffect(() => {
     const i = dongDangChon?.i ?? null;
     if (i === currentId) return;
@@ -719,11 +751,24 @@ export function Studio(props: StudioProps) {
       setCurrentId(i);
       return;
     }
-    // Dang pause: chi bo chon khi dong cu khong con phu thoi diem hien tai.
-    if (currentId === null) return;
-    const cu = dong.find((s) => s.i === currentId);
-    if (cu === undefined) return;
-    if (player.time < cu.start || player.time >= cu.end) setCurrentId(i);
+    // 🔴 DANG PAUSE + `currentId === null`: PHAI CHON LAI, khong duoc `return`.
+    //
+    // Ban truoc `return` ngay o day, nen khi playhead dung trong mot quang layer 1
+    // TRONG (currentId = null) roi nguoi dung seek toi mot doan CO phu de thi khong
+    // khoi nao duoc to vang — mai mai, vi `null` khong bao gio thoat khoi nhanh nay.
+    //
+    // DO DUOC tren DOM that (translation #52): dat `currentTime = 110.2`, `paused = true`.
+    // Khoi `"toi da tim duoc · 1:50.00 -> 1:50.50"` CO tren timeline va 110,2 nam TRONG
+    // no, nhung `ring-signal` khong co — `chon=0`.
+    //
+    // Y dinh cua nhanh pause la GIU lua chon cua nguoi dung khi no van con phu thoi
+    // diem hien tai. `null` khong phai mot lua chon de giu, nen phai roi xuong duoi.
+    if (currentId !== null) {
+      const cu = dong.find((s) => s.i === currentId);
+      if (cu === undefined) return;
+      if (player.time >= cu.start && player.time < cu.end) return;
+    }
+    setCurrentId(i);
   }, [player.playing, player.time, dongDangChon, currentId, dong]);
 
   useEffect(() => {

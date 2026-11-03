@@ -143,8 +143,18 @@ const TOM_TAT_BAN_GHI = {
   translations: [TOM_TAT_BAN_DICH],
 };
 
-const DOAN_GOC = { i: 0, start: 0, end: 2.04, text: "你绝对没吃过", suspect: false };
-const DOAN_DICH = { i: 0, start: 0, end: 2.04, text: "Bạn chắc chắn chưa từng ăn", suspect: false };
+// 🔴 `layer` LA BAT BUOC, khong phai trang tri.
+//
+// Fixture nay duoc viet truoc khi `Segment` co truong `layer`. Luc do khong sao vi
+// `currentId` khong doc `layer`. Nhung tu khi su TU DONG CHON bam layer 1, mot dong
+// thieu `layer` (= `undefined`) khong bao gio duoc chon — va nut "Dat vao" bien mat,
+// lam bai test do voi 'Unable to find an accessible element with the role "button"
+// and name /Dat vao/'.
+//
+// Them `layer: "mot_nguon"` cho DUNG du lieu that: day la mot dong OCR (suspect:
+// false), va OCR LUON la mot_nguon.
+const DOAN_GOC = { i: 0, start: 0, end: 2.04, text: "你绝对没吃过", suspect: false, layer: "mot_nguon" };
+const DOAN_DICH = { i: 0, start: 0, end: 2.04, text: "Bạn chắc chắn chưa từng ăn", suspect: false, layer: "mot_nguon" };
 
 const BAN_GHI = { ...TOM_TAT_BAN_GHI, segments: [DOAN_GOC] };
 const BAN_DICH = { ...TOM_TAT_BAN_DICH, segments: [DOAN_DICH], cps: { max_cps: 21, rows: [] } };
