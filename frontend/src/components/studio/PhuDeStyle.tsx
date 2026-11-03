@@ -69,7 +69,11 @@ export function PhuDeOverlay({
   // `hop.rong / videoWidth`, tức bề ngang hộp bằng ĐÚNG tỉ lệ so với khung hình.
   const sx = tiLeVideo.rong > 0 ? hop.rong / tiLeVideo.rong : 1;
   const sy = tiLeVideo.cao > 0 ? hop.cao / tiLeVideo.cao : 1;
-  const hopRieng = coHop && style.rongHop > 0 && style.caoHop > 0;
+  // CỔNG LÀ CHIỀU CAO, không phải cả hai: backend cho `ngang = 0` nghĩa là "bám chữ".
+  // Doi hoi ca hai > 0 lam ban xem truoc ve hop tu dong trong khi ban burn ve hop vector
+  // — hai ben lech nhau, dung thu chu du an vua bao.
+  const hopRieng = coHop && style.caoHop > 0;
+  const ngangTuDong = hopRieng && style.rongHop <= 0;
   const wHop = style.rongHop * sx;
   const hHop = style.caoHop * sy;
   const noiDung = {
@@ -88,11 +92,16 @@ export function PhuDeOverlay({
         className="absolute"
         style={{
           // Neo trong HỘP VIDEO, không trong khung chứa: `left/top` là viền đen bị bỏ.
-          left: hopRieng ? hop.trai + (hop.rong - wHop) / 2 : hop.trai + h.le,
-          width: hopRieng ? wHop : Math.max(0, hop.rong - 2 * h.le),
-          ...(hopRieng ? { height: hHop, display: "flex", alignItems: "center",
-                            justifyContent: style.canLe === 1 ? "flex-start"
-                              : style.canLe === 3 ? "flex-end" : "center" } : {}),
+          ...(hopRieng
+            ? (ngangTuDong
+                // ngang = 0: hop OM CHU. `fit-content` + margin auto de van canh giua.
+                ? { left: 0, right: 0, width: "fit-content", marginLeft: "auto",
+                    marginRight: "auto", height: hHop }
+                : { left: hop.trai + (hop.rong - wHop) / 2, width: wHop, height: hHop })
+            : { left: hop.trai + h.le, width: Math.max(0, hop.rong - 2 * h.le) }),
+          ...(hopRieng ? { display: "flex", alignItems: "center",
+                           justifyContent: style.canLe === 1 ? "flex-start"
+                             : style.canLe === 3 ? "flex-end" : "center" } : {}),
           bottom: khung.cao - (hop.tren + hop.cao) + h.cachDay,
           ...noiDung,
           ...(coHop
