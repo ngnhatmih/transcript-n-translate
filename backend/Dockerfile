@@ -19,15 +19,6 @@ FROM python:3.10-slim
 RUN apt-get update \
  && apt-get install -y --no-install-recommends ffmpeg libsndfile1 python3-venv \
  && rm -rf /var/lib/apt/lists/*
-# FONT PHU DE — .ass ghi Fontname: Archivo, libass tra qua fontconfig.
- #
- # DO DUOC: image goc KHONG co Archivo (fc-match Archivo -> DejaVuSans.ttf, fc-list grep
- # = 0), trong khi ban xem truoc tren web dung Archivo that. Khac font thi khac be rong
- # chu, khac cho be dong — moi con so ve hop deu khong the khop.
- #
- # PHAI dat SAU khoi apt-get: c-cache nam trong goi fontconfig, chua cai thi khong co.
- COPY app/assets/fonts/ /usr/share/fonts/truetype/archivo/
- RUN fc-cache -f
 
 WORKDIR /app
 
@@ -115,3 +106,12 @@ VOLUME ["/data", "/models"]
 EXPOSE 8620
 
 CMD ["python", "run_api.py"]
+
+ # FONT PHU DE — dat CUOI TEP co chu y: doi font chi mat cache tu day, khong phai cai lai
+ # torch 780 MB. Ban dau toi dat khoi nay ngay sau apt-get va DO DUOC hau qua: build lai
+ # phai cai lai toan bo pip, qua 10 phut chua xong.
+ #
+ # DO DUOC truoc khi co font: image goc khong co Archivo (fc-match -> DejaVuSans.ttf), nen
+ # chu BURN khac chu xem truoc tren web (browser co Archivo that).
+ COPY app/assets/fonts/ /usr/share/fonts/truetype/archivo/
+ RUN fc-cache -f
