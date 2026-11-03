@@ -227,6 +227,35 @@ def _style_ass(style: dict) -> dict:
     return ra
 
 
+#: File font trong IMAGE BURN — phải khớp `_style_ass`/`FONT_CHO_PHEP`.
+_FONT_CHO_DUONG = {
+    "Archivo": "/usr/share/fonts/truetype/archivo/Archivo.ttf",
+    "IBM Plex Mono": "/usr/share/fonts/truetype/archivo/IBMPlexMono-Regular.ttf",
+}
+
+
+def _do_rong_chu(chu: str, font: str, co: int) -> int:
+    """Bề rộng chữ, tính bằng PIXEL của hệ `PlayRes`, theo ĐÚNG file font sẽ burn.
+
+    `0` = KHÔNG ĐO ĐƯỢC (máy chạy test không có `/usr/share/fonts/...`, hoặc thiếu
+    Pillow). Bên gọi phải coi `0` là "bỏ hộp vector", KHÔNG phải "hộp rộng 0" — nếu không
+    sẽ vẽ ra hộp cụt.
+
+    Vì sao phải đo: `.ass` không có khái niệm "hộp rộng bằng chữ" khi hộp do mình vẽ
+    vector. Đo được thì `ngang = 0` mới có nghĩa "bám chữ", thay vì "tắt".
+    """
+    duong = _FONT_CHO_DUONG.get(font)
+    if duong is None:
+        return 0
+    try:
+        from PIL import ImageFont
+        f = ImageFont.truetype(duong, max(8, int(co)))
+        hop = f.getbbox(chu or " ")
+        return int(hop[2] - hop[0])
+    except Exception:  # noqa: BLE001 — thiếu font/Pillow thì bỏ đo, KHÔNG làm hỏng đường xuất
+        return 0
+
+
 def to_ass(segments: list[Segment], *, translations: list[str] | None = None,
            bilingual: bool = False, title: str = "phu-de-lab",
            khung: tuple[int, int] | None = None,
@@ -331,12 +360,31 @@ def to_ass(segments: list[Segment], *, translations: list[str] | None = None,
     #:     phải kẹp ở đây thay vì để người dùng nhận một hộp cụt mà không biết.
     rong_hop = int(style.get("rong_hop") or 0) if style else 0
     cao_hop = int(style.get("cao_hop") or 0) if style else 0
-    ve_hop = (rong_hop > 0 and cao_hop > 0
+    #: 🔴 `ngang = 0` KHÔNG còn là "tắt hộp" — nó là **hộp rộng theo CHỮ, cao theo số đặt**.
+    #:
+    #: ĐO ĐƯỢC (chủ dự án: *"tôi kéo cỡ cao rồi nhưng chưa có tác dụng, tại cỡ ngang bằng 0
+    #: thì nó ko đổi đcc"*): bản trước đòi CẢ HAI > 0, nên `ngang = 0` làm `ve_hop` sai và
+    #: mọi thay đổi ở ô "cao" không có gì để áp vào.
+    ve_hop = ((rong_hop > 0 or cao_hop > 0)
               and int(tham_so.get("kieu_vien", 0)) == 3)
     if ve_hop:
-        # TRẦN = BỀ NGANG KHUNG; SÀN = 40 px (dưới sàn coi như TẮT).
+        # TRẦN = BỀ NGANG KHUNG; SÀN = 40 px, áp TỪNG TRỤC (dưới sàn thì trục đó về 0).
         rong_hop = min(rong_hop, int(tham_so["rx"]))
         cao_hop = min(cao_hop, int(tham_so["ry"]))
+        if 0 < rong_hop < 40:
+            rong_hop = 0
+        if 0 < cao_hop < 40:
+            cao_hop = 0
+        #: `ngang = 0` ⇒ đo bề rộng chữ của DÒNG DÀI NHẤT rồi dùng chung cho mọi dòng, để
+        #: các dòng có hộp ĐỀU NHAU. Không đo được ⇒ 0 ⇒ bỏ hộp vector (giữ hộp tự động).
+        if rong_hop == 0:
+            do_rong = 0
+            for pos_, sg_ in enumerate(segments):
+                tr_ = translations[pos_] if translations is not None else None
+                do_rong = max(do_rong, _do_rong_chu(
+                    "".join(_lines(sg_, tr_, bilingual)),
+                    str(tham_so.get("font", "Archivo")), int(tham_so["co"])))
+            rong_hop = do_rong + 2 * int(tham_so.get("vien", 0)) if do_rong else 0
         ve_hop = rong_hop >= 40 and cao_hop >= 40
     for position, seg in enumerate(segments):
         translated = translations[position] if translations is not None else None
