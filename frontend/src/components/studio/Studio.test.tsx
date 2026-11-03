@@ -882,3 +882,51 @@ it("bo khoi chi chua KY TU LA (logo) khoi TIMELINE, giu chu Viet co dau", async 
   assert.ok(tieuDe.some((x) => x.includes("Bạn sẽ thấy trên núi")),
     "chu Viet co dau phai CON tren timeline, do duoc: " + JSON.stringify(tieuDe.slice(0, 6)));
 });
+
+
+// 🔴 CHIEU CAO KHOI THEO LAN DANG DUNG — nguoi dung gui anh: "bo cai khoang
+// trang o giua 2 lan di".
+//
+// `LAN_GOC = { mot_nguon: 0, hai_nguon: 10 }` — lop 2 nham vao chi so 10 de hai
+// dai khong bao gio cham nhau trong luc TINH. Nhung `max(lan + 1)` doc chi so do
+// thanh SO LAN, nen 11 lan duoc cap cho mot bang chi dung 2.
+//
+// DO DUOC tren DOM (translation #52):
+//
+//     tops             = [1, 181]    <- chi hai lan
+//     chieu cao khoi   = 202 px       <- tinh cho 11 lan
+//     khoang trang     = 162 px       <- 181 - 1 - 18
+//
+// Sau khi sua: tops = [1, 19], chieu cao 40 px.
+it("KHONG con khoang trang giua hai lan — cao theo so lan DANG DUNG", async () => {
+  const { props } = dungThu({
+    transcript: banGhi([
+      doan({ i: 0, start: 0, end: 1, text: "你会在山上看到" }),
+      doan({ i: 1, start: 1, end: 2, text: "这样一个雷霆大海豹" }),
+    ]),
+    banDich: banDichCua([
+      doan({ i: 0, start: 0, end: 1, text: "Bạn sẽ thấy trên núi" }),
+      doan({ i: 1, start: 1, end: 2, text: "Một tấm poster lớn" }),
+    ]),
+  });
+  // Hai lop khac nhau -> hai lan that.
+  props.transcript.segments[0].layer = "mot_nguon";
+  props.transcript.segments[1].layer = "hai_nguon";
+  const { container } = render(<Studio {...props} />);
+  await waitFor(() => {
+    assert.ok(q().queryAllByDisplayValue("Bạn sẽ thấy trên núi").length > 0,
+      "chua nap xong: chua co o phu de nao");
+  });
+  // 🔴 DOC `el.style` TRUC TIEP, khong qua `getAttribute("style")`.
+  //
+  // jsdom + React ghi style qua thuoc tinh `style` cua phan tu; chuoi tu
+  // `getAttribute("style")` khong dang tin trong moi truong nay — lan dau toi
+  // loc bang regex tren chuoi do va nhan ve `[]` (do duoc: "phai co dung hai
+  // lan, do duoc: []"), tuc la bai test do vi CACH DOC, khong phai vi bo cuc sai.
+  const khoi = [...container.querySelectorAll("div[title]")]
+    .filter((e) => e.style.top !== "" && e.style.height !== "");
+  const tops = [...new Set(khoi.map((e) => parseFloat(e.style.top)))].sort((x, y) => x - y);
+  assert.equal(tops.length, 2, "phai co dung hai lan, do duoc: " + JSON.stringify(tops));
+  const khe = tops[1] - tops[0];
+  assert.ok(khe <= 20, "khe giua hai lan phai <= 20 px, do duoc " + khe + " px");
+});

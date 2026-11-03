@@ -390,7 +390,34 @@ export function Timeline({
 
   // Chieu cao = so lan THAT SU dung. Sau khi an rac va gop manh OCR, lop 1 chi con
   // MOT lan (do duoc: {0: 114, 10: 36}).
-  const soLan = [...xepLan.values()].reduce((m, b) => Math.max(m, b.lan + 1), 1);
+  // 🔴 CHIEU CAO THEO LAN DANG DUNG, KHONG THEO CHI SO LAN.
+  //
+  // `LAN_GOC = { mot_nguon: 0, hai_nguon: 10 }` — lop 2 nham vao chi so 10 de hai
+  // dai khong bao gio cham nhau. Nhung `max(lan + 1)` doc chi so do thanh SO LAN,
+  // nen 11 lan duoc cap cho mot bang chi dung 2.
+  //
+  // DO DUOC tren DOM (translation #52):
+  //
+  //     tops                = [1, 181]     <- chi hai lan
+  //     chieu cao khoi      = 202 px        <- tinh cho 11 lan
+  //     khoang trang giua   = 162 px        <- 181 - 1 - 18
+  //
+  // Nguoi dung gui anh va chi ra khoang trong do: "bo cai khoang trong o giua 2 lan di".
+  //
+  // Cach sua: dem SO CHI SO LAN KHAC NHAU dang dung, khong lay chi so lon nhat.
+  // Voi du lieu hien tai la 2 (0 va 10) -> cao 2 * 18 + 4 = 40 px, khong con khe.
+  // Anh xa CHI SO LAN -> THU TU HIEN THI (0, 1, 2, ...).
+  //
+  // `xepLan` tra chi so lan that (0 cho lop 1, 10 cho lop 2) vi hai dai phai tach
+  // roi trong luc TINH. Nhung khi VE thi chi so do khong duoc dung lam toa do:
+  // `top: 10 * 18 + 1 = 181 px` trong mot khoi cao 40 px la nam ngoai khung.
+  //
+  // Sap chi so lan tang dan roi danh so lai tu 0. Voi du lieu hien tai {0, 10} ->
+  // {0: 0, 10: 1}, nen lop 1 o `top: 1`, lop 2 o `top: 19`, khoi cao 40 px.
+  const lanDung = [...new Set([...xepLan.values()].map((b) => b.lan))].sort((a, b) => a - b);
+  const hangCua = new Map<number, number>();
+  lanDung.forEach((lan, k) => hangCua.set(lan, k));
+  const soLan = Math.max(1, lanDung.length);
   const caoDoan = soLan * CAO_LAN + 4;
 
   // vẽ sóng
@@ -718,7 +745,7 @@ export function Timeline({
                     // `b.trai`/`b.rong` den tu `xepLan`, da keo theo ASR bao no.
                     left: b.trai,
                     width: b.rong,
-                    top: b.lan * CAO_LAN + 1,
+                  top: (hangCua.get(b.lan) ?? 0) * CAO_LAN + 1,
                     height: CAO_LAN - 2,
                   }}
                   onPointerDown={(e) => {
