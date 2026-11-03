@@ -393,7 +393,7 @@ export function PhuDeStyleDialog({
               <input
                 type="number"
                 min={0}
-                max={540}
+                max={1080}
                 step={10}
                 value={style.rongHop}
                 onChange={(e) => dat({ rongHop: Number(e.target.value) })}
@@ -405,7 +405,7 @@ export function PhuDeStyleDialog({
               <input
                 type="number"
                 min={0}
-                max={540}
+                max={1080}
                 step={10}
                 value={style.caoHop}
                 onChange={(e) => dat({ caoHop: Number(e.target.value) })}
@@ -415,7 +415,7 @@ export function PhuDeStyleDialog({
             </Truong>
             <p className="mt-1 text-[11px] leading-4 text-ink-2">
               Để <span className="kbd">0</span> là hộp tự co theo chữ (dưới 40 px cũng coi là tắt).
-              Tối đa <span className="num">540</span> px.
+              Tối đa <span className="num">1080</span> px (bề ngang khung).
             </p>
           </>
         )}

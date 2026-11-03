@@ -322,8 +322,10 @@ def to_ass(segments: list[Segment], *, translations: list[str] | None = None,
     ve_hop = (rong_hop > 0 and cao_hop > 0
               and int(tham_so.get("kieu_vien", 0)) == 3)
     if ve_hop:
-        rong_hop = min(rong_hop, int(tham_so["rx"]) // 2)
-        cao_hop = min(cao_hop, int(tham_so["ry"]) // 2)
+        # TRẦN = BỀ NGANG KHUNG; SÀN = 40 px (dưới sàn coi như TẮT).
+        rong_hop = min(rong_hop, int(tham_so["rx"]))
+        cao_hop = min(cao_hop, int(tham_so["ry"]))
+        ve_hop = rong_hop >= 40 and cao_hop >= 40
     for position, seg in enumerate(segments):
         translated = translations[position] if translations is not None else None
         parts = _lines(seg, translated, bilingual)
@@ -344,16 +346,34 @@ def to_ass(segments: list[Segment], *, translations: list[str] | None = None,
         tat_hop = "\\bord0\\shad0" if ve_hop else ""
         dau = f"{{\\an2\\pos({tham_so['rx'] // 2},{y}){tat_hop}}}" if co_pos else ""
         if ve_hop:
-            nua = rong_hop // 2
-            # `mau_hop` là `&HAABBGGRR`: 2 ký tự đầu sau `&H` là Alpha, phần còn lại là BGR.
-            # `\1c` nhận BGR KHÔNG kèm alpha; alpha đi riêng bằng `\1a`.
+            # 🔴 CHIA HỘP THÀNH NHIỀU MẢNH: MỘT hình vẽ bị libass THU NHỎ khi rộng quá
+            # `PlayResX / 2` (đo được 600→540, 800→540, 2400→540; đổi `\an`, thêm
+            # `\fscx` đều không cứu). NHIỀU mảnh ≤ `rx/2` đặt sát nhau thì vượt được.
+            #
+            # 🔴 VÀ TOẠ ĐỘ PHẢI DƯƠNG — đo được trên ảnh burn thật:
+            #
+            #     \an2 pos(270), m -270..270   -> x 0..269    (MẤT nửa trái)
+            #     \an5 pos(270), m -270..270   -> x 0..269    (mỏ neo không cứu)
+            #     \an2 pos(270), m 0..540      -> x 0..539    ĐÚNG
+            #     \an2 pos(810), m -270..270   -> x 270..809  (lệch hẳn về giữa)
+            #
+            # Nên mỗi mảnh vẽ trong hệ `0..w`, và `\an2` canh GIỮA hộp-bao mảnh vào `pos.x`.
             bgr, alpha = tham_so["mau_hop"][4:], tham_so["mau_hop"][2:4]
-            lines.append(
-                f"Dialogue: 0,{_ass_timestamp(seg.start)},{_ass_timestamp(seg.end)},"
-                f"Default,,0,0,0,,{{\\an2\\pos({tham_so['rx'] // 2},{y})\\p1"
-                f"\\1c&H{bgr}&\\1a&H{alpha}&\\bord0\\shad0}}"
-                f"m {-nua} 0 l {nua} 0 {nua} {-cao_hop} {-nua} {-cao_hop}{{\\p0}}"
-            )
+            toi_da = max(1, int(tham_so["rx"]) // 2)
+            so_manh = max(1, -(-rong_hop // toi_da))
+            nen = rong_hop // so_manh
+            du = rong_hop - nen * so_manh
+            trai = (int(tham_so["rx"]) - rong_hop) / 2
+            for m in range(so_manh):
+                rong_m = nen + (1 if m < du else 0)
+                cx = trai + rong_m / 2
+                lines.append(
+                    f"Dialogue: 0,{_ass_timestamp(seg.start)},{_ass_timestamp(seg.end)},"
+                    f"Default,,0,0,0,,{{\\an2\\pos({int(round(cx))},{y})\\p1"
+                    f"\\1c&H{bgr}&\\1a&H{alpha}&\\bord0\\shad0}}"
+                    f"m 0 0 l {rong_m} 0 {rong_m} {-cao_hop} 0 {-cao_hop}{{\\p0}}"
+                )
+                trai += rong_m
         lines.append(
             f"Dialogue: 0,{_ass_timestamp(seg.start)},{_ass_timestamp(seg.end)},"
             f"Default,,0,0,0,,{dau}{text}"
