@@ -1734,7 +1734,87 @@ master không bị ghi đè, progress kết ở 1.0),
 ### Đo cuối
 
 ```
-pytest (toàn bộ)      1525 passed, 15 deselected   EXIT_PYTEST=0
+pytest (toàn bộ)      1527 passed, 15 deselected   EXIT_PYTEST=0
+npm test              274 pass, 0 fail             EXIT_TEST=0
+npx tsc --noEmit                                   EXIT_TS=0
+```
+
+## ERRATA #71 — engine dịch mặc định bị TẮT dịch vụ ⇒ cả API không khởi động được
+
+**Phát hiện lúc:** container `api` crash-loop (`Restarting (1)`), app trắng dữ liệu.
+
+```
+RuntimeError: engine dịch mặc định 'deepseek-web' không sẵn sàng: nó có trong registry
+nhưng model chưa được pull hoặc runtime không phục vụ được
+```
+
+**Nguyên nhân:** `deepseek-web` là engine `runtime: "http"` trỏ `127.0.0.1:8790` (gateway
+`whalegate`). Gateway tắt ⇒ `available = False` ⇒ `build_components()` ném ngay lúc khởi
+động (đúng thiết kế "fail ở chỗ sớm nhất"), nhưng hệ quả là **không có API nào cả** — kể cả
+những đường không liên quan dịch thuật.
+
+**Xử lý TẠM (theo yêu cầu chủ dự án):** `default_mt` đổi `deepseek-web` → `hy-mt-1.5-7b`
+(engine Ollama, model `hy-mt1.5-7b:q4_K_M` đã pull trên máy này), và setting
+`default_mt_engine` trong DB cũng đặt về engine đó. Bật lại gateway rồi thì trả
+`default_mt` về `deepseek-web` là xong.
+
+**Sửa kèm — bộ test không được phụ thuộc lựa chọn đó.** Sáu bài đỏ vì chúng đọc FILE
+`registry.json` để biết mặc định, hoặc vì fixture tự khai "Ollama đã pull mọi thứ". Nay:
+
+- `tests/conftest.py::mo_hinh_mac_dinh()` đọc `config.REGISTRY_PATH` để biết `model_ref`
+  của engine mặc định (không viết cứng id);
+- fixture của `test_api_translations.py` và harness của `test_mt_wiring.py` **ghim**
+  `main.load_default_mt` về `opus-mt` (in-process) — chúng kiểm ngữ nghĩa `available` và
+  đường ống dịch, KHÔNG kiểm engine mặc định là cái nào;
+- bài nào muốn nói về mặc định thì tự đặt lại (xem
+  `test_build_components_refuses_an_mt_default_that_is_not_available`), và bài đối chứng
+  `test_build_components_still_accepts_an_available_mt_default` đọc mặc định **đang có hiệu
+  lực** qua `main.load_default_mt` thay vì đọc file.
+
+## ERRATA #73 — phụ đề trên web lệch bản burn: hai bên bẻ dòng bằng HAI bộ đo
+
+**Phát hiện lúc:** chủ dự án: *"tìm cách để phụ đề trên web ko lệch so với bản burn vào
+video"*.
+
+**Đo được** (style THẬT trong `localStorage`: `co 91, vien 20, cao_hop 180, dam true`,
+video 1080×1920, câu *"Chi phí hiện tại … phí nhập là 5000"*):
+
+| | số dòng | dòng | hộp | đệm |
+|---|---|---|---|---|
+| bản burn | 2 | 926 + 352 | 944 × 180 | 10 / 8 px |
+| bản xem trước (trước) | 3 | 872 / 947 / 122 | 969 × 214 | 11,25 |
+| bản xem trước (sau) | 2 | (cùng chuỗi với burn) | **947 × 180** | 11,25 |
+
+**Bốn nguyên nhân, sửa theo thứ tự:**
+
+1. **Cỡ chữ tính bằng pixel của KHUNG HIỂN THỊ** (~132 px) chứ không phải pixel video:
+   `co 30` ra 2,06 px, mà ở cỡ đó Chrome không cho ký tự hẹp hơn ~1 px ⇒ tỉ lệ chữ/hộp
+   lệch hẳn (đo được hộp xem 62 % khung, burn 41,6 %). Nay lớp đè dựng trong **hệ pixel
+   video** (`hinhHocVideo` = đúng công thức `to_ass`) rồi thu cả khối bằng
+   `transform: scale(hop.rong / videoW)`.
+2. **libass TỰ bẻ dòng khác mô phỏng của backend**: mô phỏng báo dòng dài nhất 922 px (hộp
+   944) nhưng libass bẻ thành 680 + 600, để lại **đệm 132 px** mỗi bên. Nay `to_ass` phát
+   **`\N` tường minh** khi có vẽ hộp ⇒ libass không tự bẻ, số dòng do một mô phỏng quyết.
+3. **`fit-content` + `maxWidth` không co theo dòng đã bẻ**: nó lấy `max-content` rồi kẹp ở
+   `maxWidth`, nên hộp rộng bằng CẢ bề ngang bẻ dòng (1013 px). Bỏ `maxWidth` thì Chrome
+   vẫn tính `max-content` của cả câu vì `<br>` không làm nó nhỏ đi (**1963 px**). Phải cho
+   **mỗi dòng là một khối** ⇒ hộp = dòng dài nhất + 2·viền.
+4. **Hai bộ đo khác nhau**: Pillow (burn) vs `canvas.measureText` (web) lệch ~10 % bề ngang
+   chữ ở đúng chỗ quyết định bẻ dòng. Nay backend là **nguồn duy nhất**:
+   `subtitle_format.khoi_chu()` + `POST /api/subtitles/lines`; `PhuDeOverlay` dùng thẳng
+   `rong + 2·viền` từ route, `canvas` chỉ còn là đường dự phòng khi API chưa về.
+
+**Lỗi thật đã vấp trong lúc làm, ghi lại:** đặt `useState`/`useEffect` **sau** một `return`
+sớm ⇒ React ném *"Rendered more hooks than during the previous render"* và CẢ TRANG thành
+*"Trang này không tải được"*. Hook đã chuyển lên trước mọi `return` sớm.
+
+**Ghim:** `test_api_subtitles.py` (hình dạng route + không đo được thì trả một dòng),
+`hinhHocVideo: cỡ chữ là pixel CỦA VIDEO`, và các bài hình học hộp ở `test_phu_de_style.py`.
+
+### Đo cuối
+
+```
+pytest (toàn bộ)      1527 passed, 15 deselected   EXIT_PYTEST=0
 npm test              274 pass, 0 fail             EXIT_TEST=0
 npx tsc --noEmit                                   EXIT_TS=0
 ```

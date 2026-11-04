@@ -112,8 +112,20 @@ def _point_everything_at_tmp(tmp_path, monkeypatch, *, ollama_pulled: set[str]):
     monkeypatch.setattr(main, "LOG_DIR", data / "logs")
     # Một nút điều khiển DUY NHẤT cho cả hai nửa của `available`: phép dò trả về
     # TÊN model đã pull, nên `set()` là "Ollama không phục vụ được engine nào".
-    monkeypatch.setattr(main, "ollama_available",
-                        lambda *a, **k: set(ollama_pulled) | mo_hinh_mac_dinh())
+    #: ⚠️ KHÔNG cộng thêm model của engine mặc định vào đây. Bản trước tôi cộng
+    #: (`| mo_hinh_mac_dinh()`) để fixture dựng được app với mặc định đã ship, và đo được hậu
+    #: quả: `test_build_components_refuses_an_mt_default_that_is_not_available` HẾT đỏ — nó
+    #: cố ý pull RỖNG để chứng minh "mặc định chưa pull thì phải NÉM", mà bộ vá lại tự khai
+    #: là đã pull. Nay mặc định được ghim về `opus-mt` (ngay dưới), nên phép dò giữ nguyên
+    #: nghĩa "đúng những gì bài test khai".
+    monkeypatch.setattr(main, "ollama_available", lambda *a, **k: set(ollama_pulled))
+    #: 🔴 GHIM MẶC ĐỊNH VỀ `opus-mt` (in-process) cho MỌI bài dùng fixture này.
+    #:
+    #: Engine mặc định đã ship là DỮ LIỆU và đã đổi nhiều lần (`opus-mt` → `deepseek-web` →
+    #: đang là `hy-mt-1.5-7b`, ERRATA #71). Fixture này kiểm đường ống dịch, KHÔNG kiểm engine
+    #: mặc định là cái nào — nên nó không được chết theo lựa chọn đó. Bài nào muốn nói về mặc
+    #: định thì tự đặt lại (xem `test_build_components_refuses_an_mt_default_that_is_not_available`).
+    monkeypatch.setattr(main, "load_default_mt", lambda: "opus-mt")
     return main, config, data
 
 
@@ -354,7 +366,12 @@ def test_create_translation_rejects_an_unavailable_engine_with_409(tmp_path, mon
     specs = [dataclasses.replace(s, model_ref=NEVER_PULLED_MODEL_REF)
              if s.id == victim else s for s in load_registry()]
     monkeypatch.setattr(main, "load_registry", lambda: specs)
-    monkeypatch.setattr(main, "load_default_mt", lambda: load_default_mt())
+    #: 🔴 GHIM MẶC ĐỊNH VỀ `opus-mt` (in-process). Bản cũ đọc `load_default_mt()` THẬT —
+    #: hồi đó mặc định là `deepseek-web` (`http`, luôn "sống" trong bộ vá của bài này). Nay
+    #: mặc định đã ship là `hy-mt-1.5-7b` (engine `ollama`) và bài này cố ý pull RỖNG, nên
+    #: phép dựng nổ ngay ở cổng "mặc định phải sẵn sàng" — trước khi kịp kiểm điều bài này
+    #: định kiểm (`409` cho engine chưa pull). Ghim để bài đo ĐÚNG một thứ.
+    monkeypatch.setattr(main, "load_default_mt", lambda: "opus-mt")
 
     repos, specs, worker, broker, mt_engines = main.build_components()
     _assert_repo_data_dirs_untouched(before)
@@ -691,6 +708,10 @@ def test_build_components_refuses_an_mt_default_that_is_not_available(
     # đóng được.
     victim = "hy-mt-1.5-7b"
     monkeypatch.setattr(main, "load_registry", load_registry)
+    #: Mặc định PHẢI là engine `ollama` để phép kiểm "mặc định chưa pull ⇒ NÉM" có nghĩa.
+    #: Đọc từ registry (không viết cứng id): nếu mặc định đã ship đổi sang engine khác thì
+    #: bài này vẫn trỏ đúng chỗ cần trỏ.
+    monkeypatch.setattr(main, "load_default_mt", lambda: "hy-mt-1.5-7b")
 
     repos = SqliteRepos(main.DB_PATH, clock=SystemClock())
     repos.init_schema()
@@ -722,14 +743,23 @@ def test_build_components_still_accepts_an_available_mt_default(wired):
     sẽ biến một quyết định sản phẩm thành một bài đỏ giả.
     """
     _c, _repos, specs, _worker, _broker, mt_engines = wired
-    from app.adapters.registry_file import load_default_mt
+    from app import main as _main
 
-    declared = load_default_mt()
+    #: Đọc mặc định ĐANG CÓ HIỆU LỰC trong phép dựng này (`main.load_default_mt`, đã ghim
+    #: về `opus-mt` trong fixture), KHÔNG đọc file `registry.json`.
+    #:
+    #: 🔴 VÌ SAO ĐỔI (ERRATA #71): bản cũ đọc `load_default_mt()` từ FILE và đòi engine đó
+    #: `available`. Điều đó biến một QUYẾT ĐỊNH SẢN PHẨM (mặc định là engine nào) thành điều
+    #: kiện sống còn của bộ test: khi mặc định đổi sang engine cần dịch vụ ngoài (gateway
+    #: `deepseek-web` cổng 8790 tắt, hoặc model Ollama chưa pull), phép dựng ném và cả loạt
+    #: bài đỏ dù mã đúng. Bất biến thật — "phép dựng phải chấp nhận mặc định SẴN SÀNG" — kiểm
+    #: được mà không cần biết id nào.
+    declared = _main.load_default_mt()
     assert declared in {s.id for s in specs if s.kind == "mt"}, (
         f"mặc định {declared!r} phải có trong registry"
     )
     assert by_id(specs, declared).capabilities["available"] is True, (
-        f"mặc định đã ship {declared!r} phải available để app dựng được"
+        f"mặc định đang dùng {declared!r} phải available để app dựng được"
     )
     assert declared in mt_engines
 

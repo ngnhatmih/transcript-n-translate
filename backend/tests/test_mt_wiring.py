@@ -179,7 +179,7 @@ class _Harness:
         self.ollama_alive = True
         self.pulled = _all_real_model_refs()
         monkeypatch.setattr(main, "ollama_available",
-                            lambda *a, **k: (set(self.pulled) | mo_hinh_mac_dinh())
+                            lambda *a, **k: set(self.pulled)
                             if self.ollama_alive else set())
         self.mt_engines: list[_RecordingMtEngine] = []
 
@@ -206,6 +206,18 @@ class _Harness:
         )
         self.asr = _FakeAsrEngine()
         monkeypatch.setattr(main, "_engine_factory", lambda spec: self.asr)
+
+        #: 🔴 GHIM ENGINE MẶC ĐỊNH VỀ `opus-mt` (in-process) CHO CẢ BỘ VÁ NÀY.
+        #:
+        #: Các bài dưới đây kiểm NGỮ NGHĨA `available`: tắt Ollama, hoặc chỉ pull một model,
+        #: rồi xem engine nào được dựng. Chúng gọi `build_components()` THẬT, mà hàm đó NÉM
+        #: khi engine mặc định không sẵn sàng — nên nếu mặc định là engine `ollama` thì mọi
+        #: phép hạ nút đều làm cả phép dựng nổ, và bài test đo sai thứ nó định đo.
+        #:
+        #: Ghim ở ĐÂY (không sửa `registry.json`) vì đây là chuyện của TEST, không phải của
+        #: sản phẩm: engine mặc định đã ship đổi được (ERRATA #71: đang là `hy-mt-1.5-7b` khi
+        #: gateway `deepseek-web` tắt), còn ngữ nghĩa `available` thì không đổi theo.
+        monkeypatch.setattr(main, "load_default_mt", lambda: "opus-mt")
 
     def build(self):
         built = self.main.build_components()
@@ -316,8 +328,11 @@ def test_ollama_availability_is_probed_here_and_now_not_hardcoded(harness):
     # `pytest.raises`, và câu khẳng định chuyển sang PHÉP DÒ (specs) — thứ vẫn dựng được
     # trước khi composition root đối chiếu mặc định.
     harness.http_alive = False
-    with pytest.raises(RuntimeError, match="default_mt"):
-        harness.build()
+    #: ⚠️ KHÔNG còn `pytest.raises` ở đây. Bộ vá ghim `default_mt` về `opus-mt`
+    #: (in-process) nên phép dựng KHÔNG ném dù cả hai nguồn dò đều tắt — và đó mới là
+    #: điều bài này muốn nói: `available` là dữ liệu dò sống, KHÔNG phải "app luôn dựng
+    #: được". Hành vi "mặc định không sẵn sàng thì NÉM" được ghim riêng ở
+    #: `test_api_translations.py::test_build_components_refuses_an_mt_default_that_is_not_available`.
     # Câu khẳng định chuyển sang PHÉP DÒ: dựng thẳng danh sách spec rồi gọi
     # `_mark_availability` — đúng hàm mà `build_components()` gọi để điền `available`.
     # Nhờ vậy bài vẫn kiểm được "dò sống, không hardcode" mà không đòi app dựng xong
@@ -629,7 +644,12 @@ def test_a_finished_transcription_enqueues_a_translation_the_handler_consumes(
         f"{[(j.type, j.state) for j in jobs]}"
     )
     job = translate_jobs[0]
-    mt_engine_id = load_default_mt()
+    #: Đọc mặc định ĐANG CÓ HIỆU LỰC (bộ vá đã ghim về `opus-mt`), KHÔNG đọc file registry:
+    #: `build_components()` nhận mặc định qua `main.load_default_mt`, nên so với file thì
+    #: hai bên nói về hai giá trị khác nhau — đo được: `'opus-mt' == 'hy-mt-1.5-7b'` đỏ.
+    from app import main as _main
+
+    mt_engine_id = _main.load_default_mt()
 
     assert set(job.payload) == {"translation_id", "transcript_id", "engine_id",
                                 "source_lang", "target_lang"}, (
