@@ -242,6 +242,24 @@ def _style_ass(style: dict) -> dict:
 
 _TI_LE_CHU = 0.637
 
+#: Hệ số THÊM khi chữ ĐẬM (`dam = True`).
+#:
+#: 🔴 ĐO ĐƯỢC trên video thật (nguồn 6, `translation 41`, đoạn 0:40.05, khung 1080×1920,
+#: `co = 30` hiệu dụng **17**, `dam = true`, `vien = 20` hiệu dụng **11**):
+#:
+#:     hộp vẽ ra      : 424 × 178 px
+#:     chữ libass vẽ  : 428 × 10 px   (đệm mỗi bên **1 px**, đáng ra phải 11)
+#:     Pillow đo      : 402 px  (632 × 0,637)
+#:     ⇒ 428 / 402 = **1,0647**
+#:
+#: ⚠️ Lần đo ĐẦU ra 422 và hơi hụt: hộp chỉ rộng 424 nên tôi chỉ quét được chữ TRONG hộp,
+#: và phần chữ thò ra ngoài bị cửa sổ đo cắt mất. Quét lại trong hộp ĐÃ NỚI mới ra 428.
+#:
+#: Nghĩa là `_TI_LE_CHU = 0,637` chỉ đúng cho chữ THƯỜNG. Khi `dam`, libass làm đậm
+#: glyph (biến thể `Bold` của file biến thiên + embolden), chữ rộng thêm ~6,5 % — đo đúng
+#: ở mức đó thì hộp mới còn đệm. Đây là hệ số của CHIỀU RỘNG; chiều cao đo đã đúng.
+_TI_LE_CHU_DAM = 1.065
+
 #: File font trong IMAGE BURN — phải khớp `_style_ass`/`FONT_CHO_PHEP`.
 _FONT_CHO_DUONG = {
     "Archivo": "/usr/share/fonts/truetype/archivo/Archivo.ttf",
@@ -249,7 +267,7 @@ _FONT_CHO_DUONG = {
 }
 
 
-def _do_rong_chu(chu: str, font: str, co: int) -> int:
+def _do_rong_chu(chu: str, font: str, co: int, dam: bool = False) -> int:
     """Bề rộng chữ, tính bằng PIXEL của hệ `PlayRes`, theo ĐÚNG file font sẽ burn.
 
     `0` = KHÔNG ĐO ĐƯỢC (máy chạy test không có `/usr/share/fonts/...`, hoặc thiếu
@@ -258,6 +276,9 @@ def _do_rong_chu(chu: str, font: str, co: int) -> int:
 
     Vì sao phải đo: `.ass` không có khái niệm "hộp rộng bằng chữ" khi hộp do mình vẽ
     vector. Đo được thì `ngang = 0` mới có nghĩa "bám chữ", thay vì "tắt".
+
+    `dam=True` phải nhân thêm `_TI_LE_CHU_DAM`, nếu không hộp hẹp hơn chữ và chữ chạm
+    mép hộp — đo được ở ERRATA #67.
     """
     duong = _FONT_CHO_DUONG.get(font)
     if duong is None:
@@ -266,7 +287,8 @@ def _do_rong_chu(chu: str, font: str, co: int) -> int:
         from PIL import ImageFont
         f = ImageFont.truetype(duong, max(8, int(co)))
         hop = f.getbbox(chu or " ")
-        return int((hop[2] - hop[0]) * _TI_LE_CHU)
+        rong = (hop[2] - hop[0]) * _TI_LE_CHU
+        return int(rong * (_TI_LE_CHU_DAM if dam else 1.0))
     except Exception:  # noqa: BLE001 — thiếu font/Pillow thì bỏ đo, KHÔNG làm hỏng đường xuất
         return 0
 
@@ -285,7 +307,8 @@ def _do_cao_chu(font: str, co: int) -> int:
         return 0
 
 
-def _do_khoi_chu(chu: str, font: str, co: int, rong_kha_dung: int) -> tuple[int, int, int]:
+def _do_khoi_chu(chu: str, font: str, co: int, rong_kha_dung: int,
+                 dam: bool = False) -> tuple[int, int, int]:
     """`(rộng, cao, số_dòng)` của khối chữ SAU KHI BẺ DÒNG theo `rong_kha_dung`.
 
     🔴 VÌ SAO CẦN (đo được, ảnh chủ dự án gửi): câu dài bị libass bẻ thành 3 dòng, nhưng
@@ -297,6 +320,9 @@ def _do_khoi_chu(chu: str, font: str, co: int, rong_kha_dung: int) -> tuple[int,
     trắng gần nhất). Từ nào dài hơn cả dòng thì để nguyên trên dòng riêng — thà tràn một
     từ còn hơn cắt chữ.
 
+    `dam=True` nhân bề rộng với `_TI_LE_CHU_DAM` ở MỌI phép đo bên trong — kể cả phép đo
+    quyết định bẻ dòng, vì libass cũng bẻ theo bề rộng chữ ĐẬM của nó.
+
     `(0, 0, 0)` = không đo được (máy test không có font) ⇒ bên gọi BỎ các sàn này.
     """
     duong = _FONT_CHO_DUONG.get(font)
@@ -305,10 +331,11 @@ def _do_khoi_chu(chu: str, font: str, co: int, rong_kha_dung: int) -> tuple[int,
     try:
         from PIL import ImageFont
         f = ImageFont.truetype(duong, max(8, int(co)))
+        he_so = _TI_LE_CHU * (_TI_LE_CHU_DAM if dam else 1.0)
 
         def rong(s: str) -> float:
             hop = f.getbbox(s or " ")
-            return (hop[2] - hop[0]) * _TI_LE_CHU
+            return (hop[2] - hop[0]) * he_so
 
         def cao_dong() -> float:
             hop = f.getbbox("Ạ")
@@ -492,7 +519,8 @@ def to_ass(segments: list[Segment], *, translations: list[str] | None = None,
         if int(tham_so.get("kieu_vien", 0)) == 3 and (rong_hop > 0 or cao_hop > 0):
             r_doan, c_doan, _ = _do_khoi_chu(
                 "".join(parts), str(tham_so.get("font", "Archivo")),
-                int(tham_so["co"]), rong_kha_dung)
+                int(tham_so["co"]), rong_kha_dung,
+                bool(tham_so.get("dam")))
             if r_doan:
                 rong_dong = min(int(tham_so["rx"]),
                                 max(rong_hop, r_doan + 2 * int(tham_so.get("vien", 0))))

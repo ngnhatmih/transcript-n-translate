@@ -106,3 +106,18 @@ test("hinhHoc nhân tỉ lệ theo trục NGẮN — khung dọc không tràn", 
   // Cách đáy tính theo CHIỀU CAO khung, không theo trục ngắn.
   assert.ok(Math.abs(doc.cachDay - 0.06 * 1920) < 1e-9);
 });
+
+test("hinhHoc KHÔNG có sàn 8 px — khung nhỏ phải ra ĐÚNG tỉ lệ của bản burn", () => {
+  // ĐO ĐƯỢC trên app: khung video của studio rộng ~132 px, video dọc 1080×1920.
+  // `co = 30` -> tỉ lệ 132/1920 = 0,06875 -> cỡ chữ thật 2,0625 px.
+  //
+  // Sàn 8 px (đã bỏ) thổi nó lên gấp 3,9 lần, nên bản xem trước bẻ thành 3 dòng trong khi
+  // bản burn chỉ 1 dòng, và chữ thò ra ngoài hộp đen — đúng lỗi "vẫn bị tràn".
+  const s = { ...STYLE_MAC_DINH, co: 30 };
+  const h = hinhHoc(s, 132, 235);
+  assert.ok(
+    Math.abs(h.coChu - 30 * (132 / 1920)) < 1e-9,
+    `cỡ chữ phải đúng tỉ lệ (${30 * (132 / 1920)}), đo được ${h.coChu}`,
+  );
+  assert.ok(h.coChu < 8, "không được có sàn 8 px: cỡ chữ thật ở khung này là ~2 px");
+});

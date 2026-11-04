@@ -464,32 +464,32 @@ GPU. Nó tự ép UTF-8 cho stdout (console Windows mặc định cp1252, còn s
 tiếng Trung/Việt) và tự đặt cache model trước khi nạp `faster_whisper`.
 
 Con số nền của lần chạy mặc định, đo sau khi xoá `__pycache__` (lệnh ở mục
-"Kiểm thử" trên, chạy từ trong `backend\`). Thứ có nghĩa là **1521 / 15**, không
+"Kiểm thử" trên, chạy từ trong `backend\`). Thứ có nghĩa là **1522 / 15**, không
 phải số giây — thời gian trôi giữa các lần chạy (đã thấy 24,00–30,94 s) còn con
 số bài thì không:
 
 ```
-1521 passed, 15 deselected, 3 warnings
+1522 passed, 15 deselected, 3 warnings
 ```
 
 Hai con số đó là SỐ BÀI ĐƯỢC CHỌN, và chúng khớp với số mà `--collect-only` báo
-(`1521/1536`, 15 bài `live` bị bỏ;
+(`1522/1537`, 15 bài `live` bị bỏ;
 `tests/test_backend_readme.py::test_readme_baseline_matches_the_tests_actually_
 collected` đối chiếu mỗi lần chạy).
 
 
-Máy này **CÓ** `ffmpeg 8.1.1` + `ffprobe` trên PATH (đã đo), nên `1521/15` ở trên
+Máy này **CÓ** `ffmpeg 8.1.1` + `ffprobe` trên PATH (đã đo), nên `1522/15` ở trên
 là số THẬT của nó. Máy **không có** `ffmpeg`/`ffprobe` cho một kết quả KHÁC: cả
 `tests/test_ingest.py` bị `skipif` ở cấp module — **9** bài cùng skip một lượt —
 nên dòng tổng kết của máy đó là **`1507 passed, 9 skipped, 15 deselected`** (=
-`1521 − 9`; con số này TỪNG ghi `978`, tức một baseline rất cũ, và nó lệch phép
+`1522 − 9`; con số này TỪNG ghi `978`, tức một baseline rất cũ, và nó lệch phép
 trừ của chính khối nền ngay trên nó). Đó là
 con số của máy thiếu ffmpeg, **không phải** con số máy này từng in ra; đừng chép
 nó vào khối nền ở trên, và đừng "sửa" số nền xuống chỉ vì thiếu ffmpeg.
 
 ⚠️ Con số `856` ở đây TỪNG không khớp phép trừ của chính nó: `865 − 9 = 856`, tức
 nó là số của lượt TRƯỚC `V1` (+3 bài) còn sót lại. Phép trừ của khối nền hiện tại
-là `1521 − 9` = `1512`.
+là `1522 − 9` = `1513`.
 
 
 (Con số này từng bị ghi là `798`: bài `test_a_failed_translation_leaves_the_
@@ -1863,4 +1863,60 @@ Năm bài ghim trong `tests/test_phu_de_style.py`:
 
 ```
 pytest (toàn bộ)      1521 passed, 15 deselected   EXIT_PYTEST=0
+```
+
+## ERRATA #67 — chữ ĐẬM rộng hơn 6,5 %, và SÀN 8 px của bản xem trước đẩy chữ ra ngoài hộp
+
+**Phát hiện lúc:** chủ dự án gửi đoạn `0:40.05 → 0:42.37`
+(*"Chi phí hiện tại của bạn là bao nhiêu, không tính phí nhập là 2000, phí nhập là 5000"*,
+gốc `你现在成本多少不算入费2000 是入费5000`) và nói: *"cái này vẫn bị tràn nhé"*.
+
+Style THẬT lấy từ `localStorage` của app (không phải style tôi tự chọn): `font Archivo`,
+`co 30`, `vien 20`, `cao_hop 180`, `vi_tri_doc 0,21`, `dam true`, `kieu_vien 3`,
+video 1080×1920. Burn ở 41,2 s rồi đo pixel:
+
+    hộp vẽ ra       : 424 × 178
+    chữ libass vẽ   : 428 × 10
+    đệm mỗi bên     : 1 px và 1 px      <-- phải là `vien` = 20 × 0,5625 = 11
+    Pillow đo       : 402  (632 × 0,637)
+
+**Nguyên nhân 1 — hệ số 0,637 chỉ đúng cho chữ THƯỜNG.** Khi `dam = true`, libass làm đậm
+glyph (biến thể `Bold` của file biến thiên + embolden) nên chữ rộng thêm
+`428 / 402 = 1,065`. Sửa: thêm `_TI_LE_CHU_DAM = 1.065` và truyền `dam` vào
+`_do_khoi_chu` — vào CẢ phép bẻ dòng, vì libass bẻ theo bề rộng chữ đậm của nó.
+
+Đo lại: **hộp 449 × 178, chữ 428 → đệm 11 px / 10 px**, đúng bằng `vien` người dùng đặt.
+
+⚠️ **Sai lần đầu, ghi lại:** tôi đo ra "chữ 422" và suy hệ số 1,05 → đệm còn 8 px. Sai vì
+hộp lúc đó chỉ rộng 424, nên cửa sổ quét (chỉ trong hộp) CẮT mất phần chữ thò ra ngoài.
+Quét lại trong hộp ĐÃ NỚI mới ra 428. Đây đúng là cái bẫy của phép đo này: dùng chính cái
+hộp sai để giới hạn vùng đo thì con số cũng sai theo.
+
+**Nguyên nhân 2 — bản xem trước trên web.** `hinhHoc` có **SÀN 8 px** cho cỡ chữ (đánh đổi
+có chủ: khung xem chỉ rộng ~132 px nên chữ đúng tỉ lệ là ~2 px, không đọc được). Đo trên
+chính app với cùng đoạn đó:
+
+    bản burn : chữ 17 px trong khung 1080  -> MỘT dòng,  hộp 449 × 178  (41,6 % × 9,3 % khung)
+    bản xem  : chữ  8 px trong khung 132   -> BA dòng,   hộp 132 × 30
+
+Chữ to gấp **3,9 lần** nên bản xem trước bẻ dòng ở chỗ bản burn không bẻ, và chữ thò ra
+ngoài hộp đen. Sửa hai việc:
+
+1. **Bỏ sàn 8 px** — bản xem trước phải nói ĐÚNG cái sẽ burn, không phải bản phóng to.
+   Hệ quả chấp nhận: ở khung ~132 px, chữ `co 30` chỉ còn ~2 px. Muốn đọc thì mở video lớn
+   (bấy giờ `30 × 0,5625 = 17 px`).
+2. **Hộp phải CHỨA chữ theo đúng luật của bản burn** (`cao = max(cao_hop, chữ + 2·viền)`,
+   `rong = max(rong_hop, chữ + 2·viền)`): `minHeight` thay cho `height` cố định, đệm `vien`
+   cả bốn phía, `box-sizing: border-box`. Bản cũ là `height` cố định + `padding: 0`, nên
+   hễ chữ cao hơn `cao_hop` là nó thò hẳn ra ngoài hộp.
+
+**Ghim:** `test_chu_DAM_phai_di_vao_phep_DO_be_rong` (backend: `dam` tới được phép đo, và
+hộp rộng `chữ + 2·viền`) và `hinhHoc KHÔNG có sàn 8 px` (frontend).
+
+### Đo cuối
+
+```
+pytest (toàn bộ)      1522 passed, 15 deselected   EXIT_PYTEST=0
+npm test (frontend)   263 pass, 0 fail             EXIT_TEST=0
+tsc --noEmit                                       EXIT_TSC=0
 ```

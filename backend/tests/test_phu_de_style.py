@@ -228,3 +228,39 @@ def test_KHONG_DO_DUOC_chu_thi_khong_ve_hop(monkeypatch):
     ass = to_ass([_doan(text=_THU)], khung=(1080, 1920),
                  style={"cao_hop": 960, "kieu_vien": 3, "co": 41})
     assert _manh_hop(ass) == []
+
+
+def test_chu_DAM_phai_di_vao_phep_DO_be_rong(monkeypatch):
+    """`dam = True` phải được CHUYỀN vào phép đo, và hộp phải rộng bằng `chữ + 2·viền`.
+
+    🔴 VÌ SAO PHẢI GHIM: đo trên video thật (đoạn 0:40.05, `co 30`, `dam true`, `vien 20`)
+    bản cũ vẽ hộp **424** trong khi libass vẽ chữ **428** — đệm mỗi bên còn **1 px** thay vì
+    11, tức chữ chạm mép và thò ra ngoài hộp. Nguyên nhân: `_TI_LE_CHU = 0,637` đo trên chữ
+    THƯỜNG, còn libass in đậm rộng thêm ~6,5 % (`_TI_LE_CHU_DAM`).
+
+    Máy chạy test không có file font nên không đo được chữ thật; bài này ghim ĐƯỜNG ĐI
+    (`dam` tới được `_do_khoi_chu`) và phép cộng `2·vien`, còn con số 1,065 được đo bằng
+    burn thật (xem `ERRATA #67`).
+    """
+    from app.domain import subtitle_format as sf
+
+    da_goi = []
+
+    def gia(chu, font, co, rong_kha_dung, dam=False):
+        da_goi.append(bool(dam))
+        return (300, 20, 1)
+
+    monkeypatch.setattr(sf, "_do_khoi_chu", gia)
+
+    ass = to_ass([_doan(text=_THU)], khung=(1080, 1920),
+                 style={"cao_hop": 180, "kieu_vien": 3, "co": 30, "dam": True, "vien": 20})
+    assert da_goi == [True], "`dam` không được chuyền vào phép đo: %r" % (da_goi,)
+    # `vien = 20` trên khung 1080×1920 -> 20 × 0,5625 = 11 (làm tròn).
+    assert _manh_hop(ass)[0][2] == 300 + 2 * 11, (
+        "hộp phải rộng `chữ + 2·viền`, đo được %d" % _manh_hop(ass)[0][2]
+    )
+
+    da_goi.clear()
+    to_ass([_doan(text=_THU)], khung=(1080, 1920),
+           style={"cao_hop": 180, "kieu_vien": 3, "co": 30, "dam": False, "vien": 20})
+    assert da_goi == [False]

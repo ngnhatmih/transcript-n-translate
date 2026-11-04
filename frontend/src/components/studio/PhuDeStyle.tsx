@@ -98,9 +98,16 @@ export function PhuDeOverlay({
                 // `maxWidth` = bề ngang KHUNG: câu dài hơn video phải BẺ DÒNG như libass
                 // (`WrapStyle: 0`). DO ĐƯỢC (ảnh chủ dự án): thiếu nó thì chữ tràn ra hai
                 // bên hộp ở bản xem trước, trong khi bản burn lại xuống dòng — hai bên khác nhau.
+                //
+                // 🔴 `minHeight` + `padding: vien` + `box-sizing: border-box` để khớp ĐÚNG
+                // luật của bản burn (`cao_dong = max(cao_hop, chữ + 2·viền)`,
+                // `rong_dong = max(rong_hop, chữ + 2·viền)`). Trước đây là `height` CỐ ĐỊNH
+                // và `padding: 0`, nên chữ bị ép ra ngoài hộp — đúng lỗi "vẫn bị tràn".
                 ? { left: 0, right: 0, width: "fit-content", maxWidth: hop.rong,
-                    marginLeft: "auto", marginRight: "auto", height: hHop }
-                : { left: hop.trai + (hop.rong - wHop) / 2, width: wHop, height: hHop })
+                    marginLeft: "auto", marginRight: "auto",
+                    minHeight: hHop, boxSizing: "border-box" as const }
+                : { left: hop.trai + (hop.rong - wHop) / 2, width: wHop,
+                    minHeight: hHop, boxSizing: "border-box" as const })
             : { left: hop.trai + h.le, width: Math.max(0, hop.rong - 2 * h.le) }),
           ...(hopRieng ? { display: "flex", alignItems: "center",
                            justifyContent: style.canLe === 1 ? "flex-start"
@@ -112,7 +119,10 @@ export function PhuDeOverlay({
                 // Độ đục của hộp đi qua `rgba` chứ không qua `opacity` của cả khối:
                 // `opacity` sẽ làm mờ LUÔN chữ, trong khi `.ass` chỉ trong suốt cái hộp.
                 background: rgba(style.mauHop, style.doDucHop),
-                padding: hopRieng ? 0 : `${Math.max(1, h.vien)}px ${Math.max(2, h.vien * 2)}px`,
+                // Khi người dùng đặt cỡ hộp thì đệm là `vien` ĐỦ BỐN PHÍA — đúng như bản
+                // burn cộng `2·vien` vào cả bề ngang lẫn chiều cao. Đệm 0 (bản cũ) làm chữ
+                // chạm mép hộp, và khi chữ cao hơn `cao_hop` thì nó thò hẳn ra ngoài.
+                padding: hopRieng ? Math.max(0, h.vien) : `${Math.max(1, h.vien)}px ${Math.max(2, h.vien * 2)}px`,
                 borderRadius: 2,
               }
             : {

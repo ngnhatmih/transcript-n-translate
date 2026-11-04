@@ -177,16 +177,26 @@ export function styleChoAss(s: PhuDeStyle): Record<string, unknown> {
  * `tiLe = min(W/1920, H/1080)`: trục NGẮN quyết định, nên khung dọc 1080×1920 thu chữ
  * nhỏ lại đúng bằng `1080/1920`, vừa bề ngang mà không tràn mép.
  *
- * 🔴 `coChu` có SÀN 8 px, và sàn đó là chỗ bản xem trước KHÔNG còn đúng tỉ lệ. ĐO ĐƯỢC:
- * khung video của studio chỉ rộng ~132 px (video dọc trong ô 16:9), nên cỡ chữ thật của
- * một dòng 54/1920 là **3,7 px** — không đọc được, và không thể "chỉnh bằng mắt" nếu vẽ
- * đúng. Đây là đánh đổi có chủ: thấy được mà lệch tỉ lệ, hơn là đúng tỉ lệ mà không thấy.
- * Muốn đúng tỉ lệ thì đọc số ở ô "Cỡ chữ" chứ đừng ước lượng bằng mắt trên khung nhỏ.
+ * 🔴 BỎ SÀN 8 px (đã từng có, và nó là một lỗi ĐO ĐƯỢC). Khung video của studio chỉ rộng
+ * ~132 px, nên cỡ chữ thật của `co = 30` trên video dọc 1080×1920 là **2,06 px**; sàn 8 px
+ * thổi nó lên **gấp 3,9 lần**. Hậu quả đo trên chính app (đoạn 0:40.05, `co 30`, `vien 20`,
+ * `cao_hop 180`, video 1080×1920):
+ *
+ *     bản burn : chữ 17 px trong khung 1080 → MỘT dòng, hộp 449 × 178
+ *     bản xem  : chữ 8 px trong khung 132 → BA dòng, hộp 132 × 30
+ *
+ * Tức chữ trong bản xem trước to gấp ~3,9 lần nên nó bẻ dòng ở chỗ bản burn không bẻ, và
+ * chữ thò ra ngoài hộp đen — đúng thứ chủ dự án báo "vẫn bị tràn".
+ *
+ * Đánh đổi: ở khung nhỏ, chữ đúng tỉ lệ thì KHÔNG đọc được (2 px). Đó là sự thật của
+ * `co = 30` trên video 1080 px; muốn đọc thì mở video lớn (bấy giờ 30 × 0,5625 = 17 px).
+ * Bản xem trước phải nói ĐÚNG cái sẽ burn, không phải một phiên bản phóng to của nó.
  */
 export function hinhHoc(s: PhuDeStyle, rong: number, cao: number) {
   const tiLe = Math.min(rong / HE_GOC.rx, cao / HE_GOC.ry);
   return {
-    coChu: Math.max(8, s.co * tiLe),
+    // Sàn 0,1 px chỉ để không ra 0/âm khi khung chưa đo được — không phải sàn ĐỌC ĐƯỢC.
+    coChu: Math.max(0.1, s.co * tiLe),
     vien: Math.max(0, s.vien * tiLe),
     cachDay: Math.min(Math.max(0, s.viTriDoc), 0.5) * cao,
     le: Math.max(0, 60 * tiLe),
