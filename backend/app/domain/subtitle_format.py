@@ -456,6 +456,24 @@ def to_ass(segments: list[Segment], *, translations: list[str] | None = None,
     """
     _assert_lengths(segments, translations)
     tham_so = dict(_ASS_KHUNG_MAC_DINH)
+    #: 🔴 `offset_doc` PHẢI ĐỌC ĐƯỢC TỪ `style` — đây là "Cách đáy" của giao diện.
+    #:
+    #: ĐO ĐƯỢC (chủ dự án: *"bản xuất ra trông vẫn khác xa với bản web"*, ảnh khung 3,03 s):
+    #: bản xem trước đặt hộp theo `viTriDoc = 0,21` (đáy hộp ở 79 % chiều cao), còn bản BURN
+    #: đặt hộp SÁT ĐÁY khung. Nguyên nhân: `offset_doc` là tham số riêng của `to_ass`, và
+    #: `_style_ass` lọc style theo danh sách trắng `_ASS_STYLE_CHO_PHEP` — danh sách đó
+    #: KHÔNG có `offset_doc` (nó không phải trường ASS), nên khoá này bị bỏ im lặng và mọi
+    #: đường đi qua `style` (burn, xuất tệp, preview) đều rơi về mặc định 6 %.
+    #:
+    #: Đọc Ở ĐÂY chứ không thêm vào danh sách trắng: `offset_doc` không được ghi vào dòng
+    #: `Style:` của `.ass`, nó chỉ đổi `\pos`. Tham số truyền TAY vẫn thắng style.
+    if offset_doc is None and style:
+        _od = style.get("offset_doc")
+        if _od is not None:
+            try:
+                offset_doc = float(_od)
+            except (TypeError, ValueError):
+                offset_doc = None
     # 🔴 STYLE ÁP **TRƯỚC** KHỐI `khung`, và khối đó NHÂN TỈ LỆ TỪ `tham_so`.
     #
     # Thứ tự này là thứ tự duy nhất đúng: người dùng chọn cỡ chữ trong hệ 1920×1080, còn

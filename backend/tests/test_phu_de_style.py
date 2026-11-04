@@ -304,3 +304,42 @@ def test_cao_khoi_chu_dung_BUOC_DONG_chu_khong_phai_net_chu(monkeypatch):
         f"Công thức SAI (nét × n) sẽ cho {net * so_dong}."
     )
     assert cao != net * so_dong, "không được quay lại công thức `nét × số_dòng`"
+
+
+
+def test_CACH_DAY_di_qua_STYLE_khong_bi_bo_im_lang():
+    """`offset_doc` trong `style` phải đổi `\pos` của chữ — nếu không, burn lệch bản web.
+
+    🔴 ĐO ĐƯỢC (chủ dự án: *"bản xuất ra trông vẫn khác xa với bản web"*, ảnh khung 3,03 s):
+    bản xem trước đặt hộp đáy ở 79 % chiều cao (`viTriDoc = 0,21`), còn bản BURN đặt hộp sát
+    đáy. Nguyên nhân: `offset_doc` là tham số riêng của `to_ass`, và `_style_ass` lọc theo
+    danh sách trắng `_ASS_STYLE_CHO_PHEP` — danh sách đó KHÔNG có `offset_doc` (đúng: nó
+    không phải trường của dòng `Style:`), nên khoá này bị bỏ IM LẶNG và mọi đường đi qua
+    `style` rơi về mặc định 6 %.
+
+    Khung 1080×1920: `pos_y = round(1920 × (1 − offset))` ⇒ 0,06 → 1805; 0,21 → 1517.
+    """
+    import re
+
+    def pos_y(style: dict) -> int:
+        ass = to_ass([_doan(text="Nay toi noi")], khung=(1080, 1920), style=style)
+        for line in ass.splitlines():
+            if line.startswith("Dialogue:") and "\\p1" not in line:
+                return int(re.findall(r"pos\((\d+),(\d+)\)", line)[0][1])
+        raise AssertionError("không có sự kiện chữ")
+
+    goc = {"co": 91, "vien": 20, "cao_hop": 180, "kieu_vien": 3, "dam": True}
+    assert pos_y(dict(goc)) == 1805, "không khai `offset_doc` thì giữ mặc định 6 %"
+    assert pos_y({**goc, "offset_doc": 0.21}) == 1517, (
+        "`offset_doc` trong style PHẢI được đọc — nếu không, bản burn nằm sát đáy trong khi "
+        "bản xem trước đặt ở 79 % chiều cao"
+    )
+    #: Tham số truyền TAY thắng style (đường job cũ truyền thẳng, không qua style).
+    ass = to_ass([_doan(text="Nay toi noi")], khung=(1080, 1920),
+                 offset_doc=0.30, style={**goc, "offset_doc": 0.21})
+    for line in ass.splitlines():
+        if line.startswith("Dialogue:") and "\\p1" not in line:
+            assert re.findall(r"pos\((\d+),(\d+)\)", line)[0][1] == "1344", (
+                "offset_doc truyền tay (0,30 → 1344) phải thắng style (0,21 → 1517)"
+            )
+            break
