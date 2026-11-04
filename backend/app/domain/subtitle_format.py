@@ -308,7 +308,7 @@ def _do_cao_chu(font: str, co: int) -> int:
 
 
 def _do_khoi_chu(chu: str, font: str, co: int, rong_kha_dung: int,
-                 dam: bool = False) -> tuple[int, int, int]:
+                 dam: bool = False) -> tuple[int, int, int, list[str]]:
     """`(rộng, cao, số_dòng)` của khối chữ SAU KHI BẺ DÒNG theo `rong_kha_dung`.
 
     🔴 VÌ SAO CẦN (đo được, ảnh chủ dự án gửi): câu dài bị libass bẻ thành 3 dòng, nhưng
@@ -327,7 +327,7 @@ def _do_khoi_chu(chu: str, font: str, co: int, rong_kha_dung: int,
     """
     duong = _FONT_CHO_DUONG.get(font)
     if duong is None:
-        return (0, 0, 0)
+        return (0, 0, 0, [])
     try:
         from PIL import ImageFont
         f = ImageFont.truetype(duong, max(8, int(co)))
@@ -342,20 +342,24 @@ def _do_khoi_chu(chu: str, font: str, co: int, rong_kha_dung: int,
             return (hop[3] - hop[1]) * _TI_LE_CHU
 
         dai_nhat = 0.0
-        so_dong = 1
+        dong: list[str] = []
         hien = ""
         for tu in (chu or " ").split(" "):
             thu = f"{hien} {tu}" if hien else tu
             if hien and rong(thu) > rong_kha_dung:
+                dong.append(hien)
                 dai_nhat = max(dai_nhat, rong(hien))
-                so_dong += 1
                 hien = tu
             else:
                 hien = thu
+        dong.append(hien)
         dai_nhat = max(dai_nhat, rong(hien))
-        return (int(dai_nhat), int(cao_dong() * so_dong), so_dong)
+        so_dong = len(dong)
+        #: Trả về CẢ DANH SÁCH DÒNG, không chỉ con số đếm: bên gọi phải phát được
+        #: `\N` tường minh — xem ERRATA #72 (libass bẻ dòng KHÁC mô phỏng này).
+        return (int(dai_nhat), int(cao_dong() * so_dong), so_dong, dong)
     except Exception:  # noqa: BLE001
-        return (0, 0, 0)
+        return (0, 0, 0, [])
 
 
 def to_ass(segments: list[Segment], *, translations: list[str] | None = None,
@@ -517,7 +521,7 @@ def to_ass(segments: list[Segment], *, translations: list[str] | None = None,
         #: đây thì khối đo không bao giờ chạy và hộp không bao giờ được vẽ (đo được: 156
         #: sự kiện thay vì 312).
         if int(tham_so.get("kieu_vien", 0)) == 3 and (rong_hop > 0 or cao_hop > 0):
-            r_doan, c_doan, _ = _do_khoi_chu(
+            r_doan, c_doan, _, dong_doan = _do_khoi_chu(
                 "".join(parts), str(tham_so.get("font", "Archivo")),
                 int(tham_so["co"]), rong_kha_dung,
                 bool(tham_so.get("dam")))
@@ -526,6 +530,21 @@ def to_ass(segments: list[Segment], *, translations: list[str] | None = None,
                                 max(rong_hop, r_doan + 2 * int(tham_so.get("vien", 0))))
             if c_doan:
                 cao_dong = max(cao_hop, c_doan + 2 * int(tham_so.get("vien", 0)))
+            # 🔴 PHÁT `\N` TƯỜNG MINH — ĐÂY LÀ CHỖ HAI BẢN (burn và xem trước) HẾT LỆCH.
+            #
+            # ĐO ĐƯỢC (ERRATA #72, style `co 91`/`dam`/`vien 20`, câu 86 ký tự):
+            #
+            #     mô phỏng của `_do_khoi_chu` : dòng dài nhất **922** px  → hộp 944
+            #     libass THẬT vẽ              : 2 dòng **680 + 600** px    → đệm 132 px mỗi bên
+            #
+            # Tức libass tự bẻ dòng KHÁC mô phỏng (nó bẻ sớm hơn hẳn `rong_kha_dung`), nên
+            # hộp rộng hơn chữ 264 px — và bản xem trước, vốn bẻ theo mô phỏng, không thể
+            # khớp một bản burn đang bẻ theo luật riêng của libass.
+            #
+            # Có `\N` tường minh thì libass KHÔNG tự bẻ nữa: số dòng, dòng dài nhất và bề
+            # rộng hộp đều do MỘT mô phỏng quyết định — cùng mô phỏng mà bản xem trước dùng.
+            if len(dong_doan) > 1:
+                text = "\\N".join(_ass_escape(d) for d in dong_doan)
             # 🔴 `ve_hop` PHẢI TÍNH LẠI THEO SỐ CỦA ĐOẠN NÀY. Dòng `ve_hop = rong_hop >= 40
             # and cao_hop >= 40` ở trên chạy TRƯỚC khối này, nên với `ngang = 0` nó thành
             # False và KHÔNG đoạn nào được vẽ hộp — đo được: chỉ 156 sự kiện (toàn chữ),

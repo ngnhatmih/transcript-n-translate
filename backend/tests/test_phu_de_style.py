@@ -248,7 +248,7 @@ def test_chu_DAM_phai_di_vao_phep_DO_be_rong(monkeypatch):
 
     def gia(chu, font, co, rong_kha_dung, dam=False):
         da_goi.append(bool(dam))
-        return (300, 20, 1)
+        return (300, 20, 1, ["một dòng"])
 
     monkeypatch.setattr(sf, "_do_khoi_chu", gia)
 
