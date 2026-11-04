@@ -929,16 +929,70 @@ export function Studio(props: StudioProps) {
         return;
       }
       if (id === "xuat") {
-        if (lyDoXuat !== null) setNotice(`Chua xuat duoc: ${lyDoXuat}`);
-        else onXuatVideo();
+        // Sẵn sàng thì tải tệp. Chưa có tệp thì ĐỪNG chỉ nói "cần ghép nền" — chạy luôn
+        // bước còn thiếu, vì người dùng bấm "Xuất" là muốn CÓ TỆP, không muốn đọc lý do.
+        //
+        // 🔴 ĐO ĐƯỢC: `coFileXuat` chỉ đúng khi có job `dub` mang `tron_nen = true` đã
+        // `done`. Trước đây không nút nào gửi được cờ đó ⇒ tệp không bao giờ ra đời ⇒
+        // bước Xuất đứng ở "cần ghép nền" vĩnh viễn. Nay bấm Xuất sẽ tự xếp job ghép nền
+        // (nếu chưa có) và nói rõ phải chờ.
+        if (lyDoXuat === null) {
+          onXuatVideo();
+          return;
+        }
+        if (banDich === null) {
+          setNotice(`Chưa xuất được: ${lyDoXuat}`);
+          return;
+        }
+        if (jobGhep !== null && (jobGhep.state === "queued" || jobGhep.state === "running")) {
+          setNotice("Đang ghép nền — xong thì bấm Xuất lần nữa");
+          return;
+        }
+        if (jobGhep !== null && jobGhep.state === "failed") {
+          setNotice("Lượt ghép nền trước HỎNG — xem hàng đợi, rồi bấm Ghép nền");
+          return;
+        }
+        datLacQuan("ghep");
+        setView("dub");
+        setNotice("Chưa có tệp — đang ghép nền để xuất, xong thì bấm Xuất lần nữa");
+        onBuoc("ghep");
+        return;
+      }
+      if (id === "ghep") {
+        // Bấm "Ghép nền" = XẾP JOB ghép (job `dub` + `tron_nen`), không chỉ đổi góc nhìn.
+        if (banDich === null) {
+          setNotice("Chưa có bản dịch — ghép nền cần bản lồng tiếng trước");
+          return;
+        }
+        if (jobGhep !== null && (jobGhep.state === "queued" || jobGhep.state === "running")) {
+          setNotice("Đang ghép nền — chờ lượt này xong đã");
+          setView("dub");
+          return;
+        }
+        datLacQuan("ghep");
+        setView("dub");
+        onBuoc("ghep");
         return;
       }
       if (id === "long") {
-        // Bấm "Lồng tiếng" trên thanh bước chỉ ĐỔI GÓC NHÌN — job `dub` do nút "Lồng lại"
-        // trong panel tạo. Nhưng người dùng bấm bước này vì muốn lồng tiếng, và bước phải
-        // phản hồi ngay thay vì đứng yên tới lượt hỏi `/api/jobs` kế tiếp.
+        // 🔴 ĐO ĐƯỢC: nút này TỪNG không xếp job nào — chỉ `datLacQuan` + `setView`, nên
+        // bấm "Lồng tiếng" không có gì xảy ra ngoài việc đổi tab. Người dùng báo đúng
+        // hiện tượng đó ("nút không ấn được").
+        //
+        // Nay bấm là XẾP JOB (`App.onBuoc("long")` -> `POST /api/dubs`). Vẫn đổi góc nhìn
+        // để người dùng thấy tiến độ ở đúng chỗ nó diễn ra.
+        if (banDich === null) {
+          setNotice("Chưa có bản dịch — lồng tiếng cần bản dịch trước");
+          return;
+        }
+        if (jobDub !== null && (jobDub.state === "queued" || jobDub.state === "running")) {
+          setNotice("Đang lồng tiếng — chờ lượt này xong đã");
+          setView("dub");
+          return;
+        }
         datLacQuan("long");
         setView("dub");
+        onBuoc("long");
         return;
       }
       if (id === "dich") {
@@ -981,7 +1035,8 @@ export function Studio(props: StudioProps) {
       datLacQuan(id);
       onBuoc(id);
     },
-    [issues.length, diViec, lyDoXuat, onXuatVideo, onBuoc, banDich, transcript, datLacQuan, cacBuoc],
+    [issues.length, diViec, lyDoXuat, onXuatVideo, onBuoc, banDich, transcript, datLacQuan,
+     cacBuoc, jobDub, jobGhep],
   );
 
   const commands: Command[] = [

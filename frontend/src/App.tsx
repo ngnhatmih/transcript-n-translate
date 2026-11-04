@@ -684,6 +684,34 @@ export function App() {
         })();
         return;
       }
+
+      // ───────────────────────────────────────────────────────────────────────
+      // BƯỚC `ghep` — GHÉP NỀN — là job `dub` với `tron_nen = true`.
+      //
+      // KHÔNG có loại job "tron_nen": `PAYLOAD_SCHEMA` chỉ có
+      // `ingest/asr/dub/export`, và chính `DubHandler` mới là chỗ gọi
+      // `_tron_va_remux` để sinh `dub-{tid}.mp4`. Nên bước này gửi MỘT job `dub`
+      // mang cờ đó.
+      //
+      // 🔴 ĐO ĐƯỢC vì sao phải có nhánh này: bấm bước "Ghép nền"/"Xuất" trên thanh
+      // đường ống trước đây KHÔNG gửi gì cả, nên `jobGhep` (job `dub` có
+      // `tron_nen === true`) không bao giờ tồn tại, tệp không bao giờ ra đời, và hai
+      // bước đó đứng ở "cần lồng tiếng xong"/"cần ghép nền" VĨNH VIỄN.
+      // ───────────────────────────────────────────────────────────────────────
+      if (id === "ghep") {
+        if (banDich === null) {
+          setLoi("chua co ban dich — khong ghep nen duoc");
+          return;
+        }
+        void (async () => {
+          try {
+            await endpoints.makeDub(banDich.id, null, true);
+          } catch (e) {
+            setLoi(e instanceof Error ? e.message : String(e));
+          }
+        })();
+        return;
+      }
       // ───────────────────────────────────────────────────────────────────────
       // BUOC `duyet` — DO DUOC LA NO TUNG KHONG LAM GI.
       //
@@ -719,7 +747,8 @@ export function App() {
         })();
         return;
       }
-      // `ghep`/`xuat` la hanh dong cua nut Xuat, khong phai job rieng.
+      // `xuat` la hanh dong cua nut Xuat (tai tep), khong phai job rieng: tep do chinh
+      // buoc `ghep` sinh ra.
     },
     // 🔴 `source` VA `engineAsr` PHAI co trong deps — thieu mot cai la closure dong bang.
     //

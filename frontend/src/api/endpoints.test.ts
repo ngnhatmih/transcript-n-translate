@@ -141,6 +141,29 @@ describe("endpoints: đường dẫn TƯƠNG ĐỐI, không bao giờ có '/api'
     assert.equal(endpoints.dubTakeUrl(10, 3), "/api/dubs/10/take?i=3");
   });
 
+  it("makeDub: `tron_nen` phải nằm trong BODY — đó là cờ sinh ra `dub-{tid}.mp4`", async () => {
+    // 🔴 VÌ SAO GHIM: bước "Ghép nền" trên thanh đường ống chỉ đạt `done` khi có job `dub`
+    // mang `payload.tron_nen === true`, và CHÍNH job đó sinh tệp mp4 (`_tron_va_remux`).
+    // Thiếu cờ này trong body thì tệp không bao giờ ra đời và bước "Xuất" đứng ở "cần ghép
+    // nền" vĩnh viễn — đúng hiện tượng đo được trên sản phẩm.
+    const than: string[] = [];
+    const truoc = globalThis.fetch;
+    globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+      than.push(String(init?.body ?? ""));
+      return new Response("{}", { status: 200, headers: { "content-type": "application/json" } });
+    }) as typeof fetch;
+    try {
+      await endpoints.makeDub(10, null, true);
+      await endpoints.makeDub(10, null);
+    } finally {
+      globalThis.fetch = truoc;
+    }
+    assert.equal(JSON.parse(than[0]).tron_nen, true,
+      "ghép nền phải gửi tron_nen: true, đo được " + than[0]);
+    assert.equal(JSON.parse(than[1]).tron_nen, null,
+      "lồng tiếng thường phải để tron_nen: null, đo được " + than[1]);
+  });
+
   it("sau mỗi bài, `fetch` của tiến trình KHÔNG còn là bản ghi của tệp này", () => {
     // ⚠️ ĐÍNH CHÍNH. Bản trước khẳng định `globalThis.fetch === FETCH_THAT`, với
     // `FETCH_THAT` chụp ở mức module. Vế đó SAI HAI LẦN:

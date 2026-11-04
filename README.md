@@ -1608,3 +1608,47 @@ docker compose build web                           EXIT_IMG=0
 DOM sau cả ba việc: `tops = {1: 105, 181: 38}` — lớp 1 một làn, lớp 2 một làn.
 
 Số nền README: `1497` → **`1500`** (+3 bài `needs_review`/`status`).
+
+## ERRATA #68 — ba nút bước "Lồng tiếng / Ghép nền / Xuất" bấm KHÔNG xếp job nào
+
+**Phát hiện lúc:** chủ dự án gửi ảnh thanh bước (`Lồng tiếng · chưa chạy`,
+`Ghép nền · cần lồng tiếng xong`, `Xuất · cần ghép nền`) và yêu cầu: *"làm tương tự cái nút
+để ấn lồng tiếng và tách âm ở trên này. Và cả xuất nữa"*.
+
+**Bốn chỗ hỏng, cùng một triệu chứng.** Đo bằng cách cắm bộ ghi `fetch` trong app
+(không thực thi request, để không xếp job thật):
+
+| bấm | trước | sau |
+|---|---|---|
+| Phiên âm | `POST /api/jobs {"type":"asr","engine":"fw-large-v3-turbo",…}` | (vẫn thế) |
+| Lồng tiếng | **không request nào** | `POST /api/dubs {"tron_nen":null,…}` |
+| Ghép nền | **không request nào** | `POST /api/dubs {"tron_nen":true,…}` |
+| Xuất | **không request nào** (chỉ hiện "cần ghép nền") | `POST /api/dubs {"tron_nen":true,…}` + lời báo |
+
+1. `Studio.onStep("long")` chỉ `datLacQuan` + `setView("dub")` rồi `return` — nên bước
+   "Lồng tiếng" đổi màu sang "đang chạy…" mà **không có job nào**. Đây là lý do người dùng
+   thấy "nút không ấn được": giao diện phản hồi, sản phẩm thì không làm gì.
+2. `App.onBuoc` **không có nhánh `ghep`**. Ghép nền không phải loại job riêng — nó là job
+   `dub` mang `payload.tron_nen = true`, và chính nó sinh `dub-{tid}.mp4`.
+3. `endpoints.makeDub` **không gửi `tron_nen`**: body chỉ có `translation_id/voice/style`.
+   Thiếu cờ đó thì `Studio.jobGhep` (lọc `type === "dub" && payload.tron_nen === true`) luôn
+   `null` ⇒ `coFileXuat` luôn `false` ⇒ bước "Xuất" đứng ở "cần ghép nền" **vĩnh viễn**.
+4. `onStep("xuat")` khi chưa có tệp chỉ `setNotice("Chua xuat duoc: …")` — bấm "Xuất" mà
+   không có đường nào để CÓ tệp.
+
+**Sửa:** `long`/`ghep` gọi `onBuoc` (kèm cổng chặn: chưa có bản dịch thì nói lý do, đang
+chạy thì không xếp chồng); `makeDub(id, voice, tronNen)`; `App.onBuoc("ghep")` →
+`makeDub(…, true)`; bấm "Xuất" khi chưa có tệp thì **tự xếp job ghép nền** rồi báo phải chờ,
+có tệp rồi thì tải.
+
+**Ghim:** `bấm bước Lồng tiếng XẾP job lồng tiếng`, `bấm bước Ghép nền XẾP job ghép`,
+`bấm Xuất khi CHƯA có tệp…`, `bấm Xuất khi ĐÃ có tệp…` (`Studio.test.tsx`), và
+`makeDub: tron_nen phải nằm trong BODY` (`endpoints.test.ts`).
+
+### Đo cuối
+
+```
+npm test              269 pass, 0 fail              EXIT_TEST=0
+npx tsc --noEmit                                    EXIT_TS=0
+docker compose build web                            EXIT_BUILD=0
+```

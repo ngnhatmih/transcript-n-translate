@@ -459,12 +459,19 @@ export function exportUrl(
  * TUYỆT ĐỐI (`${API}/...`), đường mà `call` bỏ qua `BASE`. Không bài nào đi qua đúng tổ hợp
  * "hàm endpoint + đường TƯƠNG ĐỐI". Bài ghim ở `endpoints.test.ts` bắt đúng tổ hợp đó.
  */
-export const makeDub = (translationId: number, voice: string | null) =>
+export const makeDub = (translationId: number, voice: string | null,
+                        tronNen: boolean | null = null) =>
   api.post<{ job: { id: number; type: string; state: string; translation_id: number } }>(
     // `style` đi cùng payload: phụ đề BURN vào video là thứ người dùng đã nhìn thấy trong
     // bản xem trước, nên hai bên phải cùng một kiểu. Backend đọc `payload["style"]`
     // (`pipeline/dub.py`), vắng mặt thì dùng mặc định của định dạng.
-    "/dubs", { translation_id: translationId, voice, style: styleChoAss(docStyle()) });
+    //
+    // 🔴 `tron_nen` KHÔNG phải trang trí: chỉ job `dub` mang `tron_nen = true` mới sinh ra
+    // `dub-{tid}.mp4` (`dub.py` gọi `_tron_va_remux`). Bước "Ghép nền" trên thanh đường
+    // ống vì thế phải gửi cờ này — thiếu nó thì không tệp nào ra đời và bước "Xuất" đứng
+    // ở "cần ghép nền" MÃI MÃI. `null` = theo mặc định của môi trường.
+    "/dubs", { translation_id: translationId, voice, tron_nen: tronNen,
+               style: styleChoAss(docStyle()) });
 
 /**
  * Kế hoạch tốc độ của lượt lồng GẦN NHẤT — số đo TỪNG dòng cho bảng ở màn Lồng tiếng.

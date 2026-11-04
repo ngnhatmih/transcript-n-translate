@@ -452,14 +452,78 @@ describe("Studio: bước Dịch — bấm là DỊCH, kể cả dịch lại", 
     assert.ok(q().getByText(/cần bóc băng trước/), "phải nói lý do, không im lặng");
   });
 
-  it("bấm bước Lồng tiếng không gọi onBuoc", () => {
-    // ⚠️ Có HAI thứ tên "Lồng tiếng": nút đổi góc nhìn (`VIEWS`, nhãn "Long tieng"
-    // KHÔNG dấu) và bước trên thanh đường ống (tên "Lồng tiếng" CÓ dấu). Chọn theo
-    // đúng chuỗi của bước để không trúng nút kia.
+  it("bấm bước Lồng tiếng XẾP job lồng tiếng (onBuoc('long'))", () => {
+    // 🔴 ĐO ĐƯỢC: bản cũ chỉ `datLacQuan` + `setView` rồi `return`, nên bấm "Lồng tiếng"
+    // không xếp job nào — nút như chết. Nay bấm là gửi `POST /api/dubs` qua
+    // `App.onBuoc("long")`.
     const { props, goi } = dungThu();
     render(<Studio {...props} />);
-    fireEvent.click(q().getByRole("button", { name: /^Lồng tiếng/ }));
-    assert.ok(!tenDaGoi(goi).includes("onBuoc"));
+    const { nut } = buocTheoTen("Lồng tiếng");
+    fireEvent.click(nut);
+    const buoc = goi.filter((g) => g.ten === "onBuoc").map((g) => g.args[0]);
+    assert.deepEqual(buoc, ["long"], `phải gửi đúng một onBuoc('long'), đo được ${JSON.stringify(buoc)}`);
+  });
+
+  it("chưa có bản dịch: bấm Lồng tiếng KHÔNG gửi job, và NÓI lý do", () => {
+    const { props, goi } = dungThu({ banDich: null });
+    render(<Studio {...props} />);
+    const { nut } = buocTheoTen("Lồng tiếng");
+    fireEvent.click(nut);
+    assert.ok(!tenDaGoi(goi).includes("onBuoc"), "chưa có bản dịch thì không xếp job");
+    assert.ok(q().getByText(/cần bản dịch trước/), "phải nói lý do, không im lặng");
+  });
+
+  it("ĐANG lồng tiếng: KHÔNG xếp thêm job, và NÓI đang lồng", () => {
+    const dangLong = job({
+      id: 73, type: "dub", state: "running",
+      payload: { translation_id: BAN_DICH_ID },
+    });
+    const { props, goi } = dungThu({ jobs: [dangLong] });
+    render(<Studio {...props} />);
+    const { nut } = buocTheoTen("Lồng tiếng");
+    fireEvent.click(nut);
+    assert.ok(!tenDaGoi(goi).includes("onBuoc"), "đang lồng thì không xếp thêm job");
+    assert.ok(q().getByText(/Đang lồng tiếng/), "phải nói đang lồng, không im lặng");
+  });
+
+  it("bấm bước Ghép nền XẾP job ghép (onBuoc('ghep'))", () => {
+    // Ghép nền KHÔNG phải loại job riêng: nó là job `dub` mang `tron_nen = true`
+    // (`App.onBuoc("ghep")` -> `makeDub(..., true)`), và chính nó sinh `dub-{tid}.mp4`.
+    const { props, goi } = dungThu();
+    render(<Studio {...props} />);
+    const { nut } = buocTheoTen("Ghép nền");
+    fireEvent.click(nut);
+    const buoc = goi.filter((g) => g.ten === "onBuoc").map((g) => g.args[0]);
+    assert.deepEqual(buoc, ["ghep"], `phải gửi đúng một onBuoc('ghep'), đo được ${JSON.stringify(buoc)}`);
+  });
+
+  it("bấm Xuất khi CHƯA có tệp: xếp job ghép nền rồi nói phải chờ", () => {
+    // Bấm "Xuất" là muốn CÓ TỆP. Trước đây chỉ hiện "Chua xuat duoc: cần ghép nền" rồi
+    // thôi — mà bước ghép nền cũng không có đường nào xếp job, nên tệp không bao giờ ra.
+    const { props, goi } = dungThu();
+    render(<Studio {...props} />);
+    const { nut } = buocTheoTen("Xuất");
+    fireEvent.click(nut);
+    const buoc = goi.filter((g) => g.ten === "onBuoc").map((g) => g.args[0]);
+    assert.deepEqual(buoc, ["ghep"], `phải xếp ghép nền, đo được ${JSON.stringify(buoc)}`);
+    assert.ok(!tenDaGoi(goi).includes("onXuatVideo"), "chưa có tệp thì chưa tải");
+    assert.ok(q().getByText(/đang ghép nền để xuất/), "phải nói đang làm gì tiếp");
+  });
+
+  it("bấm Xuất khi ĐÃ có tệp (job ghép nền done) thì TẢI, không xếp thêm job", () => {
+    const { props, goi } = dungThu({
+      jobs: [
+        job({
+          id: 74, type: "dub", state: "done",
+          payload: { translation_id: BAN_DICH_ID, tron_nen: true },
+        }),
+      ],
+    });
+    render(<Studio {...props} />);
+    const { nut } = buocTheoTen("Xuất");
+    fireEvent.click(nut);
+    assert.ok(tenDaGoi(goi).includes("onXuatVideo"), "có tệp thì phải tải tệp");
+    assert.ok(!tenDaGoi(goi).includes("onBuoc"), "không được xếp thêm job khi tệp đã có");
   });
 });
 
