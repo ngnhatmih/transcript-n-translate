@@ -207,7 +207,8 @@ export function PhuDeOverlay({
         fontWeight: style.dam ? 700 : 400,
         fontStyle: style.nghieng ? "italic" : "normal",
       }, rongKhaDung);
-  const caoDong = h.coChu * 1.25;
+  //: Bước dòng để tính chiều cao hộp khi API chưa về: đúng 1,0 em libass.
+  const caoDong = h.coLibass;
   //: Chiều cao hộp = `max(cao_hop, chữ + 2·viền)` — ĐÚNG luật `to_ass`.
   const caoHopThat = Math.max(
     hHop,
@@ -235,7 +236,11 @@ export function PhuDeOverlay({
   const noiDung = {
     fontFamily: style.font + ", system-ui, sans-serif",
     fontSize: `${h.coChu}px`,
-    lineHeight: 1.25,
+    //: 🔴 BƯỚC DÒNG của libass = **1,0 × `co`** (đo được ở ERRATA #72: đỉnh ba dòng
+    //: 1366/1417/1468 khi `co = 51`). Đặt bằng px TUYỆT ĐỐI trong hệ pixel video — không
+    //: dùng hệ số `1.25` của CSS, vì `1,25 × coChu` sau khi `coChu` đã nhân 0,637 chỉ ra
+    //: 40,7 px, hụt so với 51 px của bản burn.
+    lineHeight: `${h.coLibass}px`,
     fontWeight: style.dam ? 700 : 400,
     fontStyle: style.nghieng ? "italic" : "normal",
     color: style.mauChu,

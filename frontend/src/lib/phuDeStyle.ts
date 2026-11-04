@@ -190,11 +190,35 @@ export function styleChoAss(s: PhuDeStyle): Record<string, unknown> {
  * `transform: scale(hopRong / videoW)`. Layout chạy ở cỡ chữ thật (17 px, nơi số đo của
  * trình duyệt đáng tin), còn phép thu là tuyến tính nên tỉ lệ chữ/hộp/khung khớp bản burn.
  */
+/**
+ * `Fontsize` của libass KHÔNG phải CSS px: libass vẽ chữ nhỏ hơn ~0,637 lần so với việc
+ * Chrome đặt `font-size` bằng đúng số đó.
+ *
+ * 🔴 ĐO ĐƯỢC (chủ dự án gửi ảnh "lại bị tràn"; đo trong app):
+ *
+ *     hộp (theo số backend) : 1080 px, scrollWidth 1245  ← CHỮ VƯỢT HỘP
+ *     dòng 1 trong preview  : **1410** video px   (Chrome, `font-size: 51,1875px`)
+ *     cùng dòng, bản burn   : **~917** libass px
+ *     ⇒ 917 / 1410 = **0,65**  (đúng hằng số `_TI_LE_CHU = 0,637` của backend)
+ *
+ * Nên preview phải đặt `font-size` = `co × tỉ lệ × 0,637` thì chữ mới bằng chữ burn. Trước
+ * đây hộp đã lấy đúng số của backend nhưng CHỮ bên trong to gấp ~1,5 lần — hộp đúng mà chữ
+ * tràn ra ngoài, và đó là lý do lỗi "tràn" cứ quay lại dù đã sửa bề rộng hộp mấy lần.
+ *
+ * Hằng số này PHẢI khớp `subtitle_format._TI_LE_CHU` bên backend. Đổi một bên là hai bên
+ * lệch lại — xem `docs/PHU-DE-QUY-TAC.md`.
+ */
+export const TI_LE_CHU_LIBASS = 0.637;
+
 export function hinhHocVideo(s: PhuDeStyle, videoW: number, videoH: number) {
   const tiLe = Math.min(videoW / HE_GOC.rx, videoH / HE_GOC.ry);
+  const coLibass = s.co * tiLe;
   return {
     tiLe,
-    coChu: s.co * tiLe,
+    //: Cỡ chữ libass (px trong hệ `PlayRes`) — cũng là BƯỚC DÒNG của libass (1,0 em).
+    coLibass,
+    //: Cỡ chữ để TRÌNH DUYỆT vẽ, đã quy đổi về đúng độ lớn libass.
+    coChu: coLibass * TI_LE_CHU_LIBASS,
     vien: Math.max(0, s.vien * tiLe),
     le: Math.max(0, 60 * tiLe),
     cachDay: Math.min(Math.max(0, s.viTriDoc), 0.5) * videoH,

@@ -96,12 +96,18 @@ test("styleChoAss dùng TÊN KHOÁ của backend, không phải tên biến giao
 test("hinhHocVideo: CÙNG công thức với bản burn (`to_ass`) — trục NGẮN quyết định", () => {
   const s = { ...STYLE_MAC_DINH, co: 60, vien: 2 };
   // Ngang 1920×1080: trục ngắn 1080 -> tỉ lệ 1.
-  assert.equal(hinhHocVideo(s, HE_GOC.rx, HE_GOC.ry).coChu, 60);
+  assert.equal(hinhHocVideo(s, HE_GOC.rx, HE_GOC.ry).coLibass, 60);
   // Dọc 1080×1920: trục ngắn 1080 -> 1080/1920 = 0,5625.
   const doc = hinhHocVideo(s, 1080, 1920);
   assert.ok(
-    Math.abs(doc.coChu - 33.75) < 1e-9,
-    `cỡ chữ trên khung dọc phải là 33,75, đo được ${doc.coChu}`,
+    Math.abs(doc.coLibass - 33.75) < 1e-9,
+    `cỡ chữ libass trên khung dọc phải là 33,75, đo được ${doc.coLibass}`,
+  );
+  //: Cỡ chữ để TRÌNH DUYỆT vẽ = cỡ libass × 0,637: đo được Chrome vẽ rộng gấp ~1,5 lần
+  //: libass cùng số, nên thiếu hệ số này là chữ tràn khỏi hộp dù bề rộng hộp đúng.
+  assert.ok(
+    Math.abs(doc.coChu - 33.75 * 0.637) < 1e-9,
+    `cỡ chữ VẼ phải là 33,75 × 0,637, đo được ${doc.coChu}`,
   );
   // Cách đáy tính theo CHIỀU CAO video, không theo trục ngắn.
   assert.ok(Math.abs(doc.cachDay - 0.06 * 1920) < 1e-9);
@@ -119,8 +125,11 @@ test("hinhHocVideo: cỡ chữ là pixel CỦA VIDEO, không phải của khung 
   // `transform: scale()`, nên tỉ lệ khớp.
   const s = { ...STYLE_MAC_DINH, co: 30, vien: 20 };
   const h = hinhHocVideo(s, 1080, 1920);
-  assert.ok(Math.abs(h.coChu - 16.875) < 1e-9,
-    `cỡ chữ phải là 30 × 0,5625 = 16,875 (px của video), đo được ${h.coChu}`);
+  assert.ok(Math.abs(h.coLibass - 16.875) < 1e-9,
+    `cỡ chữ libass phải là 30 × 0,5625 = 16,875, đo được ${h.coLibass}`);
+  //: CHỮ VẼ RA phải nhỏ hơn: 16,875 × 0,637 = 10,75 px (xem `TI_LE_CHU_LIBASS`).
+  assert.ok(Math.abs(h.coChu - 16.875 * 0.637) < 1e-9,
+    `cỡ chữ VẼ phải là 16,875 × 0,637 = 10,75, đo được ${h.coChu}`);
   assert.ok(Math.abs(h.vien - 11.25) < 1e-9, `viền phải là 20 × 0,5625 = 11,25, đo được ${h.vien}`);
   assert.ok(Math.abs(h.le - 33.75) < 1e-9, `lề phải là 60 × 0,5625 = 33,75, đo được ${h.le}`);
   // Không phụ thuộc kích thước khung hiển thị — đó chính là điều làm hai bên lệch trước đây.
