@@ -35,7 +35,7 @@ import { CommandPalette, type Command } from "./CommandPalette";
 import { PhuDeOverlay, PhuDePreviewPlayer, PhuDeStyleDialog, dungHopVideo } from "./PhuDeStyle";
 import { PhuDeLibass } from "./PhuDeLibass";
 import {
-  docLibass, docStyle, luuLibass, luuStyle, type PhuDeStyle,
+  docLibass, docStyle, luuLibass, luuStyle, styleChoAss, type PhuDeStyle,
 } from "@/lib/phuDeStyle";
 import { VungDocKhung, type VungDoc } from "./VungDoc";
 
@@ -604,8 +604,15 @@ export function Studio(props: StudioProps) {
         dubState: trangThai("long", jobDub === null ? null : jobDub.state),
         ghepState: trangThai("ghep", jobGhep === null ? null : jobGhep.state),
         coFileXuat: jobGhep !== null && jobGhep.state === "done",
+        //: So kiểu chữ HIỆN TẠI với kiểu đã dùng cho lần ghép gần nhất — payload của job
+        //: `dub` mang `style` (backend lưu nguyên khối). Không so được (job cũ không có
+        //: `style` trong payload) thì coi như KHÔNG đổi: không được bịa ra "đã cũ".
+        kieuChuDoi: jobGhep !== null && jobGhep.payload?.["style"] !== undefined
+          && JSON.stringify(jobGhep.payload?.["style"])
+             !== JSON.stringify(styleChoAss(kieuPhuDe)),
       }),
-    [transcript, banDich, issues.length, jobDub, jobGhep, jobAsr, jobDich, trangThai],
+    [transcript, banDich, issues.length, jobDub, jobGhep, jobAsr, jobDich, trangThai,
+     kieuPhuDe],
   );
 
   // TỰ TAN trạng thái lạc quan khi `/api/jobs` đã mang tin THẬT về job này.

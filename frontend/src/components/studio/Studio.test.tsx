@@ -32,6 +32,7 @@ import type {
 import { cleanup, fireEvent, render, waitFor, within } from "@testing-library/react";
 import { Studio, type StudioProps } from "./Studio.tsx";
 import { VUNG_DOC_MAC_DINH } from "./VungDoc.tsx";
+import { STYLE_MAC_DINH, styleChoAss } from "@/lib/phuDeStyle.ts";
 import { setupDom, teardownDom } from "../../../test/dom.ts";
 
 const ORIGIN = "http://127.0.0.1:8620";
@@ -1231,5 +1232,40 @@ describe("usePlayer — dong ho KHONG duoc phu thuoc requestAnimationFrame", () 
         `khoi duoc to phai la doan quanh 4.5 s, do duoc: ${tieuDe}`,
       );
     });
+  });
+
+  it("kiểu chữ đã đổi sau lần ghép ⇒ bấm Xuất XẾP GHÉP LẠI, không tải tệp cũ", async () => {
+    // 🔴 ĐO ĐƯỢC (chủ dự án: "chỉnh như nào thì lúc xuất vẫn ra y hệt nhau"). Tệp mp4 sinh
+    // một lần bởi job ghép; đổi kiểu chữ không làm nó vẽ lại. Payload của job mang `style`
+    // của lần ghép đó, nên so được với kiểu đang dùng.
+    const { props, goi } = dungThu({
+      jobs: [job({
+        id: 90, type: "dub", state: "done",
+        payload: { translation_id: BAN_DICH_ID, tron_nen: true, style: { co: 999 } },
+      })],
+    });
+    render(<Studio {...props} />);
+    const { nut } = buocTheoTen("Xuất");
+    fireEvent.click(nut);
+    const buoc = goi.filter((g) => g.ten === "onBuoc").map((g) => g.args[0]);
+    assert.deepEqual(buoc, ["ghep"],
+      `kiểu chữ đã đổi thì phải ghép lại, đo được ${JSON.stringify(buoc)}`);
+    assert.ok(!tenDaGoi(goi).includes("onXuatVideo"), "không được tải tệp cũ");
+  });
+
+  it("kiểu chữ KHÔNG đổi ⇒ bấm Xuất tải tệp như cũ", () => {
+    //: Vế đối chứng: so kiểu chữ không được biến mọi lần bấm Xuất thành "ghép lại".
+    const { props, goi } = dungThu({
+      jobs: [job({
+        id: 91, type: "dub", state: "done",
+        payload: { translation_id: BAN_DICH_ID, tron_nen: true,
+                   style: styleChoAss({ ...STYLE_MAC_DINH }) },
+      })],
+    });
+    render(<Studio {...props} />);
+    const { nut } = buocTheoTen("Xuất");
+    fireEvent.click(nut);
+    assert.ok(tenDaGoi(goi).includes("onXuatVideo"), "kiểu chữ khớp thì tải tệp");
+    assert.ok(!tenDaGoi(goi).includes("onBuoc"), "không được ghép lại");
   });
 });

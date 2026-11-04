@@ -359,6 +359,15 @@ export interface DauVaoDuongOng {
   ghepState: "queued" | "running" | "done" | "failed" | "interrupted" | "cancelled" | null;
   /** Đã có file `dub-{id}.mp4` để xuất chưa (đọc từ `kichThuocDub`). */
   coFileXuat: boolean;
+  /**
+   * Kiểu chữ hiện tại KHÁC kiểu đã dùng cho lần ghép gần nhất.
+   *
+   * 🔴 ĐO ĐƯỢC (chủ dự án: *"chỉnh như nào thì lúc xuất vẫn ra y hệt nhau"*): tệp
+   * `dub-{id}.mp4` được sinh ra MỘT LẦN bởi job ghép nền, và nút "Xuất" chỉ **tải tệp đã
+   * có**. Đổi cỡ chữ/màu/vị trí xong bấm Xuất thì vẫn ra đúng tệp cũ — không có gì báo là
+   * tệp đã lỗi thời. Cờ này để bước Xuất nói ra và để nhánh "chưa có tệp" chạy lại ghép.
+   */
+  kieuChuDoi: boolean;
 }
 
 /**
@@ -480,14 +489,20 @@ export function duongOng(d: DauVaoDuongOng): BuocDuongOng[] {
 
   // Xuất KHÔNG đọc `soViec`. Lý do chưa xuất được chỉ còn hai: chưa ghép nền xong, hoặc
   // đã ghép xong nhưng chưa có tệp (job xuất chưa chạy / chưa ghi ra đĩa).
-  const buocXuat: BuocDuongOng = d.coFileXuat
-    ? { id: "xuat", name: "Xuất", note: "sẵn sàng", state: "done" }
-    : {
-        id: "xuat",
-        name: "Xuất",
-        note: d.ghepState !== "done" ? "cần ghép nền" : "chưa có tệp",
-        state: "todo",
-      };
+  //: 🔴 KIỂU CHỮ ĐỔI ⇒ TỆP CŨ KHÔNG CÒN ĐÚNG. Tệp `dub-{id}.mp4` do job ghép sinh ra một
+  //: lần; nó KHÔNG tự vẽ lại khi người dùng đổi kiểu chữ. Bản trước vẫn ghi "sẵn sàng" và
+  //: bấm Xuất là tải đúng tệp cũ — đo được (chủ dự án: *"chỉnh như nào thì lúc xuất vẫn ra y
+  //: hệt nhau"*). Nay bước Xuất nói thẳng và nhánh "chưa có tệp" sẽ chạy lại ghép nền.
+  const buocXuat: BuocDuongOng = d.coFileXuat && d.kieuChuDoi
+    ? { id: "xuat", name: "Xuất", note: "kiểu chữ đã đổi — ghép lại", state: "todo" }
+    : d.coFileXuat
+      ? { id: "xuat", name: "Xuất", note: "sẵn sàng", state: "done" }
+      : {
+          id: "xuat",
+          name: "Xuất",
+          note: d.ghepState !== "done" ? "cần ghép nền" : "chưa có tệp",
+          state: "todo",
+        };
 
   return [buocAsr, buocDich, buocDuyet, buocLong, buocGhep, buocXuat];
 }

@@ -1212,3 +1212,23 @@ describe("NHAN_LOP va moTaLop: noi RO LOP nao (layer kieu Photoshop)", () => {
       "chưa rõ lớp (bản ghi cũ)");
   });
 });
+
+test("bước Xuất: kiểu chữ đã đổi ⇒ KHÔNG còn 'sẵn sàng', nói phải ghép lại", () => {
+  // 🔴 ĐO ĐƯỢC (chủ dự án: "chỉnh như nào thì lúc xuất vẫn ra y hệt nhau"): tệp
+  // `dub-{id}.mp4` do job ghép sinh ra MỘT LẦN. Đổi cỡ chữ/màu/vị trí xong bấm Xuất thì
+  // vẫn tải đúng tệp cũ, và bước Xuất vẫn ghi "sẵn sàng" — không có gì báo tệp đã lỗi thời.
+  const cu = duongOng(vao({ coBanGhi: true, coBanDich: true, soViec: 0,
+                            dubState: "done", ghepState: "done", coFileXuat: true,
+                            kieuChuDoi: false }));
+  const xuatCu = cu.find((b) => b.id === "xuat");
+  assert.equal(xuatCu?.state, "done");
+  assert.equal(xuatCu?.note, "sẵn sàng");
+
+  const moi = duongOng(vao({ coBanGhi: true, coBanDich: true, soViec: 0,
+                             dubState: "done", ghepState: "done", coFileXuat: true,
+                             kieuChuDoi: true }));
+  const xuatMoi = moi.find((b) => b.id === "xuat");
+  assert.equal(xuatMoi?.state, "todo", "tệp cũ không còn đúng ⇒ chưa 'done'");
+  assert.match(xuatMoi?.note ?? "", /ghép lại/,
+    `phải nói phải ghép lại, đo được ${JSON.stringify(xuatMoi?.note)}`);
+});
