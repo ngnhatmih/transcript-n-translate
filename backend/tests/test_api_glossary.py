@@ -31,6 +31,8 @@ lỗi đã trả giá trong chính giai đoạn này:
 """
 from __future__ import annotations
 
+from conftest import mo_hinh_mac_dinh
+
 import dataclasses
 import pathlib
 
@@ -98,7 +100,8 @@ def wired(tmp_path, monkeypatch):
     monkeypatch.setattr(main, "LOG_DIR", data / "logs")
     # Phép dò Ollama bị ghim `set()` ⇒ `available=False` một cách TẤT ĐỊNH, nên
     # bài này không cá cược vào việc máy đang chạy đã pull model nào.
-    monkeypatch.setattr(main, "ollama_available", lambda *a, **k: set())
+    monkeypatch.setattr(main, "ollama_available",
+                        lambda *a, **k: set() | mo_hinh_mac_dinh())
 
     repos, specs, worker, broker, mt_engines = main.build_components()
     _assert_repo_data_dirs_untouched(before)

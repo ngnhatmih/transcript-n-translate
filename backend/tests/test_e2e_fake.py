@@ -40,6 +40,8 @@ DÂY (`mt_engines`, `governor.register`, `TranslateHandler`) là của `main.py`
 """
 from __future__ import annotations
 
+from conftest import mo_hinh_mac_dinh
+
 import asyncio
 import dataclasses
 import pathlib

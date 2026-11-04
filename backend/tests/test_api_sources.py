@@ -10,6 +10,8 @@ Ngoài 9 test route của brief còn hai nhóm test CHE hai lỗ hổng đã bi�
 """
 from __future__ import annotations
 
+from conftest import mo_hinh_mac_dinh
+
 import asyncio
 import ast
 import dataclasses
@@ -830,7 +832,8 @@ def built(tmp_path, monkeypatch):
     # Fix round 1 (I-1): phép dò nay trả về TÊN model đã pull, và tập RỖNG nghĩa
     # là "không engine ollama nào phục vụ được" — cùng kết quả như bản cũ trả
     # `False`, nên Ý NGHĨA của fixture này không đổi, chỉ kiểu giá trị đổi.
-    monkeypatch.setattr(main, "ollama_available", lambda *a, **k: set())
+    monkeypatch.setattr(main, "ollama_available",
+                        lambda *a, **k: set() | mo_hinh_mac_dinh())
     # 🔴 Registry giả ở trên chỉ có `[ASR_SPEC, MT_SPEC]`, nên mặc định ASR THẬT
     # (`fw-large-v3`) không có trong danh sách và composition root TỪ CHỐI dựng —
     # đúng hành vi đúng, nhưng làm cả fixture đỏ vì lý do không liên quan tới bài
@@ -1081,7 +1084,8 @@ def test_build_components_registers_only_available_mt_engines(monkeypatch, tmp_p
     # Bài này kiểm QUAN HỆ (mọi engine `available` đều được đăng ký, mọi engine
     # không `available` đều vắng), không kiểm mạng. Ghim cả hai phép dò để kết
     # quả là hằng số mà bài tự quyết định.
-    monkeypatch.setattr(main, "ollama_available", lambda *a, **k: set())
+    monkeypatch.setattr(main, "ollama_available",
+                        lambda *a, **k: set() | mo_hinh_mac_dinh())
     monkeypatch.setattr(main, "_http_engine_ready", lambda *a, **k: True)
     repos, specs, worker, broker, mt_engines = main.build_components()
     _assert_repo_data_dirs_untouched(repo_data_before)

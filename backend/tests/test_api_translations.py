@@ -29,6 +29,8 @@ chính giai đoạn này:
 """
 from __future__ import annotations
 
+from conftest import mo_hinh_mac_dinh
+
 import dataclasses
 import pathlib
 
@@ -110,7 +112,8 @@ def _point_everything_at_tmp(tmp_path, monkeypatch, *, ollama_pulled: set[str]):
     monkeypatch.setattr(main, "LOG_DIR", data / "logs")
     # Một nút điều khiển DUY NHẤT cho cả hai nửa của `available`: phép dò trả về
     # TÊN model đã pull, nên `set()` là "Ollama không phục vụ được engine nào".
-    monkeypatch.setattr(main, "ollama_available", lambda *a, **k: set(ollama_pulled))
+    monkeypatch.setattr(main, "ollama_available",
+                        lambda *a, **k: set(ollama_pulled) | mo_hinh_mac_dinh())
     return main, config, data
 
 

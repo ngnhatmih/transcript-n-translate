@@ -25,6 +25,8 @@ Fix round 1 (I-1): phép dò trả về TÊN model đã pull (`set()` khi không
 """
 from __future__ import annotations
 
+from conftest import mo_hinh_mac_dinh
+
 import dataclasses
 import json
 import pathlib
@@ -177,8 +179,8 @@ class _Harness:
         self.ollama_alive = True
         self.pulled = _all_real_model_refs()
         monkeypatch.setattr(main, "ollama_available",
-                            lambda *a, **k: set(self.pulled) if self.ollama_alive
-                            else set())
+                            lambda *a, **k: (set(self.pulled) | mo_hinh_mac_dinh())
+                            if self.ollama_alive else set())
         self.mt_engines: list[_RecordingMtEngine] = []
 
         def mt_factory(*args, **kwargs):
@@ -550,7 +552,8 @@ def test_real_mt_engines_are_constructible_from_the_shipped_registry(tmp_path, m
     monkeypatch.setattr(main, "LOG_DIR", data / "logs")
     # Fix round 1 (I-1): phép dò trả về TÊN model đã pull; ở đây pull ĐÚNG mọi
     # `model_ref` của registry để bài này dựng được adapter THẬT cho mọi engine.
-    monkeypatch.setattr(main, "ollama_available", lambda *a, **k: _all_real_model_refs())
+    monkeypatch.setattr(main, "ollama_available",
+                        lambda *a, **k: _all_real_model_refs() | mo_hinh_mac_dinh())
 
     _repos, specs, _worker, _broker, engines = main.build_components()
     _assert_repo_data_untouched(before)
@@ -813,8 +816,23 @@ def test_shipped_registry_already_declares_every_mt_engine_this_wiring_needs():
 
     raw = json.loads(pathlib.Path(config.REGISTRY_PATH).read_text(encoding="utf-8"))
     assert "engines" not in raw, "registry.json không có khoá `engines` (correction C)"
-    assert raw["default_mt"] == "deepseek-web"
+    #: 🔴 ĐỔI GIÁ TRỊ, GIỮ NGUYÊN BẤT BIẾN (ERRATA #71). Bài này TỪNG viết cứng
+    #: `== "deepseek-web"`. Khi gateway `127.0.0.1:8790` tắt, `available` của engine đó là
+    #: `False` và `build_components()` NÉM ngay lúc khởi động — cả máy chủ lẫn mọi test
+    #: dựng app thật đều chết, dù `registry.json` không có gì sai.
+    #:
+    #: Bất biến thật cần ghim KHÔNG phải "một id cụ thể", mà là: mặc định khai trong
+    #: `registry.json` phải CÓ trong danh sách engine. Một id trỏ vào hàng không tồn tại
+    #: cũng làm nổ lúc dựng y hệt, và đó mới là lỗi cần bắt.
+    assert raw["default_mt"] == "hy-mt-1.5-7b", (
+        "mặc định hiện tại là `hy-mt-1.5-7b` (đổi TẠM khi gateway deepseek-web tắt; "
+        "xem ERRATA #71 trong README). Đổi lại thì sửa cả dòng này."
+    )
     ids = [entry["id"] for entry in raw["mt"]]
+    assert raw["default_mt"] in ids, (
+        f"`default_mt` = {raw['default_mt']!r} không có trong danh sách engine — "
+        "khởi động sẽ ném ngay chỗ `default_mt_engine`"
+    )
     # `deepseek-web` là hàng `runtime: "http"` ĐẦU TIÊN được khai, và chỉ được khai SAU KHI
     # đo trên endpoint thật (`data/experiments/accuracy-pipelines/20261026-spike-deepseek-web`:
     # hợp đồng `lines` lô 30 ⇒ 115/115 done, 4 lời gọi, 13,21 s, 0 lỗi alignment, 0 echo).

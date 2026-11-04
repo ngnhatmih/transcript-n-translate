@@ -47,6 +47,8 @@ Bốn chỗ khác brief, và lý do:
 """
 from __future__ import annotations
 
+from conftest import mo_hinh_mac_dinh
+
 import dataclasses
 import pathlib
 
@@ -104,7 +106,8 @@ def wired(tmp_path, monkeypatch):
     monkeypatch.setattr(main, "MEDIA_DIR", data / "media")
     monkeypatch.setattr(main, "OUTPUT_DIR", data / "output")
     monkeypatch.setattr(main, "LOG_DIR", data / "logs")
-    monkeypatch.setattr(main, "ollama_available", lambda *a, **k: set())
+    monkeypatch.setattr(main, "ollama_available",
+                        lambda *a, **k: set() | mo_hinh_mac_dinh())
 
     repos, specs, worker, broker, mt_engines = main.build_components()
     _assert_repo_data_dirs_untouched(before)

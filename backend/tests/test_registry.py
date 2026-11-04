@@ -196,7 +196,12 @@ def test_shipped_registry_declares_the_default_mt_engine():
     from app.registry import default_mt_engine
 
     declared = load_default_mt()
-    assert declared == "deepseek-web"
+    #: 🔴 KHÔNG viết cứng id (ERRATA #71): bản cũ ghim `== "deepseek-web"`, nên khi gateway
+    #: `127.0.0.1:8790` tắt và `default_mt` được đổi TẠM sang `hy-mt-1.5-7b`, bài này đỏ dù
+    #: registry không có gì sai. Bất biến thật là "mặc định phải trỏ tới một engine CÓ THẬT".
+    assert declared == "hy-mt-1.5-7b", (
+        "mặc định hiện tại là `hy-mt-1.5-7b` (đổi TẠM khi gateway deepseek-web tắt)"
+    )
     assert declared in {s.id for s in load_registry()}, (
         "registry.json phải khai báo một engine mt CÓ THẬT trong danh sách"
     )
@@ -210,8 +215,9 @@ def test_shipped_registry_declares_the_default_mt_engine():
     assert reordered[len(asr)].id != mt[0].id, (
         "mutation tự kiểm của chính test: thứ tự mảng `mt` phải đã đổi"
     )
-    assert default_mt_engine(reordered, declared=declared) == "deepseek-web", (
-        "mặc định phải đến từ khoá `default_mt`, không từ vị trí dòng"
+    assert default_mt_engine(reordered, declared=declared) == declared, (
+        "mặc định phải đến từ khoá `default_mt`, không từ vị trí dòng — nên kết quả phải "
+        f"ĐÚNG BẰNG giá trị khai trong registry ({declared!r})"
     )
 
 

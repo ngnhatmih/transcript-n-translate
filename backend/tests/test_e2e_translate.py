@@ -43,6 +43,8 @@ là mutation M1 ở Step 3 của brief.
 """
 from __future__ import annotations
 
+from conftest import mo_hinh_mac_dinh
+
 import pathlib
 
 import pytest
@@ -176,7 +178,8 @@ def _wired(tmp_path, monkeypatch, *, fail_times: int = 0):
     monkeypatch.setattr(main, "OpusMtEngine", fake_opus_factory)
     #: "Ollama chết / chưa pull model nào" ⇒ không engine Ollama nào sẵn sàng,
     #: nên không lượt HTTP nào chạy và suite không phụ thuộc máy đang chạy gì.
-    monkeypatch.setattr(main, "ollama_available", lambda *a, **k: set())
+    monkeypatch.setattr(main, "ollama_available",
+                        lambda *a, **k: set() | mo_hinh_mac_dinh())
     #: Engine ASR thật nạp model ~1,6 GB; bài này không đi qua đường ASR.
     monkeypatch.setattr(main, "_engine_factory", lambda spec: _NeverUsedAsr(),
                         raising=False)
