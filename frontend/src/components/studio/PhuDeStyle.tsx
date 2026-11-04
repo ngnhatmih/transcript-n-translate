@@ -1,7 +1,10 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
-import { FONT_CHO_PHEP, hinhHocVideo, STYLE_MAC_DINH, type PhuDeStyle } from "@/lib/phuDeStyle";
+import {
+  FONT_CHO_PHEP, hinhHocVideo, STYLE_MAC_DINH, styleChoAss, type PhuDeStyle,
+} from "@/lib/phuDeStyle";
 import { hopVideo } from "@/lib/hopVideo";
+import { subtitleLines, type KhoiChu } from "@/api/endpoints";
 
 /**
  * BẺ DÒNG như bản burn — tham lam theo TỪ, cùng file font, cùng bề ngang.
@@ -98,6 +101,35 @@ export function PhuDeOverlay({
     };
   }, [videoRef]);
 
+  //: 🔴 DÒNG LẤY TỪ BACKEND, KHÔNG tự bẻ. Bản burn bẻ bằng Pillow, `canvas` của trình duyệt
+  //: cho câu trả lời KHÁC (~10 % bề ngang chữ ở đúng chỗ quyết định bẻ dòng), nên tự bẻ ở
+  //: đây là hai bên lệch SỐ DÒNG. `beDong` chỉ còn là đường DỰ PHÒNG khi chưa gọi được API.
+  //:
+  //: ⚠️ HOOK NÀY PHẢI NẰM TRƯỚC MỌI `return` SỚM. Bản đầu tôi đặt nó ngay chỗ dùng (sau
+  //: `if (text === "" …) return …`), và React ném "Rendered more hooks than during the
+  //: previous render" → cả trang thành "Trang này không tải được". Rules of Hooks không
+  //: phải hình thức: một `return` sớm ở giữa là đủ để số hook đổi giữa hai lượt render.
+  const [khoiApi, setKhoiApi] = useState<KhoiChu | null>(null);
+  //: Khoá phụ thuộc là CHUỖI của style: `style` là object, so sánh tham chiếu sẽ gọi lại
+  //: API mỗi lượt render (Studio re-render theo `player.time`, tức ~60 lần/giây).
+  const styleKhoa = JSON.stringify(style);
+  useEffect(() => {
+    if (tiLeVideo.rong <= 0 || tiLeVideo.cao <= 0 || text === "") return;
+    let con = true;
+    subtitleLines(text, [tiLeVideo.rong, tiLeVideo.cao],
+                  JSON.parse(styleKhoa) as Record<string, unknown>)
+      .then((r) => {
+        if (con) setKhoiApi(r);
+      })
+      .catch(() => {
+        // API hỏng ⇒ giữ đường dự phòng (canvas). Không được làm sập khung xem.
+        if (con) setKhoiApi(null);
+      });
+    return () => {
+      con = false;
+    };
+  }, [text, styleKhoa, tiLeVideo.rong, tiLeVideo.cao]);
+
   const hop = hopVideo(khung.rong, khung.cao, tiLeVideo.rong, tiLeVideo.cao);
 
   //: Chưa đo được hộp video (jsdom, hoặc video chưa có metadata) thì KHÔNG vẽ: hộp vẽ theo
@@ -138,15 +170,25 @@ export function PhuDeOverlay({
   //: ĐO ĐƯỢC trên app: hộp xem trước **1012 px** (93,7 % bề ngang video) trong khi bản
   //: burn **449 px** (41,6 %) cho đúng câu đó. Có dòng tường minh rồi thì `max-content`
   //: CHÍNH LÀ dòng dài nhất, và hộp mới bám chữ được như bản burn.
-  const dongChu = beDong(text, {
-    fontFamily: style.font + ", system-ui, sans-serif",
-    fontSize: h.coChu,
-    fontWeight: style.dam ? 700 : 400,
-    fontStyle: style.nghieng ? "italic" : "normal",
-  }, rongKhaDung);
+  const dongChu = khoiApi !== null && khoiApi.lines.length > 0
+    ? khoiApi.lines
+    : beDong(text, {
+        fontFamily: style.font + ", system-ui, sans-serif",
+        fontSize: h.coChu,
+        fontWeight: style.dam ? 700 : 400,
+        fontStyle: style.nghieng ? "italic" : "normal",
+      }, rongKhaDung);
   const caoDong = h.coChu * 1.25;
   //: Chiều cao hộp = `max(cao_hop, chữ + 2·viền)` — ĐÚNG luật `to_ass`.
-  const caoHopThat = Math.max(hHop, dongChu.length * caoDong + 2 * h.vien);
+  const caoHopThat = Math.max(
+    hHop,
+    (khoiApi !== null && khoiApi.cao > 0 ? khoiApi.cao : dongChu.length * caoDong) + 2 * h.vien,
+  );
+  //: Bề rộng hộp khi API đã trả số: `rong + 2·viền` (đúng `to_ass`), khỏi phụ thuộc
+  //: `max-content` của trình duyệt — chính chỗ từng làm hộp rộng 1013/1963 px.
+  const rongKhoiThat = khoiApi !== null && khoiApi.rong > 0
+    ? Math.min(tiLeVideo.rong, khoiApi.rong + 2 * h.vien)
+    : null;
   const noiDung = {
     fontFamily: style.font + ", system-ui, sans-serif",
     fontSize: `${h.coChu}px`,
@@ -179,16 +221,15 @@ export function PhuDeOverlay({
             // Neo trong HỘP VIDEO, không trong khung chứa: `left/top` là viền đen bị bỏ.
             ...(hopRieng
               ? (ngangTuDong
-                  // ngang = 0: hộp ÔM CHỮ. `fit-content` + margin auto để vẫn canh giữa.
+                  // ngang = 0: hộp ÔM CHỮ.
                   //
-                  // 🔴 KHÔNG ĐẶT `maxWidth` Ở ĐÂY NỮA (đo được): dòng đã do TA bẻ và
-                  // `white-space: pre` cấm trình duyệt bẻ lại, nên `max-content` CHÍNH LÀ
-                  // dòng dài nhất. Để `maxWidth = rong_kha_dung` thì `fit-content` =
-                  // `min(max-content, maxWidth)` = maxWidth (vì max-content của cả câu vẫn
-                  // lớn hơn), và hộp lại rộng bằng cả bề ngang bẻ dòng — đo trên app:
-                  // hộp **1013 px** trong khi dòng dài nhất chỉ **947 px**.
-                  ? { left: 0, right: 0, width: "fit-content",
-                      marginLeft: "auto", marginRight: "auto",
+                  // 🔴 CÓ SỐ TỪ BACKEND THÌ DÙNG THẲNG `rong + 2·viền` — đó đúng là công
+                  // thức `to_ass` dùng để vẽ hộp. Không có (API chưa về / hỏng) thì lùi về
+                  // `fit-content` với các dòng đã bẻ: `max-content` khi đó là dòng dài nhất.
+                  ? { left: 0, right: 0,
+                      width: rongKhoiThat !== null ? rongKhoiThat : "fit-content",
+                      ...(rongKhoiThat === null
+                        ? { marginLeft: "auto", marginRight: "auto" } : {}),
                       minHeight: caoHopThat, boxSizing: "border-box" as const }
                   : { left: (tiLeVideo.rong - wHop) / 2, width: wHop,
                       minHeight: caoHopThat, boxSizing: "border-box" as const })

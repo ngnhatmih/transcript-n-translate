@@ -64,7 +64,8 @@ def create_app(*, repos, specs: list[EngineSpec], media_dir, out_dir,
 
     from app.api import (routes_dubs, routes_export, routes_glossary, routes_jobs,
                          routes_media, routes_registry, routes_sources,
-                         routes_stats, routes_transcripts, routes_translations)
+                         routes_stats, routes_subtitles, routes_transcripts,
+                         routes_translations)
     app.include_router(routes_translations.chimera_router)
 
     app.include_router(routes_registry.router)
@@ -77,6 +78,9 @@ def create_app(*, repos, specs: list[EngineSpec], media_dir, out_dir,
     app.include_router(routes_media.router)
     app.include_router(routes_transcripts.router)
     app.include_router(routes_export.router)
+    # Bẻ dòng của phụ đề: MỘT nguồn cho cả bản burn và bản xem trước trên web
+    # (ERRATA #73) — trình duyệt và Pillow không cho cùng một câu trả lời.
+    app.include_router(routes_subtitles.router)
     # Task 13: `prefix="/api/translations"` là tiền tố TĨNH, không đụng route
     # `/{...}` động của các router khác, nên thứ tự ở đây không phải chuyện đúng
     # sai — nhưng vẫn đặt cạnh nhóm route tài nguyên (trước `routes_jobs`) để tệp

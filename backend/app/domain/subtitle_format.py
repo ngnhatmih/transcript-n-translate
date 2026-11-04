@@ -362,6 +362,53 @@ def _do_khoi_chu(chu: str, font: str, co: int, rong_kha_dung: int,
         return (0, 0, 0, [])
 
 
+def khoi_chu(text: str, *, khung: tuple[int, int] | None = None,
+             style: dict | None = None) -> dict:
+    """Bẻ dòng và đo khối chữ y hệt bản burn — NGUỒN DUY NHẤT cho cả hai bên.
+
+    🔴 VÌ SAO CÓ HÀM NÀY (ERRATA #73). Bản xem trước trên web tự bẻ dòng bằng
+    `canvas.measureText` của trình duyệt, còn bản burn bẻ bằng Pillow ở đây. Hai bộ đo
+    KHÔNG cho cùng một câu trả lời — đo được với `co 91` trên video 1080×1920, câu
+    *"Chi phí hiện tại … phí nhập là 5000"*:
+
+        bản burn      : 2 dòng 919 + 345   → hộp 938 × 180
+        bản xem trước : 3 dòng 872/947/122 → hộp 969 × 214
+
+    Lệch ~10 % bề ngang chữ ở ĐÚNG chỗ quyết định bẻ dòng, nên số dòng khác nhau. Muốn
+    "phụ đề trên web không lệch bản burn" thì chỉ còn một cách: giao diện HỎI chính hàm
+    này thay vì tự đo.
+
+    Trả `{"lines": [...], "rong": px, "cao": px, "co": px, "vien": px, "le": px}` —
+    `rong`/`cao` là của KHỐI CHỮ (chưa cộng viền), đúng số mà `to_ass` dùng để dựng hộp.
+    """
+    tham_so = dict(_ASS_KHUNG_MAC_DINH)
+    if style:
+        tham_so.update(_style_ass(style))
+    if khung is not None:
+        rong, cao = int(khung[0]), int(khung[1])
+        if rong > 0 and cao > 0:
+            ti_le = min(rong / 1920, cao / 1080)
+            tham_so.update(
+                rx=rong, ry=cao, wrap=0,
+                co=max(12, round(tham_so["co"] * ti_le)),
+                vien=max(1, round(tham_so["vien"] * ti_le)),
+                le=max(8, round(tham_so["le"] * ti_le)),
+            )
+    rong_kha_dung = max(40, int(tham_so["rx"]) - 2 * int(tham_so["le"]))
+    r_doan, c_doan, _, dong = _do_khoi_chu(
+        text or " ", str(tham_so.get("font", "Archivo")), int(tham_so["co"]),
+        rong_kha_dung, bool(tham_so.get("dam")))
+    return {
+        "lines": dong if dong else [text or " "],
+        "rong": r_doan,
+        "cao": c_doan,
+        "co": int(tham_so["co"]),
+        "vien": int(tham_so.get("vien", 0)),
+        "le": int(tham_so["le"]),
+        "rong_kha_dung": rong_kha_dung,
+    }
+
+
 def to_ass(segments: list[Segment], *, translations: list[str] | None = None,
            bilingual: bool = False, title: str = "phu-de-lab",
            khung: tuple[int, int] | None = None,

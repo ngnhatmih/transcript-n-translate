@@ -488,6 +488,31 @@ export const makeDub = (translationId: number, voice: string | null,
 export const getDubPlan = (translationId: number): Promise<DubPlan | null> =>
   api.get<DubPlan | null>(`/dubs/${translationId}/plan`);
 
+/** Khối chữ đã bẻ dòng — CHÍNH hàm mà bản burn dùng (xem `routes_subtitles.py`). */
+export interface KhoiChu {
+  lines: string[];
+  /** Bề rộng / chiều cao KHỐI CHỮ, pixel của video (chưa cộng viền). */
+  rong: number;
+  cao: number;
+  co: number;
+  vien: number;
+  le: number;
+  rong_kha_dung: number;
+}
+
+/**
+ * Hỏi BACKEND bẻ dòng thay vì tự đo bằng `canvas`.
+ *
+ * 🔴 VÌ SAO (ERRATA #73): bản burn bẻ bằng Pillow, bản xem trước bẻ bằng canvas của trình
+ * duyệt; hai bộ đo lệch ~10 % bề ngang chữ ở đúng chỗ quyết định bẻ dòng, nên cùng một câu
+ * ra SỐ DÒNG khác nhau — đo được với `co 91`: burn 2 dòng (919+345, hộp 938×180), preview
+ * 3 dòng (872/947/122, hộp 969×214). Gọi route này thì cả hai bên dùng CHUNG một phép bẻ.
+ */
+export const subtitleLines = (
+  text: string, khung: [number, number], style: Record<string, unknown>,
+): Promise<KhoiChu> =>
+  api.post<KhoiChu>("/subtitles/lines", { text, khung, style });
+
 /** Đường NGHE THỬ một dòng: wav của take đã ép tốc độ, cắt từ master (route không chạy TTS). */
 export const dubTakeUrl = (translationId: number, i: number): string =>
   `/api/dubs/${translationId}/take?i=${i}`;
@@ -506,6 +531,7 @@ export const dubAudioUrl = (translationId: number): string =>
 export const endpoints = {
   makeDub,
   getDubPlan,
+  subtitleLines,
   dubTakeUrl,
   dubAudioUrl,
   listSources,
