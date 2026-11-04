@@ -1913,6 +1913,28 @@ ngoài hộp đen. Sửa hai việc:
 **Ghim:** `test_chu_DAM_phai_di_vao_phep_DO_be_rong` (backend: `dam` tới được phép đo, và
 hộp rộng `chữ + 2·viền`) và `hinhHoc KHÔNG có sàn 8 px` (frontend).
 
+**Đo lại trên chính app** (tab được kích hoạt, video `readyState 4`, `videoWidth 1080`,
+`currentTime 41,2`): lớp đè `font-size 2,065 px`, `line-height 2,58`, hộp **82 × 22**,
+`clientH 22 = scrollH 22`, `clientW 82 = scrollW 82` ⇒ **không còn tràn**, đệm `1,377 px`,
+`min-height 22,03`, `box-sizing: border-box`. Chiều cao hộp so với khung: bản burn 9,3 %
+(`178/1920`), bản xem 9,4 % (`22/235`) — khớp.
+
+⚠️ **Còn lệch, và biết vì sao:** bề NGANG hộp trong bản xem là 62 % khung (`82/132`) còn bản
+burn là 41,6 % (`449/1080`). Ở cỡ chữ 2 px, Chrome không thể cho mỗi ký tự hẹp hơn ~1 px,
+nên 85 ký tự ra ~82 px (0,96 px/ký tự) trong khi bản burn cần 0,61 px/ký tự. Đây là SÀN
+CỦA CHÍNH TRÌNH DUYỆT ở cỡ chữ quá nhỏ, không phải sai công thức — và nó chỉ hết khi khung
+xem đủ lớn (mở video: 1080 px → chữ 17 px).
+
+### ⚠️ Bẫy ĐO: `ffmpeg -ss` đặt TRƯỚC `-i` thì phụ đề vẫn tính từ 0
+
+Lượt đo đầu của tôi dùng `ffmpeg -ss 41.2 -i VIDEO -vf ass=...`, và ảnh ra KHÔNG phải phút
+41,2: filter `ass` nhận mốc thời gian của luồng đã cắt, tức nó vẽ phụ đề của ~giây 0. Đo
+được: tôi tưởng đang xem "Chi phí hiện tại…" nhưng ảnh lại có "Là một người làm nghệ thuật"
+(câu ở `0:00`), và tôi đã suýt "sửa" một lỗi không tồn tại.
+
+Đúng phải là `-i VIDEO -ss 41.2` (cắt ở ĐẦU RA) — hoặc `-copyts`. Mọi ảnh burn trong
+ERRATA này đều làm lại bằng cách đó.
+
 ### Đo cuối
 
 ```
