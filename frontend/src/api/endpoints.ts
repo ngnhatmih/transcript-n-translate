@@ -460,7 +460,8 @@ export function exportUrl(
  * "hàm endpoint + đường TƯƠNG ĐỐI". Bài ghim ở `endpoints.test.ts` bắt đúng tổ hợp đó.
  */
 export const makeDub = (translationId: number, voice: string | null,
-                        tronNen: boolean | null = null) =>
+                        tronNen: boolean | null = null,
+                        chiTron = false) =>
   api.post<{ job: { id: number; type: string; state: string; translation_id: number } }>(
     // `style` đi cùng payload: phụ đề BURN vào video là thứ người dùng đã nhìn thấy trong
     // bản xem trước, nên hai bên phải cùng một kiểu. Backend đọc `payload["style"]`
@@ -470,8 +471,13 @@ export const makeDub = (translationId: number, voice: string | null,
     // `dub-{tid}.mp4` (`dub.py` gọi `_tron_va_remux`). Bước "Ghép nền" trên thanh đường
     // ống vì thế phải gửi cờ này — thiếu nó thì không tệp nào ra đời và bước "Xuất" đứng
     // ở "cần ghép nền" MÃI MÃI. `null` = theo mặc định của môi trường.
+    //
+    // 🔴 `chi_tron` TÁCH hai việc ra: ghép nền chỉ cần master `dub-{tid}.wav` đã có, nhưng
+    // `DubHandler.run()` chạy TTS TRƯỚC rồi mới trộn — nên "Ghép nền" từng chạy lại cả
+    // lượt lồng tiếng (5–7 phút). ĐO ĐƯỢC (chủ dự án: *"tại sao ấn ghép nền thì nó chạy
+    // lại cả lồng tiếng"*). `true` = dùng lại master, chỉ trộn + burn + remux.
     "/dubs", { translation_id: translationId, voice, tron_nen: tronNen,
-               style: styleChoAss(docStyle()) });
+               chi_tron: chiTron, style: styleChoAss(docStyle()) });
 
 /**
  * Kế hoạch tốc độ của lượt lồng GẦN NHẤT — số đo TỪNG dòng cho bảng ở màn Lồng tiếng.

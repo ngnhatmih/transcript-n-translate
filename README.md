@@ -1697,3 +1697,44 @@ pytest (toàn bộ)      1523 passed, 15 deselected   EXIT_PYTEST=0
 npm test              272 pass, 0 fail             EXIT_TEST=0
 npx tsc --noEmit                                   EXIT_TS=0
 ```
+
+## ERRATA #70 — "Ghép nền" chạy lại CẢ lượt lồng tiếng (TTS 5–7 phút) vì nó vẫn là job `dub`
+
+**Phát hiện lúc:** chủ dự án: *"tại sao ấn ghép nền thì nó chạy lại cả lồng tiếng"*.
+
+**Nguyên nhân:** "Ghép nền" không phải một loại job — nó là job `dub` mang `tron_nen = true`
+(xem ERRATA #68). Mà `DubHandler.run()` chạy theo đúng thứ tự cố định:
+
+```
+dòng 331   lay = self._tts([...])          <- TTS TOÀN BỘ bản dịch
+dòng 362   master = rap(dat, ...)          <- ghép các take thành dub-<tid>.wav
+dòng 374   if tron_nen: self._tron_va_remux(...)   <- CHỈ Ở ĐÂY mới trộn nền
+```
+
+Nên cờ `tron_nen` chỉ thêm việc ở CUỐI; nó không bỏ được việc ở ĐẦU. Bấm "Ghép nền" là chạy
+lại toàn bộ TTS — 5–7 phút — cho một việc mà đầu vào `dub-<tid>.wav` đã nằm sẵn trên đĩa.
+
+**Sửa:** thêm cờ `chi_tron` (cả `DubIn` ở `POST /api/dubs` và `DubPayload` ở
+`POST /api/jobs`, vì cả hai đường đều vào `DubHandler.run`). Có cờ đó thì `run()`:
+
+- đòi `dub-<tid>.wav` phải tồn tại; thiếu thì **NÉM** `chưa có bản lồng … chạy Lồng tiếng
+  trước`, KHÔNG lặng lẽ chạy lại TTS;
+- bỏ hẳn nhánh TTS và nhánh ghép take, đi thẳng vào `_tron_va_remux` với master đã có;
+- báo `ghép nền từ bản lồng đã có: dub-63.wav (24726764 byte) — không chạy lại TTS`.
+
+Giao diện: bước "Ghép nền" (và nhánh "Xuất chưa có tệp" tự xếp ghép nền) gửi
+`chi_tron = true`, và **chặn sớm** khi job `dub` chưa `done` — nói "bấm Lồng tiếng trước"
+thay vì xếp một job backend chắc chắn ném.
+
+**Ghim:** `test_GHep_nen_dung_lai_ban_long_KHONG_chay_lai_TTS` (TTS không được gọi lần nào,
+master không bị ghi đè, progress kết ở 1.0),
+`test_GHep_nen_khi_CHUA_co_ban_long_thi_NEM_chu_khong_chay_lai_TTS`,
+`makeDub: chi_tron phải nằm trong BODY`, và hai bài chặn sớm ở `Studio.test.tsx`.
+
+### Đo cuối
+
+```
+pytest (toàn bộ)      1525 passed, 15 deselected   EXIT_PYTEST=0
+npm test              274 pass, 0 fail             EXIT_TEST=0
+npx tsc --noEmit                                   EXIT_TS=0
+```

@@ -75,6 +75,61 @@ def test_handler_dat_take_dung_offset_va_xuat_du_nam_dinh_dang(repos, tmp_path):
     assert dong and dong[-1][0] == 1.0, "progress phải kết ở 1.0"
 
 
+def test_GHep_nen_dung_lai_ban_long_KHONG_chay_lai_TTS(repos, tmp_path):
+    """`chi_tron = true` ⇒ dùng `dub-<tid>.wav` đã có, KHÔNG gọi TTS.
+
+    🔴 ĐO ĐƯỢC (chủ dự án: *"tại sao ấn ghép nền thì nó chạy lại cả lồng tiếng"*): trước
+    nhánh này, `run()` chạy TTS TRƯỚC rồi mới tới `if tron_nen`, nên bấm "Ghép nền" tốn đúng
+    5–7 phút của một lượt lồng tiếng đầy đủ — cho một việc mà đầu vào đã nằm sẵn trên đĩa.
+
+    Máy test không có video gốc nên `_tron_va_remux` bỏ qua bước trộn (đường hợp lệ, xem
+    docstring của nó) — phép đo ở đây là "TTS KHÔNG được gọi" và "master không bị ghi đè".
+    """
+    r, tid = repos
+    out = tmp_path / "dubs"
+    out.mkdir(parents=True, exist_ok=True)
+    master = out / f"dub-{tid}.wav"
+    sf.write(str(master), np.full(48_000, 0.25, dtype=np.float32), 48_000)
+    truoc = master.read_bytes()
+
+    goi = []
+
+    def tts_dem(items, voice, out_dir):
+        goi.append(len(items))
+        return _tts_gia_1_giay(items, voice, out_dir)
+
+    h = DubHandler(r, out, tts_dem)
+    job_id = r.add_job(Job(id=None, workspace=2, type="dub", engine="vieneu-v3-turbo",
+                           phase="dub:vieneu-v3-turbo",
+                           payload={"translation_id": tid, "tron_nen": True, "chi_tron": True}))
+    dong: list[tuple[float, str]] = []
+    h.run(r.get_job(job_id), lambda p, line: dong.append((p, line)))
+
+    assert goi == [], f"ghép nền KHÔNG được gọi TTS, đo được {goi} lần"
+    assert master.read_bytes() == truoc, "ghép nền không được ghi đè master đã có"
+    assert any("ghép nền" in chu for _, chu in dong), "phải nói rõ đang ghép nền"
+    assert dong[-1][0] == 1.0, "progress phải kết ở 1.0"
+
+
+def test_GHep_nen_khi_CHUA_co_ban_long_thi_NEM_chu_khong_chay_lai_TTS(repos, tmp_path):
+    """Không có master thì NÉM kèm câu chỉ việc — không lặng lẽ chạy lại TTS 7 phút."""
+    r, tid = repos
+    out = tmp_path / "dubs"
+    goi = []
+
+    def tts_dem(items, voice, out_dir):
+        goi.append(len(items))
+        return _tts_gia_1_giay(items, voice, out_dir)
+
+    h = DubHandler(r, out, tts_dem)
+    job_id = r.add_job(Job(id=None, workspace=2, type="dub", engine="vieneu-v3-turbo",
+                           phase="dub:vieneu-v3-turbo",
+                           payload={"translation_id": tid, "chi_tron": True}))
+    with pytest.raises(RuntimeError, match="chạy Lồng tiếng trước"):
+        h.run(r.get_job(job_id), lambda p, line: None)
+    assert goi == [], "không có master thì cũng KHÔNG được tự chạy TTS"
+
+
 def test_handler_doc_duoc_take_vi_thu_muc_con_song(repos, tmp_path):
     """HỢP ĐỒNG: đường dẫn runner trả về phải còn sống khi `run()` đọc nó.
 

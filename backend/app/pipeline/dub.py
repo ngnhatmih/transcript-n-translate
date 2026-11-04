@@ -310,6 +310,33 @@ class DubHandler:
         kieu_chu = payload.get("style") or None
 
         ban = self._repos.get_translation(tid)
+
+        #: 🔴 `chi_tron` = GHÉP NỀN TỪ BẢN LỒNG ĐÃ CÓ, không chạy lại TTS.
+        #
+        # ĐO ĐƯỢC (chủ dự án: *"tại sao ấn ghép nền thì nó chạy lại cả lồng tiếng"*): trước
+        # nhánh này, `run()` LUÔN gọi `self._tts(...)` ở dưới rồi mới tới `if tron_nen`. Nên
+        # bấm "Ghép nền" (job `dub` + `tron_nen = true`) là chạy lại toàn bộ TTS — 5–7 phút
+        # cho một việc mà đầu vào `dub-<tid>.wav` đã nằm sẵn trên đĩa.
+        #
+        # Ghép nền chỉ cần đúng hai thứ: master đã có, và chữ của bản dịch (để burn phụ đề).
+        # Không có master thì NÉM, không lặng lẽ chạy lại TTS: người dùng bấm "ghép nền" chứ
+        # không bấm "lồng lại", và biến một thao tác 1 phút thành 7 phút mà không nói gì là
+        # đúng loại im lặng repo này xoá.
+        master_path = self._out_dir / f"dub-{tid}.wav"
+        if bool(payload.get("chi_tron")):
+            if not master_path.is_file():
+                raise RuntimeError(
+                    f"chưa có bản lồng của bản dịch #{tid} ({master_path.name}) — "
+                    "chạy Lồng tiếng trước rồi mới ghép nền")
+            report(0.05, f"ghép nền từ bản lồng đã có: {master_path.name} "
+                         f"({master_path.stat().st_size} byte) — không chạy lại TTS")
+            self._tron_va_remux(tid, ban.transcript_id, master_path, report,
+                                chu_dich=[s.text for s in (ban.segments or [])],
+                                kieu_chu=kieu_chu)
+            xuat_dinh_dang(master_path, self._out_dir, self._dinh_dangs)
+            report(1.0, "xong · ghép nền (dùng lại bản lồng đã có)")
+            return
+
         # LOC THEO LOP truoc khi long: timeline giu 2 dong de nguoi doc soat, nhung
         # ban long chi duoc noi MOT lan moi cau (xem `mot_dong_moi_cap`).
         dong = mot_dong_moi_cap([s for s in ban.segments if (s.text or "").strip()])

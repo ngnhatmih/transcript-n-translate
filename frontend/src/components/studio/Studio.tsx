@@ -961,6 +961,12 @@ export function Studio(props: StudioProps) {
           setNotice(`Chưa xuất được: ${lyDoXuat}`);
           return;
         }
+        // Ghép nền dùng lại bản lồng đã có ⇒ phải CÓ bản lồng đã xong. Nói ngay thay vì
+        // xếp một job backend chắc chắn ném "chạy Lồng tiếng trước".
+        if (jobDub === null || jobDub.state !== "done") {
+          setNotice("Chưa xuất được: chưa lồng tiếng xong — bấm Lồng tiếng trước");
+          return;
+        }
         if (jobGhep !== null && (jobGhep.state === "queued" || jobGhep.state === "running")) {
           setNotice("Đang ghép nền — xong thì bấm Xuất lần nữa");
           return;
@@ -976,9 +982,17 @@ export function Studio(props: StudioProps) {
         return;
       }
       if (id === "ghep") {
-        // Bấm "Ghép nền" = XẾP JOB ghép (job `dub` + `tron_nen`), không chỉ đổi góc nhìn.
+        // Bấm "Ghép nền" = XẾP JOB ghép (job `dub` + `tron_nen` + `chi_tron`), không chỉ
+        // đổi góc nhìn.
         if (banDich === null) {
           setNotice("Chưa có bản dịch — ghép nền cần bản lồng tiếng trước");
+          return;
+        }
+        // 🔴 GHÉP NỀN DÙNG LẠI BẢN LỒNG ĐÃ CÓ, nên nó cần bản lồng TỒN TẠI. Chưa lồng xong
+        // mà bấm thì backend ném "chạy Lồng tiếng trước" — nói ngay ở đây để người dùng
+        // không phải chờ một job chắc chắn hỏng.
+        if (jobDub === null || jobDub.state !== "done") {
+          setNotice("Chưa lồng tiếng xong — bấm Lồng tiếng trước rồi mới ghép nền");
           return;
         }
         if (jobGhep !== null && (jobGhep.state === "queued" || jobGhep.state === "running")) {

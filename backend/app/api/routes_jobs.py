@@ -93,6 +93,10 @@ class DubPayload(BaseModel):
     #: Kiểu chữ phụ đề BURN vào video — cùng khối với `POST /api/dubs` và
     #: `GET /api/export/{id}?style=…`. Vắng mặt = mặc định của định dạng.
     tron_nen: bool | None = None
+    #: Chỉ GHÉP NỀN từ `dub-<tid>.wav` đã có — không chạy lại TTS. Cùng nghĩa với
+    #: `DubIn.chi_tron` ở `POST /api/dubs` (xem docblock ở đó); cả hai đường đều đi vào
+    #: `DubHandler.run`, nên thiếu khoá này ở MỘT trong hai là một nửa hệ thống hiểu sai.
+    chi_tron: bool | None = None
     style: dict | None = None
 
 

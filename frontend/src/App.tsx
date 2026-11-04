@@ -703,9 +703,12 @@ export function App() {
           setLoi("chua co ban dich — khong ghep nen duoc");
           return;
         }
+        // `chi_tron = true`: dùng lại `dub-{tid}.wav` đã có, CHỈ trộn + burn + remux.
+        // Không có cờ này thì `DubHandler.run()` chạy lại TTS (5–7 phút) — đúng câu hỏi
+        // của chủ dự án: "tại sao ấn ghép nền thì nó chạy lại cả lồng tiếng".
         void (async () => {
           try {
-            await endpoints.makeDub(banDich.id, null, true);
+            await endpoints.makeDub(banDich.id, null, true, true);
           } catch (e) {
             setLoi(e instanceof Error ? e.message : String(e));
           }

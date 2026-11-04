@@ -155,6 +155,7 @@ describe("endpoints: đường dẫn TƯƠNG ĐỐI, không bao giờ có '/api'
     try {
       await endpoints.makeDub(10, null, true);
       await endpoints.makeDub(10, null);
+      await endpoints.makeDub(10, null, true, true);
     } finally {
       globalThis.fetch = truoc;
     }
@@ -162,6 +163,12 @@ describe("endpoints: đường dẫn TƯƠNG ĐỐI, không bao giờ có '/api'
       "ghép nền phải gửi tron_nen: true, đo được " + than[0]);
     assert.equal(JSON.parse(than[1]).tron_nen, null,
       "lồng tiếng thường phải để tron_nen: null, đo được " + than[1]);
+    // 🔴 `chi_tron` tách "ghép nền" khỏi "lồng lại": thiếu cờ này thì `DubHandler.run()`
+    // chạy TTS TRƯỚC rồi mới trộn — bấm "Ghép nền" tốn 5–7 phút (đo được, xem ERRATA #70).
+    assert.equal(JSON.parse(than[2]).chi_tron, true,
+      "ghép nền phải gửi chi_tron: true, đo được " + than[2]);
+    assert.equal(JSON.parse(than[0]).chi_tron, false,
+      "lồng tiếng thường KHÔNG được gửi chi_tron: true, đo được " + than[0]);
   });
 
   it("sau mỗi bài, `fetch` của tiến trình KHÔNG còn là bản ghi của tệp này", () => {

@@ -487,9 +487,12 @@ describe("Studio: bước Dịch — bấm là DỊCH, kể cả dịch lại", 
   });
 
   it("bấm bước Ghép nền XẾP job ghép (onBuoc('ghep'))", () => {
-    // Ghép nền KHÔNG phải loại job riêng: nó là job `dub` mang `tron_nen = true`
-    // (`App.onBuoc("ghep")` -> `makeDub(..., true)`), và chính nó sinh `dub-{tid}.mp4`.
-    const { props, goi } = dungThu();
+    // Ghép nền KHÔNG phải loại job riêng: nó là job `dub` mang `tron_nen = true` +
+    // `chi_tron = true` (`App.onBuoc("ghep")` -> `makeDub(..., true, true)`), và chính nó
+    // sinh `dub-{tid}.mp4`. Cần job `dub` đã `done` vì ghép nền DÙNG LẠI master đã có.
+    const { props, goi } = dungThu({
+      jobs: [job({ id: 83, type: "dub", state: "done", payload: { translation_id: BAN_DICH_ID } })],
+    });
     render(<Studio {...props} />);
     const { nut } = buocTheoTen("Ghép nền");
     fireEvent.click(nut);
@@ -497,10 +500,23 @@ describe("Studio: bước Dịch — bấm là DỊCH, kể cả dịch lại", 
     assert.deepEqual(buoc, ["ghep"], `phải gửi đúng một onBuoc('ghep'), đo được ${JSON.stringify(buoc)}`);
   });
 
+  it("CHƯA lồng tiếng xong: Ghép nền KHÔNG xếp job, và NÓI lý do", () => {
+    // Ghép nền dùng lại `dub-{tid}.wav`; chưa có master thì backend ném
+    // "chạy Lồng tiếng trước". Nói ngay, đừng xếp một job chắc chắn hỏng.
+    const { props, goi } = dungThu();
+    render(<Studio {...props} />);
+    const { nut } = buocTheoTen("Ghép nền");
+    fireEvent.click(nut);
+    assert.ok(!tenDaGoi(goi).includes("onBuoc"), "chưa có bản lồng thì không xếp job ghép");
+    assert.ok(q().getByText(/bấm Lồng tiếng trước/), "phải nói phải làm gì trước");
+  });
+
   it("bấm Xuất khi CHƯA có tệp: xếp job ghép nền rồi nói phải chờ", () => {
     // Bấm "Xuất" là muốn CÓ TỆP. Trước đây chỉ hiện "Chua xuat duoc: cần ghép nền" rồi
     // thôi — mà bước ghép nền cũng không có đường nào xếp job, nên tệp không bao giờ ra.
-    const { props, goi } = dungThu();
+    const { props, goi } = dungThu({
+      jobs: [job({ id: 84, type: "dub", state: "done", payload: { translation_id: BAN_DICH_ID } })],
+    });
     render(<Studio {...props} />);
     const { nut } = buocTheoTen("Xuất");
     fireEvent.click(nut);
@@ -508,6 +524,15 @@ describe("Studio: bước Dịch — bấm là DỊCH, kể cả dịch lại", 
     assert.deepEqual(buoc, ["ghep"], `phải xếp ghép nền, đo được ${JSON.stringify(buoc)}`);
     assert.ok(!tenDaGoi(goi).includes("onXuatVideo"), "chưa có tệp thì chưa tải");
     assert.ok(q().getByText(/đang ghép nền để xuất/), "phải nói đang làm gì tiếp");
+  });
+
+  it("CHƯA lồng tiếng xong: Xuất KHÔNG xếp job, và NÓI lý do", () => {
+    const { props, goi } = dungThu();
+    render(<Studio {...props} />);
+    const { nut } = buocTheoTen("Xuất");
+    fireEvent.click(nut);
+    assert.ok(!tenDaGoi(goi).includes("onBuoc"), "chưa lồng xong thì không xếp job ghép");
+    assert.ok(q().getByText(/chưa lồng tiếng xong/), "phải nói lý do");
   });
 
   it("bấm Xuất khi ĐÃ có tệp (job ghép nền done) thì TẢI, không xếp thêm job", () => {

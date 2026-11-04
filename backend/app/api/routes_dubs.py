@@ -36,6 +36,13 @@ class DubIn(BaseModel):
     #: bản lồng sạch; `True` = bắt buộc trộn. Đo được giá của `True`: +66 s và 555 MiB
     #: VRAM cho phim 20,8 phút — nên nó là lựa chọn THEO JOB, không phải mặc định ngầm.
     tron_nen: bool | None = None
+    #: CHỈ ghép nền từ `dub-<tid>.wav` đã có — KHÔNG chạy lại TTS.
+    #:
+    #: 🔴 ĐO ĐƯỢC (chủ dự án: *"tại sao ấn ghép nền thì nó chạy lại cả lồng tiếng"*): nút
+    #: "Ghép nền" gửi `tron_nen = true`, mà `DubHandler.run()` chạy TTS TRƯỚC rồi mới trộn —
+    #: nên ghép nền tốn đúng 5–7 phút của một lượt lồng tiếng đầy đủ. Cờ này tách hai việc
+    #: ra: `True` = dùng lại master, chỉ trộn + burn + remux.
+    chi_tron: bool | None = None
     #: Kiểu chữ phụ đề BURN vào `dub-<tid>.mp4`. Cùng khối `style` với
     #: `GET /api/export/{id}?style=…` và với bản xem trước trên web — một kiểu chữ, ba
     #: nơi dùng. `None` = mặc định của định dạng, tệp ra giống từng byte bản cũ.
@@ -73,6 +80,7 @@ def create_dub(body: DubIn, repos=Depends(get_repos), worker=Depends(get_worker)
               phase=f"dub:{ENGINE_TTS}",
               payload={"translation_id": body.translation_id, "voice": body.voice,
                        "so_dong": body.so_dong, "tron_nen": body.tron_nen,
+                       "chi_tron": body.chi_tron,
                        "style": body.style})
     job_id = repos.add_job(job)
     return {"job": {"id": job_id, "type": "dub", "state": repos.get_job(job_id).state,
