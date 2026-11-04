@@ -228,8 +228,11 @@ export function PhuDeOverlay({
                   // `fit-content` với các dòng đã bẻ: `max-content` khi đó là dòng dài nhất.
                   ? { left: 0, right: 0,
                       width: rongKhoiThat !== null ? rongKhoiThat : "fit-content",
-                      ...(rongKhoiThat === null
-                        ? { marginLeft: "auto", marginRight: "auto" } : {}),
+                      //: 🔴 `margin auto` PHẢI CÓ Ở CẢ HAI NHÁNH. Bản trước chỉ đặt khi chưa
+                      //: có số từ API; có `width` cụ thể rồi mà thiếu margin thì `left: 0`
+                      //: đặt hộp dính MÉP TRÁI — đo trên ảnh chủ dự án: hộp lệch hẳn sang
+                      //: trái thay vì canh giữa như bản burn `\an2` (neo giữa).
+                      marginLeft: "auto", marginRight: "auto",
                       minHeight: caoHopThat, boxSizing: "border-box" as const }
                   : { left: (tiLeVideo.rong - wHop) / 2, width: wHop,
                       minHeight: caoHopThat, boxSizing: "border-box" as const })
