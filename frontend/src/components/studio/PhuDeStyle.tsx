@@ -24,8 +24,7 @@ function beDong(chu: string, font: {
   fontSize: number;
   fontWeight: number;
   fontStyle: string;
-}, rongKhaDung: number): string[] {
-  const tu = chu.split(/\s+/).filter((x) => x !== "");
+}, rongKhaDung: number): string[] {  const tu = chu.split(/\s+/).filter((x) => x !== "");
   if (tu.length <= 1) return [chu];
   let ctx: CanvasRenderingContext2D | null = null;
   try {
@@ -50,6 +49,36 @@ function beDong(chu: string, font: {
   }
   if (hien !== "") ra.push(hien);
   return ra.length > 0 ? ra : [chu];
+}
+
+
+/**
+ * Bề rộng DÒNG DÀI NHẤT theo số đo của TRÌNH DUYỆT (canvas).
+ *
+ * 🔴 VÌ SAO PHẢI CÓ (chủ dự án gửi ảnh: *"chữ tràn ra ngoài hộp"*): bề rộng hộp lấy từ
+ * backend (`khoi_chu` đo bằng Pillow × hệ số), còn Chrome render dòng đó theo metric THẬT
+ * của nó — dòng nào Chrome vẽ rộng hơn số Pillow thì chữ thò ra ngoài hộp đen. Hai bộ đo
+ * lệch nhau vài phần trăm là đủ thấy, nhất là khi chữ bị bẻ thành nhiều dòng.
+ *
+ * Không có `canvas` (jsdom) thì trả `0` — bên gọi dùng số của backend.
+ */
+function rongDongDaiNhat(dong: string[], font: {
+  fontFamily: string;
+  fontSize: number;
+  fontWeight: number;
+  fontStyle: string;
+}): number {
+  let ctx: CanvasRenderingContext2D | null = null;
+  try {
+    ctx = document.createElement("canvas").getContext("2d");
+  } catch {
+    ctx = null;
+  }
+  if (ctx === null) return 0;
+  ctx.font = `${font.fontStyle} ${font.fontWeight} ${font.fontSize}px ${font.fontFamily}`;
+  let rong = 0;
+  for (const d of dong) rong = Math.max(rong, ctx.measureText(d).width);
+  return rong;
 }
 
 /**
@@ -186,8 +215,22 @@ export function PhuDeOverlay({
   );
   //: Bề rộng hộp khi API đã trả số: `rong + 2·viền` (đúng `to_ass`), khỏi phụ thuộc
   //: `max-content` của trình duyệt — chính chỗ từng làm hộp rộng 1013/1963 px.
-  const rongKhoiThat = khoiApi !== null && khoiApi.rong > 0
-    ? Math.min(tiLeVideo.rong, khoiApi.rong + 2 * h.vien)
+  //: Bề rộng hộp = `MAX(số của backend, số của trình duyệt) + 2·viền`.
+  //:
+  //: 🔴 Lấy MAX chứ không lấy số backend: backend đo bằng Pillow, Chrome vẽ bằng metric
+  //: của nó — dòng nào Chrome rộng hơn thì chữ THÒ RA NGOÀI hộp (đúng ảnh chủ dự án gửi
+  //: trong hộp thoại "Chỉnh phụ đề hiển thị"). Lấy max thì hộp luôn chứa chữ, và chỉ rộng
+  //: hơn bản burn đúng phần chênh của hai bộ đo (vài px).
+  const rongTrinhDuyet = rongDongDaiNhat(dongChu, {
+    fontFamily: style.font + ", system-ui, sans-serif",
+    fontSize: h.coChu,
+    fontWeight: style.dam ? 700 : 400,
+    fontStyle: style.nghieng ? "italic" : "normal",
+  });
+  const rongChuThat = Math.max(khoiApi !== null && khoiApi.rong > 0 ? khoiApi.rong : 0,
+                               rongTrinhDuyet);
+  const rongKhoiThat = rongChuThat > 0
+    ? Math.min(tiLeVideo.rong, rongChuThat + 2 * h.vien)
     : null;
   const noiDung = {
     fontFamily: style.font + ", system-ui, sans-serif",

@@ -166,4 +166,70 @@ describe("PhuDeOverlay: hộp CANH GIỮA khi đã có số từ backend", () =>
       video.remove();
     }
   });
+
+  it("chữ của TRÌNH DUYỆT rộng hơn số backend ⇒ hộp lấy số LỚN hơn (không tràn)", async () => {
+    // 🔴 ĐO ĐƯỢC (ảnh chủ dự án: "chữ tràn ra ngoài hộp" trong hộp thoại): bề rộng hộp lấy
+    // từ backend (Pillow), còn Chrome render theo metric của nó — dòng nào Chrome rộng hơn
+    // thì chữ thò ra ngoài. Sửa: `max(số backend, số canvas) + 2·viền`.
+    const V = document.createElement("video").constructor as unknown as { prototype: object };
+    const H = document.createElement("div").constructor as unknown as { prototype: object };
+    const C = document.createElement("canvas").constructor as unknown as { prototype: object };
+    const goc = {
+      vw: Object.getOwnPropertyDescriptor(V.prototype, "videoWidth"),
+      vh: Object.getOwnPropertyDescriptor(V.prototype, "videoHeight"),
+      cw: Object.getOwnPropertyDescriptor(H.prototype, "clientWidth"),
+      ch: Object.getOwnPropertyDescriptor(H.prototype, "clientHeight"),
+      gc: Object.getOwnPropertyDescriptor(C.prototype, "getContext"),
+      fetch: globalThis.fetch,
+    };
+    Object.defineProperty(V.prototype, "videoWidth", { configurable: true, get: () => 1080 });
+    Object.defineProperty(V.prototype, "videoHeight", { configurable: true, get: () => 1920 });
+    Object.defineProperty(H.prototype, "clientWidth", { configurable: true, get: () => 132 });
+    Object.defineProperty(H.prototype, "clientHeight", { configurable: true, get: () => 235 });
+    //: Canvas giả: mỗi ký tự rộng 12 px ⇒ dòng 10 ký tự rộng 120 px, LỚN HƠN `rong: 100`
+    //: mà API trả về. Hộp phải theo 120, không theo 100.
+    Object.defineProperty(C.prototype, "getContext", {
+      configurable: true,
+      value: () => ({ font: "", measureText: (s: string) => ({ width: 12 * s.length }) }),
+    });
+    globalThis.fetch = (async () => new Response(JSON.stringify({
+      lines: ["0123456789"], rong: 100, cao: 58, co: 51, vien: 11, le: 34,
+      rong_kha_dung: 1012,
+    }), { status: 200, headers: { "content-type": "application/json" } })) as typeof fetch;
+
+    const video = document.createElement("video");
+    document.body.appendChild(video);
+    try {
+      render(
+        <PhuDeOverlay
+          style={{ ...STYLE_MAC_DINH, co: 91, vien: 20, caoHop: 180,
+                   kieuVien: 3, rongHop: 0 }}
+          text="0123456789"
+          videoRef={{ current: video }}
+        />,
+      );
+      await new Promise((r) => setTimeout(r, 30));
+
+      const hop = [...document.body.querySelectorAll("div")].find((e) =>
+        (e.getAttribute("style") ?? "").includes("min-height"),
+      );
+      assert.ok(hop !== undefined, "phải có hộp");
+      const style = hop.getAttribute("style") ?? "";
+      //: 120 (canvas) + 2 × 11,25 = 142,5 — KHÔNG phải 100 + 22,5 = 122,5.
+      assert.match(style, /width:\s*142\.5px/,
+        `hộp phải theo số LỚN hơn (canvas 120 + 2×11,25), đo được: ${style}`);
+    } finally {
+      const tra = (obj: object, ten: string, d?: PropertyDescriptor): void => {
+        if (d === undefined) delete (obj as Record<string, unknown>)[ten];
+        else Object.defineProperty(obj, ten, d);
+      };
+      tra(V.prototype, "videoWidth", goc.vw);
+      tra(V.prototype, "videoHeight", goc.vh);
+      tra(H.prototype, "clientWidth", goc.cw);
+      tra(H.prototype, "clientHeight", goc.ch);
+      tra(C.prototype, "getContext", goc.gc);
+      globalThis.fetch = goc.fetch;
+      video.remove();
+    }
+  });
 });
