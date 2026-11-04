@@ -108,3 +108,60 @@ Burn: `DubHandler._tron_va_remux` → **lọc theo lớp** (`mot_dong_moi_cap`, 
   dòng), #74 (burn đè nhau).
 - Test canh: `backend/tests/test_phu_de_style.py`, `test_api_subtitles.py`, `test_dub.py`;
   `frontend/src/lib/phuDeStyle.test.ts`, `frontend/src/components/studio/PhuDeStyle.test.tsx`.
+
+## 8. Nhánh thứ hai: xem trước bằng CHÍNH libass (`PhuDeLibass`)
+
+Đường CSS ở trên phải **mô phỏng** libass, nên mỗi hằng số sai một chút là lệch — và đã 6
+lần phải sửa từng cái. Nhánh này bỏ hẳn việc mô phỏng: nó nạp **đúng file `.ass`** mà bản
+burn dùng và cho **libass biên dịch sang WebAssembly** (`jassub`) vẽ.
+
+```
+editor ──► to_ass() trên backend ──► .ass ──┬──► jassub (wasm libass)  → preview
+                                            └──► ffmpeg `ass=` filter   → burn
+```
+
+Vì sao chọn `jassub` chứ không tự viết lại: nó LÀ libass (cùng upstream), nên bẻ dòng,
+kerning, hình học hộp và vị trí do cùng một bộ máy quyết định. `SubtitlesOctopus` cùng hướng
+(cũng libass wasm); `ASS.js` (DOM/CSS) thì KHÔNG đảm bảo khớp pixel với ffmpeg.
+
+### Bật/tắt
+
+Khoá riêng trong `localStorage`: `phu-de-lab:phu-de-libass` = `"1"`/`"0"`, hoặc ô chọn
+**"Xem trước bằng libass (wasm)"** trong hộp thoại kiểu chữ. **Mặc định TẮT**: đường CSS là
+đường có test và là đường dự phòng; nhánh này là để so và để chuyển sang khi đã kiểm.
+
+### Asset
+
+`frontend/scripts/copy-jassub.mjs` chép `node_modules/jassub/dist` → `public/jassub/` trước
+`npm run dev`/`npm run build` (`predev`/`prebuild`). Thư mục đó **không commit** (`.gitignore`):
+nó là ~5 MB wasm của một gói đã ghim phiên bản trong `package-lock.json`.
+
+Hai điều bắt buộc, đều là lỗi đã gặp:
+
+1. **Không import subpath của gói**: `import("jassub/dist/worker/…?url")` làm Vite ném
+   `Rollup failed to resolve import` (vì `exports` của gói chặn subpath). Phải phục vụ tĩnh
+   `/jassub/wasm/…`. Và worker tự `import()` các chunk cạnh nó (`./renderers/*.js`), nên phải
+   chép **nguyên** `dist`, không chỉ worker + wasm.
+2. **`vite.config.ts` phải có `worker: { format: "es" }`**: `jassub` dựng Worker kiểu module,
+   còn Vite mặc định `iife` cho worker ⇒ build ném
+   `Invalid value "iife" for option "worker.format"`.
+
+### Điều kiện để khớp (không thể bỏ qua)
+
+- **Cùng file font**, không chỉ cùng tên: preview nạp `/fonts/Archivo.ttf` (bản sao của
+  `backend/app/assets/fonts/Archivo.ttf`); ffmpeg nạp đúng file đó qua `fontsdir`/`fc-cache`.
+- `PlayResX/Y` lấy từ chính `.ass` backend sinh — không khai lại ở đâu khác.
+- **Không để CSS tự tính lại** cỡ chữ/hộp khi đang ở nhánh này: canvas của `jassub` phủ lên
+  hình, `PhuDeOverlay` không được vẽ song song.
+- Phiên bản libass của `jassub` và của `ffmpeg` có thể khác nhau, `fontconfig` và cấu hình
+  shaping cũng vậy. **Cùng libass không bảo đảm giống từng pixel** — nó bảo đảm cùng LUẬT
+  (bẻ dòng, bố cục hộp, neo, ngắt dòng tường minh), đó mới là thứ đang làm hai bên lệch.
+
+### Trạng thái kiểm
+
+- `tsc` 0, `npm test` 276 pass, `npm run build` 0. ✅
+- **Chưa chụp được ảnh so sánh trong app**: `browser-harness` bị hộp thoại
+  "Allow remote debugging?" của Chrome chặn ở lượt đó. Cần bấm Allow rồi:
+  1. bật ô chọn libass, tua tới một mốc có phụ đề;
+  2. chụp khung, đo hộp đen; so với hộp đo trên ảnh burn cùng mốc (mục 5, bước 4);
+  3. `canvas` phải có kích thước > 0 và có nội dung (không trắng trơn).

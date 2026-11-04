@@ -29,6 +29,10 @@ import { fileURLToPath } from "node:url";
  * (`Test-Path docs\ERRATA.md` = False). ERRATA của repo nằm trong `README.md`.
  */
 export default defineConfig({
+  //: 🔴 `worker.format: "es"` là BẮT BUỘC: `jassub` dựng Worker của nó bằng module, và
+  //: Vite 7 mặc định `iife` cho worker nên build ném "Invalid value \"iife\" for option
+  //: \"worker.format\" — UMD and IIFE output formats are not supported for code-splitting builds".
+  worker: { format: "es" },
   plugins: [
     TanStackRouterVite({
       target: "react",

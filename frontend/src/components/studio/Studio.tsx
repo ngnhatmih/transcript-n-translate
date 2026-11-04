@@ -33,7 +33,10 @@ import { SegmentRow, type ViewMode } from "./SegmentRow";
 import { PipelineBar } from "./PipelineBar";
 import { CommandPalette, type Command } from "./CommandPalette";
 import { PhuDeOverlay, PhuDePreviewPlayer, PhuDeStyleDialog, dungHopVideo } from "./PhuDeStyle";
-import { docStyle, luuStyle, type PhuDeStyle } from "@/lib/phuDeStyle";
+import { PhuDeLibass } from "./PhuDeLibass";
+import {
+  docLibass, docStyle, luuLibass, luuStyle, type PhuDeStyle,
+} from "@/lib/phuDeStyle";
 import { VungDocKhung, type VungDoc } from "./VungDoc";
 
 /**
@@ -295,6 +298,12 @@ export function Studio(props: StudioProps) {
   // Điều kiện là `jobDub.state === "done"`, KHÔNG phải `coFileXuat`: cái sau chỉ đúng khi
   // lượt lồng có `tron_nen` (đã ghép nền). Nghe được bản lồng chỉ cần job `dub` xong.
   const [ngheLong, setNgheLong] = useState(true);
+  //: Nhánh libass-wasm (xem `PhuDeLibass`). Mặc định TẮT — đường CSS là đường có test.
+  const [dungLibass, setDungLibass] = useState(() => docLibass());
+  const doiLibass = useCallback((bat: boolean) => {
+    setDungLibass(bat);
+    luuLibass(bat);
+  }, []);
   const giongLong =
     ngheLong && banDich !== null && jobDub !== null && jobDub.state === "done"
       ? dubAudioUrl(banDich.id)
@@ -1568,7 +1577,22 @@ export function Studio(props: StudioProps) {
                   </span>
                 </button>
               )}
-              {playingSeg && (
+              {/*
+                HAI ĐƯỜNG VẼ, cùng một hợp đồng (xem `docs/PHU-DE-QUY-TAC.md`):
+                  · `PhuDeLibass` — nạp CHÍNH file `.ass` mà bản burn dùng rồi cho libass
+                    (wasm) vẽ. Không mô phỏng gì, nên không thể lệch vì công thức.
+                  · `PhuDeOverlay` — CSS, đường cũ: có test và là đường dự phòng khi wasm
+                    không nạp được.
+              */}
+              {dungLibass && banDich !== null ? (
+                <PhuDeLibass
+                  assUrl={exportUrl(banDich.id, "ass")}
+                  videoRef={player.videoRef}
+                  bat={dungLibass}
+                  font={kieuPhuDe.font}
+                />
+              ) : null}
+              {!dungLibass && playingSeg && (
                 <PhuDeOverlay
                   style={kieuPhuDe}
                   text={playingSeg.dich === "" ? playingSeg.text : playingSeg.dich}
@@ -1875,6 +1899,8 @@ export function Studio(props: StudioProps) {
         open={styleOpen}
         onClose={() => setStyleOpen(false)}
         style={kieuPhuDe}
+        libass={dungLibass}
+        onLibass={doiLibass}
         preview={
           <PhuDePreviewPlayer
             src={player.src}

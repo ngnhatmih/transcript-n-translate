@@ -9,7 +9,10 @@
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "test": "node --import ./test/swc-loader.mjs --test --test-isolation=none \"src/**/*.test.{ts,tsx}\"",
-    "e2e": "node e2e/session.mjs e2e/plans/hat-tang-song.json --out ../_shots/e2e"
+    "e2e": "node e2e/session.mjs e2e/plans/hat-tang-song.json --out ../_shots/e2e",
+    "libass:assets": "node scripts/copy-jassub.mjs",
+    "predev": "npm run libass:assets",
+    "prebuild": "npm run libass:assets"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.3.3",
@@ -17,6 +20,7 @@
     "@tanstack/react-router": "^1.170.41",
     "@tanstack/router-plugin": "^1.168.42",
     "clsx": "^2.1.1",
+    "jassub": "^2.5.29",
     "lucide-react": "^0.575.0",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",

@@ -462,6 +462,8 @@ export function PhuDeStyleDialog({
   preview,
   toiDaNgang = 1920,
   toiDaCao = 1080,
+  libass = false,
+  onLibass,
 }: {
   open: boolean;
   onClose: () => void;
@@ -469,6 +471,9 @@ export function PhuDeStyleDialog({
   onChange: (s: PhuDeStyle) => void;
   /** Khung xem trước (video + chữ) đặt ngay dưới tiêu đề. */
   preview?: React.ReactNode;
+  /** Bật nhánh xem trước bằng libass-wasm (xem `PhuDeLibass`). */
+  libass?: boolean;
+  onLibass?: (bat: boolean) => void;
   /**
    * Trần CỦA CHÍNH VIDEO, tính bằng pixel thật (`videoWidth`/`videoHeight`).
    *
@@ -516,7 +521,18 @@ export function PhuDeStyleDialog({
         {/* KHUNG XEM TRƯỚC — video THẬT đang mở, cùng thẻ `<video>` với chữ đè lên nó.
             Chỉnh tham số mà không thấy kết quả trên chính khung hình thì phải đoán, và
             đoán sai phải quay lại sửa — vòng lặp đó là lý do khung này tồn tại. */}
-        {preview}
+        {onLibass !== undefined && (
+        <label className="mb-2 flex items-center gap-2 text-[11.5px] text-ink-1">
+          <input
+            type="checkbox"
+            checked={libass}
+            onChange={(e) => onLibass(e.currentTarget.checked)}
+            aria-label="Xem trước bằng libass"
+          />
+          Xem trước bằng libass (wasm) — dùng CHÍNH file .ass của bản burn, không mô phỏng
+        </label>
+      )}
+      {preview}
 
         <Truong nhan="Font">
           <select

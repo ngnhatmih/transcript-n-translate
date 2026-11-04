@@ -224,3 +224,30 @@ export function hinhHocVideo(s: PhuDeStyle, videoW: number, videoH: number) {
     cachDay: Math.min(Math.max(0, s.viTriDoc), 0.5) * videoH,
   };
 }
+
+/**
+ * Công tắc "xem trước bằng libass" (nhánh `PhuDeLibass`).
+ *
+ * 🔴 VÌ SAO LÀ KHOÁ RIÊNG, không nhét vào `PhuDeStyle`: đây là lựa chọn CÁCH RENDER, không
+ * phải một thuộc tính của phụ đề. Nhét vào style thì nó đi kèm mọi lời gọi `/api/export`
+ * và `/api/dubs` như một khoá backend phải bỏ qua — thêm một thứ nữa có thể trôi.
+ *
+ * Mặc định TẮT: đường CSS là đường đã được đo và có test; bật libass là để so/kiểm.
+ */
+export const KHOA_LIBASS = "phu-de-lab:phu-de-libass";
+
+export function docLibass(kho: KhoLuu = khoMacDinh()): boolean {
+  try {
+    return kho?.getItem(KHOA_LIBASS) === "1";
+  } catch {
+    return false;
+  }
+}
+
+export function luuLibass(bat: boolean, kho: KhoLuu = khoMacDinh()): void {
+  try {
+    kho?.setItem(KHOA_LIBASS, bat ? "1" : "0");
+  } catch {
+    //: Chặn ghi thì bỏ qua — công tắc hiển thị không được làm hỏng studio.
+  }
+}
