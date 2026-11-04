@@ -1771,6 +1771,35 @@ những đường không liên quan dịch thuật.
   `test_build_components_still_accepts_an_available_mt_default` đọc mặc định **đang có hiệu
   lực** qua `main.load_default_mt` thay vì đọc file.
 
+## ERRATA #72 — hộp burn SAI CHIỀU CAO khi câu dài, và libass tự bẻ dòng khác mô phỏng
+
+**Phát hiện lúc:** ảnh chủ dự án gửi — dòng đầu của phụ đề nằm **ngoài** hộp trắng (style
+`co 91, vien 20, cao_hop 60`, câu dài thành 3 dòng).
+
+**Hai lỗi, cùng lộ ra khi `cao_hop` nhỏ:**
+
+1. **Chiều cao khối tính bằng `nét_chữ × số_dòng`.** Đo trên ảnh burn 3 dòng: đỉnh các dòng
+   ở **1366 / 1417 / 1468** ⇒ **bước dòng = 51 px = 1,0 × cỡ chữ**; còn nét chữ (Pillow ×
+   0,637) chỉ **29 px**. Công thức cũ cho hộp cao `29 × 3 = 87` (→ 109 với viền) trong khi
+   khối chữ cao **132** ⇒ dòng 1 thò ra ngoài.
+   Sửa: `cao = nét_một_dòng + (n−1) × co` (bước dòng = 1,0 em, SỐ ĐO với file Archivo đang
+   ship — đổi font thì phải đo lại).
+
+2. **libass tự bẻ dòng khác mô phỏng của backend.** Với câu 86 ký tự, mô phỏng báo dòng dài
+   nhất **922 px** (hộp 944) nhưng libass bẻ thành **680 + 600**, để lại **đệm 132 px** mỗi
+   bên thay vì 11. Sửa: `to_ass` phát **`\N` tường minh** khi có vẽ hộp ⇒ libass không tự bẻ,
+   số dòng và dòng dài nhất do MỘT mô phỏng quyết định.
+
+**Đo lại bản burn** (cùng style, 3 dòng):
+
+```
+trước: hộp 998 × 109 · chữ 132 cao (dòng 1 NGOÀI hộp)
+sau  : hộp 998 × 153 · chữ nằm TRỌN trong hộp (route trả cao=131, +2·viền 11 = 153)
+```
+
+**Ghim:** `test_cao_khoi_chu_dung_BUOC_DONG_chu_khong_phai_net_chu` (tiêm font giả nên chạy
+được cả trên máy không có file font: `cao == nét + (n−1)×51`, và KHÔNG được bằng `nét × n`).
+
 ## ERRATA #73 — phụ đề trên web lệch bản burn: hai bên bẻ dòng bằng HAI bộ đo
 
 **Phát hiện lúc:** chủ dự án: *"tìm cách để phụ đề trên web ko lệch so với bản burn vào

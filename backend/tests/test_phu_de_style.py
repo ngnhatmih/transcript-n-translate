@@ -264,3 +264,43 @@ def test_chu_DAM_phai_di_vao_phep_DO_be_rong(monkeypatch):
     to_ass([_doan(text=_THU)], khung=(1080, 1920),
            style={"cao_hop": 180, "kieu_vien": 3, "co": 30, "dam": False, "vien": 20})
     assert da_goi == [False]
+
+
+
+def test_cao_khoi_chu_dung_BUOC_DONG_chu_khong_phai_net_chu(monkeypatch):
+    """Chiều cao khối = `nét_một_dòng + (n−1) × bước_dòng`.
+
+    🔴 ĐO ĐƯỢC (ERRATA #72, style `co 91`, 3 dòng, `cao_hop 60`): bản burn vẽ đỉnh ba dòng
+    ở **1366 / 1417 / 1468** — bước dòng **51 px = 1,0 × cỡ chữ** — trong khi nét chữ đo qua
+    Pillow chỉ **29 px**. Công thức cũ `nét × n = 87` cho hộp cao 109 trong khi khối chữ cao
+    132, nên **DÒNG ĐẦU NẰM NGOÀI HỘP** (đúng ảnh chủ dự án gửi).
+
+    Máy chạy test không có file font, nên bài này TIÊM một font giả: nét cao 20 px, mỗi ký tự
+    rộng 12 px. Nhờ vậy phép đo chạy được ở mọi máy và con số kiểm là số học thuần.
+    """
+    from PIL import ImageFont
+
+    from app.domain import subtitle_format as sf
+
+    class FontGia:
+        def getbbox(self, s: str):
+            #: Nét cao 20 px cho MỌI chuỗi (kể cả "Ạ"), bề rộng 12 px mỗi ký tự.
+            return (0, 0, 12 * len(s), 20)
+
+        def getmetrics(self):
+            return (45, 11)
+
+    monkeypatch.setitem(sf._FONT_CHO_DUONG, "Archivo", "gia.ttf")
+    monkeypatch.setattr(ImageFont, "truetype", lambda *a, **k: FontGia())
+
+    #: `co = 51`, bề ngang cho phép 30 px ⇒ mỗi từ (12 px/ký tự) đứng riêng một dòng.
+    dai, cao, so_dong, dong = sf._do_khoi_chu("aa bb cc", "Archivo", 51, 30)
+
+    assert so_dong == 3, f"phải bẻ thành 3 dòng, đo được {so_dong}: {dong}"
+    net = int(20 * sf._TI_LE_CHU)          # 12
+    dung = net + (so_dong - 1) * 51        # 12 + 2×51 = 114
+    assert cao == dung, (
+        f"chiều cao khối phải là nét + (n−1)×bước_dòng = {dung}, đo được {cao}. "
+        f"Công thức SAI (nét × n) sẽ cho {net * so_dong}."
+    )
+    assert cao != net * so_dong, "không được quay lại công thức `nét × số_dòng`"

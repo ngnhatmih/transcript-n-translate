@@ -355,9 +355,23 @@ def _do_khoi_chu(chu: str, font: str, co: int, rong_kha_dung: int,
         dong.append(hien)
         dai_nhat = max(dai_nhat, rong(hien))
         so_dong = len(dong)
+        #: 🔴 CHIỀU CAO KHỐI = `nét_một_dòng + (n−1) × BƯỚC_DÒNG`, KHÔNG phải
+        #: `nét_một_dòng × n`.
+        #:
+        #: ĐO ĐƯỢC (ERRATA #72, style `co 91`, 3 dòng, `cao_hop 60`): bản burn vẽ chữ ở
+        #: đỉnh ba dòng **1366 / 1417 / 1468** → bước dòng **51 px = 1,0 × cỡ chữ**; còn nét
+        #: chữ đo bằng Pillow × 0,637 chỉ **29 px**. Công thức cũ (`29 × 3 = 87`) cho hộp cao
+        #: 109 trong khi khối chữ cao 132 ⇒ **DÒNG ĐẦU NẰM NGOÀI HỘP** (đúng ảnh chủ dự án
+        #: gửi: dòng 1 nằm trên hộp trắng).
+        #:
+        #: Bước dòng đo được = 1,0 em với file Archivo đang ship; `co` là cỡ chữ trong hệ
+        #: `PlayRes` nên dùng thẳng `co`. Đổi font mà libass nhảy dòng khác 1,0 em thì con số
+        #: này phải ĐO LẠI — nó là số đo, không phải hằng số toán học.
+        cao_net = cao_dong()
+        cao_ca_khoi = cao_net + (so_dong - 1) * float(int(co))
         #: Trả về CẢ DANH SÁCH DÒNG, không chỉ con số đếm: bên gọi phải phát được
         #: `\N` tường minh — xem ERRATA #72 (libass bẻ dòng KHÁC mô phỏng này).
-        return (int(dai_nhat), int(cao_dong() * so_dong), so_dong, dong)
+        return (int(dai_nhat), int(cao_ca_khoi), so_dong, dong)
     except Exception:  # noqa: BLE001
         return (0, 0, 0, [])
 
