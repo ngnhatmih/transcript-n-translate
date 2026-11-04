@@ -1,7 +1,53 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
-import { FONT_CHO_PHEP, hinhHoc, STYLE_MAC_DINH, type PhuDeStyle } from "@/lib/phuDeStyle";
+import { FONT_CHO_PHEP, hinhHocVideo, STYLE_MAC_DINH, type PhuDeStyle } from "@/lib/phuDeStyle";
 import { hopVideo } from "@/lib/hopVideo";
+
+/**
+ * BẺ DÒNG như bản burn — tham lam theo TỪ, cùng file font, cùng bề ngang.
+ *
+ * 🔴 VÌ SAO PHẢI CÓ: `width: fit-content` + `maxWidth` KHÔNG co theo dòng đã bẻ (nó lấy
+ * `max-content` rồi kẹp ở `maxWidth`), nên hộp trong bản xem trước rộng bằng CẢ bề ngang
+ * bẻ dòng — đo được **1012 px** (93,7 % video) trong khi bản burn **449 px** (41,6 %).
+ *
+ * Luật y hệt `subtitle_format._do_khoi_chu` của backend (greedy theo từ, bẻ ở khoảng
+ * trắng gần nhất, từ nào dài hơn cả dòng thì để nguyên) và cùng bề ngang
+ * `PlayResX − 2·lề` — nếu hai bên bẻ khác nhau thì hộp và số dòng cũng khác nhau.
+ *
+ * Không có `canvas` (jsdom) thì trả MỘT dòng: không đo được thì không bẻ bừa.
+ */
+function beDong(chu: string, font: {
+  fontFamily: string;
+  fontSize: number;
+  fontWeight: number;
+  fontStyle: string;
+}, rongKhaDung: number): string[] {
+  const tu = chu.split(/\s+/).filter((x) => x !== "");
+  if (tu.length <= 1) return [chu];
+  let ctx: CanvasRenderingContext2D | null = null;
+  try {
+    ctx = document.createElement("canvas").getContext("2d");
+  } catch {
+    ctx = null;
+  }
+  if (ctx === null) return [chu];
+  ctx.font = `${font.fontStyle} ${font.fontWeight} ${font.fontSize}px ${font.fontFamily}`;
+  const rong = (s: string) => ctx!.measureText(s).width;
+
+  const ra: string[] = [];
+  let hien = "";
+  for (const w of tu) {
+    const thu = hien === "" ? w : hien + " " + w;
+    if (hien !== "" && rong(thu) > rongKhaDung) {
+      ra.push(hien);
+      hien = w;
+    } else {
+      hien = thu;
+    }
+  }
+  if (hien !== "") ra.push(hien);
+  return ra.length > 0 ? ra : [chu];
+}
 
 /**
  * Bản xem trước phụ đề ĐÈ LÊN video.
@@ -9,7 +55,7 @@ import { hopVideo } from "@/lib/hopVideo";
  * Vì sao phải đo khung bằng `ResizeObserver` chứ không dùng đơn vị CSS linh hoạt: kiểu chữ
  * được khai trong hệ `.ass` (1920×1080), và backend nhân tỉ lệ theo trục NGẮN của khung
  * THẬT. Muốn xem trước đúng thì phải biết kích thước thật của khung chứa video, rồi áp
- * CÙNG công thức (`hinhHoc`).
+ * CÙNG công thức (`hinhHocVideo` dùng y hệt `to_ass`), rồi thu bằng `transform`.
  *
  * 🔴 VÀ PHẢI ĐO HỘP HIỂN THỊ THẬT CỦA VIDEO, không phải khung chứa — xem `lib/hopVideo`:
  * `<video>` dùng `object-contain`, nên video dọc trong khung 16:9 chỉ chiếm ~31 % bề ngang.
@@ -54,28 +100,53 @@ export function PhuDeOverlay({
 
   const hop = hopVideo(khung.rong, khung.cao, tiLeVideo.rong, tiLeVideo.cao);
 
-  if (text === "" || hop.rong === 0 || hop.cao === 0) {
+  //: Chưa đo được hộp video (jsdom, hoặc video chưa có metadata) thì KHÔNG vẽ: hộp vẽ theo
+  //: kích thước khung CHỨA là một hộp sai, và sai im lặng còn tệ hơn không vẽ.
+  if (text === "" || hop.rong === 0 || hop.cao === 0
+      || tiLeVideo.rong <= 0 || tiLeVideo.cao <= 0) {
     return <div ref={hopRef} className="pointer-events-none absolute inset-0" />;
   }
 
-  const h = hinhHoc(style, hop.rong, hop.cao);
-  const coHop = style.kieuVien === 3;
-  //: Cỡ hộp RIÊNG — quy đổi bằng tỉ lệ CỦA CHÍNH VIDEO, không phải hệ 1920×1080.
+  // ── DỰNG TRONG HỆ PIXEL CỦA VIDEO, RỒI THU BẰNG `transform` ─────────────────────────
   //
-  // 🔴 ĐO ĐƯỢC (chủ dự án: *"cái tôi cần là cái bề ngang kìa"*): `rongHop` là pixel của
-  // VIDEO, còn `hinhHoc` tính theo hệ thiết kế 1920×1080. Video DỌC 1080×1920 hiện trong
-  // khung 16:9 cho `tiLe = min(200/1920, 356/1080) = 0,104`, nên hộp khai 1080 chỉ vẽ
-  // `1080 × 0,104 = 112 px` trên bề ngang hiển thị 200 px — hụt còn 56 %. Quy đổi đúng là
-  // `hop.rong / videoWidth`, tức bề ngang hộp bằng ĐÚNG tỉ lệ so với khung hình.
-  const sx = tiLeVideo.rong > 0 ? hop.rong / tiLeVideo.rong : 1;
-  const sy = tiLeVideo.cao > 0 ? hop.cao / tiLeVideo.cao : 1;
-  // CỔNG LÀ CHIỀU CAO, không phải cả hai: backend cho `ngang = 0` nghĩa là "bám chữ".
-  // Doi hoi ca hai > 0 lam ban xem truoc ve hop tu dong trong khi ban burn ve hop vector
-  // — hai ben lech nhau, dung thu chu du an vua bao.
+  // 🔴 ĐÂY LÀ CÁCH HẾT LỆCH SO VỚI BẢN BURN (chủ dự án: *"tìm cách để phụ đề trên web ko
+  // lệch so với bản burn vào video"*). Đặt `font-size` theo px của khung hiển thị (bản cũ)
+  // thì ở khung 132 px, `co = 30` ra 2,06 px — Chrome không cho ký tự hẹp hơn ~1 px, nên
+  // 85 ký tự chiếm 82 px (0,96 px/ký tự) trong khi bản burn cần 0,61: hộp xem trước rộng
+  // 62 % khung, bản burn 41,6 %.
+  //
+  // Nay mọi số tính bằng pixel VIDEO — đúng hệ `PlayRes` của `.ass` (`hinhHocVideo` dùng
+  // Y HỆT công thức `to_ass`) — và CẢ KHỐI được thu bằng `scale(hop.rong / videoW)`.
+  // Layout chạy ở cỡ chữ THẬT (17 px), nơi số đo của trình duyệt đáng tin; phép thu là
+  // tuyến tính nên tỉ lệ chữ / hộp / khung khớp bản burn.
+  const h = hinhHocVideo(style, tiLeVideo.rong, tiLeVideo.cao);
+  const sx = hop.rong / tiLeVideo.rong;
+  const coHop = style.kieuVien === 3;
   const hopRieng = coHop && style.caoHop > 0;
   const ngangTuDong = hopRieng && style.rongHop <= 0;
-  const wHop = style.rongHop * sx;
-  const hHop = style.caoHop * sy;
+  //: `rong_hop` / `cao_hop` ĐÃ là pixel của VIDEO (`to_ass` dùng thẳng, chỉ kẹp theo
+  //: `PlayRes`) nên trong hệ này KHÔNG nhân tỉ lệ gì thêm — nhân nữa là nhân hai lần.
+  const wHop = style.rongHop;
+  const hHop = style.caoHop;
+  //: Bề ngang libass bẻ dòng = `PlayResX − 2·lề` (`rong_kha_dung` bên `to_ass`).
+  const rongKhaDung = Math.max(40, tiLeVideo.rong - 2 * h.le);
+  //: BẺ DÒNG NGAY Ở ĐÂY, y hệt luật của bản burn (tham lam theo TỪ, bề ngang
+  //: `PlayResX − 2·lề`) và bằng CÙNG file font.
+  //:
+  //: 🔴 VÌ SAO PHẢI TỰ BẺ: `width: fit-content` + `maxWidth` KHÔNG co theo dòng đã bẻ —
+  //: nó lấy `max-content` rồi kẹp ở `maxWidth`, nên hộp rộng bằng CẢ bề ngang bẻ dòng.
+  //: ĐO ĐƯỢC trên app: hộp xem trước **1012 px** (93,7 % bề ngang video) trong khi bản
+  //: burn **449 px** (41,6 %) cho đúng câu đó. Có dòng tường minh rồi thì `max-content`
+  //: CHÍNH LÀ dòng dài nhất, và hộp mới bám chữ được như bản burn.
+  const dongChu = beDong(text, {
+    fontFamily: style.font + ", system-ui, sans-serif",
+    fontSize: h.coChu,
+    fontWeight: style.dam ? 700 : 400,
+    fontStyle: style.nghieng ? "italic" : "normal",
+  }, rongKhaDung);
+  const caoDong = h.coChu * 1.25;
+  //: Chiều cao hộp = `max(cao_hop, chữ + 2·viền)` — ĐÚNG luật `to_ass`.
+  const caoHopThat = Math.max(hHop, dongChu.length * caoDong + 2 * h.vien);
   const noiDung = {
     fontFamily: style.font + ", system-ui, sans-serif",
     fontSize: `${h.coChu}px`,
@@ -83,60 +154,75 @@ export function PhuDeOverlay({
     fontWeight: style.dam ? 700 : 400,
     fontStyle: style.nghieng ? "italic" : "normal",
     color: style.mauChu,
-    textAlign: style.canLe === 1 ? "left" : style.canLe === 3 ? "right" : "center",
-  } as const;
+    textAlign: (style.canLe === 1 ? "left" : style.canLe === 3 ? "right" : "center") as
+      "left" | "right" | "center",
+    //: Dòng do TA bẻ ⇒ cấm trình duyệt bẻ lại (bẻ lại là hai bên lệch nhau lần nữa).
+    whiteSpace: "pre" as const,
+  };
 
   return (
     <div ref={hopRef} className="pointer-events-none absolute inset-0">
       <div
-        className="absolute"
         style={{
-          // Neo trong HỘP VIDEO, không trong khung chứa: `left/top` là viền đen bị bỏ.
-          ...(hopRieng
-            ? (ngangTuDong
-                // ngang = 0: hop OM CHU. `fit-content` + margin auto de van canh giua.
-                // `maxWidth` = bề ngang KHUNG: câu dài hơn video phải BẺ DÒNG như libass
-                // (`WrapStyle: 0`). DO ĐƯỢC (ảnh chủ dự án): thiếu nó thì chữ tràn ra hai
-                // bên hộp ở bản xem trước, trong khi bản burn lại xuống dòng — hai bên khác nhau.
-                //
-                // 🔴 `minHeight` + `padding: vien` + `box-sizing: border-box` để khớp ĐÚNG
-                // luật của bản burn (`cao_dong = max(cao_hop, chữ + 2·viền)`,
-                // `rong_dong = max(rong_hop, chữ + 2·viền)`). Trước đây là `height` CỐ ĐỊNH
-                // và `padding: 0`, nên chữ bị ép ra ngoài hộp — đúng lỗi "vẫn bị tràn".
-                ? { left: 0, right: 0, width: "fit-content", maxWidth: hop.rong,
-                    marginLeft: "auto", marginRight: "auto",
-                    minHeight: hHop, boxSizing: "border-box" as const }
-                : { left: hop.trai + (hop.rong - wHop) / 2, width: wHop,
-                    minHeight: hHop, boxSizing: "border-box" as const })
-            : { left: hop.trai + h.le, width: Math.max(0, hop.rong - 2 * h.le) }),
-          ...(hopRieng ? { display: "flex", alignItems: "center",
-                           justifyContent: style.canLe === 1 ? "flex-start"
-                             : style.canLe === 3 ? "flex-end" : "center" } : {}),
-          bottom: khung.cao - (hop.tren + hop.cao) + h.cachDay,
-          ...noiDung,
-          ...(coHop
-            ? {
-                // Độ đục của hộp đi qua `rgba` chứ không qua `opacity` của cả khối:
-                // `opacity` sẽ làm mờ LUÔN chữ, trong khi `.ass` chỉ trong suốt cái hộp.
-                background: rgba(style.mauHop, style.doDucHop),
-                // Khi người dùng đặt cỡ hộp thì đệm là `vien` ĐỦ BỐN PHÍA — đúng như bản
-                // burn cộng `2·vien` vào cả bề ngang lẫn chiều cao. Đệm 0 (bản cũ) làm chữ
-                // chạm mép hộp, và khi chữ cao hơn `cao_hop` thì nó thò hẳn ra ngoài.
-                padding: hopRieng ? Math.max(0, h.vien) : `${Math.max(1, h.vien)}px ${Math.max(2, h.vien * 2)}px`,
-                borderRadius: 2,
-              }
-            : {
-                // Chỉ viền quanh NÉT chữ: CSS không có viền chữ, nên dựng bằng 4 bóng lệch.
-                textShadow: [
-                  `${h.vien}px 0 0 ${style.mauHop}`,
-                  `-${h.vien}px 0 0 ${style.mauHop}`,
-                  `0 ${h.vien}px 0 ${style.mauHop}`,
-                  `0 -${h.vien}px 0 ${style.mauHop}`,
-                ].join(", "),
-              }),
+          position: "absolute",
+          left: hop.trai,
+          top: hop.tren,
+          width: tiLeVideo.rong,
+          height: tiLeVideo.cao,
+          transform: `scale(${sx})`,
+          transformOrigin: "top left",
         }}
       >
-        {text}
+        <div
+          className="absolute"
+          style={{
+            // Neo trong HỘP VIDEO, không trong khung chứa: `left/top` là viền đen bị bỏ.
+            ...(hopRieng
+              ? (ngangTuDong
+                  // ngang = 0: hộp ÔM CHỮ. `fit-content` + margin auto để vẫn canh giữa.
+                  // `maxWidth` = bề ngang BẺ DÒNG của libass (`rong_kha_dung`): câu dài hơn
+                  // phải xuống dòng ở đúng chỗ bản burn xuống dòng.
+                  ? { left: 0, right: 0, width: "fit-content", maxWidth: rongKhaDung,
+                      marginLeft: "auto", marginRight: "auto",
+                      minHeight: caoHopThat, boxSizing: "border-box" as const }
+                  : { left: (tiLeVideo.rong - wHop) / 2, width: wHop,
+                      minHeight: caoHopThat, boxSizing: "border-box" as const })
+              : { left: h.le, width: rongKhaDung }),
+            ...(hopRieng ? { display: "flex", alignItems: "center",
+                             justifyContent: style.canLe === 1 ? "flex-start"
+                               : style.canLe === 3 ? "flex-end" : "center" } : {}),
+            // `cachDay` đã ở hệ pixel video: đáy hộp cách đáy KHUNG HÌNH đúng bằng
+            // `offset_doc` — cùng mốc `pos_y = round(cao × (1 − offset))` bên `to_ass`.
+            bottom: h.cachDay,
+            ...noiDung,
+            ...(coHop
+              ? {
+                  // Độ đục của hộp đi qua `rgba` chứ không qua `opacity` của cả khối:
+                  // `opacity` sẽ làm mờ LUÔN chữ, trong khi `.ass` chỉ trong suốt cái hộp.
+                  background: rgba(style.mauHop, style.doDucHop),
+                  // Đệm = `vien` ĐỦ BỐN PHÍA, đúng như bản burn cộng `2·viền` vào cả hai
+                  // chiều (`rong_dong = max(rong_hop, chữ + 2·viền)`).
+                  padding: hopRieng ? Math.max(0, h.vien)
+                    : `${Math.max(1, h.vien)}px ${Math.max(2, h.vien * 2)}px`,
+                }
+              : {
+                  // Chỉ viền quanh NÉT chữ: CSS không có viền chữ, nên dựng bằng 4 bóng lệch.
+                  textShadow: [
+                    `${h.vien}px 0 0 ${style.mauHop}`,
+                    `-${h.vien}px 0 0 ${style.mauHop}`,
+                    `0 ${h.vien}px 0 ${style.mauHop}`,
+                    `0 -${h.vien}px 0 ${style.mauHop}`,
+                  ].join(", "),
+                }),
+          }}
+        >
+          {dongChu.map((d, i) => (
+            <span key={i}>
+              {d}
+              {i < dongChu.length - 1 ? <br /> : null}
+            </span>
+          ))}
+        </div>
       </div>
     </div>
   );
