@@ -1652,3 +1652,48 @@ npm test              269 pass, 0 fail              EXIT_TEST=0
 npx tsc --noEmit                                    EXIT_TS=0
 docker compose build web                            EXIT_BUILD=0
 ```
+
+## ERRATA #69 — lồng tiếng XONG mà khung xem vẫn phát tiếng GỐC
+
+**Phát hiện lúc:** chủ dự án: *"lồng tiếng xong rồi nhưng chưa nghe được ở trên vid"*.
+
+**Nguyên nhân — hai lớp, cả hai đều thật:**
+
+1. Khung xem phát `/api/media/<id>`: đó là tiếng của **video gốc**. Bản lồng `dub-<tid>.wav`
+   đã nằm trên đĩa (đo được: `24726764` byte, 278,55 s) nhưng không có đường nào phát nó cùng
+   hình.
+2. Không thể mượn route `GET /api/dubs/{id}/download?format=wav`: `FileResponse(..., filename=)`
+   gắn `Content-Disposition: attachment`, và Chrome coi URL đó là một lượt **TẢI XUỐNG** —
+   `<audio>` không bao giờ phát (`readyState: 0`, `play()` không resolve). Chính repo này đã
+   ghi lại hiện tượng đó ở route `take`; nên chỗ **nghe** phải là `inline`.
+
+**Sửa:**
+
+- Route mới `GET /api/dubs/{translation_id}/audio` — trả `dub-<tid>.wav` với
+  `Content-Disposition: inline`, có `Range`. Đo được:
+  `206 · audio/wav · inline; filename="dub-63.wav" · accept-ranges: bytes · content-range: bytes 0-99/24726764`.
+- `usePlayer(media, giongLong)`: khi có bản lồng thì `<video>` bị **tắt tiếng** (hình giữ
+  nguyên) và một thẻ `<audio>` phát đè, bám mốc mỗi lượt (kéo lại khi lệch quá 0,3 s).
+  Tệp lồng hỏng thì **bật lại** tiếng gốc — không để khung xem câm im lặng.
+- Nút cạnh "Phát": **"Âm: bản lồng" ⇄ "Âm: bản gốc"**, chỉ hiện khi job `dub` đã `done`
+  (nghe được bản lồng không cần `tron_nen`).
+
+**Đo trong app** (Chrome thật, đoạn 0:00, sau 2,5 s phát):
+
+```
+the audio app tao : src="/api/dubs/63/audio"  preload=auto  readyState=4
+video.muted       : true
+sau 2,5 s         : video 21,07 s   audio 21,00 s   => lech 0,063 s
+```
+
+**Ghim:** `test_route_nghe_ban_long_tra_INLINE_va_404_khi_chua_long` (backend) và ba bài
+trong `Studio.test.tsx` (có nút + video tắt tiếng; bấm thì về tiếng gốc; chưa lồng xong thì
+không có nút).
+
+### Đo cuối
+
+```
+pytest (toàn bộ)      1523 passed, 15 deselected   EXIT_PYTEST=0
+npm test              272 pass, 0 fail             EXIT_TEST=0
+npx tsc --noEmit                                   EXIT_TS=0
+```

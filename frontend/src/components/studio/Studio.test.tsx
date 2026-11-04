@@ -605,6 +605,56 @@ function job(p: Partial<Job> & { id: number }): Job {
   };
 }
 
+describe("Studio: NGHE bản lồng tiếng ngay trong khung xem", () => {
+  it("job dub done ⇒ có nút 'Âm: bản lồng' và video BỊ TẮT tiếng", () => {
+    // 🔴 ĐO ĐƯỢC (chủ dự án: "lồng tiếng xong rồi nhưng chưa nghe được ở trên vid").
+    // Khung xem luôn phát tiếng của `/api/media/<id>`; bản lồng chỉ nằm trên đĩa. Nay nó
+    // được phát ĐÈ qua một thẻ `audio` riêng, còn `<video>` bị tắt tiếng.
+    const { props } = dungThu({
+      source: KENH,
+      jobs: [job({ id: 80, type: "dub", state: "done", payload: { translation_id: BAN_DICH_ID } })],
+    });
+    render(<Studio {...props} />);
+    const nut = [...document.body.querySelectorAll("button")].find(
+      (b) => /Âm: bản lồng/.test(b.textContent ?? ""),
+    );
+    assert.ok(nut !== undefined, "đã lồng xong thì phải có nút đổi lớp âm");
+    assert.equal(nut.getAttribute("aria-pressed"), "true");
+    const v = document.body.querySelector("video");
+    assert.ok(v !== null && v.muted, "video phải bị TẮT tiếng, nếu không sẽ nghe hai lớp");
+  });
+
+  it("bấm nút đổi âm ⇒ về TIẾNG GỐC, video bật tiếng lại", () => {
+    const { props } = dungThu({
+      source: KENH,
+      jobs: [job({ id: 81, type: "dub", state: "done", payload: { translation_id: BAN_DICH_ID } })],
+    });
+    render(<Studio {...props} />);
+    const nut = [...document.body.querySelectorAll("button")].find(
+      (b) => /Âm: bản lồng/.test(b.textContent ?? ""),
+    ) as HTMLElement;
+    fireEvent.click(nut);
+    const sau = [...document.body.querySelectorAll("button")].find(
+      (b) => /Âm: bản gốc/.test(b.textContent ?? ""),
+    );
+    assert.ok(sau !== undefined, "sau khi bấm, nhãn phải là 'Âm: bản gốc'");
+    const v = document.body.querySelector("video");
+    assert.ok(v !== null && !v.muted, "về tiếng gốc thì video phải bật tiếng");
+  });
+
+  it("CHƯA lồng xong ⇒ KHÔNG có nút đổi âm", () => {
+    const { props } = dungThu({
+      source: KENH,
+      jobs: [job({ id: 82, type: "dub", state: "running", payload: { translation_id: BAN_DICH_ID } })],
+    });
+    render(<Studio {...props} />);
+    const co = [...document.body.querySelectorAll("button")].filter(
+      (b) => /Âm: /.test(b.textContent ?? ""),
+    );
+    assert.equal(co.length, 0, "chưa có bản lồng thì không được mời đổi lớp âm");
+  });
+});
+
 describe("Studio: bước Ghép nền hiện dấu tích khi job dub tron_nen xong", () => {
   it("có job dub tron_nen done ⇒ bước Ghép nền done (dấu tích hiện)", () => {
     const { props } = dungThu({

@@ -486,10 +486,22 @@ export const getDubPlan = (translationId: number): Promise<DubPlan | null> =>
 export const dubTakeUrl = (translationId: number, i: number): string =>
   `/api/dubs/${translationId}/take?i=${i}`;
 
+/**
+ * Đường NGHE CẢ BẢN LỒNG — dùng làm lớp âm của khung xem video.
+ *
+ * ⚠️ KHÔNG dùng `download?format=wav` cho việc này: route đó gắn
+ * `Content-Disposition: attachment`, nên Chrome coi URL là một lượt TẢI XUỐNG và
+ * `<audio>` không bao giờ phát (`readyState: 0`, `play()` không resolve). Route
+ * `/audio` trả `inline` — đo được ở `routes_dubs.py::audio`.
+ */
+export const dubAudioUrl = (translationId: number): string =>
+  `/api/dubs/${translationId}/audio`;
+
 export const endpoints = {
   makeDub,
   getDubPlan,
   dubTakeUrl,
+  dubAudioUrl,
   listSources,
   getSource,
   uploadSource,

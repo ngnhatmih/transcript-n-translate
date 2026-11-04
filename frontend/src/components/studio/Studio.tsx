@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Command as CmdIcon, Film, Menu, Moon, Pause, Play, Repeat, Sun, Upload, Cpu, X } from "lucide-react";
+import { Command as CmdIcon, Film, Menu, Moon, Pause, Play, Repeat, Sun, Upload, Cpu, Volume2, X } from "lucide-react";
 
-import { mediaUrl, exportUrl, getPeaks } from "@/api/endpoints";
+import { mediaUrl, exportUrl, getPeaks, dubAudioUrl } from "@/api/endpoints";
 import type { DubPlanRow, Job, JobState, Source, Status, TranslationCps, TranslationDetail, Transcript } from "@/api/types";
 import {
   BA_GOC_NHIN,
@@ -255,8 +255,51 @@ export function Studio(props: StudioProps) {
     });
   }, []);
 
+  // ⚠️ KHOI NAY PHAI KHAI BAO TRUOC `usePlayer` (dong duoi): khung xem can biet
+  // có bản lồng hay chưa để chọn lớp ÂM. Đặt sau là `tsc` chặn
+  // (TDZ của `const`), đúng loại lỗi đã gặp ở `App.tsx` với `engineAsr`.
+  /**
+   * JOB LỒNG TIẾNG của bản dịch đang xem — job `dub` KHÔNG ghép nền.
+   *
+   * Hai chỗ sửa so với bản trước, cùng một lý do "phải đọc đúng dữ liệu":
+   *
+   *   1. `j.payload["translation_id"]` → `j.payload?.["translation_id"]`. `payload` là
+   *      `Record<string, unknown>` nhưng dữ liệu qua JSON có thể thiếu hẳn trường này;
+   *      đọc thẳng ném `Cannot read properties of undefined` (đo được: cả bộ test đỏ vì
+   *      một job mẫu không có `payload`).
+   *   2. `ds[ds.length - 1]` → `reduce(max id)`. Mảng `jobs` do máy chủ trả theo `id` TĂNG,
+   *      nên `ds[ds.length - 1]` hiện đúng — nhưng đó là phụ thuộc vào THỨ TỰ MẢNG, thứ
+   *      không nằm trong hợp đồng. Lấy theo `id` là đọc đúng thứ mà nó muốn nói: job mới
+   *      nhất.
+   *
+   * Bản này KHÔNG lọc `tron_nen`: job `dub` có ghép nền vẫn là job lồng tiếng (nó làm cả
+   * hai việc), nên bước "Lồng tiếng" phải thấy nó.
+   */
+  const jobDub = useMemo(() => {
+    if (banDich === null) return null;
+    const ds = jobs.filter(
+      (j) =>
+        j.type === "dub" &&
+        (j.payload?.["translation_id"] as number | undefined) === banDich.id,
+    );
+    return ds.length === 0 ? null : ds.reduce((a, b) => (b.id > a.id ? b : a));
+  }, [jobs, banDich]);
+
   const media: string | null = source === null ? null : mediaUrl(source.id);
-  const player = usePlayer(media);
+  //: Đã lồng tiếng xong ⇒ mặc định NGHE BẢN LỒNG trong khung xem (có nút đổi lại bản gốc).
+  //
+  // 🔴 ĐO ĐƯỢC (chủ dự án: *"lồng tiếng xong rồi nhưng chưa nghe được ở trên vid"*): khung
+  // xem luôn phát tiếng của `/api/media/<id>` — tiếng GỐC. Bản lồng đã nằm trên đĩa
+  // (`dub-{tid}.wav`) nhưng không có đường phát nó cùng hình.
+  //
+  // Điều kiện là `jobDub.state === "done"`, KHÔNG phải `coFileXuat`: cái sau chỉ đúng khi
+  // lượt lồng có `tron_nen` (đã ghép nền). Nghe được bản lồng chỉ cần job `dub` xong.
+  const [ngheLong, setNgheLong] = useState(true);
+  const giongLong =
+    ngheLong && banDich !== null && jobDub !== null && jobDub.state === "done"
+      ? dubAudioUrl(banDich.id)
+      : null;
+  const player = usePlayer(media, giongLong);
   //: Do HOP HIEN THI THAT cua video moi khi khung hoac video doi kich thuoc.
   useEffect(() => {
     const chua = khungVideoRef.current;
@@ -430,32 +473,6 @@ export function Studio(props: StudioProps) {
    * `ghepState` doc tu job `tron_nen` that; `dubState` tu job `dub` that. Ban goc
    * dung bien `remux` chay bang `setTimeout` — do la mo phong, khong phai trang thai.
    */
-  /**
-   * JOB LỒNG TIẾNG của bản dịch đang xem — job `dub` KHÔNG ghép nền.
-   *
-   * Hai chỗ sửa so với bản trước, cùng một lý do "phải đọc đúng dữ liệu":
-   *
-   *   1. `j.payload["translation_id"]` → `j.payload?.["translation_id"]`. `payload` là
-   *      `Record<string, unknown>` nhưng dữ liệu qua JSON có thể thiếu hẳn trường này;
-   *      đọc thẳng ném `Cannot read properties of undefined` (đo được: cả bộ test đỏ vì
-   *      một job mẫu không có `payload`).
-   *   2. `ds[ds.length - 1]` → `reduce(max id)`. Mảng `jobs` do máy chủ trả theo `id` TĂNG,
-   *      nên `ds[ds.length - 1]` hiện đúng — nhưng đó là phụ thuộc vào THỨ TỰ MẢNG, thứ
-   *      không nằm trong hợp đồng. Lấy theo `id` là đọc đúng thứ mà nó muốn nói: job mới
-   *      nhất.
-   *
-   * Bản này KHÔNG lọc `tron_nen`: job `dub` có ghép nền vẫn là job lồng tiếng (nó làm cả
-   * hai việc), nên bước "Lồng tiếng" phải thấy nó.
-   */
-  const jobDub = useMemo(() => {
-    if (banDich === null) return null;
-    const ds = jobs.filter(
-      (j) =>
-        j.type === "dub" &&
-        (j.payload?.["translation_id"] as number | undefined) === banDich.id,
-    );
-    return ds.length === 0 ? null : ds.reduce((a, b) => (b.id > a.id ? b : a));
-  }, [jobs, banDich]);
 
   /**
    * JOB GHÉP NỀN — và đây là chỗ bản trước lọc SAI LOẠI JOB.
@@ -1618,6 +1635,27 @@ export function Studio(props: StudioProps) {
                 >
                   <Repeat className="size-3.5" /> Lặp đoạn
                 </button>
+                {/*
+                  ĐỔI LỚP ÂM — chỉ hiện khi ĐÃ lồng tiếng xong, vì trước đó không có bản lồng
+                  nào để nghe. Nhãn nói ĐANG phát cái gì, không phải "bấm để làm gì": người
+                  dùng cần biết tai mình đang nghe tiếng gốc hay tiếng lồng.
+                */}
+                {banDich !== null && jobDub !== null && jobDub.state === "done" && (
+                  <button
+                    onClick={() => setNgheLong((cu) => !cu)}
+                    aria-pressed={ngheLong}
+                    className={cn(
+                      "flex items-center gap-1.5 rounded-sm border px-2 py-1.5 text-[11.5px]",
+                      ngheLong ? "border-signal text-signal" : "border-rule text-ink-1 hover:border-ink-1",
+                    )}
+                    title={ngheLong
+                      ? "Đang nghe bản lồng tiếng — bấm để nghe tiếng gốc"
+                      : "Đang nghe tiếng gốc — bấm để nghe bản lồng tiếng"}
+                  >
+                    <Volume2 className="size-3.5" />
+                    {ngheLong ? "Âm: bản lồng" : "Âm: bản gốc"}
+                  </button>
+                )}
                 <span className="num ml-2 text-[12px] text-ink-0">
                   {timecode(player.time)} <span className="text-ink-2">/ {timecode(player.duration)}</span>
                 </span>

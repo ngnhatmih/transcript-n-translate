@@ -160,6 +160,38 @@ def test_route_tai_tra_404_kem_huong_dan_khi_chua_long_tieng(repos, tmp_path):
         assert sai.status_code == 404 and "ogg" in sai.json()["detail"]
 
 
+def test_route_nghe_ban_long_tra_INLINE_va_404_khi_chua_long(repos, tmp_path):
+    """`GET /api/dubs/{id}/audio` — đường NGHE cả bản lồng trong khung xem.
+
+    🔴 VÌ SAO PHẢI LÀ `inline`, và vì sao phải ghim: `FileResponse(..., filename=...)` (route
+    `download`) gắn `Content-Disposition: attachment`, và với header đó Chrome coi URL là một
+    lượt TẢI XUỐNG — `<audio>` không bao giờ phát (`readyState: 0`, `play()` không resolve).
+    ĐO ĐƯỢC đúng hiện tượng này ở route `take` (xem docstring ở `routes_dubs.py`).
+
+    Chủ dự án báo: *"lồng tiếng xong rồi nhưng chưa nghe được ở trên vid"* — bản lồng có trên
+    đĩa mà khung xem vẫn phát tiếng gốc, vì không có route nào phát nó cùng hình.
+    """
+    r, tid = repos
+    out = tmp_path / "o"
+    app = create_app(repos=r, specs=[], media_dir=tmp_path / "m", out_dir=out)
+    with TestClient(app) as c:
+        thieu = c.get(f"/api/dubs/{tid}/audio")
+        assert thieu.status_code == 404
+        assert "chưa có bản lồng tiếng" in thieu.json()["detail"]
+
+        thu_muc = out / "dubs"
+        thu_muc.mkdir(parents=True, exist_ok=True)
+        (thu_muc / f"dub-{tid}.wav").write_bytes(b"RIFF....WAVE")
+
+        ok = c.get(f"/api/dubs/{tid}/audio")
+        assert ok.status_code == 200, ok.text
+        assert ok.headers["content-type"].startswith("audio/wav")
+        assert ok.headers["content-disposition"].startswith("inline"), (
+            "phải là `inline`, đo được " + ok.headers["content-disposition"]
+        )
+        assert ok.content == b"RIFF....WAVE"
+
+
 def test_san_sang_noi_dung_thu_dang_thieu_khi_may_chua_co_tts(repos, tmp_path):
     """`san_sang()` là câu trả lời của HANDLER về môi trường, và nó phải nêu ĐÚNG thứ thiếu.
 

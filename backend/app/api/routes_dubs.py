@@ -152,6 +152,34 @@ def take(translation_id: int, i: int, dirs=Depends(get_dirs)):
                         headers={"Content-Disposition": f'inline; filename="{tam.name}"'})
 
 
+@router.get("/{translation_id}/audio")
+def audio(translation_id: int, dirs=Depends(get_dirs)):
+    """Phát bản lồng tiếng NGAY trong trình duyệt — dùng cho lớp âm của khung xem video.
+
+    🔴 KHÁC `/{translation_id}/download` ở ĐÚNG MỘT header, và header đó là tất cả:
+    `Content-Disposition: inline` thay vì `attachment`.
+
+    ĐO ĐƯỢC (đã ghi ở route `take` phía trên): `FileResponse(..., filename=...)` khiến
+    Starlette gắn `Content-Disposition: attachment`, và Chrome coi URL đó là một lượt TẢI
+    XUỐNG chứ không phải nguồn phát — `play()` trả Promise nhưng KHÔNG BAO GIỜ resolve,
+    `readyState: 0`, Resource Timing rỗng. Nên chỗ NGHE phải là `inline`.
+
+    Vì sao là WAV chứ không phải mp4: `dub-<tid>.mp4` chỉ tồn tại khi job chạy với
+    `tron_nen`, mà nó là video đã BURN phụ đề — phát nó trong khung xem sẽ thành hai lớp
+    phụ đề chồng nhau. `dub-<tid>.wav` là MASTER của bản lồng, cùng độ dài phim, đúng thứ
+    cần để nghe đè lên hình gốc.
+    """
+    thu_muc = _thu_muc(dirs)
+    for duoi, kieu in (("wav", "audio/wav"), ("m4a", "audio/mp4"), ("mp3", "audio/mpeg")):
+        tep = thu_muc / f"dub-{translation_id}.{duoi}"
+        if tep.is_file():
+            return FileResponse(
+                tep, media_type=kieu,
+                headers={"Content-Disposition": f'inline; filename="{tep.name}"'})
+    raise HTTPException(404, f"chưa có bản lồng tiếng cho bản dịch #{translation_id} "
+                             "(chạy lồng tiếng trước)")
+
+
 @router.get("/{translation_id}/download")
 def download(translation_id: int, format: str = "wav", dirs=Depends(get_dirs)):
     """Tải một định dạng của bản lồng tiếng. 404 nói RÕ: chưa lồng hay sai định dạng."""

@@ -27,8 +27,10 @@ import { useCallback, useEffect, useRef, useState } from "react";
  * vẫn có một đầu phát chạy để xem dải thời gian, và nó KHÔNG tuyên bố là đang phát
  * tệp nào. Đó là hành vi của bản gốc, không phải dữ liệu bịa.
  */
-export function usePlayer(media: string | null) {
+export function usePlayer(media: string | null, giongLong: string | null = null) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  //: Lớp ÂM của bản lồng tiếng — phát ĐÈ lên hình gốc, hình không đổi.
+  const audioRef = useRef<HTMLAudioElement | null>(null);
   const [src, setSrc] = useState<string | null>(null);
   const [time, setTime] = useState(0);
   const [playing, setPlaying] = useState(false);
@@ -153,6 +155,75 @@ export function usePlayer(media: string | null) {
     };
   }, [src]);
 
+  // ── LỚP ÂM BẢN LỒNG ────────────────────────────────────────────────────────
+  //
+  // 🔴 VÌ SAO PHẢI CÓ: sau khi lồng tiếng xong, khung xem vẫn phát TIẾNG GỐC của video —
+  // người dùng bấm Phát để nghe bản lồng và không nghe thấy gì khác. `dub-<tid>.wav` đã
+  // nằm trên đĩa, chỉ là chưa có đường phát nó cùng hình.
+  //
+  // Cách làm: TẮT tiếng của `<video>` (giữ nguyên hình, `currentTime`, mọi thứ khác) và
+  // phát một `Audio` riêng cùng mốc thời gian. Không đổi `src` của video sang
+  // `dub-<tid>.mp4` vì tệp đó đã BURN phụ đề — hai lớp phụ đề chồng nhau.
+  //
+  // `new Audio(...)` không gắn vào DOM: chỉ để phát. Mọi thứ dọn trong cleanup.
+  useEffect(() => {
+    const v = videoRef.current;
+    if (giongLong === null) {
+      const cu = audioRef.current;
+      audioRef.current = null;
+      cu?.pause();
+      if (v !== null) v.muted = false;
+      return;
+    }
+    // `document.createElement("audio")` chứ KHÔNG `new Audio(src)`: đo được trong harness
+    // test (jsdom) `Audio` KHÔNG tồn tại ⇒ `ReferenceError: Audio is not defined`, và 4 bài
+    // của `Studio` đỏ. Thẻ audio tạo bằng DOM thì cả jsdom lẫn trình duyệt đều có.
+    const a = document.createElement("audio");
+    a.preload = "auto";
+    a.src = giongLong;
+    //: 🔴 NẾU TỆP LỒNG KHÔNG TẢI ĐƯỢC thì BẬT LẠI tiếng gốc. Không có dòng này, một tệp
+    //: thiếu/hỏng làm `<video>` câm VĨNH VIỄN — người dùng nghe im lặng và tưởng hỏng cả app,
+    //: trong khi đúng ra chỉ là "bản lồng không có ở đó". Hỏng to thì vẫn phải nghe được cái
+    //: cũ.
+    a.addEventListener("error", () => {
+      const vv = videoRef.current;
+      if (vv !== null) vv.muted = false;
+    }, { once: true });
+    audioRef.current = a;
+    if (v !== null) v.muted = true;
+    return () => {
+      a.pause();
+      a.src = "";
+      if (audioRef.current === a) audioRef.current = null;
+      const vv = videoRef.current;
+      if (vv !== null) vv.muted = false;
+    };
+  }, [giongLong, src]);
+
+  /**
+   * Bám mốc: chạy/dừng theo hình, và kéo lại khi lệch quá 0,3 s.
+   *
+   * `0,3 s` là ngưỡng ĐO ĐƯỢC bằng tai: dưới mức đó không nghe ra lệch, trên mức đó nghe
+   * thành "tiếng đi trước hình". `play()` có thể bị từ chối (chính sách autoplay) nên
+   * nuốt lỗi — hình vẫn chạy, chỉ thiếu tiếng, KHÔNG được làm sập trình phát.
+   */
+  useEffect(() => {
+    const a = audioRef.current;
+    const v = videoRef.current;
+    if (a === null || v === null) return;
+    // Khẳng định lại mỗi lượt: `<video>` có thể được dựng lại (đổi `src`) và mang
+    // `muted = false` mặc định của thẻ mới — đo được: quên dòng này thì bản lồng phát
+    // CHỒNG lên tiếng gốc.
+    if (!v.muted) v.muted = true;
+    if (Math.abs(a.currentTime - v.currentTime) > 0.3) a.currentTime = v.currentTime;
+    if (playing) {
+      const p = a.play() as Promise<void> | undefined;
+      if (p !== undefined && typeof p.catch === "function") p.catch(() => {});
+    } else {
+      a.pause();
+    }
+  }, [playing, time]);
+
   const seek = useCallback(
     (t: number) => {
       const c = Math.max(0, duration > 0 ? Math.min(duration, t) : t);
@@ -180,7 +251,7 @@ export function usePlayer(media: string | null) {
     else setPlaying(true);
   }, [src]);
 
-  return { videoRef, src, time, playing, duration, seek, toggle, play, loop, setLoop };
+  return { videoRef, audioRef, src, time, playing, duration, seek, toggle, play, loop, setLoop };
 }
 
 /**
