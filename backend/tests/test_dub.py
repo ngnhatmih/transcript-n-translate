@@ -13,6 +13,7 @@ from __future__ import annotations
 import numpy as np
 
 from app.domain.models import Segment
+from app.domain.phu_de import xep_hang_trong_lop
 from app.pipeline.dub import (
     LOP_HAI_NGUON,
     LOP_MOT_NGUON,
@@ -241,3 +242,122 @@ def test_ban_long_gop_du_lieu_cu_chong_nhau_thanh_MOT_dong():
     ra = mot_dong_moi_cap(d)
     assert len(ra) == 1, [s.text for s in ra]
 
+
+
+
+# ---------------------------------------------------------------------------
+# PHỤ ĐỀ BURN: một câu một lúc — đoạn sau ĐỢI đoạn trước hiện xong
+#
+# 🔴 Chủ dự án: "khi burn phụ đề có mấy cái bị đè nhau … tôi muốn nó đợi cái được burn
+# trước hết xong mới đến lượt cái sau", giới hạn phạm vi: "vẫn đang xét trong layer 1 /
+# làn 1 thôi".
+#
+# Đo được trên bản dịch #63: 163 đoạn, 61 cặp chồng, tổng 64,26 s — ví dụ
+# `7,02-8,00` (lớp 1) nằm dưới `7,02-9,66` (lớp 2). Sau `mot_dong_moi_cap`: 110 đoạn,
+# 0 cặp chồng. `xep_hang_trong_lop` là BẢO HIỂM cho dữ liệu mà hai dòng CÙNG lớp vẫn chồng.
+# ---------------------------------------------------------------------------
+
+def test_xep_hang_doi_DAU_doan_sau_len_END_doan_truoc():
+    d = [
+        _d(1, 1.00, 3.00, "trước", LOP_MOT_NGUON, False),
+        _d(2, 2.00, 4.00, "sau", LOP_MOT_NGUON, False),
+    ]
+    ra = xep_hang_trong_lop(d)
+    sau = [s for s in ra if s.i == 2][0]
+    assert sau.start == 3.00, f"đoạn sau phải đợi đoạn trước xong (3,00), đo được {sau.start}"
+    assert sau.end == 4.00, "KHÔNG được cắt chữ — `end` giữ nguyên"
+
+
+def test_xep_hang_KHONG_dung_vao_lop_khac():
+    """Hai LỚP là hai làn hiển thị; chồng nhau ở đó là bình thường, không được dời."""
+    d = [
+        _d(1, 1.00, 3.00, "lớp 1", LOP_MOT_NGUON, False),
+        _d(2, 1.00, 3.00, "lớp 2", LOP_HAI_NGUON, False),
+    ]
+    ra = xep_hang_trong_lop(d)
+    assert [(s.i, s.start, s.end) for s in ra] == [(1, 1.0, 3.0), (2, 1.0, 3.0)]
+
+
+def test_xep_hang_KHONG_de_doan_thanh_ZERO_giay():
+    """Dời `start` lên sát `end` thì phải kéo `end`, không được để đoạn vô hình."""
+    d = [
+        _d(1, 1.00, 5.00, "dài", LOP_MOT_NGUON, False),
+        _d(2, 1.00, 1.20, "ngắn", LOP_MOT_NGUON, False),
+    ]
+    ra = xep_hang_trong_lop(d)
+    sau = [s for s in ra if s.i == 2][0]
+    assert sau.start == 5.00, sau.start
+    assert sau.end > sau.start, (
+        f"đoạn không được dài 0 giây: {sau.start}..{sau.end}"
+    )
+    assert abs((sau.end - sau.start) - 0.20) < 1e-9, "giữ ĐÚNG độ dài cũ (0,20 s)"
+
+
+def test_xep_hang_khong_sua_tai_cho_va_giu_nguyen_thu_tu_khac():
+    d = [
+        _d(2, 2.00, 4.00, "sau", LOP_MOT_NGUON, False),
+        _d(1, 1.00, 3.00, "trước", LOP_MOT_NGUON, False),
+    ]
+    ra = xep_hang_trong_lop(d)
+    assert [s.i for s in ra] == [1, 2], "trả theo thứ tự thời gian"
+    assert d[0].start == 2.00 and d[1].start == 1.00, "KHÔNG được sửa danh sách gốc"
+
+
+def test_xep_hang_danh_sach_rong():
+    assert xep_hang_trong_lop([]) == []
+
+
+def test_ASS_burn_khong_con_HAI_dong_cung_lop_chong_nhau():
+    """Chuỗi đầy đủ của đường burn: lọc theo lớp → xếp hàng → dựng `.ass`.
+
+    Ghim bằng chính `export.render("ass", …)`: đọc ngược thời gian từ sự kiện `Dialogue`
+    rồi khẳng định không còn hai dòng CÙNG LỚP nào chồng nhau.
+    """
+    import re
+
+    from app.pipeline.export import render
+
+    #: ⚠️ Đi THẲNG qua `xep_hang_trong_lop`, KHÔNG qua `mot_dong_moi_cap`: hàm lọc kia GỘP
+    #: mọi đoạn chồng thời gian vào cùng một "cặp", nên nó đã dẹp chồng từ trước và phép
+    #: xếp hàng không còn gì để làm. Ở đây ta kiểm chính phép xếp hàng.
+    doan = xep_hang_trong_lop([
+        _d(1, 0.00, 2.00, "câu một", LOP_MOT_NGUON, False),
+        _d(2, 1.50, 3.00, "câu hai", LOP_MOT_NGUON, False),
+    ])
+    ass = render("ass", doan, translations=[s.text for s in doan],
+                 khung=(1080, 1920), style={"co": 54, "cao_hop": 180, "kieu_vien": 3})
+
+    def giay(s: str) -> float:
+        h, m, r = s.split(":")
+        return int(h) * 3600 + int(m) * 60 + float(r)
+
+    khung_thoi = []
+    for line in ass.splitlines():
+        if not line.startswith("Dialogue:") or "\\p1" in line:
+            continue
+        phan = line.split(",", 9)
+        khung_thoi.append((giay(phan[1]), giay(phan[2]), phan[9]))
+
+    khung_thoi.sort()
+    for (a0, a1, atext), (b0, b1, btext) in zip(khung_thoi, khung_thoi[1:]):
+        assert b0 >= a1 - 1e-6, (
+            f"còn chồng: {a0:.2f}-{a1:.2f} {atext[:24]!r} || {b0:.2f}-{b1:.2f} {btext[:24]!r}"
+        )
+    assert len(khung_thoi) == 2, [t for _, _, t in khung_thoi]
+    assert "câu hai" in " ".join(t for _, _, t in khung_thoi)
+
+
+def test_ASS_burn_giu_NGUYEN_ban_OCR_khi_mot_cau_co_hai_ban():
+    """Vế đối chứng: lọc theo lớp phải giữ bản OCR (lớp 1), không phải bản ASR."""
+    from app.pipeline.export import render
+
+    d = [
+        _d(1, 0.00, 2.00, "OCR đọc đúng", LOP_MOT_NGUON, False),
+        _d(2, 0.00, 2.00, "ASR nghe sai", LOP_HAI_NGUON, True),
+    ]
+    doan = xep_hang_trong_lop(
+        [s for s in d if s.i in {x.i for x in mot_dong_moi_cap(list(d))}])
+    ass = render("ass", doan, translations=[s.text for s in doan],
+                 khung=(1080, 1920), style={"co": 54, "cao_hop": 180, "kieu_vien": 3})
+    assert "OCR đọc đúng" in ass
+    assert "ASR nghe sai" not in ass, "bản ASR KHÔNG được burn cùng câu"

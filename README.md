@@ -1840,10 +1840,46 @@ sớm ⇒ React ném *"Rendered more hooks than during the previous render"* và
 **Ghim:** `test_api_subtitles.py` (hình dạng route + không đo được thì trả một dòng),
 `hinhHocVideo: cỡ chữ là pixel CỦA VIDEO`, và các bài hình học hộp ở `test_phu_de_style.py`.
 
+## ERRATA #74 — phụ đề BURN đè nhau: đường burn không lọc theo lớp, đường xuất tệp thì có
+
+**Phát hiện lúc:** chủ dự án: *"khi burn phụ đề có mấy cái bị đè nhau … tôi muốn nó đợi cái
+được burn trước hết xong mới đến lượt cái sau"*, và giới hạn phạm vi: *"vẫn đang xét trong
+layer 1 / làn 1 thôi"*.
+
+**Đo được trên bản dịch #63** (đếm cặp chồng thời gian, sau khi lọc theo lớp):
+
+```
+TRƯỚC: 163 đoạn · 61 cặp chồng · tổng 64,26 s chồng
+       ví dụ  7,02-8,00  lớp 1  "Thường xuyên phải chứng minh"
+              7,02-9,66  lớp 2  "Thường xuyên phải chứng minh tác phẩm…"
+SAU  : 110 đoạn · 0 cặp chồng
+```
+
+**Nguyên nhân:** timeline GIỮ CẢ HAI dòng của một câu (lớp 1 + lớp 2) để người đọc soát — đó
+là chủ ý. Đường **xuất tệp** đã lọc (`ExportHandler.run` gọi `mot_dong_moi_cap`, có từ trước:
+*"khi dùng phụ đề thì ưu tiên chặt đúng layer 1"*), nhưng đường **burn vào video**
+(`DubHandler._tron_va_remux`) truyền thẳng `transcript.segments` — nên hai câu khác nhau của
+hai lớp được vẽ chồng ở cùng một mốc.
+
+**Sửa hai lớp bảo vệ, cùng một chỗ:**
+
+1. **Lọc theo lớp** đúng như đường xuất tệp — chữ đi kèm lọc theo CÙNG chỉ số (lệch chỉ số
+   là câu hiện ra lệch hàng).
+2. **`phu_de.xep_hang_trong_lop`** — đoạn sau ĐỢI đoạn trước hiện xong: dời `start` lên đúng
+   `end` của đoạn trước, GIỮ `end` (thà dài hơn còn hơn nuốt mất dòng), và **chỉ so trong
+   cùng một lớp** (hai lớp là hai làn hiển thị, chồng nhau ở đó là bình thường). Với dữ liệu
+   hiện tại bước này không đổi gì — nó là BẢO HIỂM cho dữ liệu mà hai dòng cùng lớp vẫn chồng.
+
+**Ghim:** 8 bài trong `tests/test_dub.py` — 5 bài cho phép xếp hàng (dời đúng `end`, không
+đụng lớp khác, không để đoạn 0 giây, không sửa danh sách gốc, danh sách rỗng), 1 bài dựng
+`.ass` rồi đọc ngược `Dialogue` để khẳng định không còn hai dòng cùng lớp chồng nhau, 1 bài
+khẳng định sau khi lọc theo lớp thì lớp 1 hết cặp chồng, 1 bài khẳng định giữ bản OCR thay vì
+bản ASR.
+
 ### Đo cuối
 
 ```
-pytest (toàn bộ)      1527 passed, 15 deselected   EXIT_PYTEST=0
-npm test              274 pass, 0 fail             EXIT_TEST=0
+pytest (toàn bộ)      1535 passed, 15 deselected   EXIT_PYTEST=0
+npm test              275 pass, 0 fail             EXIT_TEST=0
 npx tsc --noEmit                                   EXIT_TS=0
 ```

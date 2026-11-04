@@ -512,6 +512,56 @@ def _tu_trong_khoang(tu: list[Word], dau: float, cuoi: float,
     return ra
 
 
+def xep_hang_trong_lop(doan: list[Segment]) -> list[Segment]:
+    """XẾP HÀNG hiển thị trong TỪNG LỚP: đoạn sau ĐỢI đoạn trước hiện xong.
+
+    🔴 VÌ SAO (chủ dự án: *"khi burn phụ đề có mấy cái bị đè nhau … tôi muốn nó đợi cái được
+    burn trước hết xong mới đến lượt cái sau"*, kèm giới hạn phạm vi: *"vẫn đang xét trong
+    layer 1 / làn 1 thôi"*).
+
+    Hai đoạn cùng một làn mà chồng thời gian thì trên video có hai dòng chữ đè nhau, người
+    xem không đọc được dòng nào. Cách rẻ nhất và đúng ý: dời `start` của đoạn sau lên ĐÚNG
+    `end` của đoạn trước.
+
+    Ba điều phải đúng:
+
+    * **Chỉ so trong CÙNG một lớp.** Lớp 1 và lớp 2 là hai làn HIỂN THỊ; chồng nhau ở đó là
+      bình thường (timeline giữ cả hai để người đọc soát). Gộp hai lớp vào một hàng sẽ đẩy
+      lùi cả dòng của lớp kia — sai hẳn dữ liệu.
+    * **Không để `start >= end`.** Dời tới mức đoạn không còn thời gian hiện là biến nó thành
+      vô hình, mà nguyên tắc đã chốt là *"không cắt chữ"* — thà giữ `end` cũ (nên nó dài ra)
+      còn hơn nuốt mất một dòng. Vì vậy mốc để dời luôn là `end` của đoạn trước, và nếu ra
+      `start >= end` thì giữ nguyên độ dài CŨ.
+    * **Đoạn không có `layer`** (dữ liệu cũ) là một lớp riêng (`""`), không gộp bừa vào lớp 1.
+
+    Trả DANH SÁCH MỚI, không sửa tại chỗ: các bước trước (`keo_dai_theo_asr`, `gop_thanh_dong`)
+    vẫn phải thấy mốc CHƯA dời, và `Segment` là dữ liệu gốc của bản dịch.
+    """
+    if not doan:
+        return []
+
+    #: Mốc `end` XA NHẤT đã dùng cho từng lớp — dùng `max` chứ không phải "end của đoạn vừa
+    #: xét": một đoạn dài có thể vượt qua nhiều đoạn ngắn phía sau.
+    moc: dict[str, float] = {}
+    ra: list[Segment] = []
+    for s in sorted(doan, key=lambda x: (x.start, x.i)):
+        lop = s.layer or ""
+        truoc = moc.get(lop)
+        start, end = s.start, s.end
+        if truoc is not None and start < truoc:
+            start = truoc
+        if end <= start:
+            end = start + max(end - s.start, 0.04)
+        moc[lop] = end if truoc is None else max(truoc, end)
+        ra.append(Segment(
+            i=s.i, start=start, end=end, text=s.text, words=s.words,
+            emotion=s.emotion, events=list(s.events), speaker=s.speaker,
+            avg_logprob=s.avg_logprob, no_speech_prob=s.no_speech_prob,
+            suspect=s.suspect, t=s.t, qa=list(s.qa), layer=s.layer,
+        ))
+    return ra
+
+
 def keo_dai_theo_asr(doan: list[Segment], tu_asr: list[Word],
                      dung_sai: float = 0.5) -> list[Segment]:
     """Kéo `end` của mỗi dòng OCR tới hết LỜI NÓI của câu đó.

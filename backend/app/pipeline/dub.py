@@ -493,7 +493,34 @@ class DubHandler:
             # thay vì im lặng, vì người dùng có thể đang xem một bản dịch cũ.
             phu_de = tam / f"dub-{tid}.ass"
             try:
+                from app.domain.phu_de import xep_hang_trong_lop
                 from app.pipeline import export as _export
+
+                # 🔴 PHỤ ĐỀ BURN PHẢI MỘT CÂU MỘT LÚC — hai việc, cả hai đều cần.
+                #
+                # 1. LỌC THEO LỚP, y hệt đường XUẤT TỆP (`ExportHandler.run`): timeline giữ
+                #    CẢ HAI dòng của một câu (để người đọc soát), nhưng chữ burn vào video
+                #    mà có cả hai thì hai câu khác nhau nằm chồng ở cùng mốc. Đo được trên
+                #    bản dịch #63: 163 đoạn, **61 cặp chồng**, tổng 64,26 s chồng — ví dụ
+                #    `7,02-8,00 "Thường xuyên phải chứng minh"` (lớp 1) nằm dưới
+                #    `7,02-9,66 "Thường xuyên phải chứng minh tác phẩm…"` (lớp 2).
+                #    Sau `mot_dong_moi_cap`: 110 đoạn, **0 cặp chồng**.
+                #
+                # 2. XẾP HÀNG trong từng lớp (`xep_hang_trong_lop`): đoạn sau ĐỢI đoạn trước
+                #    hiện xong. Với dữ liệu hiện tại bước này không đổi gì (0 cặp chồng sau
+                #    khi lọc), nhưng nó là BẢO HIỂM cho dữ liệu khác có hai dòng lớp 1 chồng
+                #    nhau — lúc đó chữ sẽ đè lên nhau trên video.
+                #
+                # Chữ đi kèm phải lọc theo CÙNG chỉ số, nếu không câu hiện ra lệch hàng.
+                giu = {s.i for s in mot_dong_moi_cap(list(transcript.segments))}
+                chi_so = [k for k, s in enumerate(transcript.segments) if s.i in giu]
+                doan_burn = [transcript.segments[k] for k in chi_so]
+                chu_burn = (
+                    [chu_dich[k] for k in chi_so]
+                    if chu_dich is not None and len(chu_dich) == len(transcript.segments)
+                    else list(chu_dich or [])
+                )
+                doan_burn = xep_hang_trong_lop(doan_burn)
 
                 # Kích thước khung THẬT của video gốc — `.ass` phải khai đúng hệ này,
                 # nếu không libass co giãn và chữ tràn ra ngoài mép. Đo được trên
@@ -507,8 +534,8 @@ class DubHandler:
                     # `khung` khai đúng hệ toạ độ; `offset_doc` (mặc định 6 % chiều cao)
                     # đẩy khối chữ XUỐNG để HỘP ĐEN che lấp lớp phụ đề TRUNG CỨNG của
                     # video gốc ở đáy khung — xem `subtitle_format._ASS_OFFSET_DOC_MAC_DINH`.
-                    _export.render("ass", transcript.segments,
-                                   translations=list(chu_dich or []), khung=khung,
+                    _export.render("ass", doan_burn,
+                                   translations=chu_burn, khung=khung,
                                    style=kieu_chu),
                     encoding="utf-8",
                 )
