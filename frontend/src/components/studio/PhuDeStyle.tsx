@@ -180,17 +180,23 @@ export function PhuDeOverlay({
             ...(hopRieng
               ? (ngangTuDong
                   // ngang = 0: hộp ÔM CHỮ. `fit-content` + margin auto để vẫn canh giữa.
-                  // `maxWidth` = bề ngang BẺ DÒNG của libass (`rong_kha_dung`): câu dài hơn
-                  // phải xuống dòng ở đúng chỗ bản burn xuống dòng.
-                  ? { left: 0, right: 0, width: "fit-content", maxWidth: rongKhaDung,
+                  //
+                  // 🔴 KHÔNG ĐẶT `maxWidth` Ở ĐÂY NỮA (đo được): dòng đã do TA bẻ và
+                  // `white-space: pre` cấm trình duyệt bẻ lại, nên `max-content` CHÍNH LÀ
+                  // dòng dài nhất. Để `maxWidth = rong_kha_dung` thì `fit-content` =
+                  // `min(max-content, maxWidth)` = maxWidth (vì max-content của cả câu vẫn
+                  // lớn hơn), và hộp lại rộng bằng cả bề ngang bẻ dòng — đo trên app:
+                  // hộp **1013 px** trong khi dòng dài nhất chỉ **947 px**.
+                  ? { left: 0, right: 0, width: "fit-content",
                       marginLeft: "auto", marginRight: "auto",
                       minHeight: caoHopThat, boxSizing: "border-box" as const }
                   : { left: (tiLeVideo.rong - wHop) / 2, width: wHop,
                       minHeight: caoHopThat, boxSizing: "border-box" as const })
               : { left: h.le, width: rongKhaDung }),
-            ...(hopRieng ? { display: "flex", alignItems: "center",
-                             justifyContent: style.canLe === 1 ? "flex-start"
-                               : style.canLe === 3 ? "flex-end" : "center" } : {}),
+            ...(hopRieng ? { display: "flex", flexDirection: "column" as const,
+                             alignItems: style.canLe === 1 ? "flex-start"
+                               : style.canLe === 3 ? "flex-end" : "center",
+                             justifyContent: "center" } : {}),
             // `cachDay` đã ở hệ pixel video: đáy hộp cách đáy KHUNG HÌNH đúng bằng
             // `offset_doc` — cùng mốc `pos_y = round(cao × (1 − offset))` bên `to_ass`.
             bottom: h.cachDay,
@@ -216,11 +222,13 @@ export function PhuDeOverlay({
                 }),
           }}
         >
+          {/*: MỖI DÒNG LÀ MỘT KHỐI, không phải `<br>`.
+                🔴 ĐO ĐƯỢC: với `<br>`, `max-content` của hộp vẫn tính CẢ CÂU trên một
+                dòng (hộp ra **1963 px** trong khi dòng dài nhất chỉ **947**) — Chrome
+                không trừ `<br>` khi tính `max-content`, nên `fit-content` không ôm chữ.
+                Ba khối thì bề rộng hộp = bề rộng khối rộng nhất = đúng dòng dài nhất. */}
           {dongChu.map((d, i) => (
-            <span key={i}>
-              {d}
-              {i < dongChu.length - 1 ? <br /> : null}
-            </span>
+            <div key={i}>{d}</div>
           ))}
         </div>
       </div>
