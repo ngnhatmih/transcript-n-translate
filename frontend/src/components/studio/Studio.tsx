@@ -277,6 +277,11 @@ export function Studio(props: StudioProps) {
    *
    * Bản này KHÔNG lọc `tron_nen`: job `dub` có ghép nền vẫn là job lồng tiếng (nó làm cả
    * hai việc), nên bước "Lồng tiếng" phải thấy nó.
+   *
+   * ⚠️ VẾ TRÊN ĐÃ SAI kể từ khi có `chi_tron` (ERRATA #70): "Ghép nền" / "Xuất" gửi job
+   * `dub` mang `chi_tron = true`, và job đó KHÔNG chạy TTS — nó chỉ trộn + burn + remux.
+   * Vì vậy `jobDub` (dùng để biết BẢN LỒNG ĐÃ CÓ) và `jobLong` (dùng để vẽ trạng thái bước
+   * "Lồng tiếng") là HAI thứ khác nhau; xem `jobLong` ngay dưới. Xem ERRATA #76.
    */
   const jobDub = useMemo(() => {
     if (banDich === null) return null;
@@ -287,6 +292,45 @@ export function Studio(props: StudioProps) {
     );
     return ds.length === 0 ? null : ds.reduce((a, b) => (b.id > a.id ? b : a));
   }, [jobs, banDich]);
+
+  /**
+   * JOB LỒNG TIẾNG **THẬT** — job `dub` có chạy TTS, không phải lượt ghép nền.
+   *
+   * 🔴 LỖI THẬT, ĐO ĐƯỢC (chủ dự án gửi ảnh thanh bước: *"là sao nhỉ ấn xuất vẫn chạy lại
+   * lồng tiếng"* — ảnh chụp cho thấy CẢ "Lồng tiếng" và "Ghép nền" đều ghi *đang chạy…*).
+   *
+   * Đối chiếu hàng đợi thật lúc đó: job `#202` mang `tron_nen = true` + `chi_tron = true`,
+   * log của nó ghi rõ *"ghép nền từ bản lồng đã có … không chạy lại TTS"*, chạy 38 s. Tức
+   * là TTS **không** chạy lại — chỉ có GIAO DIỆN nói thế.
+   *
+   * Nguyên nhân: `dubState` của bước "Lồng tiếng" đọc `jobDub`, mà `jobDub` không lọc
+   * `chi_tron`, nên một lượt ghép nền đang chạy làm bước "Lồng tiếng" (đã xong từ lâu)
+   * nhảy về "đang chạy…". Người dùng đọc đúng những gì màn hình nói, và màn hình nói sai.
+   *
+   * Điều kiện là `chi_tron !== true` (không phải `tron_nen !== true`): job ghép nền CÓ chạy
+   * TTS là job đời cũ, không mang `chi_tron` — nó vẫn là một lượt lồng tiếng thật.
+   */
+  const jobLong = useMemo(() => {
+    if (banDich === null) return null;
+    const ds = jobs.filter(
+      (j) =>
+        j.type === "dub" &&
+        (j.payload?.["translation_id"] as number | undefined) === banDich.id &&
+        j.payload?.["chi_tron"] !== true,
+    );
+    return ds.length === 0 ? null : ds.reduce((a, b) => (b.id > a.id ? b : a));
+  }, [jobs, banDich]);
+
+  /**
+   * Trạng thái THẬT của bước "Lồng tiếng".
+   *
+   * Có job chạy TTS ⇒ trạng thái của nó. Không có (dữ liệu cũ, hoặc lượt lồng đã bị xoá
+   * khỏi danh sách) thì chỉ dám nói "xong" khi có một job `dub` đã `done`: chính nó là thứ
+   * sinh ra `dub-{tid}.wav`. Một lượt ghép nền đang chạy KHÔNG phải bằng chứng TTS đã chạy.
+   */
+  const trangThaiLong: JobState | null = jobLong !== null
+    ? jobLong.state
+    : jobDub !== null && jobDub.state === "done" ? "done" : null;
 
   const media: string | null = source === null ? null : mediaUrl(source.id);
   //: Đã lồng tiếng xong ⇒ mặc định NGHE BẢN LỒNG trong khung xem (có nút đổi lại bản gốc).
@@ -601,7 +645,7 @@ export function Studio(props: StudioProps) {
         dichState: trangThai("dich", jobDich === null ? null : jobDich.state),
         engineMt: banDich === null ? null : banDich.engine,
         soViec: issues.length,
-        dubState: trangThai("long", jobDub === null ? null : jobDub.state),
+        dubState: trangThai("long", trangThaiLong),
         ghepState: trangThai("ghep", jobGhep === null ? null : jobGhep.state),
         coFileXuat: jobGhep !== null && jobGhep.state === "done",
         //: So kiểu chữ HIỆN TẠI với kiểu đã dùng cho lần ghép gần nhất — payload của job
@@ -611,7 +655,7 @@ export function Studio(props: StudioProps) {
           && JSON.stringify(jobGhep.payload?.["style"])
              !== JSON.stringify(styleChoAss(kieuPhuDe)),
       }),
-    [transcript, banDich, issues.length, jobDub, jobGhep, jobAsr, jobDich, trangThai,
+    [transcript, banDich, issues.length, trangThaiLong, jobGhep, jobAsr, jobDich, trangThai,
      kieuPhuDe],
   );
 
@@ -635,7 +679,7 @@ export function Studio(props: StudioProps) {
     const cap: Array<[string, JobState | null]> = [
       ["asr", jobAsr === null ? null : jobAsr.state],
       ["dich", jobDich === null ? null : jobDich.state],
-      ["long", jobDub === null ? null : jobDub.state],
+      ["long", trangThaiLong],
       ["ghep", jobGhep === null ? null : jobGhep.state],
     ];
     setLacQuan((cu) => {
@@ -648,7 +692,7 @@ export function Studio(props: StudioProps) {
       }
       return moi.size === cu.size ? cu : moi;
     });
-  }, [jobAsr, jobDich, jobDub, jobGhep]);
+  }, [jobAsr, jobDich, trangThaiLong, jobGhep]);
 
   /**
    * GẮN ƯỚC LƯỢNG vào bước đang chạy — tính NGOÀI `duongOng` vì hàm đó là THUẦN và
@@ -1032,7 +1076,10 @@ export function Studio(props: StudioProps) {
           setNotice("Chưa có bản dịch — lồng tiếng cần bản dịch trước");
           return;
         }
-        if (jobDub !== null && (jobDub.state === "queued" || jobDub.state === "running")) {
+        // Chặn theo `jobLong` (job CÓ chạy TTS), không theo `jobDub`: đang ghép nền cũng là
+        // một job `dub`, và chặn theo nó thì người dùng bị từ chối lồng tiếng chỉ vì một
+        // lượt burn đang chạy. Hai việc độc lập (xem ERRATA #76).
+        if (jobLong !== null && (jobLong.state === "queued" || jobLong.state === "running")) {
           setNotice("Đang lồng tiếng — chờ lượt này xong đã");
           setView("dub");
           return;
@@ -1083,7 +1130,7 @@ export function Studio(props: StudioProps) {
       onBuoc(id);
     },
     [issues.length, diViec, lyDoXuat, onXuatVideo, onBuoc, banDich, transcript, datLacQuan,
-     cacBuoc, jobDub, jobGhep],
+     cacBuoc, jobDub, jobLong, jobGhep],
   );
 
   const commands: Command[] = [

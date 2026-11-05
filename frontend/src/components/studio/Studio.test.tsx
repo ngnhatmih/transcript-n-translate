@@ -738,6 +738,83 @@ describe("Studio: bước Ghép nền hiện dấu tích khi job dub tron_nen xo
 
 
 // ---------------------------------------------------------------------------
+// BƯỚC "LỒNG TIẾNG" KHÔNG ĐƯỢC NÓI "ĐANG CHẠY" KHI VIỆC ĐANG CHẠY LÀ GHÉP NỀN — ERRATA #76
+//
+// 🔴 LỖI THẬT, ĐO ĐƯỢC. Chủ dự án gửi ảnh thanh bước: *"là sao nhỉ ấn xuất vẫn chạy lại lồng
+// tiếng"* — trong ảnh CẢ "Lồng tiếng" và "Ghép nền" đều ghi "đang chạy…". Đối chiếu hàng đợi
+// thật: job `#202` mang `tron_nen = true` + `chi_tron = true`, log ghi *"ghép nền từ bản lồng
+// đã có … không chạy lại TTS"*, chạy 38 s. TTS **không** chạy lại — chỉ giao diện nói thế.
+//
+// Nguyên nhân: bước "Lồng tiếng" đọc `jobDub`, mà `jobDub` cố ý KHÔNG lọc `chi_tron` (nó trả
+// lời câu "đã có bản lồng chưa"). Nay tách làm hai: `jobDub` (có bản lồng) và `jobLong` (job
+// CÓ chạy TTS). Bốn bài dưới đây ghim cả hai vế và cả chỗ chặn bấm.
+// ---------------------------------------------------------------------------
+
+describe("Studio: bước Lồng tiếng KHÔNG nhảy 'đang chạy' khi job đang chạy là GHÉP NỀN", () => {
+  const longXong = (id: number) =>
+    job({ id, type: "dub", state: "done", payload: { translation_id: BAN_DICH_ID } });
+  const ghepDangChay = (id: number) =>
+    job({
+      id,
+      type: "dub",
+      state: "running",
+      payload: { translation_id: BAN_DICH_ID, tron_nen: true, chi_tron: true },
+    });
+
+  it("job lồng tiếng done + job ghép nền đang chạy ⇒ 'Lồng tiếng' là ĐÃ LỒNG, chỉ 'Ghép nền' đang chạy", () => {
+    const { props } = dungThu({ source: KENH, jobs: [longXong(80), ghepDangChay(81)] });
+    render(<Studio {...props} />);
+
+    const long = buocTheoTen("Lồng tiếng");
+    const ghep = buocTheoTen("Ghép nền");
+    assert.match(long.chu, /đã lồng/, `bước Lồng tiếng phải ghi 'đã lồng', đo được: ${long.chu}`);
+    assert.doesNotMatch(
+      long.chu,
+      /đang chạy/,
+      "job đang chạy là GHÉP NỀN (chi_tron = true, không chạy TTS) mà bước Lồng tiếng ghi " +
+      "'đang chạy…' — chính câu 'ấn xuất vẫn chạy lại lồng tiếng'",
+    );
+    assert.match(ghep.chu, /đang chạy/, `bước Ghép nền phải ghi 'đang chạy…', đo được: ${ghep.chu}`);
+  });
+
+  it("job lồng tiếng THẬT đang chạy ⇒ 'Lồng tiếng' vẫn 'đang chạy…' (vế chống sửa quá tay)", () => {
+    // Bỏ hết `dubState` là hỏng vế này: bấm Lồng tiếng xong sẽ không thấy gì đang chạy.
+    const { props } = dungThu({
+      source: KENH,
+      jobs: [job({ id: 82, type: "dub", state: "running", payload: { translation_id: BAN_DICH_ID } })],
+    });
+    render(<Studio {...props} />);
+    assert.match(buocTheoTen("Lồng tiếng").chu, /đang chạy/);
+  });
+
+  it("CHỈ có job ghép nền đã done (dữ liệu cũ) ⇒ vẫn coi là ĐÃ LỒNG, không báo 'chưa chạy'", () => {
+    // Một lượt ghép nền thành công là bằng chứng `dub-{tid}.wav` tồn tại. Không có job lồng
+    // tiếng nào trong danh sách thì đừng nói dối theo hướng ngược lại.
+    const { props } = dungThu({
+      source: KENH,
+      jobs: [job({
+        id: 83,
+        type: "dub",
+        state: "done",
+        payload: { translation_id: BAN_DICH_ID, tron_nen: true, chi_tron: true },
+      })],
+    });
+    render(<Studio {...props} />);
+    assert.match(buocTheoTen("Lồng tiếng").chu, /đã lồng/);
+  });
+
+  it("đang ghép nền KHÔNG chặn bấm Lồng tiếng (hai việc độc lập)", () => {
+    // Chặn theo `jobDub` khiến người dùng bị từ chối lồng tiếng chỉ vì một lượt burn đang chạy.
+    const { props, goi } = dungThu({ source: KENH, jobs: [longXong(84), ghepDangChay(85)] });
+    render(<Studio {...props} />);
+    fireEvent.click(buocTheoTen("Lồng tiếng").nut);
+    const buoc = goi.filter((g) => g.ten === "onBuoc").map((g) => g.args[0]);
+    assert.deepEqual(buoc, ["long"], `phải xếp job lồng tiếng, đo được ${JSON.stringify(buoc)}`);
+  });
+});
+
+
+// ---------------------------------------------------------------------------
 // TRẠNG THÁI LẠC QUAN CỦA BƯỚC "PHIÊN ÂM" — đổi NGAY lúc bấm
 //
 // 🔴 LỖI THẬT, ĐO ĐƯỢC (người dùng: "nên đổi state từ cái lúc ấn ý").

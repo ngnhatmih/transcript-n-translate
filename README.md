@@ -1945,4 +1945,60 @@ pytest (toàn bộ)      1541 passed, 15 deselected, 11 warnings   EXIT_PYTEST=0
 npm test              278 pass, 0 fail                           EXIT_TEST=0
 ```
 
+---
+
+## ERRATA #76 — bước "Lồng tiếng" ghi "đang chạy…" trong khi việc đang chạy là GHÉP NỀN
+
+**Phát hiện lúc:** chủ dự án gửi ảnh thanh bước và hỏi: *"là sao nhỉ ấn xuất vẫn chạy lại
+lồng tiếng"*. Trong ảnh, CẢ ba bước hiện: `Lồng tiếng — đang chạy…`, `Ghép nền — đang
+chạy…`, `Xuất — cần ghép nền`.
+
+**Đo được — TTS KHÔNG hề chạy lại.** Đối chiếu hàng đợi thật đúng lúc đó:
+
+```
+#202 dub done  payload {"translation_id":63,"tron_nen":true,"chi_tron":true,...}
+     log    ghép nền từ bản lồng đã có: dub-63.wav (24726764 byte) — không chạy lại TTS
+            dùng lại bản trộn đã có (dub-63.tron.wav) — chỉ burn lại phụ đề + remux
+            video lồng tiếng: dub-63.mp4 (270022 kB)
+     thời gian 06:25:09 → 06:25:47  (38 s; một lượt TTS thật là 5–7 phút)
+```
+
+Tức là backend làm đúng (ERRATA #70 vẫn còn tác dụng), và **chỉ giao diện nói sai**.
+
+**Nguyên nhân:** bước "Lồng tiếng" đọc `dubState` từ `jobDub`, và `jobDub` **cố ý** không lọc
+`tron_nen` — chú thích cũ trong `Studio.tsx` viết: *"job `dub` có ghép nền vẫn là job lồng
+tiếng (nó làm cả hai việc), nên bước Lồng tiếng phải thấy nó"*. Câu đó **đã sai kể từ khi có
+`chi_tron`**: lượt ghép nền không còn làm việc lồng tiếng nữa, nó chỉ trộn + burn + remux.
+Nên một lượt burn đang chạy kéo bước "Lồng tiếng" (đã xong từ lâu) về "đang chạy…".
+
+**Sửa:** tách đôi, vì hai câu hỏi khác nhau:
+
+| biến | câu hỏi nó trả lời | lọc |
+|---|---|---|
+| `jobDub` | *đã có bản lồng chưa?* (nghe thử, chặn ghép nền) | mọi job `dub` của bản dịch |
+| `jobLong` | *lượt lồng tiếng gần nhất thế nào?* (vẽ bước) | `chi_tron !== true` |
+
+Điều kiện là `chi_tron !== true` chứ không phải `tron_nen !== true`: job ghép nền đời cũ
+**có** chạy TTS và không mang `chi_tron` — nó vẫn là một lượt lồng tiếng thật, phải hiện đúng.
+
+`trangThaiLong` = trạng thái của `jobLong`; nếu không có job nào như vậy thì chỉ dám nói
+`done` khi có một job `dub` đã `done` (chính nó sinh ra `dub-{tid}.wav`) — **không** lấy trạng
+thái của một lượt ghép nền đang chạy làm bằng chứng TTS đã chạy.
+
+Kèm một chỗ cùng gốc: nút "Lồng tiếng" chặn bấm theo `jobDub`, tức đang ghép nền thì người
+dùng bị từ chối lồng tiếng. Nay chặn theo `jobLong` — hai việc độc lập.
+
+**Ghim:** 4 bài trong `Studio.test.tsx` — (1) job lồng tiếng `done` + job ghép nền `running`
+⇒ bước Lồng tiếng là *đã lồng*, chỉ bước Ghép nền *đang chạy…* (đây đúng là ảnh chụp của chủ
+dự án); (2) job lồng tiếng THẬT đang chạy ⇒ vẫn *đang chạy…* (vế chống sửa quá tay — bỏ hẳn
+`dubState` là hỏng vế này); (3) chỉ có một job ghép nền đã `done` (dữ liệu cũ) ⇒ vẫn coi là
+*đã lồng*; (4) đang ghép nền **không** chặn bấm Lồng tiếng.
+
+### Đo cuối
+
+```
+npm test              282 pass, 0 fail                           EXIT_TEST=0
+npx tsc --noEmit                                                 EXIT_TS=0
+```
+
 
