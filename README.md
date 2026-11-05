@@ -2064,4 +2064,74 @@ npm test              286 pass, 0 fail             EXIT_TEST=0
 npx tsc --noEmit                                   EXIT_TS=0
 ```
 
+---
+
+## ERRATA #78 — bản BURN có một VẠCH DỌC giữa hộp phụ đề, bản xem trước trên web thì không
+
+**Phát hiện lúc:** chủ dự án gửi hai ảnh cạnh nhau — ảnh hộp trong hộp thoại "Chỉnh phụ đề
+hiển thị" (sạch) và ảnh phóng to hộp trong video đã burn (có một **vạch dọc** chia đôi hộp) —
+kèm câu *"bản web vs bản burn"*.
+
+**Đo được** trên chính `dub-63.mp4` (khung 1080×1920, câu "Là một người làm nghề thuật" ở
+giây 0,5; style `co 160`, `cao_hop 180`, `vien 20`, hộp đen đặc):
+
+```
+hộp: x 137→941 (805 px), y 1337→1516 (180 px)
+cột không đen suốt cả chiều cao hộp: 539, 540
+màu tại đó: (83,76,71) / (84,77,72)  — nền video (216,208,192) lọt qua ~45 %
+```
+
+Tức hộp **không** liền: đúng hai cột ở giữa chỉ được phủ một nửa, và vì hộp đen trên nền sáng
+nên mắt thấy thành một đường kẻ.
+
+**Nguyên nhân:** hộp rộng **806** > trần `PlayResX/2 = 540` (libass THU NHỎ một hình vẽ vượt
+nửa bề ngang script — đo từ trước, xem ERRATA #72), nên hộp bị chia **hai mảnh**, mỗi mảnh
+rộng **403 (số LẺ)**. Tâm mỗi mảnh vì thế là `.5`, mà bản cũ ghi `\pos` bằng `int(round(cx))`,
+và `round` của Python làm tròn **chẵn**. Đọc thẳng tệp `.ass` của bản cũ (in ra ở đây nguyên
+văn, không suy luận):
+
+```
+mảnh 1: {\an2\pos(338,...)} m 0 0 l 403 0 403 -180 0 -180   → mép 136,5 … 539,5
+mảnh 2: {\an2\pos(742,...)} m 0 0 l 403 0 403 -180 0 -180   → mép 540,5 … 943,5
+```
+
+Hai mép lẽ ra phải trùng một đường thì lại **hở đúng 1 px** — nền video lọt qua khe đó, và trên
+ảnh burn nó thành hai cột nửa phủ. Rasteriser của libass là subpixel, nên `int(round())` chính
+là thứ đẩy mép ra khỏi toạ độ nguyên.
+
+**Sửa** (`domain/subtitle_format.py`): biên ngang của từng mảnh tính bằng **SỐ NGUYÊN, cộng
+dồn** (`canh_ngang[k] = canh_ngang[k-1] + bề rộng mảnh`), phần lệch ±1 px của hai lần làm tròn
+dồn vào mảnh CUỐI; và `\pos` ghi bằng `_so_ass` — giữ `.5` (`\pos(338.5,…)` /
+`\pos(741.5,…)`) thay vì ép về `int`. Hình học hộp KHÔNG đổi (đo lại sau khi sửa: vẫn
+`x 137→941`, `y 1337→1516`).
+
+**Đo lại sau khi sửa** (cùng khung, cùng câu, job #204 — 39 s, vẫn không chạy lại TTS):
+
+```
+hộp: x 137→941 (805 px), y 1337→1516 (180 px)          ← y hệt trước
+cột không đen trong hộp: KHÔNG CÓ
+màu tại 538…542: (0,0,2) (0,0,2) (0,0,2) (0,0,2) (0,0,2)
+```
+
+**Ghim 2 bài** trong `tests/test_phu_de_style.py`:
+
+1. `test_mep_ngang_cua_manh_hop_la_SO_NGUYEN_va_KHOP_NHAU` — mọi mép là số nguyên và hai mảnh
+   kề CHUNG đúng một mép. Đây là điều kiện để không cột nào bị phủ nửa.
+2. `test_BURN_THAT_khong_co_cot_nao_ho_giua_hai_manh_hop` — **burn thật** một khung bằng ffmpeg
+   rồi đếm cột. Bài này là bài duy nhất bắt được lỗi, vì lỗi nằm ở pixel chứ không ở chuỗi
+   `.ass`: một test chỉ đọc số trong tệp sẽ xanh trong khi video vẫn có vạch.
+
+Đã kiểm hai bài này **ĐỎ trên bản cũ** (đo được đúng thông báo: *"mép trái 136.5 KHÔNG nguyên"*
+và *"hộp 806 px có 2 cột bị nền lọt qua, ví dụ [(539, (103, 101, 97)), …]"*), rồi **XANH sau khi
+sửa**. Đo thêm 5 kiểu hộp khác (hộp hẹp 1 mảnh, hộp cao 960 chia 4 hàng, hộp vừa rộng vừa cao,
+hộp đục 50 %): không kiểu nào còn cột/hàng hở, và hộp đục 50 % cũng không bị đậm gấp đôi ở
+đường nối (vì các mảnh KHÔNG chồng nhau — chúng chia nhau đúng một mép nguyên).
+
+### Đo cuối
+
+```
+pytest (toàn bộ)      1544 passed, 15 deselected   EXIT_PYTEST=0
+npm test              286 pass, 0 fail             EXIT_TEST=0   (không đổi frontend)
+```
+
 

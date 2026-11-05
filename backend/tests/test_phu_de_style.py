@@ -140,17 +140,26 @@ def test_style_mau_SAI_thi_nem():
 # Chiều cao thì không cần đo, nên đặt sẵn bề rộng là đủ để kiểm hình học dọc.
 
 
-def _manh_hop(ass: str) -> list[tuple[int, int, int, int]]:
-    """`(x, y, rộng, cao)` của TỪNG mảnh hộp vector trong tệp."""
+def _manh_hop(ass: str) -> list[tuple[float, int, int, int]]:
+    """`(pos.x, pos.y, rộng, cao)` của TỪNG mảnh hộp vector trong tệp.
+
+    `pos.x` đọc bằng `float`, KHÔNG `int`: hộp rộng lẻ bị chia mảnh thì tâm mảnh là `.5`
+    và chính con số đó là thứ giữ mép trên toạ độ nguyên (xem ERRATA #78).
+    """
     ra = []
     for line in ass.splitlines():
         if "\\p1" not in line:
             continue
-        x, y = (int(v) for v in line.split("\\pos(")[1].split(")")[0].split(","))
+        x_ra, y_ra = line.split("\\pos(")[1].split(")")[0].split(",")
         # `m 0 0 l {rong} 0 {rong} -{cao} 0 -{cao}`: lấy hai số ĐẦU của cạnh thứ nhất.
         rong, cao = re.search(r"m 0 0 l (\d+) 0 \d+ (-?\d+)", line).groups()
-        ra.append((x, y, int(rong), -int(cao)))
+        ra.append((float(x_ra), int(y_ra), int(rong), -int(cao)))
     return ra
+
+
+def _mep_ngang(ass: str) -> list[tuple[float, float]]:
+    """`(mép trái, mép phải)` của từng mảnh hộp — `pos.x` là TÂM mảnh (neo `\\an2`)."""
+    return [(x - rong / 2, x + rong / 2) for x, _, rong, _ in _manh_hop(ass)]
 
 
 def _khung_hop(ass: str) -> tuple[int, int]:
@@ -214,6 +223,123 @@ def test_chu_NAM_TRONG_hop_khi_hop_cao():
         assert dinh <= y_chu <= day, (
             "cao %d: chữ ở %d nằm ngoài hộp [%d, %d]" % (cao_hop, y_chu, dinh, day)
         )
+
+
+# ---------------------------------------------------------------------------
+# VẠCH HỞ GIỮA HAI MẢNH HỘP — ERRATA #78
+#
+# 🔴 ĐO ĐƯỢC trên ảnh burn thật (bản dịch #63, câu "Là một người làm nghề thuật",
+# `cao_hop 180`, hộp rộng 806 trên khung 1080): HAI CỘT x=539 và x=540 không đen suốt cả
+# chiều cao hộp, mỗi cột chỉ phủ ~45 % — nền video lọt qua thành một vạch dọc giữa hộp,
+# trong khi bản xem trước trên web (CSS) không có vạch đó.
+#
+# Nguyên nhân: hộp 806 > `PlayResX/2 = 540` nên bị chia HAI mảnh, mỗi mảnh rộng **403 (số
+# LẺ)** ⇒ tâm mảnh là `.5`. Bản cũ ghi `\pos` bằng `int(round(cx))`, mà `round` của Python làm
+# tròn CHẴN (338,5 → 338 và 741,5 → 742), nên hai mép kề nhau hở đúng 1 px. Đọc thẳng tệp
+# `.ass` của bản cũ:
+#
+#     mảnh 1: \pos(338) rộng 403 → mép 136,5 … 539,5
+#     mảnh 2: \pos(742) rộng 403 → mép 540,5 … 943,5     ← hở 1 px
+#
+# Bài 1 ghim HÌNH HỌC (nhanh, không cần ffmpeg). Bài 2 BURN THẬT rồi đếm cột — vì lỗi này
+# thuần thị giác, một test chỉ so số trong tệp `.ass` sẽ không bắt được nó.
+# ---------------------------------------------------------------------------
+
+
+def _he_hop_rong_le() -> dict:
+    """Style của ĐÚNG ca gây lỗi (đo trên ảnh burn thật): hộp rộng **806** trên khung 1080.
+
+    `mau_hop`/`do_duc_hop` khai tường minh: mặc định của hộp là `&HA0000000` (alpha `A0`,
+    tức ĐỤC 62 %) — trên nền sáng nó ra màu xám và bài đo pixel bên dưới sẽ không nhận ra
+    hộp. Hộp trong ca thật của chủ dự án là ĐEN ĐẶC (`do_duc_hop = 1`).
+    """
+    return {"rong_hop": 806, "cao_hop": 180, "kieu_vien": 3, "co": 41,
+            "mau_hop": "#000000", "mau_chu": "#ffffff", "do_duc_hop": 1}
+
+
+def test_mep_ngang_cua_manh_hop_la_SO_NGUYEN_va_KHOP_NHAU():
+    """Mọi mép của mọi mảnh là số nguyên, và hai mảnh kề CHUNG đúng một mép.
+
+    Đây là điều kiện để libass (rasteriser subpixel) phủ trọn cột ở đường nối: mép nằm trên
+    toạ độ nguyên thì không cột nào bị phủ nửa. Lệch `.5` ⇒ vạch hở đúng hai cột.
+    """
+    ass = to_ass([_doan(text="A")], khung=(1080, 1920), offset_doc=0.21,
+                 style=_he_hop_rong_le())
+    mep = _mep_ngang(ass)
+    assert len(mep) >= 2, "hộp 806 px phải chia mảnh (trần rx/2 = 540), đo được %d" % len(mep)
+
+    for trai, phai in mep:
+        assert abs(trai - round(trai)) < 1e-9, f"mép trái {trai} KHÔNG nguyên — sẽ hở vạch"
+        assert abs(phai - round(phai)) < 1e-9, f"mép phải {phai} KHÔNG nguyên — sẽ hở vạch"
+
+    mep.sort()
+    for (_, phai_truoc), (trai_sau, _) in zip(mep, mep[1:]):
+        assert trai_sau == phai_truoc, (
+            f"hai mảnh kề lệch nhau: mảnh trước hết ở {phai_truoc}, mảnh sau bắt đầu ở "
+            f"{trai_sau} — hở {trai_sau - phai_truoc} px")
+
+
+def _co_ffmpeg() -> bool:
+    import subprocess
+
+    try:
+        subprocess.run(["ffmpeg", "-version"], capture_output=True, check=True)
+        return True
+    except (OSError, subprocess.CalledProcessError):
+        return False
+
+
+def test_BURN_THAT_khong_co_cot_nao_ho_giua_hai_manh_hop(tmp_path):
+    """Burn một khung thật rồi đếm: KHÔNG cột nào bên trong hộp bị nền lọt qua.
+
+    Bài này là bài DUY NHẤT bắt được lỗi thật, vì lỗi nằm ở pixel chứ không ở chuỗi `.ass`.
+    Đo trên bản CŨ: cột x=539 và x=540 có màu `(103,101,97)` trên nền `(216,208,192)` — tức
+    chỉ phủ ~45 %. Nay cả hai phải là `(0,0,0)`.
+    """
+    import subprocess
+
+    if not _co_ffmpeg():
+        pytest.skip("cần ffmpeg có libass")
+
+    from PIL import Image
+
+    nen = (216, 208, 192)
+    ass = to_ass([_doan(text="A", start=0.0, end=1.0)], khung=(1080, 1920),
+                 offset_doc=0.21, style=_he_hop_rong_le())
+    tep_ass = tmp_path / "box.ass"
+    tep_ass.write_text(ass, encoding="utf-8")
+    tep_png = tmp_path / "box.png"
+
+    # Thoát đường dẫn y như `tach_nen.remux` (dấu `:` và `\\` có nghĩa trong chuỗi filter).
+    duong = str(tep_ass.resolve()).replace("\\", "/").replace(":", r"\:").replace("'", r"\'")
+    subprocess.run(
+        ["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi",
+         "-i", f"color=c=0x{nen[0]:02X}{nen[1]:02X}{nen[2]:02X}:s=1080x1920:d=1:r=10",
+         "-vf", f"ass='{duong}'", "-frames:v", "1", str(tep_png)],
+        check=True, capture_output=True)
+
+    px = Image.open(tep_png).convert("RGB").load()
+    W, H = 1080, 1920
+
+    def den(c: tuple[int, int, int]) -> bool:
+        return max(c) < 40
+
+    hang = [y for y in range(H) if sum(1 for x in range(0, W, 4) if den(px[x, y])) > 60]
+    assert hang, "không thấy hộp đen nào trên khung — hộp không được vẽ?"
+    y0, y1 = min(hang), max(hang)
+    cot = [x for x in range(W) if den(px[x, (y0 + y1) // 2])]
+    x0, x1 = min(cot), max(cot)
+
+    # Mười hai hàng sát ĐỈNH hộp: vùng này không có chữ, nên phải đen tuyệt đối.
+    ho = [
+        (x, px[x, y0 + 5])
+        for x in range(x0, x1 + 1)
+        for y in range(y0, y0 + 12)
+        if not den(px[x, y0 + 5])
+    ]
+    assert not ho, (
+        f"hộp {x1 - x0 + 1} px có {len(set(x for x, _ in ho))} cột bị nền lọt qua, "
+        f"ví dụ {ho[:4]} — đó là vạch hở giữa hai mảnh (mép không nguyên)")
 
 
 def test_KHONG_DO_DUOC_chu_thi_khong_ve_hop(monkeypatch):

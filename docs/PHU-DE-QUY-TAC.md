@@ -101,11 +101,19 @@ Burn: `DubHandler._tron_va_remux` → **lọc theo lớp** (`mot_dong_moi_cap`, 
    so với pixel video phải chia lại cho `scale` (hoặc đo trên khung 1080 px).
 10. **`ffmpeg -ss` đặt TRƯỚC `-i`**: filter `ass` vẫn tính mốc từ 0, ảnh ra là phút 0 chứ
     không phải mốc cần xem. Đặt `-ss` sau `-i`.
+11. **Mép MẢNH hộp phải là SỐ NGUYÊN**: hộp rộng quá `PlayResX/2` bị chia mảnh, và nếu mỗi
+    mảnh được đặt bằng `\pos` làm tròn về `int` thì hai mép kề nhau rơi vào **hai cột khác
+    nhau** — mỗi cột chỉ được phủ một nửa và nền video lọt qua thành **vạch dọc giữa hộp**.
+    Đo được trên `dub-63.mp4`: cột 539/540 màu `(83,76,71)` trên nền `(216,208,192)`, trong
+    khi bản xem trước bằng CSS thì sạch. Biên từng mảnh phải cộng dồn trên **số nguyên**, và
+    `\pos` phải giữ `.5` (hàm `_so_ass`) — rasteriser của libass là subpixel. Đây là lỗi CHỈ
+    thấy trên pixel, nên phải có bài **burn thật rồi đếm cột**; test đọc chuỗi `.ass` không
+    bắt được. Xem ERRATA #78.
 
 ## 7. Liên quan
 
 - `ERRATA` #66 (chia mảnh hộp), #67 (chữ đậm), #72 (`\N` + bước dòng), #73 (một nguồn bẻ
-  dòng), #74 (burn đè nhau).
+  dòng), #74 (burn đè nhau), #78 (vạch hở giữa hai mảnh).
 - Test canh: `backend/tests/test_phu_de_style.py`, `test_api_subtitles.py`, `test_dub.py`;
   `frontend/src/lib/phuDeStyle.test.ts`, `frontend/src/components/studio/PhuDeStyle.test.tsx`.
 

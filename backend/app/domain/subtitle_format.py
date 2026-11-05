@@ -42,6 +42,20 @@ def _ass_timestamp(seconds: float) -> str:
     return f"{hours:d}:{minutes:02d}:{secs:02d}.{centis:02d}"
 
 
+def _so_ass(x: float) -> str:
+    """Số cho `\\pos(...)`: KHÔNG làm tròn về `int` khi có phần lẻ (`137.5` ở lại `137.5`).
+
+    Vì sao cần (ERRATA #78): hộp phụ đề rộng quá `PlayResX/2` bị chia mảnh, và mỗi mảnh
+    được đặt bằng `\\pos` tại TÂM của nó. Với hộp rộng lẻ, tâm là `.5`; `int(round(...))`
+    dời mảnh nửa pixel, hai mép kề nhau rơi vào hai cột khác nhau và nền video lọt qua
+    thành một vạch dọc. Giữ nguyên `.5` thì libass (rasteriser subpixel) vẽ mép đúng số
+    nguyên. Số nguyên vẫn in ra không có `.0` để chuỗi ASS dễ đọc bằng mắt.
+    """
+    if abs(x - round(x)) < 1e-9:
+        return str(int(round(x)))
+    return f"{x:.3f}".rstrip("0").rstrip(".")
+
+
 def _assert_lengths(segments: list[Segment], translations: list[str] | None) -> None:
     if translations is not None and len(translations) != len(segments):
         raise ValueError(
@@ -683,6 +697,31 @@ def to_ass(segments: list[Segment], *, translations: list[str] | None = None,
             cao_manh = cao_dong // so_manh_doc
             du_cao = cao_dong - cao_manh * so_manh_doc
             trai_goc = (int(tham_so["rx"]) - rong_dong) / 2
+            #: 🔴 BIÊN NGANG CỦA TỪNG MẢNH LÀ SỐ NGUYÊN — ĐÂY LÀ CHỖ HỞ VẠCH ĐEN (ERRATA #78).
+            #:
+            #: ĐO ĐƯỢC trên ảnh burn thật (bản dịch #63, câu "Là một người làm nghề thuật",
+            #: `cao_hop 180`, hộp rộng 806 trên khung 1080): có **hai cột x=539 và x=540**
+            #: không đen suốt cả chiều cao hộp — mỗi cột chỉ phủ ~45 % (màu `(103,101,97)`
+            #: trên nền `(216,208,192)`), tức nền video LỌT QUA thành một vạch dọc giữa hộp.
+            #:
+            #: Nguyên nhân: hộp 806 > trần `PlayResX/2 = 540` nên bị chia HAI mảnh, mỗi mảnh
+            #: rộng **403 (số LẺ)** ⇒ TÂM mảnh là `.5`. Bản cũ ghi `int(round(cx))`, mà
+            #: `round` của Python làm tròn CHẴN: 338,5 → 338 và 741,5 → 742. Đo được đúng thế
+            #: trong tệp `.ass` của bản cũ:
+            #:
+            #:     mảnh 1: \pos(338) rộng 403  → mép 136,5 … 539,5
+            #:     mảnh 2: \pos(742) rộng 403  → mép 540,5 … 943,5      ← HỞ 1 px
+            #:
+            #: Nền lọt qua đúng khe 1 px đó. Libass là rasteriser SUBPIXEL, nên cách chữa là
+            #: để mép rơi trên toạ độ NGUYÊN (biên cộng dồn ngay dưới) và giữ `\pos` ở `.5` —
+            #: chính `int(round())` mới là thứ đẩy mép ra khỏi số nguyên.
+            canh_ngang = [int(round(trai_goc))]
+            for m in range(so_manh_ngang):
+                canh_ngang.append(canh_ngang[-1] + nen + (1 if m < du else 0))
+            #: Tổng các mảnh có thể lệch ±1 px so với `rong_dong` vì hai lần làm tròn; dồn
+            #: phần lệch vào mảnh CUỐI để mép trái/phải của cả hộp đúng như đã tính.
+            lech = int(round(trai_goc + rong_dong)) - canh_ngang[-1]
+            canh_ngang[-1] += lech
             #: 🔴 ĐÁY HỘP LÀ `y`. ĐO ĐƯỢC cách libass đặt một mảnh cao `h` neo tại
             #: `pos.y = p`: nó hiện ở `[p - 2h, p - h]`, tức ĐÁY THẬT = `p - h`.
             #: Đời trước dùng `pos = y + cao_dong` và chỉ đúng vì lúc đó luôn có MỘT
@@ -693,17 +732,20 @@ def to_ass(segments: list[Segment], *, translations: list[str] | None = None,
             for hang in range(so_manh_doc):
                 cao_m = cao_manh + (1 if hang < du_cao else 0)
                 day_m = day_hop - cao_da_ve
-                trai = trai_goc
                 for m in range(so_manh_ngang):
-                    rong_m = nen + (1 if m < du else 0)
-                    cx = trai + rong_m / 2
+                    rong_m = canh_ngang[m + 1] - canh_ngang[m]
+                    if rong_m <= 0:      # mảnh 0 px thì bỏ, không vẽ hình vô nghĩa
+                        continue
+                    #: `(trái + phải)/2` — có thể là `.5`. Libass nhận `\pos` số thực và
+                    #: rasteriser của nó là subpixel, nên **mép** vẫn rơi đúng số nguyên;
+                    #: làm tròn `pos` về int mới là thứ tạo lại vạch hở (xem ERRATA #78).
+                    cx = (canh_ngang[m] + canh_ngang[m + 1]) / 2
                     lines.append(
                         f"Dialogue: 0,{_ass_timestamp(seg.start)},{_ass_timestamp(seg.end)},"
-                        f"Default,,0,0,0,,{{\\an2\\pos({int(round(cx))},{int(round(day_m + cao_m))})\\p1"
+                        f"Default,,0,0,0,,{{\\an2\\pos({_so_ass(cx)},{int(round(day_m + cao_m))})\\p1"
                         f"\\1c&H{bgr}&\\1a&H{alpha}&\\bord0\\shad0}}"
                         f"m 0 0 l {rong_m} 0 {rong_m} {-cao_m} 0 {-cao_m}{{\\p0}}"
                     )
-                    trai += rong_m
                 cao_da_ve += cao_m
         lines.append(
             f"Dialogue: 0,{_ass_timestamp(seg.start)},{_ass_timestamp(seg.end)},"
