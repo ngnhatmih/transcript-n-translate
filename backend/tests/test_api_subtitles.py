@@ -43,14 +43,18 @@ def test_tra_du_hinh_dang_ma_giao_dien_doc():
 
 
 def test_khong_co_font_thi_tra_MOT_dong_chu_khong_bo_cau(monkeypatch):
-    """Máy không có file font (chính máy chạy test): KHÔNG đo được, nhưng KHÔNG được bỏ câu.
+    """Máy không có file font: KHÔNG đo được, nhưng KHÔNG được bỏ câu.
 
     `_do_khoi_chu` trả `(0, 0, 0, [])` khi thiếu font. Route phải trả nguyên câu thành một
     dòng, `rong = 0` — bên gọi thấy `rong == 0` thì giữ đường dự phòng, không vẽ hộp rỗng.
+
+    ⚠️ Chặn `_duong_font`, KHÔNG chỉ `_FONT_CHO_DUONG`: từ ERRATA #79 phép đo còn một đường
+    dự phòng trong repo (`backend/app/assets/fonts`), nên làm rỗng bảng đường hệ thống là
+    chưa đủ để mô phỏng máy không có font — và bài test sẽ kiểm nhầm điều nó tuyên bố.
     """
     from app.domain import subtitle_format as sf
 
-    monkeypatch.setattr(sf, "_FONT_CHO_DUONG", {})
+    monkeypatch.setattr(sf, "_duong_font", lambda font: None)
     with _client() as c:
         r = c.post("/api/subtitles/lines", json={
             "text": "Xin chào các bạn", "khung": [1080, 1920], "style": {"co": 54},

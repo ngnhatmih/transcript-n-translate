@@ -2134,4 +2134,86 @@ pytest (toàn bộ)      1544 passed, 15 deselected   EXIT_PYTEST=0
 npm test              286 pass, 0 fail             EXIT_TEST=0   (không đổi frontend)
 ```
 
+---
+
+## ERRATA #79 — chữ trong hộp LỆCH TÂM DỌC, và khi câu xuống dòng thì dính mép trên
+
+**Phát hiện lúc:** chủ dự án: *"tôi thấy cái chữ trong box cứ bị lệch tâm trên và dưới kiểu gì
+ý. khi có word wrap thì chữ sát với viền luôn"*, kèm hai ảnh burn.
+
+**Đo được** (khung 1080×1920, style `co 160`, `cao_hop 180`, hộp đen đặc; lề đo giữa MÉP HỘP
+và NÉT CHỮ). Số dưới đây lấy từ một **burn tổng hợp trên nền phẳng** cùng style/cùng hộp —
+nền video thật làm ngưỡng "pixel chữ" nhiễu vài px, nên nền phẳng là phép đo sạch:
+
+```
+một dòng "Là một người làm nghề thuật" : lề trên 38 · lề dưới 77   → lệch 39
+hai dòng (câu 18, wrap)                : lề trên  0 · lề dưới 33   → lệch 33, dòng đầu DÍNH mép
+```
+
+**Nguyên nhân:** bản cũ neo `\an2` (ĐÁY khối chữ của libass) rồi tự dịch lên
+`(cao_hop − cao_chữ)/2`, trong đó `cao_chữ` là **chiều cao NÉT** đo bằng Pillow. Hai con số đó
+là hai thứ khác nhau:
+
+* `\an2` neo vào ĐÁY HỘP DÒNG của libass, nằm dưới đáy nét chữ đúng phần descender (đo được
+  14 px với Archivo);
+* `cao_chữ` của Pillow chỉ là nét, và chỉ cộng thêm `(n−1)·co` cho các dòng sau.
+
+Sai số vì thế **nhân theo số dòng** — càng nhiều dòng, chữ càng bị đẩy lên, tới mức dòng đầu
+chạm mép hộp (lề trên 0).
+
+**Sửa:** để CHÍNH LIBASS căn, không tự đoán: `\an5` (neo GIỮA-DỌC) đặt tại tâm hộp
+`y − cao_dong/2`. Không còn con số chiều cao nào của mình chen vào giữa, nên không còn phụ
+thuộc số dòng hay font. Chỉ dùng `\an5` khi CÓ hộp: không hộp thì đáy khối chữ phải neo đúng
+`\pos.y` (`offset_doc` tính theo đáy), đổi ở đó sẽ đẩy mọi phụ đề lên nửa khối chữ.
+
+**Đo lại cùng phép đo** (burn tổng hợp, nền phẳng) và trên **bản burn thật** (job #206, 39 s,
+vẫn không chạy lại TTS):
+
+```
+tổng hợp, một dòng : 57 / 58   → lệch 1     (trước: 38/77)
+tổng hợp, hai dòng : 14 / 14   → lệch 0     (trước:  0/33, dòng đầu dính mép)
+dub-63.mp4, một dòng: 67 / 58  → lệch 9     (nền video làm ngưỡng nhiễu; xem dưới)
+dub-63.mp4, hai dòng: 14 / 14  → lệch 0     ← đúng ca chủ dự án gửi ảnh
+```
+
+9 px ở dòng cuối cùng là do NÉT của chính câu đó: "người", "nghề" có `g` thò xuống (descender),
+nên nét không đối xứng quanh khối chữ — và nền video sáng ở đó làm phép đếm pixel chữ bắt thêm
+vài hàng. Bản xem trước trên web cũng căn theo khối dòng (`justifyContent: center`) chứ không
+theo nét, nên hai bên **cùng một cách căn** — đó mới là điều cần khớp.
+
+**Kèm một lỗi im lặng phát hiện trong lúc đo:** phép đo chữ chỉ tra `/usr/share/fonts/...`
+(đường của image Linux). Chạy API ngay trên Windows thì `PIL.ImageFont` không mở được file, phép
+đo trả `0`, và hộp vector **BIẾN MẤT** — dù `rong_hop = 0` nghĩa là "bám chữ", không phải
+"tắt hộp". Đo được trên máy này: `_do_khoi_chu('A', 'Archivo', 160, 960, True)` → `(0, 0, 0,
+[])` và `.ass` không có `\p1` nào. Nay `_duong_font` thử đường HỆ THỐNG trước, rồi tới bản copy
+trong repo (`backend/app/assets/fonts/`). Trong container không có gì đổi (đường hệ thống
+thắng); trên Windows hộp hiện lại đúng.
+
+**Ghim 3 bài** trong `test_phu_de_style.py`:
+
+1. `test_text_dung_AN5_dat_o_TAM_hop` — sự kiện CHỮ phải neo `\an5` và `pos.y` phải bằng tâm
+   hộp. Vế nhanh, chạy mọi máy, và chính là chỗ sinh ra lỗi.
+2. `test_KHONG_CO_HOP_thi_van_neo_AN2_o_day` — vế chống sửa quá tay: không hộp thì vẫn `\an2`.
+3. `test_BURN_THAT_chu_namGIUA_hop_ca_khi_XUONG_DONG` — burn thật rồi đo lề trên/dưới với câu
+   một dòng VÀ câu hai dòng, đòi lệch ≤ 2 px. Bài này **tự bỏ qua kèm lý do** khi libass không
+   dùng đúng file font (đo được trên Windows không cài Archivo: nét 165 px so với 89 px của
+   Pillow) — thà nói rõ "không đo được ở đây" còn hơn hạ ngưỡng cho vừa, vì ngưỡng lỏng sẽ
+   không bắt được lỗi thật (bản cũ lệch 29–33 px).
+
+Hai bài `test_KHONG_DO_DUOC_chu_thi_khong_ve_hop` (backend) và `test_khong_co_font_thi_tra_
+MOT_dong_chu_khong_bo_cau` (API) phải sửa theo: chúng mô phỏng "máy không có font" bằng cách làm
+rỗng `_FONT_CHO_DUONG`, mà nay còn đường dự phòng trong repo — nên chúng chuyển sang chặn
+`_duong_font`. Không sửa thì hai bài đó **kiểm nhầm điều chúng tuyên bố**.
+
+### Đo cuối
+
+```
+pytest (toàn bộ)      1546 passed, 1 skipped, 15 deselected   EXIT_PYTEST=0
+npm test              286 pass, 0 fail                        EXIT_TEST=0   (không đổi frontend)
+```
+
+(Bài bị skip là bài burn-thật ở trên, kèm lý do: máy này không cài font `Archivo` cho
+fontconfig. Trong image API — nơi font đã cài — bài đó chạy; phép đo tương đương đã chạy tay
+trong container và cho đúng `67/58` và `14/14`.)
+
 

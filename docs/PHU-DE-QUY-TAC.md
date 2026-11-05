@@ -109,11 +109,26 @@ Burn: `DubHandler._tron_va_remux` → **lọc theo lớp** (`mot_dong_moi_cap`, 
     `\pos` phải giữ `.5` (hàm `_so_ass`) — rasteriser của libass là subpixel. Đây là lỗi CHỈ
     thấy trên pixel, nên phải có bài **burn thật rồi đếm cột**; test đọc chuỗi `.ass` không
     bắt được. Xem ERRATA #78.
+12. **Căn giữa dọc: để `\an5`, ĐỪNG tự dịch bằng chiều cao Pillow**: `\an2` neo vào ĐÁY HỘP
+    DÒNG của libass (dưới nét chữ đúng phần descender), còn Pillow cho chiều cao NÉT — hai
+    con số khác nhau, và hiệu của chúng **nhân theo số dòng**. Đo được: neo `\an2` rồi dịch
+    `(cao_hop − cao_chữ)/2` cho lề trên/dưới **48/77** (một dòng) và **0/33** (hai dòng, dòng
+    đầu dính mép). Nay `\an5` đặt tại tâm hộp `y − cao_dong/2` ⇒ **67/58** và **14/14**; phần
+    lệch còn lại là do NÉT của câu có descender, và bản xem trước CSS cũng căn theo khối dòng
+    nên hai bên cùng một cách căn. Chỉ dùng `\an5` khi CÓ hộp — không hộp thì phải giữ `\an2`
+    ở `\pos.y`, vì `offset_doc` tính theo đáy. Xem ERRATA #79.
+13. **Đường dẫn font khi ĐO khác đường dẫn font khi VẼ**: phép đo bằng Pillow cần một file
+    `.ttf`; image Linux có `/usr/share/fonts/truetype/archivo/Archivo.ttf`, máy Windows thì
+    không. Thiếu file ⇒ phép đo trả `0` ⇒ `rong_hop = 0` ("bám chữ") bị hiểu thành "tắt hộp"
+    và hộp vector BIẾN MẤT. Nay có bản copy trong `backend/app/assets/fonts/` làm đường dự
+    phòng (`_duong_font`), nhưng libass vẫn tìm font theo TÊN qua fontconfig — nên máy không
+    cài font vẫn có thể vẽ bằng font khác, và mọi bài đo pixel phải kiểm chéo cỡ nét trước khi
+    kết luận.
 
 ## 7. Liên quan
 
 - `ERRATA` #66 (chia mảnh hộp), #67 (chữ đậm), #72 (`\N` + bước dòng), #73 (một nguồn bẻ
-  dòng), #74 (burn đè nhau), #78 (vạch hở giữa hai mảnh).
+  dòng), #74 (burn đè nhau), #78 (vạch hở giữa hai mảnh), #79 (lệch tâm dọc + font dự phòng).
 - Test canh: `backend/tests/test_phu_de_style.py`, `test_api_subtitles.py`, `test_dub.py`;
   `frontend/src/lib/phuDeStyle.test.ts`, `frontend/src/components/studio/PhuDeStyle.test.tsx`.
 

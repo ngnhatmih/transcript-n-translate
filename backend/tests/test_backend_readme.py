@@ -59,20 +59,29 @@ _REPO_ROOT = BACKEND.parent
 
 
 def _readme_baseline(text: str | None = None) -> tuple[int, int]:
-    """`(passed, deselected)` đọc từ khối ``` ngay dưới dòng "Con số nền".
+    """`(số bài ĐƯỢC CHỌN, deselected)` đọc từ khối ``` ngay dưới "Con số nền".
 
     Đọc bằng VỊ TRÍ (khối đầu tiên sau tiêu đề) chứ không quét mọi số trong tệp:
     README còn nhiều con số khác (`798`, `94 ký tự`, `219/149`) và một phép quét
     toàn văn sẽ bắt nhầm chúng. Tham số `text` chỉ để bài tự-kiểm ở dưới truyền
     vào một bản README giả.
+
+    🔴 `skipped` được CỘNG vào `passed`, và đây không phải chi tiết vụn: dòng tổng kết
+    thật của máy có bài bị skip là `1546 passed, 1 skipped, 15 deselected`, trong khi
+    `--collect-only` đếm **1547** bài được chọn. Bản đọc cũ chỉ khớp `(\\d+) passed`
+    đứng NGAY trước `deselected`, nên nó NÉM khi thấy `skipped` ở giữa — và cách "sửa"
+    dễ nhất (ghi `1547 passed` dù chỉ 1546 bài xanh) là nói dối về số bài đã chạy.
+    Ở đây cộng lại để vế trái vẫn là "số bài được chọn", đúng thứ `_collect_counts`
+    đo được.
     """
     lines = (_text() if text is None else text).splitlines()
     start = next(i for i, line in enumerate(lines) if "Con số nền" in line)
     fence = next(i for i in range(start, len(lines)) if lines[i].strip().startswith("```"))
     body = lines[fence + 1].strip()
-    match = re.search(r"(\d+) passed, (\d+) deselected", body)
+    match = re.search(r"(\d+) passed, (?:(\d+) skipped, )?(\d+) deselected", body)
     assert match, f"không đọc được số nền từ README: {body!r}"
-    return int(match.group(1)), int(match.group(2))
+    passed = int(match.group(1)) + (int(match.group(2)) if match.group(2) else 0)
+    return passed, int(match.group(3))
 
 
 #: Dòng tổng kết của `--collect-only` khi `addopts = -q` đang bật (xem

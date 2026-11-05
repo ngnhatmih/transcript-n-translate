@@ -342,6 +342,136 @@ def test_BURN_THAT_khong_co_cot_nao_ho_giua_hai_manh_hop(tmp_path):
         f"ví dụ {ho[:4]} — đó là vạch hở giữa hai mảnh (mép không nguyên)")
 
 
+def _he_hop() -> dict:
+    """Style của chính ca đang xét, nhưng hộp cao **400** để đo lề cho chắc.
+
+    Ca thật của chủ dự án là `cao_hop 180`; ở đây nới lên 400 vì phép đo phải đúng cả trên
+    máy KHÔNG cài font Archivo cho fontconfig: khi đó libass vẽ bằng font dự phòng, khối chữ
+    to hơn (đo được 166 px cho một dòng) và SÁT/CHE mép hộp 180 — lề bằng 0 thì không đo
+    được gì. Căn giữa là phép toán KHÔNG phụ thuộc font, nên hộp rộng rãi vẫn kiểm đúng điều
+    cần kiểm: lề trên ≈ lề dưới.
+    """
+    return {"font": "Archivo", "co": 160, "vien": 20, "cao_hop": 400, "rong_hop": 0,
+            "kieu_vien": 3, "dam": True, "nghieng": False, "can_le": 2,
+            "mau_hop": "#000000", "mau_chu": "#ffffff", "do_duc_hop": 1}
+
+
+def _burn_khung(tmp_path, ass: str, ten: str = "khung"):
+    """Burn `.ass` lên MỘT khung nền sáng, trả `(px, W, H)` để đếm pixel.
+
+    Nền `0xD8D0C0` (sáng) để hộp đen và lề hở đều nhìn thấy; đường dẫn được thoát y như
+    `tach_nen.remux` (`:` và `\\` có nghĩa trong chuỗi filter).
+    """
+    import subprocess
+
+    from PIL import Image
+
+    tep_ass = tmp_path / f"{ten}.ass"
+    tep_ass.write_text(ass, encoding="utf-8")
+    tep_png = tmp_path / f"{ten}.png"
+    duong = str(tep_ass.resolve()).replace("\\", "/").replace(":", r"\:").replace("'", r"\'")
+    subprocess.run(
+        ["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi",
+         "-i", "color=c=0xD8D0C0:s=1080x1920:d=1:r=10",
+         "-vf", f"ass='{duong}'", "-frames:v", "1", str(tep_png)],
+        check=True, capture_output=True)
+    im = Image.open(tep_png).convert("RGB")
+    return im.load(), im.size[0], im.size[1]
+
+
+def test_BURN_THAT_chu_namGIUA_hop_ca_khi_XUONG_DONG(tmp_path):
+    """Chữ phải nằm GIỮA hộp theo chiều dọc, kể cả khi câu bị bẻ thành hai dòng.
+
+    🔴 ĐO ĐƯỢC trên bản burn cũ (style `co 160`, `cao_hop 180`, khung 1080×1920): lề
+    TRÊN/lề DƯỚI của nét chữ trong hộp là **38/77** với câu một dòng và **0/33** với câu hai
+    dòng — dòng đầu DÍNH mép trên. Chủ dự án: *"chữ trong box cứ bị lệch tâm trên và dưới…
+    khi có word wrap thì chữ sát với viền luôn"*.
+
+    Nguyên nhân: bản cũ neo `\\an2` (đáy khối chữ của libass, nằm dưới nét chữ đúng phần
+    descender) rồi tự dịch lên `(cao_hop − cao_chữ)/2` với `cao_chữ` đo bằng Pillow — hai
+    chiều cao khác nhau, và sai số nhân theo SỐ DÒNG. Nay để libass tự căn bằng `\\an5`.
+
+    Đo trên bản ĐÃ SỬA: 57/58 (một dòng) và 14/14 (hai dòng) — lệch ≤ 1 px.
+    """
+    if not _co_ffmpeg():
+        pytest.skip("cần ffmpeg có libass")
+
+    #: libass tìm font theo TÊN qua fontconfig. Máy không cài `Archivo` (Windows dùng
+    #: DirectWrite, `fontsdir` không cứu) thì nó vẽ bằng font DỰ PHÒNG, khối chữ cao gấp
+    #: ~2,5 lần và mép nét không đối xứng quanh khối — phép đo lề mất nghĩa (đo được: lệch
+    #: 15 px với font dự phòng trong khi 1 px với Archivo). Bỏ qua và NÓI RÕ, thay vì lặng
+    #: lẽ hạ ngưỡng cho vừa: ngưỡng lỏng sẽ không bắt được lỗi thật (bản cũ lệch 39 px).
+    import subprocess as _sp
+
+    from app.domain import subtitle_format as _sf
+
+    if _sf._duong_font("Archivo") is None:
+        pytest.skip("không có file font Archivo để đối chiếu")
+    ink_that = _sf._do_cao_chu("Archivo", 160)
+    if ink_that == 0:
+        pytest.skip("không đo được chữ bằng Pillow")
+
+    def do(text: str, ten: str) -> tuple[int, int, int]:
+        ass = to_ass([_doan(text=text, start=0.0, end=1.0)], khung=(1080, 1920),
+                     offset_doc=0.21, style=_he_hop(), translations=[text])
+        px, W, H = _burn_khung(tmp_path, ass, ten)
+
+        def den(c: tuple[int, int, int]) -> bool:
+            return max(c) < 40
+
+        hang = [y for y in range(H) if sum(1 for x in range(0, W, 4) if den(px[x, y])) > 100]
+        assert hang, f"{ten}: không thấy hộp đen — hộp không được vẽ?"
+        y0, y1 = min(hang), max(hang)
+        cot = [x for x in range(W) if den(px[x, (y0 + y1) // 2])]
+        x0, x1 = min(cot), max(cot)
+        sang = [y for x in range(x0 + 2, x1 - 1) for y in range(y0, y1 + 1)
+                if min(px[x, y]) > 200]
+        assert sang, f"{ten}: không thấy chữ trong hộp"
+        return min(sang) - y0, y1 - max(sang), max(sang) - min(sang) + 1
+
+    for text, ten in (
+        ("Là một người làm nghề thuật", "mot-dong"),
+        ("Ông còn nợ tôi mười tám vạn bảy nghìn bảy trăm mười hai", "hai-dong"),
+    ):
+        tren, duoi, net = do(text, ten)
+        if ten == "mot-dong" and abs(net - ink_that) > 0.25 * ink_that:
+            #: Kiểm chéo: nét libass vẽ phải CÙNG CỠ với nét Pillow đã đo. Lệch nhiều nghĩa
+            #: là libass đang dùng font DỰ PHÒNG ⇒ phép đo lề không nói gì về code (đo được
+            #: trên Windows không cài Archivo: nét 165 px so với 89 px của Pillow).
+            pytest.skip(
+                f"libass vẽ nét {net} px còn Pillow đo {ink_that} px — máy này không cài "
+                f"font Archivo cho fontconfig nên không đo được lề; bài này chạy được trong "
+                f"image (nơi font đã cài)")
+        assert abs(tren - duoi) <= 2, (
+            f"{ten}: chữ LỆCH TÂM — lề trên {tren} px, lề dưới {duoi} px. "
+            f"Phải để libass căn bằng `\\an5`, không tự dịch bằng chiều cao Pillow")
+
+
+def test_text_dung_AN5_dat_o_TAM_hop():
+    """Sự kiện CHỮ phải neo `\\an5` tại TÂM hộp, không phải `\\an2` ở đáy.
+
+    Vế nhanh của bài burn ở trên: bắt được lỗi hồi quy mà không cần ffmpeg.
+    """
+    ass = to_ass([_doan(text="A")], khung=(1080, 1920), offset_doc=0.21,
+                 style=_he_hop())
+    dong_chu = _dong_chu(ass)
+    assert "\\an5" in dong_chu, f"sự kiện chữ phải neo \\an5, đo được: {dong_chu[:80]}"
+    y_chu = float(dong_chu.split("\\pos(")[1].split(")")[0].split(",")[1])
+    dinh, day = _khung_hop(ass)
+    assert abs(y_chu - (dinh + day) / 2) <= 1, (
+        f"chữ neo ở y={y_chu} nhưng tâm hộp là {(dinh + day) / 2} (hộp [{dinh}, {day}])")
+
+
+def test_KHONG_CO_HOP_thi_van_neo_AN2_o_day():
+    """Không có hộp ⇒ GIỮ `\\an2` tại `\\pos.y`. Đổi sang `\\an5` ở đây là đẩy MỌI phụ đề
+    lên nửa khối chữ, và `offset_doc` (tính theo đáy) sai theo.
+    """
+    ass = to_ass([_doan(text="A")], khung=(1080, 1920), offset_doc=0.21, style={})
+    dong_chu = _dong_chu(ass)
+    assert "\\an2" in dong_chu, f"không hộp thì phải giữ \\an2, đo được: {dong_chu[:80]}"
+    assert "\\an5" not in dong_chu
+
+
 def test_KHONG_DO_DUOC_chu_thi_khong_ve_hop(monkeypatch):
     """`ngang = 0` là "bám chữ" — không đo được chữ thì KHÔNG vẽ hộp, chứ không vẽ hộp rỗng.
 
@@ -350,7 +480,10 @@ def test_KHONG_DO_DUOC_chu_thi_khong_ve_hop(monkeypatch):
     """
     from app.domain import subtitle_format as sf
 
-    monkeypatch.setattr(sf, "_FONT_CHO_DUONG", {})
+    # Chặn CẢ đường dự phòng trong repo (`backend/app/assets/fonts`): nếu chỉ làm rỗng
+    # `_FONT_CHO_DUONG` thì bản copy trong repo vẫn được dùng và hộp vẫn được vẽ — bài này
+    # sẽ không còn kiểm đúng điều nó nói.
+    monkeypatch.setattr(sf, "_duong_font", lambda font: None)
     ass = to_ass([_doan(text=_THU)], khung=(1080, 1920),
                  style={"cao_hop": 960, "kieu_vien": 3, "co": 41})
     assert _manh_hop(ass) == []
@@ -444,28 +577,23 @@ def test_CACH_DAY_di_qua_STYLE_khong_bi_bo_im_lang():
     `style` rơi về mặc định 6 %.
 
     Khung 1080×1920: `pos_y = round(1920 × (1 − offset))` ⇒ 0,06 → 1805; 0,21 → 1517.
-    """
-    import re
 
-    def pos_y(style: dict) -> int:
-        ass = to_ass([_doan(text="Nay toi noi")], khung=(1080, 1920), style=style)
-        for line in ass.splitlines():
-            if line.startswith("Dialogue:") and "\\p1" not in line:
-                return int(re.findall(r"pos\((\d+),(\d+)\)", line)[0][1])
-        raise AssertionError("không có sự kiện chữ")
+    ⚠️ Đọc ĐÁY HỘP (`_khung_hop`), không đọc `pos.y` của sự kiện CHỮ: từ ERRATA #79 chữ
+    được neo `\an5` ở TÂM hộp, nên `pos.y` của chữ không còn là đáy. Đáy hộp mới là thứ
+    `offset_doc` điều khiển.
+    """
+
+    def day_hop(style: dict, offset_doc: float | None = None) -> int:
+        ass = to_ass([_doan(text="Nay toi noi")], khung=(1080, 1920),
+                     offset_doc=offset_doc, style=style)
+        return _khung_hop(ass)[1]
 
     goc = {"co": 91, "vien": 20, "cao_hop": 180, "kieu_vien": 3, "dam": True}
-    assert pos_y(dict(goc)) == 1805, "không khai `offset_doc` thì giữ mặc định 6 %"
-    assert pos_y({**goc, "offset_doc": 0.21}) == 1517, (
+    assert day_hop(dict(goc)) == 1805, "không khai `offset_doc` thì giữ mặc định 6 %"
+    assert day_hop({**goc, "offset_doc": 0.21}) == 1517, (
         "`offset_doc` trong style PHẢI được đọc — nếu không, bản burn nằm sát đáy trong khi "
         "bản xem trước đặt ở 79 % chiều cao"
     )
     #: Tham số truyền TAY thắng style (đường job cũ truyền thẳng, không qua style).
-    ass = to_ass([_doan(text="Nay toi noi")], khung=(1080, 1920),
-                 offset_doc=0.30, style={**goc, "offset_doc": 0.21})
-    for line in ass.splitlines():
-        if line.startswith("Dialogue:") and "\\p1" not in line:
-            assert re.findall(r"pos\((\d+),(\d+)\)", line)[0][1] == "1344", (
-                "offset_doc truyền tay (0,30 → 1344) phải thắng style (0,21 → 1517)"
-            )
-            break
+    assert day_hop({**goc, "offset_doc": 0.21}, 0.30) == 1344, (
+        "offset_doc truyền tay (0,30 → 1344) phải thắng style (0,21 → 1517)")

@@ -280,6 +280,35 @@ _FONT_CHO_DUONG = {
     "IBM Plex Mono": "/usr/share/fonts/truetype/archivo/IBMPlexMono-Regular.ttf",
 }
 
+#: Đường dự phòng trong REPO, cùng file với đường hệ thống ở trên (bản copy trong
+#: `backend/app/assets/fonts`). Vì sao cần: đường hệ thống chỉ có trong image Linux. Chạy
+#: API ngay trên Windows (dev) thì `PIL.ImageFont` không mở được `/usr/share/fonts/...`,
+#: phép đo trả `0`, và hộp vector **biến mất** dù `rong_hop = 0` nghĩa là "bám chữ" chứ
+#: không phải "tắt". Đo được trên máy Windows này trước khi thêm dòng này:
+#: `_do_khoi_chu('A', 'Archivo', 160, 960, True)` → `(0, 0, 0, [])` và `.ass` không có
+#: `\p1` nào. Thứ tự vẫn là HỆ THỐNG TRƯỚC, nên trong container không có gì đổi.
+_FONT_DU_PHONG = {
+    "Archivo": ("Archivo.ttf",),
+    "IBM Plex Mono": ("IBMPlexMono-Regular.ttf",),
+}
+
+
+def _duong_font(font: str) -> str | None:
+    """Đường tới file `.ttf` để ĐO chữ: bản hệ thống nếu có, không thì bản trong repo."""
+    import pathlib as _pathlib
+
+    goc = _pathlib.Path(__file__).resolve().parents[1] / "assets" / "fonts"
+    ung_vien = []
+    duong = _FONT_CHO_DUONG.get(font)
+    if duong is not None:
+        ung_vien.append(_pathlib.Path(duong))
+    for ten in _FONT_DU_PHONG.get(font, ()):
+        ung_vien.append(goc / ten)
+    for p in ung_vien:
+        if p.is_file():
+            return str(p)
+    return None
+
 
 def _do_rong_chu(chu: str, font: str, co: int, dam: bool = False) -> int:
     """Bề rộng chữ, tính bằng PIXEL của hệ `PlayRes`, theo ĐÚNG file font sẽ burn.
@@ -294,7 +323,7 @@ def _do_rong_chu(chu: str, font: str, co: int, dam: bool = False) -> int:
     `dam=True` phải nhân thêm `_TI_LE_CHU_DAM`, nếu không hộp hẹp hơn chữ và chữ chạm
     mép hộp — đo được ở ERRATA #67.
     """
-    duong = _FONT_CHO_DUONG.get(font)
+    duong = _duong_font(font)
     if duong is None:
         return 0
     try:
@@ -309,7 +338,7 @@ def _do_rong_chu(chu: str, font: str, co: int, dam: bool = False) -> int:
 
 def _do_cao_chu(font: str, co: int) -> int:
     """Chiều cao một dòng chữ, cùng hệ số với `_do_rong_chu`. `0` = không đo được."""
-    duong = _FONT_CHO_DUONG.get(font)
+    duong = _duong_font(font)
     if duong is None:
         return 0
     try:
@@ -339,7 +368,7 @@ def _do_khoi_chu(chu: str, font: str, co: int, rong_kha_dung: int,
 
     `(0, 0, 0)` = không đo được (máy test không có font) ⇒ bên gọi BỎ các sàn này.
     """
-    duong = _FONT_CHO_DUONG.get(font)
+    duong = _duong_font(font)
     if duong is None:
         return (0, 0, 0, [])
     try:
@@ -657,14 +686,35 @@ def to_ass(segments: list[Segment], *, translations: list[str] | None = None,
         # `fs54` và **517×241** với `fs200` — tức vùng đen là HỢP của hộp vector và hộp
         # tự động, và nó lại phụ thuộc cỡ chữ. `\bord0\shad0` tắt hộp đó, chỉ còn vector.
         tat_hop = "\\bord0\\shad0" if ve_hop else ""
-        # 🔴 CĂN GIỮA DỌC trong hộp: `\an2` neo ĐÁY chữ, nên đặt chữ ở đáy hộp thì khi
-        # hộp cao hơn chữ (vd `cao = 400` cho câu 1 dòng) sẽ thừa một khoảng trống phía
-        # trên. Dịch chữ lên `(cao_hop − cao_chữ)/2` để nó nằm GIỮA hộp — số `cao_khoi`
-        # đã đo sẵn từ `_do_khoi_chu`, chỉ là trước đây chưa dùng.
-        y_chu = y
-        if ve_hop and c_doan > 0 and cao_dong > c_doan:
-            y_chu = y - (cao_dong - c_doan) // 2
-        dau = f"{{\\an2\\pos({tham_so['rx'] // 2},{y_chu}){tat_hop}}}" if co_pos else ""
+        # 🔴 CĂN GIỮA DỌC: để CHÍNH LIBASS căn (`\an5`), không tự đoán chiều cao khối chữ.
+        #
+        # ĐO ĐƯỢC trên ảnh burn thật (style `co 160`, `cao_hop 180`, khung 1080×1920, hộp
+        # đen đặc) — lề trên/lề dưới của CHỮ trong hộp, đo bằng pixel:
+        #
+        #     1 dòng ("Là một người làm nghề thuật")       : trên 38 · dưới 77   (lệch 39)
+        #     2 dòng (câu 18, wrap)                        : trên  0 · dưới 33   (lệch 33)
+        #
+        # Tức chữ nằm CAO hơn giữa hộp, và tệ nhất là khi xuống dòng: dòng đầu DÍNH mép
+        # trên — đúng câu chủ dự án: *"khi có word wrap thì chữ sát với viền luôn"*.
+        #
+        # Vì sao bản cũ lệch: nó neo `\an2` (ĐÁY khối chữ) rồi tự dịch lên
+        # `(cao_hop − cao_chữ)/2` với `cao_chữ` đo bằng Pillow. Nhưng `\an2` neo vào ĐÁY
+        # HỘP DÒNG của libass (nằm dưới đáy nét chữ đúng phần descender — đo được 14 px),
+        # còn `cao_chữ` của Pillow là chiều cao NÉT; hai con số đó lệch nhau, và phần lệch
+        # nhân theo số dòng (vì `cao_chữ` chỉ cộng `(n−1)·co`). Nên càng nhiều dòng càng lệch.
+        #
+        # `\an5` = neo GIỮA-DỌC: libass tự đặt tâm khối chữ (theo đúng metrics font mà nó
+        # dùng để vẽ) vào `\pos`, nên không còn con số nào của mình chen vào giữa. Toạ độ
+        # tâm hộp = `y − cao_dong/2` (hộp vẽ từ `y − cao_dong` tới `y`).
+        #
+        # ⚠️ CHỈ dùng `\an5` khi CÓ HỘP. Không có hộp thì đáy khối chữ phải neo đúng
+        # `\pos.y` (`offset_doc` tính theo đáy) — đổi sang `\an5` ở đó sẽ đẩy mọi phụ đề
+        # lên nửa khối chữ. Đường "không style" còn phải GIỐNG TỪNG BYTE bản cũ.
+        if ve_hop:
+            tam_doc = y - cao_dong / 2
+            dau = f"{{\\an5\\pos({tham_so['rx'] // 2},{_so_ass(tam_doc)}){tat_hop}}}"
+        else:
+            dau = (f"{{\\an2\\pos({tham_so['rx'] // 2},{y}){tat_hop}}}" if co_pos else "")
         if ve_hop:
             # 🔴 CHIA HỘP THÀNH NHIỀU MẢNH: MỘT hình vẽ bị libass THU NHỎ khi rộng quá
             # `PlayResX / 2` (đo được 600→540, 800→540, 2400→540; đổi `\an`, thêm
