@@ -338,3 +338,140 @@ def test_tron_nen_end_to_end_that_qua_handler(tmp_path):
     mau, _ = sf.read(str(giai), dtype="float32", always_2d=True)
     assert float(np.abs(mau).max()) < 1.0, (
         f"audio kẹp trần: peak {float(np.abs(mau).max()):.6f} — nền chưa chuẩn hoá?")
+
+
+# ── Chọn bộ mã hoá khi BURN phụ đề (ERRATA #75) ────────────────────────────────────────
+#
+# Bốn bài dưới đây KHÔNG cần GPU và không mã hoá gì thật: chúng thay `subprocess` của
+# `tach_nen` bằng một hàm chỉ GHI LẠI lệnh, rồi soi đúng tham số. Lý do phải ghim: chọn sai
+# encoder ở đây không làm đỏ bài nào khác — nó chỉ âm thầm làm hỏng máy không có NVIDIA, hoặc
+# âm thầm đổi chất lượng file mà không ai biết.
+
+
+def _bat_lenh(monkeypatch, loi_lan_dau: bool = False):
+    """Gắn `subprocess` giả vào `tach_nen`, trả danh sách lệnh đã gọi.
+
+    Thay `tach_nen.subprocess` (không phải `subprocess.run` toàn cục) để không đụng tới
+    `ffprobe`/`ffmpeg` của bài khác chạy cùng tiến trình.
+    """
+    import types
+
+    from app.pipeline import tach_nen
+
+    da_goi: list[list[str]] = []
+
+    def run(cmd, **_kw):
+        da_goi.append(list(cmd))
+        if loi_lan_dau and len(da_goi) == 1:
+            raise subprocess.CalledProcessError(1, cmd)
+        return types.SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    # `CalledProcessError` phải có trong namespace giả: `remux` bắt đúng lớp ngoại lệ đó để
+    # biết NVENC hỏng và làm lại bằng CPU.
+    monkeypatch.setattr(tach_nen, "subprocess", types.SimpleNamespace(
+        run=run, CalledProcessError=subprocess.CalledProcessError))
+    return da_goi
+
+
+def test_remux_burn_dung_nvenc_khi_co_gpu(tmp_path, monkeypatch):
+    """Có GPU ⇒ `h264_nvenc`, và chất lượng đặt bằng `-cq 23` (KHÔNG phải `-b:v` cố định).
+
+    Ghim số 23: `-cq` của NVENC không tương đương `-crf` của x264. ĐO ĐƯỢC trên film 4:38
+    1080×1920: `-cq 20` ra 366 MB, `-crf 18` ra 238 MB, `-cq 23` ra 265 MB — nên 23 là mức
+    đã chọn. Ai đổi số thì phải đo lại dung lượng, đừng đổi cho "nét hơn".
+    """
+    from app.pipeline import tach_nen
+
+    da_goi = _bat_lenh(monkeypatch)
+    monkeypatch.setattr(tach_nen, "co_nvenc", lambda: True)
+
+    tach_nen.remux(tmp_path / "v.mp4", tmp_path / "a.wav", tmp_path / "ra.mp4",
+                   phu_de=tmp_path / "x.ass")
+
+    assert len(da_goi) == 1, da_goi
+    lenh = da_goi[0]
+    assert "h264_nvenc" in lenh, lenh
+    assert "-crf" not in lenh, f"còn `-crf` của x264 trong lệnh NVENC: {lenh}"
+    assert lenh[lenh.index("-cq") + 1] == "23", lenh
+    # Video là nguồn DUY NHẤT được re-encode; `-c:v copy` mà lọt vào đây là mất phụ đề.
+    assert lenh[lenh.index("-c:v") + 1] == "h264_nvenc", lenh
+
+
+def test_remux_burn_roi_ve_libx264_khi_khong_co_gpu(tmp_path, monkeypatch):
+    """Máy KHÔNG có NVENC phải ra được video — rơi về `libx264 -crf 18`, không ném."""
+    from app.pipeline import tach_nen
+
+    da_goi = _bat_lenh(monkeypatch)
+    monkeypatch.setattr(tach_nen, "co_nvenc", lambda: False)
+
+    tach_nen.remux(tmp_path / "v.mp4", tmp_path / "a.wav", tmp_path / "ra.mp4",
+                   phu_de=tmp_path / "x.ass")
+
+    assert len(da_goi) == 1, da_goi
+    lenh = da_goi[0]
+    assert "libx264" in lenh, lenh
+    assert lenh[lenh.index("-crf") + 1] == "18", lenh
+
+
+def test_remux_burn_nvenc_hong_giua_duong_thi_lam_lai_bang_cpu(tmp_path, monkeypatch):
+    """NVENC chết giữa đường (driver cũ, hết VRAM) ⇒ LÀM LẠI bằng CPU, không mất lượt ghép.
+
+    Đây là bảo hiểm cho một lượt đã tách nền + trộn xong: ném ra ngoài là người dùng phải bấm
+    lại từ đầu. Đo được 2 lần gọi: lần đầu NVENC (ném), lần hai `libx264`.
+    """
+    from app.pipeline import tach_nen
+
+    da_goi = _bat_lenh(monkeypatch, loi_lan_dau=True)
+    monkeypatch.setattr(tach_nen, "co_nvenc", lambda: True)
+
+    tach_nen.remux(tmp_path / "v.mp4", tmp_path / "a.wav", tmp_path / "ra.mp4",
+                   phu_de=tmp_path / "x.ass")
+
+    assert len(da_goi) == 2, da_goi
+    assert "h264_nvenc" in da_goi[0], da_goi[0]
+    assert "libx264" in da_goi[1], f"không làm lại bằng CPU: {da_goi[1]}"
+
+
+def test_co_nvenc_do_mot_lan_va_do_o_khung_du_lon(monkeypatch):
+    """Phép dò NVENC chạy MỘT lần cho cả tiến trình, và dò ở 320×240.
+
+    Hai lỗi đã đo được, mỗi lỗi một nửa bài này:
+      · Dò lại mỗi lượt ghép = thêm một tiến trình ffmpeg cho mỗi lần burn;
+      · Dò ở 64×64 thì ffmpeg báo *"Frame Dimension less than the minimum supported value"*
+        và ta tưởng máy KHÔNG có NVENC dù nó có (RTX 3070) — 320×240 mới qua.
+    """
+    import types
+
+    from app.pipeline import tach_nen
+
+    monkeypatch.setattr(tach_nen, "_CO_NVENC", None)
+    da_goi: list[list[str]] = []
+
+    def run(cmd, **_kw):
+        da_goi.append(list(cmd))
+        return types.SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(tach_nen, "subprocess", types.SimpleNamespace(run=run))
+
+    assert tach_nen.co_nvenc() is True
+    assert tach_nen.co_nvenc() is True
+    assert len(da_goi) == 1, f"dò lại {len(da_goi)} lần — phải nhớ kết quả"
+    assert "s=320x240" in " ".join(da_goi[0]), da_goi[0]
+
+
+def test_co_nvenc_tra_false_chu_khong_nem_khi_probe_loi(monkeypatch):
+    """ffmpeg dò trả mã lỗi (máy không có driver) ⇒ `False`, KHÔNG ném.
+
+    Ném ở đây là mọi lượt ghép trên máy không GPU chết ngay từ bước dò.
+    """
+    import types
+
+    from app.pipeline import tach_nen
+
+    monkeypatch.setattr(tach_nen, "_CO_NVENC", None)
+    monkeypatch.setattr(
+        tach_nen, "subprocess",
+        types.SimpleNamespace(run=lambda cmd, **_kw: types.SimpleNamespace(
+            returncode=1, stdout="", stderr="Cannot load libnvidia-encode.so.1")))
+
+    assert tach_nen.co_nvenc() is False

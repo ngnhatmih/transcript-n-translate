@@ -210,6 +210,41 @@ def _resample(mau: np.ndarray, tu: int, den: int) -> np.ndarray:
     return np.ascontiguousarray(lai, dtype=np.float32)
 
 
+#: Kết quả dò NVENC — dò MỘT lần cho cả tiến trình (mỗi lần dò là một lần gọi ffmpeg).
+_CO_NVENC: bool | None = None
+
+
+def co_nvenc() -> bool:
+    """Máy/ffmpeg này có bộ mã hoá `h264_nvenc` chạy được THẬT không.
+
+    🔴 VÌ SAO DÒ BẰNG CÁCH CHẠY THỬ, không bằng `ffmpeg -encoders | grep nvenc`: có tên
+    trong danh sách chỉ nghĩa là ffmpeg ĐƯỢC BIÊN DỊCH kèm nvenc. Máy không có driver
+    NVIDIA, hoặc container không được cấp GPU, thì lệnh mã hoá vẫn ném
+    `Cannot load libcuda.so.1` — và lỗi đó chỉ lộ ra SAU khi job đã chạy xong xuôi phần
+    tách nền. Ở đây chỉ mã hoá MỘT khung rồi bỏ, rẻ hơn nhiều.
+
+    ⚠️ Khung dò phải ĐỦ LỚN. ĐO ĐƯỢC: 64×64 bị NVENC từ chối — *"Frame Dimension less
+    than the minimum supported value"* — nên phép dò kết luận "máy không có NVENC" trong
+    khi máy CÓ (RTX 3070). Dùng 320×240, trên mức tối thiểu.
+
+    Đo trên máy này: `docker compose exec api nvidia-smi` → `NVIDIA GeForce RTX 3070,
+    8192 MiB`; `ffmpeg -hide_banner -encoders | grep -ci nvenc` = 3.
+    """
+    global _CO_NVENC
+    if _CO_NVENC is not None:
+        return _CO_NVENC
+    try:
+        r = subprocess.run(
+            ["ffmpeg", "-hide_banner", "-loglevel", "error", "-f", "lavfi",
+             "-i", "color=c=black:s=320x240:d=0.04:r=25", "-frames:v", "1",
+             "-c:v", "h264_nvenc", "-f", "null", "-"],
+            capture_output=True)
+        _CO_NVENC = r.returncode == 0
+    except Exception:  # noqa: BLE001 — thiếu ffmpeg thì đã hỏng ở chỗ khác
+        _CO_NVENC = False
+    return _CO_NVENC
+
+
 def remux(video: pathlib.Path, audio: pathlib.Path, ra: pathlib.Path,
           phu_de: pathlib.Path | None = None) -> None:
     """Video COPY (không re-encode), audio `aac 192k` ở `SR_RA`, đệm im lặng cho đủ dài.
@@ -251,16 +286,45 @@ def remux(video: pathlib.Path, audio: pathlib.Path, ra: pathlib.Path,
     # Thoat cho bo loc: `\` -> `/` truoc, roi moi thoat `:` va `'`.
     duong = str(pathlib.Path(phu_de).resolve()).replace("\\", "/")
     duong = duong.replace(":", r"\:").replace("'", r"\'")
-    subprocess.run(
-        ["ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
-         "-i", str(video), "-i", str(audio),
-         "-map", "0:v:0", "-map", "1:a:0",
-         "-vf", f"ass='{duong}'",
-         "-c:v", "libx264", "-preset", "medium", "-crf", "18",
-         "-pix_fmt", "yuv420p",
-         "-c:a", "aac", "-b:a", "192k", "-ar", str(SR_RA),
-         "-af", "apad", "-shortest", str(ra)],
-        check=True, capture_output=True)
+    #: 🔴 GPU NẾU CÓ. Burn phụ đề là bước MÃ HOÁ LẠI TOÀN BỘ HÌNH, và với phụ đề cứng thì
+    #: không có cách nào tránh — đó là phần đắt nhất còn lại của một lượt ghép.
+    #:
+    #: ĐO ĐƯỢC (cùng film 4:38, 1080×1920, bản trộn đã cache): `libx264 -preset medium`
+    #: cho một lượt ghép **75 s**; `h264_nvenc -cq 23` trên RTX 3070 cho **39 s** — nhanh
+    #: gần gấp đôi (đo hai lần: job #200 và #201, cùng ra 271 247 kB).
+    #:
+    #: ⚠️ `-cq` của NVENC KHÔNG tương đương `-crf` của x264. ĐO ĐƯỢC: cùng film, `-cq 20`
+    #: ra **366 MB** trong khi `-crf 18` ra **238 MB**. Nên dùng `-cq 23` để dung lượng về
+    #: mức cũ; muốn nét hơn thì hạ số và chấp nhận file to hơn.
+    #:
+    #: `libx264` VẪN là đường dự phòng, chạy ngay khi NVENC hỏng: máy không có driver
+    #: NVIDIA hoặc container không được cấp GPU vẫn phải ra được video, chỉ chậm hơn.
+    ma_hoa = (
+        ["-c:v", "h264_nvenc", "-preset", "p5", "-rc", "vbr", "-cq", "23", "-b:v", "0"]
+        if co_nvenc()
+        else ["-c:v", "libx264", "-preset", "medium", "-crf", "18"]
+    )
+
+    def _chay(tham_so_ma_hoa: list[str]) -> None:
+        subprocess.run(
+            ["ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
+             "-i", str(video), "-i", str(audio),
+             "-map", "0:v:0", "-map", "1:a:0",
+             "-vf", f"ass='{duong}'",
+             *tham_so_ma_hoa,
+             "-pix_fmt", "yuv420p",
+             "-c:a", "aac", "-b:a", "192k", "-ar", str(SR_RA),
+             "-af", "apad", "-shortest", str(ra)],
+            check=True, capture_output=True)
+
+    try:
+        _chay(ma_hoa)
+    except subprocess.CalledProcessError:
+        if ma_hoa[1] == "libx264":
+            raise
+        #: NVENC hỏng giữa đường (driver cũ, hết VRAM) ⇒ làm lại bằng CPU. Chậm hơn nhưng
+        #: KHÔNG mất một lượt ghép đã tách nền xong.
+        _chay(["-c:v", "libx264", "-preset", "medium", "-crf", "18"])
 
 
 def do_dai(path: pathlib.Path) -> float:

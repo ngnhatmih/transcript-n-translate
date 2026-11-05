@@ -27,6 +27,13 @@ services:
     # trong `backend/requirements-docker.txt` sang bản `cpu` (xem README).
     gpus: all
     environment:
+      # 🔴 `video` phải có trong DANH SÁCH capability, nếu không NVIDIA chỉ mount thư viện
+      # COMPUTE (`libcuda`, `libcublas` — torch/whisper vẫn chạy) mà KHÔNG mount
+      # `libnvidia-encode.so.1`, nên `h264_nvenc` báo "Cannot load libnvidia-encode.so.1"
+      # dù máy có GPU và driver đủ mới. ĐO ĐƯỢC: driver 566.36 + RTX 3070, thiếu dòng này
+      # thì `co_nvenc()` trong `pipeline/tach_nen.py` trả `False` và burn chạy bằng CPU
+      # (75 s/lượt thay vì 39 s). Cần `video` cho NVENC, `compute,utility` cho torch.
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility,video
       # Thiết bị ASR: `cuda` khi container thấy GPU; `cpu` khi không.
       PHUDE_ASR_DEVICE: cuda
       # Ollama KHÔNG chạy trong compose: dùng Ollama của MÁY CHỦ (model 5 GB đã có,

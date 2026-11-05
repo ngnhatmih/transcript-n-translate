@@ -1883,3 +1883,66 @@ pytest (toàn bộ)      1535 passed, 15 deselected   EXIT_PYTEST=0
 npm test              275 pass, 0 fail             EXIT_TEST=0
 npx tsc --noEmit                                   EXIT_TS=0
 ```
+
+---
+
+## ERRATA #75 — burn phụ đề mã hoá lại CẢ PHIM bằng CPU: 75 s mỗi lượt ghép, dù máy có GPU
+
+**Phát hiện lúc:** chủ dự án: *"máy có gpu"* — sau khi `Ghép nền` đã hết chạy lại TTS
+(ERRATA #70) và bản trộn đã được cache, câu hỏi còn lại là chỗ nào còn CHẬM. Đo ra: phần còn
+lại của một lượt ghép gần như toàn bộ là **mã hoá lại video** để vẽ chữ vào từng khung hình.
+
+**Vì sao phần đó không tránh được:** phụ đề cứng nằm trong PIXEL. Không có cờ nào copy được
+một stream mà lại vẽ thêm chữ lên nó — `-c:v copy` là bỏ luôn phụ đề. Muốn nhanh thì chỉ còn
+cách làm cho phép mã hoá nhanh hơn, tức là GPU.
+
+**Đo được** (cùng film 4:38, 1080×1920, 8 355 khung, bản trộn `dub-63.tron.wav` đã cache nên
+chỉ còn burn + remux; thời gian là của CẢ job, thăm dò mỗi 3 s nên thực tế trong khoảng ±3 s):
+
+| bộ mã hoá | tham số | thời gian | dung lượng ra |
+|---|---|---|---|
+| `libx264` | `-preset medium -crf 18` | **75 s** | `237 997 kB` (238 MB) |
+| `h264_nvenc` | `-preset p5 -rc vbr -cq 20 -b:v 0` | **37 s** | `375 325 kB` (366 MB) |
+| `h264_nvenc` | `-preset p5 -rc vbr -cq 23 -b:v 0` | **39 s** | `271 247 kB` (265 MB) |
+
+Hai dòng `h264_nvenc` là hai lần đo RIÊNG, không phải ngoại suy: `-cq 23` chạy hai lượt
+(job #200 và #201, lượt sau trên image vừa build lại) và ra đúng cùng một dung lượng
+`271 247 kB`. Tức là **nhanh gần gấp đôi** (75 s → 39 s), và cái giá là **+11 % dung lượng**
+(265 MB so với 238 MB) — chọn `-cq 23` chứ không phải `-cq 20` chính vì lý do đó: `-cq` của
+NVENC **không** tương đương `-crf` của x264, `-cq 20` phình ra +54 %.
+
+**Ba lỗi đường đi, mỗi lỗi đều làm "máy có GPU" thành vô nghĩa:**
+
+1. **Container không thấy thư viện mã hoá.** `nvidia-smi` chạy được, CUDA chạy được (TTS vẫn
+   dùng GPU), nhưng `ffmpeg -c:v h264_nvenc` báo `Cannot load libnvidia-encode.so.1`. Docker
+   chỉ mount `libnvidia-encode.so.1` khi được cấp capability `video`; compose đang để mặc
+   định `compute,utility`. Sửa: thêm `NVIDIA_DRIVER_CAPABILITIES: compute,utility,video`.
+2. **Phép dò ở khung quá nhỏ.** Dò bằng ffmpeg trên khung 64×64 bị NVENC từ chối: *"Frame
+   Dimension less than the minimum supported value"* ⇒ `co_nvenc()` trả `False` trên một máy
+   RTX 3070. Sửa: dò ở **320×240**.
+3. **Dò lại mỗi lượt.** Kết quả được nhớ ở biến module (`_CO_NVENC`), nên mỗi tiến trình chỉ
+   tốn một lần ffmpeg ~50 ms.
+
+**Cách sửa** (`pipeline/tach_nen.py`): có NVENC thì `h264_nvenc -preset p5 -rc vbr -cq 23
+-b:v 0`; không có thì `libx264 -preset medium -crf 18` — **giữ nguyên** hành vi cũ từng byte.
+Và nếu NVENC hỏng GIỮA ĐƯỜNG (driver cũ, hết VRAM) thì bắt `CalledProcessError` rồi **làm
+lại bằng CPU**, chứ không ném ra ngoài: một lượt ghép đã tách nền + trộn xong rồi, mất nó vì
+GPU hắt hơi là mất 5–7 phút của người dùng.
+
+**Ghim:** 5 bài trong `tests/test_tach_nen.py` — có GPU ⇒ đúng `h264_nvenc` + `-cq 23` và
+KHÔNG còn `-crf`; không GPU ⇒ `libx264 -crf 18`; NVENC ném giữa đường ⇒ lần hai là `libx264`;
+`co_nvenc()` chỉ dò MỘT lần và dò ở `s=320x240`; ffmpeg dò trả mã lỗi ⇒ `False` chứ không ném.
+Không bài nào cần GPU: chúng thay `subprocess` của module bằng hàm chỉ ghi lại lệnh.
+
+**Kiểm bằng mắt, không chỉ bằng số:** trích một khung ở 60 s từ `dub-63.mp4` bản NVENC, câu
+*"Cùng sống lâu với trời đất"* hiện đúng trong hộp đen, chữ sắc, không khung xanh, không nhoè;
+`ffprobe` báo `h264 1080×1920`, `8355` khung, `278,500 s` — bằng đúng film gốc.
+
+### Đo cuối
+
+```
+pytest (toàn bộ)      1541 passed, 15 deselected, 11 warnings   EXIT_PYTEST=0
+npm test              278 pass, 0 fail                           EXIT_TEST=0
+```
+
+
