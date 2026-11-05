@@ -204,6 +204,41 @@ def test_route_xep_job_va_tu_choi_ban_dich_khong_ton_tai(repos, tmp_path):
         assert "999" in that.json()["detail"], "câu lỗi phải nêu đúng id"
 
 
+def test_route_burn_phu_de_giu_nguyen_phase_dub(repos, tmp_path):
+    """`chi_tron = true` (burn phụ đề, KHÔNG chạy TTS) vẫn mang phase `dub:<ENGINE_TTS>`.
+
+    🔴 Ghim vì đây là chỗ rất dễ "sửa cho đẹp". Đổi phase của job burn thành `burn:phude` phá
+    hai thứ, cả hai đều im lặng:
+
+      · `Worker.tick` (`app/worker.py:139-165`) là FIFO TOÀN CỤC rồi hút HẾT job cùng phase
+        trước khi đổi giai đoạn ⇒ một lượt burn mang phase riêng có thể bị các job `dub` MỚI
+        HƠN vượt mặt, dù nó vào hàng đợi trước.
+      · `SingleGpuGovernor.before_phase` (`adapters/governor/single_gpu.py:38-41`) gọi MỌI
+        releaser của phase khác ⇒ model TTS bị đẩy khỏi VRAM, và lượt lồng tiếng kế tiếp phải
+        nạp lại. Burn không cần TTS nhưng cũng không được làm nó rơi.
+
+    Nhãn hiển thị ("ghép nền · burn phụ đề") là việc của frontend — `nhanJob` đọc
+    `payload.chi_tron`, không đọc phase.
+    """
+    from app.api.deps import get_worker
+    from app.api.routes_dubs import ENGINE_TTS
+
+    r, tid = repos
+    app = create_app(repos=r, specs=[], media_dir=tmp_path / "m", out_dir=tmp_path / "o")
+    app.dependency_overrides[get_worker] = lambda: object()
+    with TestClient(app) as c:
+        resp = c.post("/api/dubs",
+                      json={"translation_id": tid, "tron_nen": True, "chi_tron": True})
+        assert resp.status_code == 201, resp.text
+        job = r.get_job(resp.json()["job"]["id"])
+
+    assert job.phase == f"dub:{ENGINE_TTS}", (
+        f"job burn mang phase {job.phase!r} — đổi giai đoạn sẽ đẩy model TTS khỏi VRAM và "
+        f"phá thứ tự FIFO; giữ nguyên `dub:{ENGINE_TTS}`")
+    assert job.payload["chi_tron"] is True, job.payload
+    assert job.payload["tron_nen"] is True, job.payload
+
+
 def test_route_tai_tra_404_kem_huong_dan_khi_chua_long_tieng(repos, tmp_path):
     r, tid = repos
     app = create_app(repos=r, specs=[], media_dir=tmp_path / "m", out_dir=tmp_path / "o")

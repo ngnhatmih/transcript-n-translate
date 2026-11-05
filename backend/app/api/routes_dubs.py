@@ -76,6 +76,19 @@ def create_dub(body: DubIn, repos=Depends(get_repos), worker=Depends(get_worker)
 
     from app.domain.models import Job
 
+    # 🔴 `phase` GIỮ NGUYÊN `dub:<ENGINE_TTS>` kể cả khi `chi_tron` (job chỉ burn phụ đề,
+    # không chạy TTS). Đây là quyết định CÓ CHỦ Ý, đừng "sửa" thành `burn:phude`:
+    #
+    #   · `Worker.tick` (`worker.py:139-165`) là FIFO TOÀN CỤC rồi hút HẾT job cùng `phase`
+    #     trước khi đổi giai đoạn. Một burn mang phase riêng có thể bị các job `dub` MỚI HƠN
+    #     (cùng phase đang chạy) vượt mặt — hàng đợi hết là FIFO.
+    #   · `SingleGpuGovernor.before_phase` (`adapters/governor/single_gpu.py:38-41`) gọi MỌI
+    #     releaser của phase KHÁC. Vào phase mới ⇒ model TTS bị đẩy khỏi VRAM, và job lồng
+    #     tiếng kế tiếp phải NẠP LẠI. Burn không cần TTS nhưng cũng không được làm nó rơi.
+    #   · `phase_switches` trong `GET /api/status` tăng theo mỗi lần đổi — nhiễu vô ích.
+    #
+    # Cái đúng cần sửa là NHÃN: hàng đợi phải đọc `payload.chi_tron` để in "ghép nền · burn
+    # phụ đề" thay vì "lồng tiếng" (`frontend/src/lib/studio.ts::nhanJob`, ERRATA #77).
     job = Job(id=None, workspace=2, type="dub", engine=ENGINE_TTS,
               phase=f"dub:{ENGINE_TTS}",
               payload={"translation_id": body.translation_id, "voice": body.voice,

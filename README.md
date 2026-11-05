@@ -2001,4 +2001,67 @@ npm test              282 pass, 0 fail                           EXIT_TEST=0
 npx tsc --noEmit                                                 EXIT_TS=0
 ```
 
+---
+
+## ERRATA #77 — hàng đợi gọi lượt BURN PHỤ ĐỀ là "lồng tiếng", và gọi việc XUẤT `.ass` là "ghép nền"
+
+**Phát hiện lúc:** chủ dự án hỏi đúng chỗ: *"cái burn video này hiện tại thuộc job nào nói rõ
+ra"*, rồi ngay sau đó: *"khi chạy cái đó thì nó có đụng vào mấy cái khác trong phase ko?"*.
+
+**Sự thật về chỗ burn nằm:** nó **không có loại job riêng**. `PAYLOAD_SCHEMA`
+(`routes_jobs.py:196`) chỉ có bốn loại — `ingest`, `asr`, `dub`, `export`. Burn là một job
+`dub` mang `tron_nen = true`; bản có thêm `chi_tron = true` thì **không chạy TTS**:
+
+```
+POST /api/dubs            → job type="dub", phase="dub:vieneu-v3-turbo"
+DubHandler.run            dub.py:300
+  └ chi_tron == true      dub.py:332   không chạy TTS, đi tiếp
+    └ _tron_va_remux      dub.py:339
+        ├ ghi dub-63.ass  dub.py:565   (lọc theo lớp + xếp hàng)
+        └ tach_nen.remux(..., phu_de=ass)   dub.py:582
+            └ ffmpeg -vf ass='…' + h264_nvenc -cq 23    tach_nen.py:305-315
+```
+
+Nên panel hàng đợi in **"lồng tiếng · vieneu-v3-turbo"** cho một lượt chỉ burn 39 s — đúng cái
+làm chủ dự án tưởng TTS chạy lại — và in **"ghép nền"** cho job `export`, vốn chỉ ghi `.srt`/
+`.ass` mà không đụng một khung hình nào. Hai nhãn sai, cùng một nguyên nhân: nhãn đọc `type`,
+không đọc `payload`.
+
+**Vì sao KHÔNG đổi `phase` (đây là phần trả lời câu hỏi thứ hai):** rất dễ "sửa cho đẹp" bằng
+cách đặt phase riêng `burn:phude`, và nó phá hai thứ, cả hai đều im lặng:
+
+1. **Thứ tự hàng đợi.** `Worker.tick` (`worker.py:139-165`) là FIFO TOÀN CỤC: bốc
+   `oldest_queued()`, rồi hút **hết** job cùng `phase` (`next_queued_for_phase`, SQL
+   `WHERE state='queued' AND phase=? ORDER BY id`, `sqlite_repos.py:589`) trước khi đổi giai
+   đoạn. Một lượt burn mang phase riêng sẽ bị các job `dub` **mới hơn** vượt mặt, vì chúng
+   cùng phase với giai đoạn đang chạy.
+2. **VRAM.** `SingleGpuGovernor.before_phase` (`adapters/governor/single_gpu.py:38-41`) gọi
+   **mọi** releaser của phase KHÁC. Vào `burn:phude` ⇒ model TTS bị đẩy khỏi VRAM; lượt lồng
+   tiếng kế tiếp phải nạp lại. Cộng thêm `phase_switches` trong `GET /api/status` tăng vô ích.
+
+**Sửa — chỉ ở chỗ hiển thị** (`frontend/src/lib/studio.ts::nhanJob`), đọc `payload` thật:
+
+| job | payload | nhãn |
+|---|---|---|
+| `dub` | `chi_tron = true` | `ghép nền · burn phụ đề` (**không** in engine TTS) |
+| `dub` | `tron_nen = true`, không `chi_tron` (đời cũ: chạy TTS rồi mới trộn) | `lồng tiếng + ghép nền` |
+| `dub` | còn lại | `lồng tiếng · <engine>` |
+| `export` | `format: "ass"` | `xuất phụ đề · ass` (trước đây ghi "ghép nền") |
+
+Không đổi `phase`, không đổi loại job, không đổi payload — nên hàng đợi cũ trong DB vẫn đọc
+được, và không có job nào bị xếp lại.
+
+**Ghim:** 5 bài — 4 bài `nhanJob` trong `studio.test.ts` (burn không kèm engine TTS; job đời cũ
+nói rõ làm cả hai việc; job lồng tiếng thường giữ nhãn cũ; `export` là *xuất phụ đề*, có và
+không có `format`) và 1 bài trong `test_dub_handler.py` ghim `phase == "dub:<ENGINE_TTS>"` cho
+job `chi_tron` — kèm docstring nêu đúng hai hậu quả nếu ai đó đổi nó.
+
+### Đo cuối
+
+```
+pytest (toàn bộ)      1542 passed, 15 deselected   EXIT_PYTEST=0
+npm test              286 pass, 0 fail             EXIT_TEST=0
+npx tsc --noEmit                                   EXIT_TS=0
+```
+
 

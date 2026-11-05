@@ -39,6 +39,7 @@ import {
   hangDoi,
   lyDoChuaXuatDuoc,
   NGUONG_NEN,
+  nhanJob,
   raSrt,
   soVi,
   tachTuKhac,
@@ -832,6 +833,65 @@ describe("hangDoi: panel hàng đợi đọc `jobs` thật", () => {
 
   it("hang doi rong ⇒ mang rong, khong nem", () => {
     assert.deepEqual(hangDoi([]), []);
+  });
+});
+
+
+// ---------------------------------------------------------------------------
+// NHÃN HÀNG ĐỢI PHẢI NÓI RA VIỆC THẬT — "lồng tiếng" ≠ "burn phụ đề" — ERRATA #77
+//
+// 🔴 ĐO ĐƯỢC: burn phụ đề KHÔNG có loại job riêng (`PAYLOAD_SCHEMA` chỉ có ingest/asr/dub/
+// export). Nó là job `dub` + `tron_nen`, và bản `chi_tron` KHÔNG chạy TTS. Nên panel in
+// "lồng tiếng · vieneu-v3-turbo" cho một lượt chỉ burn 39 s — đúng câu hỏi của chủ dự án:
+// *"cái burn video này hiện tại thuộc job nào nói rõ ra"*.
+//
+// Nhãn cũ còn sai cả job `export`: nó ghi "ghép nền" trong khi `export` chỉ ghi `.srt`/`.ass`.
+// ---------------------------------------------------------------------------
+
+describe("nhanJob: hàng đợi phải nói đúng việc đang làm", () => {
+  const nhan = (p: Parameters<typeof job>[0]) => nhanJob(job(p));
+
+  it("job dub + chi_tron ⇒ 'ghép nền · burn phụ đề', KHÔNG kèm engine TTS", () => {
+    // Chính ca job #202: 38 s, log ghi "không chạy lại TTS". In engine TTS ở đây là mời
+    // người đọc hiểu sai thành một lượt lồng tiếng.
+    const s = nhan({
+      id: 202,
+      type: "dub",
+      engine: "vieneu-v3-turbo",
+      payload: { translation_id: 63, tron_nen: true, chi_tron: true },
+    });
+    assert.equal(s, "ghép nền · burn phụ đề");
+    assert.doesNotMatch(s, /vieneu/, "burn không chạy TTS nên không được in engine TTS");
+  });
+
+  it("job dub + tron_nen KHÔNG có chi_tron (đời cũ) ⇒ nói rõ là làm CẢ HAI việc", () => {
+    const s = nhan({
+      id: 197,
+      type: "dub",
+      engine: "vieneu-v3-turbo",
+      payload: { translation_id: 63, tron_nen: true },
+    });
+    assert.equal(s, "lồng tiếng + ghép nền");
+  });
+
+  it("job dub thường ⇒ 'lồng tiếng · <engine>' (vế chống sửa quá tay)", () => {
+    assert.equal(
+      nhan({ id: 5, type: "dub", engine: "vieneu-v3-turbo", payload: { translation_id: 63 } }),
+      "lồng tiếng · vieneu-v3-turbo",
+    );
+  });
+
+  it("job export là XUẤT PHỤ ĐỀ (kèm định dạng), KHÔNG phải 'ghép nền'", () => {
+    // `export` chỉ ghi `.srt`/`.ass`; nó không đụng một khung hình nào. Nhãn cũ "ghép nền"
+    // làm người dùng tưởng đã có video.
+    assert.equal(
+      nhan({ id: 6, type: "export", engine: null, payload: { transcript_id: 59, format: "ass" } }),
+      "xuất phụ đề · ass",
+    );
+    assert.equal(
+      nhan({ id: 7, type: "export", engine: null, payload: { transcript_id: 59 } }),
+      "xuất phụ đề",
+    );
   });
 });
 

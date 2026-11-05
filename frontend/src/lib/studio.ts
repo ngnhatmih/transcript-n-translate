@@ -727,8 +727,40 @@ const TEN_LOAI: Record<string, string> = {
   asr: "phiên âm",
   translate: "dịch",
   dub: "lồng tiếng",
-  export: "ghép nền",
+  export: "xuất phụ đề",
 };
+
+/**
+ * Nhãn của MỘT job trong hàng đợi — đọc cả `payload`, không chỉ `type`.
+ *
+ * 🔴 VÌ SAO (đo được, chủ dự án: *"cái burn video này hiện tại thuộc job nào nói rõ ra"*):
+ * `PAYLOAD_SCHEMA` chỉ có bốn loại job — `ingest`, `asr`, `dub`, `export` — nên **burn phụ đề
+ * không có loại riêng**. Nó là job `dub` mang `tron_nen = true`, và bản có `chi_tron = true`
+ * thì KHÔNG chạy TTS. Hệ quả: panel hàng đợi in "lồng tiếng · vieneu-v3-turbo" cho một lượt
+ * chỉ burn 39 s (đúng ca người dùng tưởng là lồng tiếng lại), và in "ghép nền" cho job
+ * `export` vốn chỉ ghi tệp `.srt`/`.ass` mà không đụng một khung hình nào.
+ *
+ * Nhãn dưới đây lấy từ payload — dữ liệu THẬT của job, không phải phỏng đoán từ `type`:
+ *
+ *   `chi_tron = true`   → ghép nền + burn, không TTS (engine không liên quan, không in)
+ *   `tron_nen = true`   → lồng tiếng + ghép nền (job đời cũ: chạy TTS RỒI mới trộn)
+ *   `dub` còn lại       → lồng tiếng · <engine>
+ *   `export`            → xuất phụ đề · <định dạng>
+ */
+export function nhanJob(j: Job): string {
+  const p = j.payload ?? {};
+  if (j.type === "dub") {
+    if (p["chi_tron"] === true) return "ghép nền · burn phụ đề";
+    if (p["tron_nen"] === true) return "lồng tiếng + ghép nền";
+    return j.engine === null ? "lồng tiếng" : `lồng tiếng · ${j.engine}`;
+  }
+  if (j.type === "export") {
+    const fmt = typeof p["format"] === "string" ? p["format"] : null;
+    return fmt === null ? "xuất phụ đề" : `xuất phụ đề · ${fmt}`;
+  }
+  const ten = TEN_LOAI[j.type] ?? j.type;
+  return j.engine === null ? ten : `${ten} · ${j.engine}`;
+}
 
 /**
  * Danh sách job để hiện trong panel hàng đợi, MỚI NHẤT TRƯỚC.
@@ -745,8 +777,7 @@ export function hangDoi(jobs: readonly Job[], gioiHan = 8): DongHangDoi[] {
     .sort((a, b) => b.id - a.id)
     .slice(0, gioiHan)
     .map((j) => {
-      const ten = TEN_LOAI[j.type] ?? j.type;
-      const nhan = j.engine === null ? `${ten}` : `${ten} · ${j.engine}`;
+      const nhan = nhanJob(j);
       if (j.state === "running") {
         const pt = j.progress > 0 && j.progress < 1 ? Math.round(j.progress * 100) : null;
         return { id: j.id, nhan, trangThai: "dang-chay" as const, phanTram: pt };
