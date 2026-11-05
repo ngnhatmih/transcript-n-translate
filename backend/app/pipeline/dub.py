@@ -195,7 +195,13 @@ def xuat_dinh_dang(master: pathlib.Path, out_dir: pathlib.Path,
     for ten, tham_so in dinh_dangs.items():
         dich = out_dir / f"{master.stem}.{ten}"
         if ten == "wav":
-            dich.write_bytes(master.read_bytes())
+            #: 🔴 ĐỪNG CHÉP LÊN CHÍNH NÓ. `dich` ở đây CHÍNH LÀ `master` (master là
+            #: `dub-{tid}.wav`), nên `write_bytes(read_bytes())` là một vòng đọc-ghi 24 MB
+            #: vô nghĩa — và nó ĐỔI `mtime` của master. Hậu quả ĐO ĐƯỢC: cache bản trộn
+            #: (`dub-{tid}.tron.wav`, khoá theo mtime master) KHÔNG BAO GIỜ trúng, nên mỗi
+            #: lần đổi kiểu chữ vẫn chạy lại htdemucs (91 s thay vì phần burn+remux).
+            if dich.resolve() != master.resolve():
+                dich.write_bytes(master.read_bytes())
         else:
             subprocess.run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
                             "-i", str(master), *tham_so, str(dich)],
@@ -450,21 +456,47 @@ class DubHandler:
 
         import tempfile
 
+        #: 🔴 CACHE BẢN TRỘN — tách nền (htdemucs) là phần ĐẮT NHẤT của bước ghép, và nó
+        #: KHÔNG phụ thuộc kiểu chữ phụ đề.
+        #:
+        #: ĐO ĐƯỢC (chủ dự án: *"nhưng tại sao xuất phải chạy lại lồng tiếng và ghép nền?"*):
+        #: đổi cỡ chữ rồi bấm Xuất thì job ghép chạy lại TỪ ĐẦU — 96 giây cho một việc mà
+        #: đầu vào không đổi. Trong đó TTS đã được bỏ từ trước (`chi_tron`), còn lại phần
+        #: đắt là tách nền + trộn.
+        #:
+        #: Khoá cache là `(master, video)`: bản trộn chỉ đúng khi master lồng tiếng và video
+        #: gốc chưa đổi, nên so `mtime` của cả hai. Đổi kiểu chữ KHÔNG làm hai mốc đó đổi,
+        #: nên lần ghép sau dùng lại `tron.wav` và chỉ còn burn phụ đề + remux.
+        self._out_dir.mkdir(parents=True, exist_ok=True)
+        cache_tron = self._out_dir / f"dub-{tid}.tron.wav"
+        con_dung = (
+            cache_tron.is_file()
+            and cache_tron.stat().st_mtime >= master.stat().st_mtime
+            and cache_tron.stat().st_mtime >= video.stat().st_mtime
+        )
+
         with tempfile.TemporaryDirectory(prefix="nen-") as tam:
             tam = pathlib.Path(tam)
-            report(0.90, "tách nền khỏi tiếng gốc (htdemucs)")
-            goc = tam / "goc.wav"
-            tach_nen.trich_audio_goc(video, goc)
-            nen = tach_nen.tach_nen(goc)
-            nen, he_so = tach_nen.chuan_hoa_nen(nen)
-            if he_so > 1.0:
-                report(0.93, f"nền vượt biên độ (peak {he_so:.3f}) — đã chuẩn hoá")
-
-            dub = tach_nen.doc_stereo(master, sr=tach_nen.SR_MODEL)
-            tron = tach_nen.tron(nen, dub)
-            tron_path = tam / "tron.wav"
             import soundfile as sf
-            sf.write(str(tron_path), tron.T, tach_nen.SR_MODEL)
+
+            if con_dung:
+                report(0.90, f"dùng lại bản trộn đã có ({cache_tron.name}) — "
+                             "chỉ burn lại phụ đề + remux")
+                tron_path = cache_tron
+            else:
+                report(0.90, "tách nền khỏi tiếng gốc (htdemucs)")
+                goc = tam / "goc.wav"
+                tach_nen.trich_audio_goc(video, goc)
+                nen = tach_nen.tach_nen(goc)
+                nen, he_so = tach_nen.chuan_hoa_nen(nen)
+                if he_so > 1.0:
+                    report(0.93, f"nền vượt biên độ (peak {he_so:.3f}) — đã chuẩn hoá")
+
+                dub = tach_nen.doc_stereo(master, sr=tach_nen.SR_MODEL)
+                tron = tach_nen.tron(nen, dub)
+                #: Ghi thẳng vào thư mục ra (không phải thư mục tạm) để lần sau dùng lại.
+                sf.write(str(cache_tron), tron.T, tach_nen.SR_MODEL)
+                tron_path = cache_tron
 
             report(0.95, "remux vào video gốc")
             ra = self._out_dir / f"dub-{tid}.mp4"
