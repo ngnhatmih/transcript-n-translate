@@ -26,6 +26,7 @@ import type {
 } from "@/api/types";
 import { Studio } from "@/components/studio/Studio";
 import { VUNG_DOC_MAC_DINH, type VungDoc } from "@/components/studio/VungDoc";
+import { nhanNgan } from "@/lib/studio";
 
 /**
  * TANG NOI API — CHO DUY NHAT doc/ghi backend.
@@ -525,7 +526,12 @@ export function App() {
   //:
   //: Đọc MỘT lần lúc nạp, cùng lượt với registry: cả hai là cấu hình, không đổi giữa
   //: phiên (đổi trong panel thì panel tự gọi lại API và trang tự tải lại bảng jobs).
-  const [modelDung, setModelDung] = useState<Record<string, string | null>>({});
+  //: Mỗi việc giữ ĐÚNG hai thứ: `id` để xếp job, `nhan` (tên ngắn) để thanh bước hiện ra.
+  //: Chỉ giữ id thì thanh bước không có gì để nói ngoài id kỹ thuật — đúng cái chủ dự án
+  //: vừa báo (`ocr+asr`, `deepseek-web`).
+  const [modelDung, setModelDung] = useState<Record<string, { id: string | null; nhan: string | null }>>({});
+  //: ID engine → tên ngắn (mọi ứng viên của mọi việc). Xem chỗ dùng ở bước "Dịch".
+  const [tenEngine, setTenEngine] = useState<Record<string, string>>({});
   useEffect(() => {
     void (async () => {
       try {
@@ -542,9 +548,25 @@ export function App() {
       }
       try {
         const ms = await getModelSettings();
-        const dung: Record<string, string | null> = {};
-        for (const t of ms.tasks) dung[t.id] = t.used;
+        const dung: Record<string, { id: string | null; nhan: string | null }> = {};
+        for (const t of ms.tasks) {
+          //: Nhãn tra theo `used`, KHÔNG theo `fallback`: thanh bước kể tên model đang được
+          //: đặt cho việc đó. `nhanNgan` cắt phần giải thích trong ngoặc để vừa một bước.
+          const nhanDay = t.candidates.find((u) => u.id === t.used)?.label ?? t.used;
+          dung[t.id] = { id: t.used, nhan: nhanNgan(nhanDay) };
+        }
         setModelDung(dung);
+        //: Bảng ID ENGINE → tên ngắn, cho những chỗ cần tên của model ĐÃ CHẠY chứ không
+        //: phải model đang đặt: bước "Dịch" phải kể tên engine của CHÍNH bản dịch đang mở
+        //: (`banDich.engine`), không phải engine người dùng vừa đổi trong bảng cài đặt.
+        const ten: Record<string, string> = {};
+        for (const t of ms.tasks) {
+          for (const u of t.candidates) {
+            const ngan = nhanNgan(u.label);
+            if (ngan !== null) ten[u.id] = ngan;
+          }
+        }
+        setTenEngine(ten);
       } catch {
         // Bảng cài đặt hỏng KHÔNG được chặn cả ứng dụng: `{}` nghĩa là "dùng mặc định
         // của registry", đúng hành vi trước khi có bảng này.
@@ -604,7 +626,7 @@ export function App() {
         //: Model ĐANG DÙNG theo bảng "Cài đặt model" thắng mặc định của registry
         //: (ERRATA #80). `??` chứ không `||`: một id rỗng trong settings nghĩa là "chưa
         //: đặt", còn `||` sẽ nuốt cả chuỗi rỗng thành mặc định của registry.
-        const engineGui = modelDung["asr"] ?? engineAsr;
+        const engineGui = modelDung["asr"]?.id ?? engineAsr;
         // 🔴 NGUỒN CHƯA CÓ AUDIO THÌ CHƯA BÓC BĂNG ĐƯỢC.
         //
         // DO DUOC (nguoi dung bao "mo mot video khac thi hang doi ko thay gi"): nap
@@ -677,7 +699,7 @@ export function App() {
         //   3. engine của bản dịch đang mở;
         //   4. engine MT ĐẦU TIÊN của registry — cùng nguyên tắc với `engineAsr`: danh mục
         //      là dữ liệu, không viết cứng tên engine trong giao diện.
-        const chonTrongBang = modelDung["dich"];
+        const chonTrongBang = modelDung["dich"]?.id;
         const daDung = transcript.translations.filter((t) => engineMt.includes(t.engine));
         const moiNhat = daDung.reduce<(typeof daDung)[number] | null>(
           (a, b) => (a === null || b.id > a.id ? b : a), null);
@@ -835,6 +857,14 @@ export function App() {
     [napKenh],
   );
 
+  //: Tên ngắn của model cho từng việc, để thanh bước ghi "RapidOCR + Faster-Whisper large-v3"
+  //: thay cho nhãn nguồn chữ `ocr+asr`. Việc nào chưa có nhãn thì BỎ khoá, và `duongOng`
+  //: giữ nguyên hành vi cũ cho khoá đó.
+  const nhanModel: Record<string, string> = { ...tenEngine };
+  for (const [task, gt] of Object.entries(modelDung)) {
+    if (gt.nhan !== null && gt.nhan !== "") nhanModel[task] = gt.nhan;
+  }
+
   return (
     <Studio
       sources={sources}
@@ -860,6 +890,7 @@ export function App() {
       soEngine={engineCount}
       vungDoc={vungDoc}
       onVungDoc={onVungDoc}
+      nhanModel={nhanModel}
     />
   );
 }

@@ -147,6 +147,12 @@ export interface StudioProps {
   /** Vùng đọc OCR của nguồn đang mở; `null` = TẮT (đọc cả khung). */
   vungDoc: VungDoc | null;
   onVungDoc: (v: VungDoc | null) => void;
+  /**
+   * Tên NGẮN của model đang đặt cho từng việc (`ocr`, `asr`, `dich`, `tts`, `tach_giong`,
+   * `burn`) — App đọc từ bảng "Cài đặt model". Thanh bước dùng nó để ghi TÊN MODEL thay
+   * cho id kỹ thuật / nhãn nguồn chữ (`ocr+asr`). Thiếu khoá thì `duongOng` giữ hành vi cũ.
+   */
+  nhanModel?: Record<string, string>;
 }
 
 export function Studio(props: StudioProps) {
@@ -172,6 +178,7 @@ export function Studio(props: StudioProps) {
     soEngine,
     vungDoc,
     onVungDoc,
+    nhanModel,
   } = props;
 
   const [currentId, setCurrentId] = useState<number | null>(null);
@@ -657,8 +664,11 @@ export function Studio(props: StudioProps) {
         kieuChuDoi: jobGhep !== null && jobGhep.payload?.["style"] !== undefined
           && JSON.stringify(jobGhep.payload?.["style"])
              !== JSON.stringify(styleChoAss(kieuPhuDe)),
+        //: Tên model cho ghi chú thanh bước (ERRATA #83). `?? {}` để nơi gọi không phải
+        //: truyền khi không quan tâm (test cũ, màn khác) — thiếu thì giữ hành vi cũ.
+        nhanModel: nhanModel ?? {},
       }),
-    [transcript, banDich, issues.length, trangThaiLong, jobGhep, jobAsr, jobDich, trangThai,
+    [transcript, banDich, issues.length, trangThaiLong, jobGhep, jobAsr, jobDich, trangThai, nhanModel,
      kieuPhuDe],
   );
 

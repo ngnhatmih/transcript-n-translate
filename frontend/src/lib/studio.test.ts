@@ -56,6 +56,7 @@ import {
   mauLop,
   moTaLop,
   NHAN_LOP,
+  nhanNgan,
 } from "./studio.ts";
 
 // ---------------------------------------------------------------------------
@@ -110,6 +111,20 @@ function chiTiet(segments: Segment[]): TranslationDetail {
 }
 
 // ---------------------------------------------------------------------------
+
+/**
+ * Đầu vào ĐẦY ĐỦ cho `duongOng`, cho các bài ở CẤP TỆP (ngoài mọi `describe`).
+ *
+ * `vao()` trong các `describe` khác là hàm CỤC BỘ của từng khối, nên bài ở cấp tệp không
+ * thấy nó — và trước đây một bài như vậy đã CHẾT ÂM THẦM (xem ERRATA #83).
+ */
+const vaoDayDu = (p: Partial<DauVaoDuongOng>): DauVaoDuongOng => ({
+  coBanGhi: false, engineAsr: null, asrState: null,
+  coBanDich: false, dichState: null, engineMt: null,
+  soViec: 0, dubState: null, ghepState: null, coFileXuat: false,
+  kieuChuDoi: false,
+  ...p,
+});
 
 describe("doDai: san 0,01 de phep chia khong no", () => {
   it("doan binh thuong tra dung hieu", () => {
@@ -1273,22 +1288,108 @@ describe("NHAN_LOP va moTaLop: noi RO LOP nao (layer kieu Photoshop)", () => {
   });
 });
 
-test("bước Xuất: kiểu chữ đã đổi ⇒ KHÔNG còn 'sẵn sàng', nói phải ghép lại", () => {
+it("bước Xuất: kiểu chữ đã đổi ⇒ KHÔNG còn 'sẵn sàng', nói phải ghép lại", () => {
   // 🔴 ĐO ĐƯỢC (chủ dự án: "chỉnh như nào thì lúc xuất vẫn ra y hệt nhau"): tệp
   // `dub-{id}.mp4` do job ghép sinh ra MỘT LẦN. Đổi cỡ chữ/màu/vị trí xong bấm Xuất thì
   // vẫn tải đúng tệp cũ, và bước Xuất vẫn ghi "sẵn sàng" — không có gì báo tệp đã lỗi thời.
-  const cu = duongOng(vao({ coBanGhi: true, coBanDich: true, soViec: 0,
+  const cu = duongOng(vaoDayDu({ coBanGhi: true, coBanDich: true, soViec: 0,
                             dubState: "done", ghepState: "done", coFileXuat: true,
                             kieuChuDoi: false }));
   const xuatCu = cu.find((b) => b.id === "xuat");
   assert.equal(xuatCu?.state, "done");
   assert.equal(xuatCu?.note, "sẵn sàng");
 
-  const moi = duongOng(vao({ coBanGhi: true, coBanDich: true, soViec: 0,
+  const moi = duongOng(vaoDayDu({ coBanGhi: true, coBanDich: true, soViec: 0,
                              dubState: "done", ghepState: "done", coFileXuat: true,
                              kieuChuDoi: true }));
   const xuatMoi = moi.find((b) => b.id === "xuat");
   assert.equal(xuatMoi?.state, "todo", "tệp cũ không còn đúng ⇒ chưa 'done'");
   assert.match(xuatMoi?.note ?? "", /ghép lại/,
     `phải nói phải ghép lại, đo được ${JSON.stringify(xuatMoi?.note)}`);
+});
+
+// ---------------------------------------------------------------------------
+// TÊN MODEL TRONG THANH BƯỚC — ERRATA #83
+//
+// 🔴 ĐO ĐƯỢC (chủ dự án gửi ảnh thanh bước): ghi chú bước "Phiên âm" hiện `ocr+asr` — nhãn
+// NGUỒN CHỮ của bản ghi, không phải tên model; "Dịch" hiện `deepseek-web` (id kỹ thuật);
+// "Lồng tiếng"/"Ghép nền" hiện "đã lồng"/"đã ghép", không nói model nào. Nay ghi chú lấy tên
+// model đã đặt cho việc đó, và thiếu tên thì GIỮ NGUYÊN hành vi cũ.
+// ---------------------------------------------------------------------------
+
+describe("nhanNgan: cắt phần giải thích trong ngoặc, chỉ giữ tên model", () => {
+  it("cắt tại ' (' đầu tiên", () => {
+    assert.equal(nhanNgan("Faster-Whisper large-v3 (chính xác hơn turbo)"), "Faster-Whisper large-v3");
+    assert.equal(nhanNgan("GPU NVENC (nhanh gấp đôi, cần driver NVIDIA)"), "GPU NVENC");
+    assert.equal(nhanNgan("RapidOCR (PP-OCRv4, đọc phụ đề cứng)"), "RapidOCR");
+  });
+
+  it("không có ngoặc thì giữ nguyên; null/rỗng thì null", () => {
+    assert.equal(nhanNgan("htdemucs"), "htdemucs");
+    assert.equal(nhanNgan(null), null);
+    assert.equal(nhanNgan("   "), null);
+  });
+
+  it("không cắt vào giữa tên model: tên không chứa ' ('", () => {
+    //: Vế chống sửa quá tay: nếu ai đổi sang cắt tại "(" không kèm dấu cách thì
+    //: "Qwen2.5-3B(Ollama)" — nhãn KHÔNG có dấu cách — sẽ bị cắt mất tên.
+    assert.equal(nhanNgan("Qwen2.5-3B(Ollama)"), "Qwen2.5-3B(Ollama)");
+  });
+});
+
+describe("duongOng: thanh bước ghi TÊN MODEL, không ghi id kỹ thuật", () => {
+  const NHAN = {
+    ocr: "RapidOCR",
+    asr: "Faster-Whisper large-v3",
+    dich: "HY-MT1.5-7B",
+    tts: "VieNeu v3 Turbo",
+    tach_giong: "htdemucs",
+    burn: "h264_nvenc",
+  };
+
+  it("Phiên âm: `ocr+asr` thành TÊN của CẢ HAI model", () => {
+    const b = duongOng(vaoDayDu({ coBanGhi: true, engineAsr: "ocr+asr", nhanModel: NHAN }));
+    assert.equal(b[0].note, "RapidOCR + Faster-Whisper large-v3");
+  });
+
+  it("Phiên âm: chỉ ASR thì chỉ tên ASR (không gán oan OCR)", () => {
+    const b = duongOng(vaoDayDu({ coBanGhi: true, engineAsr: "asr", nhanModel: NHAN }));
+    assert.equal(b[0].note, "Faster-Whisper large-v3");
+  });
+
+  it("Dịch / Lồng tiếng / Ghép nền: tên model thay cho id và cho 'đã X'", () => {
+    const b = duongOng(vaoDayDu({
+      coBanGhi: true, engineAsr: "ocr+asr", coBanDich: true, engineMt: "hy-mt-1.5-7b",
+      dubState: "done", ghepState: "done", coFileXuat: true, nhanModel: NHAN,
+    }));
+    //: Khoá theo ENGINE ID thắng khoá theo việc: ghi chú kể tên engine ĐÃ VIẾT bản dịch
+    //: đang mở, không phải engine vừa đặt trong bảng cài đặt.
+    assert.equal(b[1].note, "HY-MT1.5-7B", `Dịch: ${b[1].note}`);
+    assert.equal(b[3].note, "VieNeu v3 Turbo", `Lồng tiếng: ${b[3].note}`);
+    //: Ghép nền dùng HAI model: tách giọng rồi mã hoá lại hình.
+    assert.equal(b[4].note, "htdemucs · h264_nvenc", `Ghép nền: ${b[4].note}`);
+  });
+
+  it("KHÔNG có nhanModel ⇒ giữ nguyên hành vi cũ (một chữ cũ vẫn hơn ô trống)", () => {
+    const b = duongOng(vaoDayDu({
+      coBanGhi: true, engineAsr: "ocr+asr", coBanDich: true, engineMt: "deepseek-web",
+      dubState: "done", ghepState: "done", coFileXuat: true,
+    }));
+    assert.equal(b[0].note, "ocr+asr");
+    assert.equal(b[1].note, "deepseek-web");
+    assert.equal(b[3].note, "đã lồng");
+    assert.equal(b[4].note, "đã ghép");
+  });
+});
+
+describe("duongOng: bước Dịch kể tên engine CỦA BẢN DỊCH, không phải model vừa đặt", () => {
+  it("engineMt khác model trong bảng cài đặt ⇒ lấy tên của engineMt", () => {
+    //: ĐO ĐƯỢC trên dữ liệu thật: bản dịch #63 viết bởi `deepseek-web`, còn bảng cài đặt đang
+    //: đặt `hy-mt-1.5-7b`. Ghi chú phải nói "DeepSeek web" — nó mô tả BẢN ĐANG XEM.
+    const b = duongOng(vaoDayDu({
+      coBanGhi: true, coBanDich: true, engineMt: "deepseek-web",
+      nhanModel: { dich: "HY-MT1.5-7B", "deepseek-web": "DeepSeek web" },
+    }));
+    assert.equal(b[1].note, "DeepSeek web", b[1].note);
+  });
 });

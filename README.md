@@ -2428,4 +2428,82 @@ npm test              301 pass, 0 fail                        EXIT_TEST=0
 npx tsc --noEmit                                              EXIT_TS=0
 ```
 
+---
+
+## ERRATA #83 — thanh bước vẫn ghi `ocr+asr`, và một bài test đã CHẾT ÂM THẦM
+
+**Yêu cầu:** *"với header đã đổi tên đâu vẫn hiện ocr+asr kìa (để tên ocr/tên asr), mấy cái task
+kia nữa"*.
+
+### 1. Ghi chú của thanh bước giờ là TÊN MODEL
+
+Trước: `ocr+asr` (nhãn NGUỒN CHỮ của bản ghi, không phải engine), `deepseek-web` (id kỹ thuật),
+`đã lồng` / `đã ghép` (không nói model nào). Nay, đo bằng cách đọc thẳng DOM của thanh bước trên
+ứng dụng đang chạy:
+
+```
+["Phiên âm | RapidOCR + Faster-Whisper large-v3",
+ "Dịch | DeepSeek web",
+ "Duyệt | còn 207 việc",
+ "Lồng tiếng | VieNeu v3 Turbo",
+ "Ghép nền | htdemucs · GPU NVENC",
+ "Xuất | kiểu chữ đã đổi — ghép lại"]
+```
+
+Ba quyết định trong đó, mỗi cái đều có lý do đo được:
+
+* **`ocr+asr` được DỊCH thành tên model**, không in nguyên chuỗi: `transcript.engine` là nhãn
+  nguồn chữ (`domain/nguon_chu.py`), nên `"ocr+asr"` phải ra `RapidOCR + Faster-Whisper large-v3`.
+  Bản ghi chỉ do ASR thì chỉ hiện tên ASR — không gán oan OCR.
+* **Bước "Dịch" kể tên engine CỦA BẢN DỊCH ĐANG MỞ**, không phải model vừa đặt trong bảng cài
+  đặt: bản dịch #63 viết bởi `deepseek-web` trong khi bảng đang đặt `hy-mt-1.5-7b` — ghi chú mô
+  tả BẢN ĐANG XEM, nên nó là "DeepSeek web". Nên `nhanModel` mang HAI loại khoá: `task.id` (model
+  đang đặt) và `engine.id` (tên của model đã chạy).
+* **"Ghép nền" kể CẢ HAI model** của bước đó (`htdemucs · GPU NVENC`): tách giọng rồi mã hoá lại
+  hình.
+
+Tên trong thanh bước được cắt phần giải thích trong ngoặc (`nhanNgan`): nhãn registry là câu giải
+thích ("Faster-Whisper large-v3 (chính xác hơn turbo)"), còn thanh bước chỉ rộng ~200 px cho một
+bước.
+
+### 2. 🔴 Một bài test đã KHÔNG CHẠY suốt từ lúc được viết, và không ai thấy
+
+Khi thêm bài cho `nhanNgan`, tôi phát hiện `npm test` báo **126** bài trong khi tệp có **133**
+`it(`. Truy ra: `frontend/src/lib/studio.test.ts` khai `import { describe, it } from "node:test"`
+nhưng ở CUỐI TỆP có một bài viết bằng **`test(...)`** — không import. `test` không tồn tại ⇒
+`ReferenceError` ngay lúc NẠP MODULE ⇒ mọi thứ khai báo sau dòng đó (bài "bước Xuất: kiểu chữ đã
+đổi…" và toàn bộ khối mới của tôi) **không bao giờ chạy**.
+
+Vì sao không ai thấy, ba lớp chặn cùng lúc:
+
+1. `tsconfig.json` **exclude `src/**/*.test.ts(x)`**, nên `tsc --noEmit` không hề đọc tệp test —
+   `test is not defined` (TS2304) lẽ ra bị bắt ngay.
+2. `npm test` chạy với `--test-isolation=none`; ở chế độ đó một ngoại lệ lúc nạp tệp bị NUỐT (đo
+   được: cùng tệp chạy bằng `node --test` KHÔNG có cờ đó thì báo `✖ … ReferenceError: test is not
+   defined`, `fail 1`, exit 1; có cờ thì exit 0, im lặng).
+3. Bài đó là bài DUY NHẤT của nó (không nằm trong `describe`), nên không có "suite rỗng" nào để
+   mắt nhận ra.
+
+**Sửa:** `test(` → `it(`, và thêm một chặng `npm run test:load` CHẠY TRƯỚC `test`: nạp mọi tệp
+test với `--test-name-pattern="__khong_bao_gio_chay__"` (không bài nào chạy) — vẫn đủ để một
+ngoại lệ lúc nạp làm sập, mà chỉ tốn **~1 s**:
+
+```
+"test:load": "node --import ./test/swc-loader.mjs --test --test-name-pattern=\"__khong_bao_gio_chay__\" \"src/**/*.test.{ts,tsx}\"",
+"test": "npm run test:load && node --import ./test/swc-loader.mjs --test --test-isolation=none \"src/**/*.test.{ts,tsx}\""
+```
+
+Đo được: `npm run test:load` trên 12 tệp = **1 s**, exit 0; khi tệp còn lỗi thì nó đỏ ngay.
+
+**Bài chết âm thầm đó, khi được chạy lại, ĐÃ XANH** — tức hành vi "kiểu chữ đổi ⇒ nói phải ghép
+lại" vẫn đúng; chỉ là từ trước tới nay chưa có gì canh nó.
+
+### Đo cuối
+
+```
+pytest (toàn bộ)      1567 passed, 1 skipped, 15 deselected   EXIT_PYTEST=0
+npm test              310 pass, 0 fail                        EXIT_TEST=0   (trước: 301 — 8 bài giờ mới chạy được + 1 bài thêm)
+npx tsc --noEmit                                              EXIT_TS=0
+```
+
 

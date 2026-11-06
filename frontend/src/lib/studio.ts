@@ -368,6 +368,43 @@ export interface DauVaoDuongOng {
    * tệp đã lỗi thời. Cờ này để bước Xuất nói ra và để nhánh "chưa có tệp" chạy lại ghép.
    */
   kieuChuDoi: boolean;
+  /**
+   * TÊN NGẮN của model đang đặt cho từng việc, suy từ bảng "Cài đặt model".
+   *
+   * Khoá có HAI loại, và cả hai đều hợp lệ trong cùng một map:
+   *   · `task.id` (`ocr`, `asr`, `dich`, `tts`, `tach_giong`, `burn`) — model ĐANG ĐẶT;
+   *   · `engine.id` (`deepseek-web`, `fw-large-v3`, …) — tên của model ĐÃ CHẠY, dùng cho
+   *     bước "Dịch": ghi chú phải kể engine của CHÍNH bản dịch đang mở, không phải engine
+   *     người dùng vừa đổi trong bảng cài đặt.
+   * Hai bộ khoá không trùng nhau (task id là danh từ việc, engine id là tên model).
+   *
+   * 🔴 ĐO ĐƯỢC (chủ dự án gửi ảnh thanh bước): ghi chú của bước "Phiên âm" hiện
+   * **`ocr+asr`** — đó là nhãn NGUỒN CHỮ của bản ghi, không phải tên model; bước "Dịch"
+   * hiện `deepseek-web` (id kỹ thuật); "Lồng tiếng"/"Ghép nền" thì hiện "đã lồng"/"đã ghép",
+   * không nói model nào. Nay ghi chú lấy TÊN MODEL đã đặt cho việc đó.
+   *
+   * Thiếu khoá (App chưa nạp xong bảng cài đặt, hoặc API hỏng) thì giữ NGUYÊN hành vi cũ:
+   * một thanh bước hiện id cũ vẫn đọc được, còn một thanh bước trống thì không.
+   */
+  nhanModel?: Record<string, string>;
+}
+
+/**
+ * Tên NGẮN của một model, để nhét vừa thanh bước: cắt phần trong ngoặc.
+ *
+ * Nhãn trong registry là câu giải thích cho người đọc danh mục ("Faster-Whisper large-v3
+ * (chính xác hơn turbo)", "GPU NVENC (nhanh gấp đôi, cần driver NVIDIA)"). Thanh bước chỉ
+ * cần TÊN MODEL — đo được trên ảnh chủ dự án gửi: chỗ đó rộng ~200 px cho cả một bước.
+ *
+ * Cắt tại dấu " (" ĐẦU TIÊN, không phải regex thông minh: mọi nhãn trong danh mục đều đặt
+ * phần giải thích sau " (", nên cắt ở đó là đủ và không bao giờ cắt vào giữa tên model
+ * (không tên model nào chứa " (" ). Nhãn không có ngoặc thì giữ nguyên.
+ */
+export function nhanNgan(nhan: string | null | undefined): string | null {
+  if (nhan === null || nhan === undefined) return null;
+  const i = nhan.indexOf(" (");
+  const ra = (i < 0 ? nhan : nhan.slice(0, i)).trim();
+  return ra === "" ? null : ra;
 }
 
 /**
@@ -389,6 +426,27 @@ export interface DauVaoDuongOng {
  * Thiếu ba thứ đó thì bước sau KHÔNG CÓ ĐẦU VÀO, khác hẳn "chưa được phép".
  */
 export function duongOng(d: DauVaoDuongOng): BuocDuongOng[] {
+  const nhan = d.nhanModel ?? {};
+
+  /**
+   * Ghi chú của bước "Phiên âm" — TÊN MODEL của những nguồn chữ đã đọc ra bản ghi.
+   *
+   * `transcript.engine` là nhãn NGUỒN CHỮ, không phải engine: `"ocr+asr"` nghĩa là cả OCR
+   * lẫn ASR cùng đọc ra (xem `domain/nguon_chu.py`). Nên nó phải được DỊCH thành tên model
+   * của hai việc đó, không phải in nguyên chuỗi.
+   *
+   * Giá trị lạ (dữ liệu cũ, engine id thuần) thì trả lại chính nó — nói một cái tên cũ còn
+   * hơn để trống.
+   */
+  const ghiChuNguonChu = (): string => {
+    const e = (d.engineAsr ?? "").toLowerCase();
+    const ten = [
+      e.includes("ocr") ? nhan["ocr"] : null,
+      e.includes("asr") ? nhan["asr"] : null,
+    ].filter((x): x is string => typeof x === "string" && x !== "");
+    return ten.length > 0 ? ten.join(" + ") : (d.engineAsr ?? "");
+  };
+
   /**
    * BƯỚC `asr` — thứ tự xét, và vì sao thứ tự CŨ SAI.
    *
@@ -435,7 +493,7 @@ export function duongOng(d: DauVaoDuongOng): BuocDuongOng[] {
           : d.asrState === "interrupted"
             ? { id: "asr", name: "Phiên âm", note: "bị ngắt — chạy lại được", state: "blocked" }
             : d.coBanGhi
-              ? { id: "asr", name: "Phiên âm", note: d.engineAsr ?? "", state: "done" }
+              ? { id: "asr", name: "Phiên âm", note: ghiChuNguonChu(), state: "done" }
               : d.asrState === "done"
                 ? { id: "asr", name: "Phiên âm", note: "đang nạp lại…", state: "running" }
                 : { id: "asr", name: "Phiên âm", note: "chưa nạp", state: "todo" };
@@ -453,7 +511,10 @@ export function duongOng(d: DauVaoDuongOng): BuocDuongOng[] {
           : d.dichState === "interrupted"
             ? { id: "dich", name: "Dịch", note: "bị ngắt — chạy lại được", state: "blocked" }
             : d.coBanDich
-              ? { id: "dich", name: "Dịch", note: d.engineMt ?? "", state: "done" }
+              //: Tên của engine ĐÃ VIẾT bản dịch đang mở (`engineMt`), không phải engine vừa
+              //: đổi trong bảng cài đặt: ô ghi chú này mô tả bản đang xem. `nhanModel` mang
+              //: CẢ khoá theo id engine lẫn khoá theo việc, nên tra id trước.
+              ? { id: "dich", name: "Dịch", note: nhan[d.engineMt ?? ""] ?? nhan["dich"] ?? d.engineMt ?? "", state: "done" }
               : { id: "dich", name: "Dịch", note: d.coBanGhi ? "chưa dịch" : "chờ phiên âm", state: d.coBanGhi ? "blocked" : "todo" };
 
   // GỢI Ý, không phải cổng: `blocked` ở đây chỉ nói "còn việc nên xem", và
@@ -480,12 +541,18 @@ export function duongOng(d: DauVaoDuongOng): BuocDuongOng[] {
   // lý do đó ("chờ bản dịch"), đừng mượn chữ "duyệt" để giải thích một chuyện khác.
   const buocLong: BuocDuongOng = !d.coBanDich
     ? { id: "long", name: "Lồng tiếng", note: "chờ bản dịch", state: "todo" }
-    : tuJob("long", "Lồng tiếng", "đã lồng", d.dubState);
+    : tuJob("long", "Lồng tiếng", nhan["tts"] ?? "đã lồng", d.dubState);
+
+  //: Bước ghép dùng HAI model: tách giọng (`htdemucs`) rồi mã hoá lại hình (`h264_nvenc`).
+  //: Một dòng ghi chú nên kể cả hai — người dùng đang muốn biết "bước này chạy bằng gì".
+  const nhanGhep =
+    [nhan["tach_giong"], nhan["burn"]].filter((x): x is string => typeof x === "string" && x !== "")
+      .join(" · ") || "đã ghép";
 
   const buocGhep: BuocDuongOng =
     d.dubState !== "done" && d.ghepState === null
       ? { id: "ghep", name: "Ghép nền", note: "cần lồng tiếng xong", state: "todo" }
-      : tuJob("ghep", "Ghép nền", "đã ghép", d.ghepState);
+      : tuJob("ghep", "Ghép nền", nhanGhep, d.ghepState);
 
   // Xuất KHÔNG đọc `soViec`. Lý do chưa xuất được chỉ còn hai: chưa ghép nền xong, hoặc
   // đã ghép xong nhưng chưa có tệp (job xuất chưa chạy / chưa ghi ra đĩa).
