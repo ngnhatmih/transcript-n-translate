@@ -103,8 +103,13 @@ export function ChonModel({
           }
         }}
         className={
-          "flex h-8 w-full items-center gap-1.5 rounded-sm border bg-panel-0 px-2 text-left " +
-          "text-[12.5px] transition-colors duration-150 active:translate-y-px " +
+          //: 🔴 `min-w-0` PHẢI có, dù bên trong đã `truncate`. Nút này là CON TRỰC TIẾP của
+          //: một `grid` (`grid-cols-[26px_150px_1fr_1fr]`), mà item lưới mặc định
+          //: `min-width: auto` — tức nó KHÔNG co xuống dưới bề rộng nội dung, nên chuỗi dài
+          //: đẩy cột rộng ra và TRÀN khỏi khung. Đo được trên ảnh chủ dự án gửi: nhãn
+          //: "Faster-Whisper large-v3 (chính xác hơn turbo)" chạy quá mép ô.
+          "flex h-8 w-full min-w-0 items-center gap-1.5 rounded-sm border bg-panel-0 px-2 " +
+          "text-left text-[12.5px] transition-colors duration-150 active:translate-y-px " +
           (mo
             ? "border-signal text-ink-0"
             : "border-rule text-ink-0 hover:border-ink-2")
