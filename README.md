@@ -2363,4 +2363,69 @@ npm test              299 pass, 0 fail                        EXIT_TEST=0
 npx tsc --noEmit                                              EXIT_TS=0
 ```
 
+---
+
+## ERRATA #82 — dropdown/radio tự vẽ, nhóm MT/LLM lọc THẬT, và tên model dưới tên việc
+
+**Yêu cầu:** *"sửa lại style của dropdown và radio button. Và ngoài ra khi chọn radio button
+của cái llm hoặc mt thì phải thay đổi danh sách dropdown. MT thì hiện opus mt thôi. Và ngoài ra
+khi lưu setting model xong thì phần header của task phải hiện các tên model tương ứng ở dưới."*
+
+### 1. Dropdown và radio: viết tay, vì `<select>` trần không style được
+
+Danh sách xổ xuống của `<select>` do HỆ ĐIỀU HÀNH vẽ — `background`, bo góc, cỡ chữ, màu hover
+đều nằm ngoài tầm CSS, nên trên Windows nó ra một hộp xám bo tròn của Chrome, lạc hẳn khỏi bảng
+graphite 2 px. Nay `components/studio/ChonModel.tsx` có hai điều khiển tự vẽ:
+
+* `<ChonModel>` — nút mở + `role="listbox"` + `role="option"`, vẽ bằng token của app (nền
+  `panel-2`, viền `rule`, dòng đang chọn có `◆` amber + `signal-soft`, model chưa chạy được ghi
+  `chưa sẵn sàng` màu `fault`). Danh sách nằm trong **PORTAL**: khung bảng có `overflow-y-auto`,
+  một `absolute` bên trong sẽ bị CẮT ở đáy khung — đúng lúc chọn việc cuối cùng thì danh sách cụt.
+  Tự lo phần `<select>` cho sẵn: Escape đóng danh sách (không đóng cả bảng), bấm ra ngoài đóng,
+  `aria-haspopup`/`aria-expanded`/`aria-selected`.
+* `<ChonNhom>` — thanh gạt MT/LLM hai ô, vẫn là `<input type="radio">` THẬT (ẩn bằng `sr-only`)
+  chứ không phải `<button>` đóng giả: `radiogroup` + radio mới cho trình đọc màn hình biết "một
+  trong hai", và phím mũi tên mới đi được giữa hai lựa chọn.
+
+Phụ: hai điều khiển là NÚT + `click` — và đó cũng là đường mà harness test bấm được
+(`fireEvent.change` trên ô điều khiển không chạy handler React dưới harness này, xem
+`PhuDeStyle.test.tsx`).
+
+### 2. Đổi nhóm phải đổi DANH SÁCH — và đổi cả GIÁ TRỊ
+
+**Lỗi thật, đo được:** đang ở nhóm MT mà danh sách vẫn có `hy-mt-1.5-7b` — một engine LLM. Nguyên
+nhân: bản trước, để ô chọn không bị rỗng, tôi CHÈN LẠI model đang lưu vào danh sách đã lọc. Luật
+đó sai. Nay:
+
+* danh sách CHỈ còn engine của nhóm đang chọn — đo bằng ảnh chụp thật: MT ⇒ đúng một dòng
+  `OPUS-MT (Marian)`;
+* nếu model đang chọn không thuộc nhóm mới thì nó được **đổi sang ứng viên đầu của nhóm**
+  (LLM ⇒ `Qwen2.5-3B (Ollama)`), và bản nháp được đánh dấu đổi — footer hiện `1 việc chưa lưu`,
+  bấm Lưu là ghi thật;
+* **nhóm MỞ ĐẦU lấy theo NHÓM CỦA MODEL ĐANG CHẠY**, không theo `nhom_dich` đã lưu. ĐO ĐƯỢC trên
+  máy này: `nhom_dich = "mt"` nhưng model đang chạy là `hy-mt-1.5-7b` (LLM) — mở bảng theo nhóm
+  cũ thì ô chọn TRỐNG ngay từ giây đầu, vì nhóm MT không chứa model đó.
+
+### 3. Tên model dưới tên việc
+
+Mỗi dòng giờ có: số thứ tự mono, **tên việc**, và ngay dưới nó **tên model đang dùng** (kèm
+`· dự phòng: …` nếu có) — cột chọn bên phải bị cắt bằng dấu ba chấm khi tên dài, nên đây là chỗ
+đọc được tên đầy đủ. Đo trên ảnh chụp: `ASR / Faster-Whisper large-v3 (chính xác hơn turbo)`,
+`Dịch / HY-MT1.5-7B (Hunyuan-MT)`, `Burn phụ đề / GPU NVENC (nhanh gấp đôi, cần driver NVIDIA)`.
+
+### Kiểm
+
+`npm test` 301 bài (panel 14 bài, trong đó 3 bài mới: danh sách MT chỉ có opus-mt; bấm LLM đổi
+danh sách NGAY và đổi giá trị; nhóm mở đầu theo model đang chạy). Ảnh chụp Chrome thật ở
+1424×1005 xác nhận cả ba trạng thái: panel mở, danh sách MT (một dòng OPUS-MT), và sau khi bấm
+LLM (giá trị thành Qwen2.5-3B, footer `1 việc chưa lưu`). Không bấm Lưu nên DB không đổi.
+
+### Đo cuối
+
+```
+pytest (toàn bộ)      1567 passed, 1 skipped, 15 deselected   EXIT_PYTEST=0
+npm test              301 pass, 0 fail                        EXIT_TEST=0
+npx tsc --noEmit                                              EXIT_TS=0
+```
+
 

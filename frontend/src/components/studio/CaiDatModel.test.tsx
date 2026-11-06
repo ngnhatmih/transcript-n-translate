@@ -1,15 +1,15 @@
 /**
- * Test cho bảng "Cài đặt model" (mở từ Ctrl+K → "Cài đặt model", ERRATA #80).
+ * Test cho bảng "Cài đặt model" (Ctrl+K → "Cài đặt model", ERRATA #80–#82).
  *
- * Kiểm phần DÂY NỐI chạy được dưới harness này: panel dựng từ DỮ LIỆU THẬT backend trả,
- * việc chỉ có một ứng viên KHÔNG được vẽ ô dự phòng, "đang chạy: X (model dự phòng)" là
- * câu của backend chứ không phải giao diện tự suy, và hai nút gửi đúng thứ chúng hứa:
- * Lưu ⇒ `PUT` chỉ những dòng đã đổi; Khôi phục ⇒ ghi lại `mac_dinh`.
+ * Kiểm phần DÂY NỐI chạy được dưới harness: panel dựng từ dữ liệu THẬT backend trả, việc
+ * chỉ có một ứng viên KHÔNG vẽ ô dự phòng, tên model hiện dưới tên việc, và ba luật của
+ * nhóm MT/LLM (nhóm mở đầu theo model đang chạy; đổi nhóm đổi DANH SÁCH; đổi nhóm đổi luôn
+ * GIÁ TRỊ nếu model cũ không thuộc nhóm mới).
  *
- * ⚠️ HARNESS: `fireEvent.change` trên ô điều khiển KHÔNG chạy handler React dưới harness
- * này (đo được ở `PhuDeStyle.test.tsx`), nên các bài ở đây chỉ khẳng định thứ chúng đo
- * được — cấu trúc DOM, chữ hiện ra, và request thật. Đổi `<select>` được kiểm bằng đường
- * `Khôi phục` (nút bấm, chạy được) thay vì giả vờ rằng change đã chạy.
+ * ⚠️ HARNESS: `fireEvent.change` trên ô điều khiển KHÔNG chạy handler React dưới harness này
+ * (đo được ở `PhuDeStyle.test.tsx`). Đó là một phần lý do hai điều khiển của bảng được viết
+ * tay: chúng là NÚT + `click`, và `click` thì chạy. Nên các bài ở đây bấm được thật, thay vì
+ * giả vờ rằng `change` đã chạy.
  */
 import assert from "node:assert/strict";
 import { afterEach, beforeEach, describe, it } from "node:test";
@@ -73,13 +73,16 @@ interface Goi {
   body: unknown;
 }
 
+let dap: ModelSettings = DU_LIEU;
+
 function stubFetch(ds: ModelSettings = DU_LIEU): Goi[] {
+  dap = ds;
   const goi: Goi[] = [];
   globalThis.fetch = (async (url: string, init?: RequestInit) => {
     const body = typeof init?.body === "string" ? JSON.parse(init.body) : null;
     goi.push({ method: init?.method ?? "GET", url: String(url), body });
     //: `PUT` trả lại bảng ĐÃ trộn — giống backend thật (nó trả `_bang(...)`).
-    return new Response(JSON.stringify(ds), {
+    return new Response(JSON.stringify(dap), {
       status: 200, headers: { "content-type": "application/json" },
     });
   }) as typeof fetch;
@@ -100,8 +103,29 @@ function mo() {
   return render(<CaiDatModel open onClose={() => {}} />);
 }
 
-async function cho() {
-  await new Promise((r) => setTimeout(r, 30));
+function cho() {
+  return new Promise((r) => setTimeout(r, 40));
+}
+
+/** Nút mở một ô chọn, theo `aria-label`. */
+function nutChon(nhan: string): HTMLButtonElement | undefined {
+  return [...document.body.querySelectorAll("button")].find(
+    (b) => b.getAttribute("aria-label") === nhan,
+  ) as HTMLButtonElement | undefined;
+}
+
+/** Mở một ô chọn và đọc danh sách vừa hiện ra. */
+async function moVaDoc(nhan: string): Promise<string[]> {
+  const nut = nutChon(nhan);
+  assert.ok(nut, `không thấy ô "${nhan}"`);
+  fireEvent.click(nut);
+  await cho();
+  const hop = document.body.querySelector('[role="listbox"]');
+  assert.ok(hop, `bấm "${nhan}" mà không mở danh sách`);
+  //: Bỏ dấu "đang chọn" (◆) ở đầu mỗi dòng: nó là trang trí, không phải tên model.
+  return [...hop.querySelectorAll('[role="option"]')].map((o) =>
+    (o.textContent ?? "").replace(/^◆/, "").replace(/\s+/g, " ").trim(),
+  );
 }
 
 describe("CaiDatModel: bảng dựng từ dữ liệu THẬT của backend", () => {
@@ -119,7 +143,7 @@ describe("CaiDatModel: bảng dựng từ dữ liệu THẬT của backend", () 
     assert.equal(goi[0].method, "GET");
     assert.match(goi[0].url, /\/api\/model-settings$/);
     const chu = document.body.textContent ?? "";
-    for (const ten of ["Phiên âm", "Dịch", "Ghép nền", "OCR", "ASR", "Dịch", "Burn phụ đề"]) {
+    for (const ten of ["Phiên âm", "Dịch", "Ghép nền", "OCR", "ASR", "Burn phụ đề"]) {
       assert.ok(chu.includes(ten), `thiếu "${ten}" trong panel: ${chu.slice(0, 200)}`);
     }
   });
@@ -128,17 +152,24 @@ describe("CaiDatModel: bảng dựng từ dữ liệu THẬT của backend", () 
     stubFetch();
     mo();
     await cho();
-    const chonDuPhong = [...document.body.querySelectorAll("select")]
-      .map((s) => s.getAttribute("aria-label") ?? "");
-    assert.ok(
-      !chonDuPhong.some((n) => n.includes("dự phòng của OCR")),
-      "OCR chỉ có một model mà vẫn vẽ ô dự phòng — ô nói dối rằng có thể chọn",
-    );
-    assert.ok(chonDuPhong.some((n) => n.includes("dự phòng của ASR")), chonDuPhong.join(" | "));
+    assert.equal(nutChon("model dự phòng của OCR"), undefined,
+      "OCR chỉ có một model mà vẫn vẽ ô dự phòng — ô nói dối rằng có thể chọn");
+    assert.ok(nutChon("model dự phòng của ASR"), "ASR phải có ô dự phòng");
     assert.match(document.body.textContent ?? "", /chỉ có một model/);
   });
 
-  it("câu 'đang chạy' là của BACKEND, kèm nhãn (dự phòng) khi model đang dùng không chạy được", async () => {
+  it("TÊN MODEL hiện ngay dưới tên việc, kèm dự phòng nếu có", async () => {
+    stubFetch();
+    mo();
+    await cho();
+    const chu = document.body.textContent ?? "";
+    //: Yêu cầu của chủ dự án: *"phần header của task phải hiện các tên model tương ứng ở dưới"*.
+    assert.match(chu, /ASR\s*Whisper large-v3\s*· dự phòng: Whisper medium/, chu.slice(0, 600));
+    assert.match(chu, /OCR\s*RapidOCR/);
+    assert.match(chu, /Burn phụ đề\s*GPU NVENC\s*· dự phòng: CPU x264/);
+  });
+
+  it("câu 'đang chạy' là của BACKEND, chỉ hiện khi đã rơi về dự phòng", async () => {
     stubFetch();
     mo();
     await cho();
@@ -147,34 +178,77 @@ describe("CaiDatModel: bảng dựng từ dữ liệu THẬT của backend", () 
     assert.match(chu, /đang chạy bằng model dự phòng:\s*libx264/);
   });
 
-  it("ứng viên chưa sẵn sàng được ghi rõ ngay trong danh sách", async () => {
+  it("ứng viên chưa sẵn sàng được ghi rõ TRONG danh sách xổ xuống", async () => {
     stubFetch();
     mo();
     await cho();
-    assert.match(document.body.textContent ?? "", /GPU NVENC — chưa sẵn sàng/);
+    const nhan = await moVaDoc("model sử dụng của Burn phụ đề");
+    assert.ok(
+      nhan.some((t) => t.includes("GPU NVENC") && t.includes("chưa sẵn sàng")),
+      `danh sách phải nói rõ model chưa chạy được: ${nhan.join(" | ")}`,
+    );
+  });
+});
+
+describe("CaiDatModel: nhóm MT/LLM đổi DANH SÁCH và đổi GIÁ TRỊ", () => {
+  it("nhóm Dịch có thanh gạt MT / LLM (radio thật)", async () => {
+    stubFetch();
+    mo();
+    await cho();
+    const radios = [...document.body.querySelectorAll('input[type="radio"]')];
+    assert.equal(radios.length, 2, `phải có đúng hai lựa chọn nhóm, đo được ${radios.length}`);
+    const nhan = radios.map((r) => r.parentElement?.textContent ?? "");
+    assert.ok(nhan.some((t) => t === "MT"), nhan.join(" | "));
+    assert.ok(nhan.some((t) => t === "LLM"), nhan.join(" | "));
   });
 
-  it("nhóm Dịch đang là MT ⇒ danh sách CHỈ có engine MT, không lẫn engine LLM", async () => {
-    //: Nhóm là dữ liệu của engine (`runtime`), `nhom_dich` chỉ lọc thứ được HIỆN. Trộn
-    //: hai nhóm vào một danh sách là mời chọn một model LLM rồi tưởng nó chạy offline.
+  it("đang MT ⇒ danh sách CHỈ có engine MT (opus-mt), không lẫn LLM", async () => {
     stubFetch();
     mo();
     await cho();
-    const chon = [...document.body.querySelectorAll("select")]
-      .find((s) => s.getAttribute("aria-label") === "model sử dụng của Dịch");
-    assert.ok(chon, "không thấy ô chọn model của Dịch");
-    const nhan = [...chon.options].map((o) => o.textContent ?? "");
-    assert.deepEqual(nhan, ["OPUS-MT"], `nhóm MT mà lộ engine khác: ${nhan.join(" | ")}`);
+    const nhan = await moVaDoc("model sử dụng của Dịch");
+    assert.deepEqual(nhan, ["OPUS-MT"],
+      `nhóm MT mà lộ engine khác: ${nhan.join(" | ")}`);
   });
 
-  it("nhóm Dịch có ô chọn MT hay LLM", async () => {
+  it("bấm LLM ⇒ danh sách đổi sang engine LLM NGAY, không cần lưu", async () => {
     stubFetch();
     mo();
     await cho();
-    const radios = [...document.body.querySelectorAll("input[type=radio]")]
-      .map((r) => r.parentElement?.textContent ?? "");
-    assert.ok(radios.some((t) => t.includes("MT (dịch máy)")), radios.join(" | "));
-    assert.ok(radios.some((t) => t.includes("LLM (mô hình ngôn ngữ)")), radios.join(" | "));
+    const nutLlm = [...document.body.querySelectorAll("label")].find(
+      (l) => (l.textContent ?? "") === "LLM",
+    );
+    assert.ok(nutLlm, "không thấy nhãn LLM");
+    fireEvent.click(nutLlm.querySelector("input") as HTMLInputElement);
+    await cho();
+
+    //: FIX CỦA CHỦ DỰ ÁN: chọn LLM thì danh sách phải đổi theo, và vì `opus-mt` là engine
+    //: MT nên giá trị phải chuyển sang engine LLM đầu tiên — không được để ô rỗng.
+    const nhan = await moVaDoc("model sử dụng của Dịch");
+    assert.equal(nhan.length, 1, `nhóm LLM phải chỉ còn engine LLM: ${nhan.join(" | ")}`);
+    assert.match(nhan[0], /Qwen2\.5-7B/, `nhóm LLM mà danh sách không đổi: ${nhan.join(" | ")}`);
+    assert.match(document.body.textContent ?? "", /1 việc chưa lưu/,
+      "đổi nhóm kéo theo đổi model nên phải có thay đổi chưa lưu");
+  });
+
+  it("nhóm MỞ ĐẦU lấy theo model đang chạy, không theo nhóm đã lưu", async () => {
+    //: Dữ liệu thật của máy này: `nhom_dich = "mt"` nhưng model đang chạy là `hy-mt-1.5-7b`
+    //: (LLM). Mở bảng mà lọc theo nhóm cũ thì ô chọn TRỐNG ngay từ giây đầu.
+    stubFetch({
+      ...DU_LIEU,
+      nhom_dich: "mt",
+      tasks: DU_LIEU.tasks.map((t) =>
+        t.id === "dich" ? { ...t, used: "qwen2.5-7b" } : t,
+      ),
+    });
+    mo();
+    await cho();
+    const nhan = await moVaDoc("model sử dụng của Dịch");
+    assert.ok(
+      nhan.some((t) => t.includes("Qwen2.5-7B")),
+      `nhóm mở đầu phải theo model đang chạy: ${nhan.join(" | ")}`,
+    );
+    assert.ok(!nhan.some((t) => t.includes("OPUS-MT")), nhan.join(" | "));
   });
 });
 
@@ -214,24 +288,6 @@ describe("CaiDatModel: hai nút gửi đúng thứ chúng hứa", () => {
     assert.equal(tasks["burn"].used, "h264_nvenc");
     assert.equal(tasks["ocr"].used, "rapidocr");
   });
-});
-
-describe("CaiDatModel: chỗ THỪA đã bị bỏ (và phím Escape)", () => {
-  it("dòng 'đang chạy' KHÔNG được vẽ khi nó chỉ lặp lại model đang chọn", async () => {
-    //: Bản đầu in "đang chạy: X" cho CẢ sáu dòng, kể cả khi X chính là giá trị đang hiện
-    //: trong ô chọn ngay trên nó — sáu câu lặp lại không nói thêm gì. Nay dòng đó chỉ hiện
-    //: khi đã rơi về dự phòng hoặc không còn đường nào.
-    stubFetch({
-      ...DU_LIEU,
-      tasks: DU_LIEU.tasks.map((t) => ({
-        ...t,
-        hieu_luc: { engine: t.used, ly_do: "dang-dung" },
-      })),
-    });
-    mo();
-    await cho();
-    assert.doesNotMatch(document.body.textContent ?? "", /đang chạy/);
-  });
 
   it("Escape đóng bảng (chuột không phải đường duy nhất)", async () => {
     stubFetch();
@@ -242,26 +298,16 @@ describe("CaiDatModel: chỗ THỪA đã bị bỏ (và phím Escape)", () => {
     assert.equal(dong, 1, "Escape phải đóng bảng");
   });
 
-  it("model đang lưu NGOÀI nhóm đang chọn vẫn hiện trong ô, không thành ô rỗng", async () => {
-    //: `<select>` của React không có giá trị nằm ngoài `options` thì hiển thị RỖNG. Đổi
-    //: sang nhóm LLM khi đang dùng `opus-mt` (MT) mà lọc thẳng tay thì người dùng thấy ô
-    //: trống và mất luôn lựa chọn cũ, không hiểu vì sao.
+  it("dòng 'đang chạy' KHÔNG được vẽ khi nó chỉ lặp lại model đang chọn", async () => {
     stubFetch({
       ...DU_LIEU,
-      nhom_dich: "llm",
-      tasks: DU_LIEU.tasks.map((t) =>
-        t.id === "dich" ? { ...t, used: "opus-mt" } : t,
-      ),
+      tasks: DU_LIEU.tasks.map((t) => ({
+        ...t,
+        hieu_luc: { engine: t.used, ly_do: "dang-dung" },
+      })),
     });
     mo();
     await cho();
-    const chon = [...document.body.querySelectorAll("select")]
-      .find((s) => s.getAttribute("aria-label") === "model sử dụng của Dịch");
-    assert.ok(chon, "không thấy ô chọn của Dịch");
-    const nhan = [...chon.options].map((o) => o.textContent ?? "");
-    assert.ok(
-      nhan.some((t) => t.includes("OPUS-MT")),
-      `giá trị đang lưu bị bỏ khỏi danh sách: ${nhan.join(" | ")}`,
-    );
+    assert.doesNotMatch(document.body.textContent ?? "", /đang chạy/);
   });
 });
