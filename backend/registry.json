@@ -19,7 +19,7 @@
     },
     {
       "id": "fw-large-v3",
-      "label": "Faster-Whisper large-v3 (chính xác hơn turbo)",
+      "label": "Faster-Whisper large-v3",
       "runtime": "inprocess",
       "model_ref": "large-v3",
       "vram_mb": 3200,
@@ -62,7 +62,7 @@
   "ocr": [
     {
       "id": "rapidocr",
-      "label": "RapidOCR (PP-OCRv4, đọc phụ đề cứng)",
+      "label": "RapidOCR",
       "runtime": "inprocess",
       "opts": { "fps": 2.0, "vung_doc": [0.0, 0.1, 1.0, 1.0] }
     }
@@ -70,7 +70,7 @@
   "mt": [
     {
       "id": "opus-mt",
-      "label": "OPUS-MT (Marian)",
+      "label": "OPUS-MT",
       "runtime": "inprocess",
       "model_ref": "Helsinki-NLP/opus-mt-zh-vi",
       "vram_mb": 0,
@@ -80,7 +80,7 @@
     },
     {
       "id": "qwen2.5-3b",
-      "label": "Qwen2.5-3B (Ollama)",
+      "label": "Qwen2.5-3B",
       "runtime": "ollama",
       "model_ref": "qwen2.5:3b-instruct-q4_K_M",
       "vram_mb": 2500,
@@ -90,7 +90,7 @@
     },
     {
       "id": "qwen2.5-7b",
-      "label": "Qwen2.5-7B (Ollama)",
+      "label": "Qwen2.5-7B",
       "runtime": "ollama",
       "model_ref": "qwen2.5:7b-instruct-q4_K_M",
       "vram_mb": 5200,
@@ -100,7 +100,7 @@
     },
     {
       "id": "hy-mt-1.5-7b",
-      "label": "HY-MT1.5-7B (Hunyuan-MT)",
+      "label": "HY-MT1.5-7B",
       "runtime": "ollama",
       "model_ref": "hy-mt1.5-7b:q4_K_M",
       "vram_mb": 5200,
@@ -110,7 +110,7 @@
     },
     {
       "id": "deepseek-web",
-      "label": "DeepSeek web (whalegate, qua mạng — KHÔNG mặc định)",
+      "label": "DeepSeek web",
       "runtime": "http",
       "model_ref": "deepseek-web",
       "vram_mb": 0,

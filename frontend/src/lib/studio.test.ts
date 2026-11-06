@@ -1320,7 +1320,7 @@ it("bước Xuất: kiểu chữ đã đổi ⇒ KHÔNG còn 'sẵn sàng', nói
 describe("nhanNgan: cắt phần giải thích trong ngoặc, chỉ giữ tên model", () => {
   it("cắt tại ' (' đầu tiên", () => {
     assert.equal(nhanNgan("Faster-Whisper large-v3 (chính xác hơn turbo)"), "Faster-Whisper large-v3");
-    assert.equal(nhanNgan("GPU NVENC (nhanh gấp đôi, cần driver NVIDIA)"), "GPU NVENC");
+    assert.equal(nhanNgan("h264_nvenc (GPU)"), "h264_nvenc");
     assert.equal(nhanNgan("RapidOCR (PP-OCRv4, đọc phụ đề cứng)"), "RapidOCR");
   });
 

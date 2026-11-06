@@ -2506,4 +2506,55 @@ npm test              310 pass, 0 fail                        EXIT_TEST=0   (tr�
 npx tsc --noEmit                                              EXIT_TS=0
 ```
 
+---
+
+## ERRATA #84 — đổi nhãn model sang TÊN NGẮN (danh sách đã được chủ dự án duyệt)
+
+**Yêu cầu:** *"à cái list ở trên tôi duyệt nhá bn đổi vô đi"* — duyệt danh sách ở ERRATA #83.
+
+Nhãn là DỮ LIỆU, nên chỉ sửa hai chỗ; không route nào, không component nào phải biết:
+
+| chỗ | cũ | mới |
+|---|---|---|
+| `registry.json` (asr) | `Faster-Whisper large-v3 (chính xác hơn turbo)` | `Faster-Whisper large-v3` |
+| `registry.json` (ocr) | `RapidOCR (PP-OCRv4, đọc phụ đề cứng)` | `RapidOCR` |
+| `registry.json` (mt) | `OPUS-MT (Marian)` | `OPUS-MT` |
+| `registry.json` (mt) | `Qwen2.5-3B (Ollama)` / `Qwen2.5-7B (Ollama)` | `Qwen2.5-3B` / `Qwen2.5-7B` |
+| `registry.json` (mt) | `HY-MT1.5-7B (Hunyuan-MT)` | `HY-MT1.5-7B` |
+| `registry.json` (mt) | `DeepSeek web (whalegate, qua mạng — KHÔNG mặc định)` | `DeepSeek web` |
+| `domain/model_settings.py` | `VieNeu v3 Turbo (TTS tiếng Việt)` | `VieNeu v3 Turbo` |
+| `domain/model_settings.py` | `htdemucs (Demucs)` | `htdemucs` |
+| `domain/model_settings.py` | `GPU NVENC (nhanh gấp đôi, cần driver NVIDIA)` | `h264_nvenc (GPU)` |
+| `domain/model_settings.py` | `CPU x264 (chậm hơn, luôn chạy được)` | `libx264 (CPU)` |
+
+Giữ hậu tố `(GPU)` / `(CPU)` cho hai bộ mã hoá burn: đúng tên bộ mã hoá nhưng vẫn phân biệt
+được cái nào cần driver NVIDIA — và `nhanNgan` cắt đúng phần đó khi hiện trên thanh bước
+(`htdemucs · h264_nvenc`).
+
+Đo trên ứng dụng đang chạy sau khi rebuild — đọc thẳng chữ trong DOM:
+
+```
+panel:      RapidOCR · Faster-Whisper large-v3 · HY-MT1.5-7B · VieNeu v3 Turbo ·
+            htdemucs · h264_nvenc (GPU)        ← không còn chỗ nào tràn
+thanh bước: RapidOCR + Faster-Whisper large-v3 · DeepSeek web · VieNeu v3 Turbo ·
+            htdemucs · h264_nvenc
+```
+
+**Những gì KHÔNG đổi:** `id` của engine (job, `phase`, bảng `translations` vẫn dùng id — đổi id
+là đổi khoá dữ liệu, không phải đổi nhãn), `model_ref`, `vram_mb`, `capabilities`. Nhãn của
+`chimera.candidates` cũng giữ nguyên: chúng mô tả BIẾN THỂ PROMPT ("Qwen-3B nhiệt độ 0,1"), một
+khái niệm khác, và không hiện trong bảng cài đặt model.
+
+**Ghim:** không thêm bài mới. 40 bài sẵn có của `test_model_settings.py` +
+`test_registry*.py` xanh sau khi đổi (chúng bám `id`, không bám nhãn — đúng như thiết kế), và
+`nhanNgan` đã có bài kiểm việc cắt ngoặc với đúng dạng nhãn mới (`h264_nvenc (GPU)`).
+
+### Đo cuối
+
+```
+pytest (toàn bộ)      1567 passed, 1 skipped, 15 deselected   EXIT_PYTEST=0
+npm test              310 pass, 0 fail                        EXIT_TEST=0
+npx tsc --noEmit                                              EXIT_TS=0
+```
+
 

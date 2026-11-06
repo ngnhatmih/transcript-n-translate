@@ -52,8 +52,8 @@ SEP_ENGINE = "htdemucs"
 BURN_NVENC = "h264_nvenc"
 BURN_X264 = "libx264"
 BURN_ENCODERS: dict[str, str] = {
-    BURN_NVENC: "GPU NVENC (nhanh gấp đôi, cần driver NVIDIA)",
-    BURN_X264: "CPU x264 (chậm hơn, luôn chạy được)",
+    BURN_NVENC: "h264_nvenc (GPU)",
+    BURN_X264: "libx264 (CPU)",
 }
 
 #: Tiền tố khoá trong bảng `settings`. Một chỗ duy nhất để đọc/ghi.
@@ -96,8 +96,8 @@ TASKS: tuple[Task, ...] = (
 
 #: Nhãn cho ứng viên cố định (registry đã có `label` riêng của nó).
 NHAN_CO_DINH = {
-    TTS_ENGINE: "VieNeu v3 Turbo (TTS tiếng Việt)",
-    SEP_ENGINE: "htdemucs (Demucs)",
+    TTS_ENGINE: "VieNeu v3 Turbo",
+    SEP_ENGINE: "htdemucs",
     **BURN_ENCODERS,
 }
 
