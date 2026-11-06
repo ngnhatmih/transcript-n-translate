@@ -5,6 +5,7 @@ import {
   createTranslation,
   endpoints,
   getDubPlan,
+  getModelSettings,
   getTranscript,
   getTranslation,
   listSources,
@@ -515,6 +516,16 @@ export function App() {
   //: chỉ phần tử đầu: bước `Dịch` phải kiểm được engine của bản dịch đang xem còn hợp lệ
   //: không trước khi dùng lại nó (xem `onBuoc("dich")`).
   const [engineMt, setEngineMt] = useState<string[]>([]);
+  //: 🔴 MODEL ĐANG DÙNG theo bảng "Cài đặt model" (ERRATA #80), `task_id -> id`.
+  //:
+  //: Vì sao phải đọc ở ĐÂY chứ không để backend tự quyết: `POST /api/jobs` (`asr`) và
+  //: `POST /api/translations` nhận `engine` TỪ CLIENT. Không đọc bảng cài đặt thì lựa
+  //: chọn trong panel chỉ có tác dụng khi engine client gửi tình cờ không chạy được —
+  //: tức "model sử dụng" không bao giờ được dùng đúng như tên của nó.
+  //:
+  //: Đọc MỘT lần lúc nạp, cùng lượt với registry: cả hai là cấu hình, không đổi giữa
+  //: phiên (đổi trong panel thì panel tự gọi lại API và trang tự tải lại bảng jobs).
+  const [modelDung, setModelDung] = useState<Record<string, string | null>>({});
   useEffect(() => {
     void (async () => {
       try {
@@ -528,6 +539,16 @@ export function App() {
         setEngineCount(null);
         setEngineAsr(null);
         setEngineMt([]);
+      }
+      try {
+        const ms = await getModelSettings();
+        const dung: Record<string, string | null> = {};
+        for (const t of ms.tasks) dung[t.id] = t.used;
+        setModelDung(dung);
+      } catch {
+        // Bảng cài đặt hỏng KHÔNG được chặn cả ứng dụng: `{}` nghĩa là "dùng mặc định
+        // của registry", đúng hành vi trước khi có bảng này.
+        setModelDung({});
       }
     })();
   }, []);
@@ -580,6 +601,10 @@ export function App() {
           setLoi("chưa đọc được danh mục engine ASR — thử lại sau khi trang nạp xong");
           return;
         }
+        //: Model ĐANG DÙNG theo bảng "Cài đặt model" thắng mặc định của registry
+        //: (ERRATA #80). `??` chứ không `||`: một id rỗng trong settings nghĩa là "chưa
+        //: đặt", còn `||` sẽ nuốt cả chuỗi rỗng thành mặc định của registry.
+        const engineGui = modelDung["asr"] ?? engineAsr;
         // 🔴 NGUỒN CHƯA CÓ AUDIO THÌ CHƯA BÓC BĂNG ĐƯỢC.
         //
         // DO DUOC (nguoi dung bao "mo mot video khac thi hang doi ko thay gi"): nap
@@ -607,7 +632,7 @@ export function App() {
           try {
             await endpoints.createJob({
               type: "asr",
-              engine: engineAsr,
+              engine: engineGui,
               workspace: 1,
               // KHÔNG gửi `vung_doc` ở đây nữa — vùng đã lưu ở CHÍNH NGUỒN
               // (`sources.vung_doc`, ghi qua `PATCH /api/sources/{id}/vung-doc` mỗi
@@ -646,17 +671,23 @@ export function App() {
         // khi lượt gần nhất HỎNG (đó chính là ca đang sửa: lượt `deepseek-web` hỏng vì 429,
         // và rơi về `opus-mt` là đổi engine mà không ai yêu cầu, chất lượng khác hẳn).
         //
-        //   1. engine của bản dịch MỚI NHẤT còn trong registry (bất kể `status`);
-        //   2. engine của bản dịch đang mở;
-        //   3. engine MT ĐẦU TIÊN của registry — cùng nguyên tắc với `engineAsr`: danh mục
+        //   1. ENGINE DỊCH ĐANG CHỌN trong bảng "Cài đặt model" (ERRATA #80) — đây là
+        //      câu trả lời ĐÚNG cho "dùng model nào", và nó có trước mọi suy đoán lịch sử;
+        //   2. engine của bản dịch MỚI NHẤT còn trong registry (bất kể `status`);
+        //   3. engine của bản dịch đang mở;
+        //   4. engine MT ĐẦU TIÊN của registry — cùng nguyên tắc với `engineAsr`: danh mục
         //      là dữ liệu, không viết cứng tên engine trong giao diện.
+        const chonTrongBang = modelDung["dich"];
         const daDung = transcript.translations.filter((t) => engineMt.includes(t.engine));
         const moiNhat = daDung.reduce<(typeof daDung)[number] | null>(
           (a, b) => (a === null || b.id > a.id ? b : a), null);
-        const engine = moiNhat?.engine
-          ?? (banDich !== null && engineMt.includes(banDich.engine)
-            ? banDich.engine
-            : engineMt[0]);
+        const engine = chonTrongBang !== null && chonTrongBang !== undefined
+            && engineMt.includes(chonTrongBang)
+          ? chonTrongBang
+          : moiNhat?.engine
+            ?? (banDich !== null && engineMt.includes(banDich.engine)
+              ? banDich.engine
+              : engineMt[0]);
         if (engine === undefined) {
           setLoi("chưa đọc được danh mục engine dịch — thử tải lại trang");
           return;

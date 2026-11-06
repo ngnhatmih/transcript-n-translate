@@ -1346,3 +1346,49 @@ describe("usePlayer — dong ho KHONG duoc phu thuoc requestAnimationFrame", () 
     assert.ok(!tenDaGoi(goi).includes("onBuoc"), "không được ghép lại");
   });
 });
+
+
+// ---------------------------------------------------------------------------
+// BẢNG LỆNH (Ctrl+K) PHẢI MỞ ĐƯỢC BẢNG "CÀI ĐẶT MODEL" — ERRATA #80
+//
+// Đây là đường DUY NHẤT mở bảng đó (không có phím tắt riêng), nên nếu lệnh không có
+// trong `commands` thì cả bảng là một component không ai với tới.
+// ---------------------------------------------------------------------------
+
+describe("Studio: lệnh Ctrl+K 'Cài đặt model' mở bảng cài đặt", () => {
+  it("bấm nút Lệnh rồi bấm lệnh 'Cài đặt model' ⇒ panel hiện ra (và gọi API)", async () => {
+    const goc = globalThis.fetch;
+    const goi: string[] = [];
+    globalThis.fetch = (async (url: string, init?: RequestInit) => {
+      goi.push(`${init?.method ?? "GET"} ${String(url)}`);
+      return new Response(JSON.stringify({
+        tasks: [], nhom_dich: "mt", nhom_dich_chon: ["mt", "llm"],
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    }) as typeof fetch;
+
+    try {
+      const { props } = dungThu();
+      render(<Studio {...props} />);
+      assert.equal(document.body.querySelector('[aria-label="Cài đặt model"]'), null,
+        "panel phải ĐÓNG lúc mới mở Studio");
+
+      const nutLenh = [...document.body.querySelectorAll("button")]
+        .find((b) => (b.textContent ?? "").includes("Ctrl K")) as HTMLButtonElement;
+      assert.ok(nutLenh, "không thấy nút mở bảng lệnh");
+      fireEvent.click(nutLenh);
+
+      const lenh = [...document.body.querySelectorAll("button")]
+        .find((b) => (b.textContent ?? "").startsWith("Cài đặt model")) as HTMLButtonElement;
+      assert.ok(lenh, "bảng lệnh không có lệnh 'Cài đặt model'");
+      fireEvent.click(lenh);
+      await new Promise((r) => setTimeout(r, 30));
+
+      assert.ok(document.body.querySelector('[aria-label="Cài đặt model"]'),
+        "bấm lệnh mà panel không mở");
+      assert.ok(goi.some((g) => g.includes("/api/model-settings")),
+        `panel phải đọc danh mục thật, đo được: ${JSON.stringify(goi)}`);
+    } finally {
+      globalThis.fetch = goc;
+    }
+  });
+});

@@ -47,6 +47,7 @@ from app.api.deps import get_chimera_plan, get_prices, get_repos, get_specs
 from app.api.routes_jobs import _job_json
 from app.domain.chimera import Baseline, cost_json
 from app.domain.job_state import phase_of
+from app import chon_model
 from app.domain.models import Job
 from app.domain.mt_qa import QaLimits, cps_row
 from app.domain.staleness import is_stale, translation_summary_json
@@ -169,11 +170,23 @@ def create_translation(body: CreateIn, repos=Depends(get_repos), prices=Depends(
             422, f"engine không phải engine dịch: {body.engine!r} "
                  f"(kind={spec.kind!r})")
 
-    if not spec.capabilities.get("available"):
+    #: 🔴 MODEL DỰ PHÒNG (ERRATA #80) — cùng luật với job `asr`:
+    #: engine client gửi là ưu tiên; nếu nó KHÔNG chạy được thì lấy model dự phòng đã đặt
+    #: trong bảng "Cài đặt model"; không có dự phòng chạy được thì 409 kèm cả hai id.
+    #: Bản cũ 409 ngay khi engine chưa sẵn sàng, nên đặt dự phòng trong giao diện không có
+    #: tác dụng gì — một ô cài đặt không đường thực hiện.
+    engine_that, ly_do = chon_model.giai_quyet("dich", yeu_cau=body.engine, specs=specs, repos=repos)
+    if engine_that is None:
         # I-3: từ chối Ở ĐÂY, không để job chết trong worker.
         raise HTTPException(
             409, f"engine chưa sẵn sàng: {body.engine!r} "
-                 f"(model chưa pull hoặc runtime không phục vụ được)")
+                 f"(model chưa pull hoặc runtime không phục vụ được) và chưa đặt model "
+                 f"dự phòng nào chạy được — mở Cài đặt model (Ctrl+K) để chọn")
+    if engine_that != body.engine:
+        # Đổi engine thì phải đọc lại SPEC: mọi trường đi vào job (`prompt_version`,
+        # `glossary_prompt`…) là DỮ LIỆU của chính engine đó. Dùng spec cũ là ghi một
+        # hàng `translations` mang engine dự phòng nhưng cấu hình của engine đã chọn.
+        spec = by_id(specs, engine_that)
 
     transcript = _require_transcript(repos, body.transcript_id)
 

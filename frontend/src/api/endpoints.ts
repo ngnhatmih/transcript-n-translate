@@ -19,6 +19,8 @@ import type {
   GlossaryVersion,
   Job,
   JobType,
+  ModelSettings,
+  ModelSettingsIn,
   Registry,
   Source,
   SourceCreated,
@@ -527,6 +529,19 @@ export const dubTakeUrl = (translationId: number, i: number): string =>
  */
 export const dubAudioUrl = (translationId: number): string =>
   `/api/dubs/${translationId}/audio`;
+
+/**
+ * Bảng "Cài đặt model" — model ĐANG DÙNG + DỰ PHÒNG của từng việc.
+ *
+ * Backend trả luôn `hieu_luc` (engine SẼ chạy, và vì sao): giao diện không được tự suy
+ * từ `available` rồi hiện một kết luận khác thứ worker sẽ dùng. ERRATA #80.
+ */
+export const getModelSettings = (): Promise<ModelSettings> =>
+  api.get<ModelSettings>("/model-settings");
+
+/** Ghi lựa chọn. Chỉ gửi việc đã đổi — khoá vắng mặt thì backend KHÔNG đụng. */
+export const putModelSettings = (body: ModelSettingsIn): Promise<ModelSettings> =>
+  api.put<ModelSettings>("/model-settings", body);
 
 export const endpoints = {
   makeDub,

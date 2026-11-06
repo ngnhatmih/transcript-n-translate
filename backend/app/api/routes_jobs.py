@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field, ValidationError, field_validator
 from app.api.deps import get_repos, get_specs
 from app.api.sse import JobEventBroker, stream_events
 from app.domain import job_state as js
+from app import chon_model
 from app.domain.models import Job, translation_id_of
 from app.registry import by_id
 
@@ -235,9 +236,24 @@ def create_job(payload: JobIn, request: Request, repos=Depends(get_repos),
             # kép và cùng một lỗi có hai hình dạng ở hai route.
             raise HTTPException(422, exc.args[0]) from exc
 
+    #: 🔴 MODEL DỰ PHÒNG — bảng "Cài đặt model" (ERRATA #80).
+    #:
+    #: Client gửi engine nó muốn (`payload.engine`). Nếu engine đó KHÔNG chạy được ngay
+    #: bây giờ (model chưa pull, endpoint chết) thì dùng model dự phòng đã đặt; không có
+    #: dự phòng chạy được thì TỪ CHỐI Ở ĐÂY, kèm cả hai id — đúng lớp lỗi I-3: nhận job
+    #: rồi chết ở tận worker là cách im lặng nhất để làm mất 20 phút của người dùng.
+    engine = payload.engine
+    if payload.type == "asr":
+        engine, ly_do = chon_model.giai_quyet("asr", yeu_cau=payload.engine, specs=specs, repos=repos)
+        if engine is None:
+            raise HTTPException(
+                409,
+                f"model ASR {payload.engine!r} chưa chạy được và chưa đặt model dự phòng "
+                f"nào chạy được — mở Cài đặt model (Ctrl+K) để chọn, hoặc pull model trước")
+
     job = Job(id=None, workspace=payload.workspace, type=payload.type,
-              engine=payload.engine,
-              phase=js.phase_of(payload.type, payload.engine),
+              engine=engine,
+              phase=js.phase_of(payload.type, engine),
               payload=payload.payload)
     job.id = repos.add_job(job)
     return _job_json(repos.get_job(job.id))

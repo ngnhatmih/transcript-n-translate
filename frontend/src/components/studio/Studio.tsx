@@ -31,6 +31,7 @@ import { usePlayer } from "./use-player";
 import { Timeline, type BaoSong } from "./Timeline";
 import { SegmentRow, type ViewMode } from "./SegmentRow";
 import { PipelineBar } from "./PipelineBar";
+import { CaiDatModel } from "./CaiDatModel";
 import { CommandPalette, type Command } from "./CommandPalette";
 import { PhuDeOverlay, PhuDePreviewPlayer, PhuDeStyleDialog, dungHopVideo } from "./PhuDeStyle";
 import { PhuDeLibass } from "./PhuDeLibass";
@@ -178,6 +179,8 @@ export function Studio(props: StudioProps) {
   const [pxPerSec, setPxPerSec] = useState(40);
   const [bao, setBao] = useState<BaoSong>({ tren: [], duoi: [] });
   const [paletteOpen, setPaletteOpen] = useState(false);
+  //: Bảng "Cài đặt model" (ERRATA #80). Mở bằng lệnh trong Ctrl+K, không phải phím tắt riêng.
+  const [caiDatModelOpen, setCaiDatModelOpen] = useState(false);
   //: Kiểu chữ phụ đề — nạp từ `localStorage` ngay lần vẽ đầu, để bản xem trước không nháy
   //: từ mặc định sang kiểu đã lưu.
   const [kieuPhuDe, setKieuPhuDe] = useState<PhuDeStyle>(() => docStyle());
@@ -1155,6 +1158,14 @@ export function Studio(props: StudioProps) {
       // `localStorage` khi dựng URL xuất và payload lồng tiếng).
       run: () => setStyleOpen(true),
     },
+    {
+      id: "cai-dat-model",
+      label: "Cài đặt model",
+      hint: "Model",
+      //: Model ĐANG DÙNG + DỰ PHÒNG cho từng việc (OCR, ASR, Dịch, TTS, tách giọng, burn).
+      //: Danh sách ứng viên do `GET /api/model-settings` trả — không viết cứng ở đây.
+      run: () => setCaiDatModelOpen(true),
+    },
     { id: "open", label: "Mo video...", run: () => fileRef.current?.click() },
     { id: "theme", label: theme === "dark" ? "Che do sang" : "Che do toi", run: () => setTheme((t) => (t === "dark" ? "light" : "dark")) },
   ];
@@ -1948,6 +1959,7 @@ export function Studio(props: StudioProps) {
           {notice}
         </div>
       )}
+      <CaiDatModel open={caiDatModelOpen} onClose={() => setCaiDatModelOpen(false)} />
       <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} commands={commands} />
       <PhuDeStyleDialog
         open={styleOpen}

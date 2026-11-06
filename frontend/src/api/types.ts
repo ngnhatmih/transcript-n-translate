@@ -691,3 +691,54 @@ export interface Status {
   vram_unit: string;
   ollama: OllamaState;
 }
+
+/**
+ * Một ứng viên của bảng "Cài đặt model" — backend trả kèm `available` ĐO ĐƯỢC.
+ *
+ * `nhom` chỉ có nghĩa với việc `dich`: `mt` = chạy trong tiến trình, `llm` = Ollama
+ * hoặc endpoint HTTP. Nhóm là dữ liệu của engine (`runtime`), không phải lựa chọn của
+ * người dùng — người dùng chọn NHÓM để lọc danh sách, còn engine vẫn mang nhóm của nó.
+ */
+export interface ModelCandidate {
+  id: string;
+  label: string;
+  available: boolean;
+  nhom: "mt" | "llm" | null;
+}
+
+/** Một dòng của bảng: một VIỆC (OCR, ASR, Dịch, TTS, Tách giọng, Burn). */
+export interface ModelTask {
+  id: string;
+  label: string;
+  nhom: string;
+  note: string;
+  /**
+   * Chỉ có MỘT ứng viên ⇒ giao diện KHÔNG vẽ ô "dự phòng": ô chỉ có một lựa chọn là ô
+   * nói dối rằng có thể chọn.
+   */
+  locked: boolean;
+  candidates: ModelCandidate[];
+  used: string | null;
+  fallback: string | null;
+  /** Giá trị của nút "Khôi phục". */
+  mac_dinh: { used: string | null; fallback: string | null };
+  /**
+   * Engine SẼ chạy ngay bây giờ, do BACKEND quyết: `dang-dung` | `du-phong` | `theo-yeu-cau`
+   * | `khong-co`. Giao diện không được tự suy từ `available` — hai kết luận khác nhau là
+   * hai thứ khác nhau để người dùng tin.
+   */
+  hieu_luc: { engine: string | null; ly_do: string };
+}
+
+/** `GET /api/model-settings`. */
+export interface ModelSettings {
+  tasks: ModelTask[];
+  nhom_dich: "mt" | "llm";
+  nhom_dich_chon: Array<"mt" | "llm">;
+}
+
+/** `PUT /api/model-settings` — chỉ gửi việc đã đổi; khoá vắng mặt thì KHÔNG bị đụng. */
+export interface ModelSettingsIn {
+  tasks: Record<string, { used?: string | null; fallback?: string | null }>;
+  nhom_dich?: "mt" | "llm";
+}

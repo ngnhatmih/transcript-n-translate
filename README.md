@@ -2216,4 +2216,76 @@ npm test              286 pass, 0 fail                        EXIT_TEST=0   (kh�
 fontconfig. Trong image API — nơi font đã cài — bài đó chạy; phép đo tương đương đã chạy tay
 trong container và cho đúng `67/58` và `14/14`.)
 
+---
+
+## ERRATA #80 — "Cài đặt model": chọn model ĐANG DÙNG và model DỰ PHÒNG cho từng việc
+
+**Yêu cầu của chủ dự án:** *"làm thêm 1 lệnh trong ctrl K để mở panel cài đặt model cho từng
+task. Làm 2 mục là model mặc định và model sử dụng. Model mặc định được dùng khi model sử dụng
+ko thể hoạt động. … với cả phần dịch thì làm thêm mục chọn dịch dùng mt hoặc llm"*.
+
+**Sự thật về danh mục hiện có** (đọc `registry.json`, không chép từ ảnh mockup): sản phẩm có
+**3 loại engine** — `asr` (5), `ocr` (1), `mt` (5) — cộng hai thứ KHÔNG phải engine trong
+registry: TTS (`vieneu-v3-turbo`) và tách giọng (`htdemucs`), và bước burn có hai bộ mã hoá
+thật (`h264_nvenc` / `libx264`). Bảng cài đặt vì thế có **sáu việc**, dựng từ dữ liệu thật:
+
+| việc | ứng viên | ghi chú |
+|---|---|---|
+| OCR | `rapidocr` | một ứng viên ⇒ `locked` |
+| ASR | 5 engine Faster-Whisper/SenseVoice | |
+| Dịch | 5 engine, chia hai NHÓM | nhóm = `runtime`: `inprocess` → MT, `ollama`/`http` → LLM |
+| TTS | `vieneu-v3-turbo` | một ứng viên ⇒ `locked` |
+| Tách giọng | `htdemucs` | một ứng viên ⇒ `locked` |
+| Burn phụ đề | `h264_nvenc`, `libx264` | việc duy nhất mà "dự phòng" đã là hành vi thật |
+
+**KHÔNG bịa model.** Ảnh mockup ghi *PaddleOCR, Tesseract, NLLB-200, Google Translate, Gemini
+2.5 Flash, Edge TTS, XTTS v2, UVR MDX-Net, FFmpeg*. Không cái nào trong số đó chạy trong sản
+phẩm này, nên đưa chúng vào bảng là bán một lựa chọn không tồn tại — đúng loại "khai báo nói
+dối" mà repo xoá. Bảng vẽ ra đúng thứ đang chạy được, và việc chỉ có một model thì hiện
+**"chỉ có một model"** thay vì một ô dự phòng rỗng (ô chỉ có một lựa chọn là ô nói dối rằng có
+thể chọn).
+
+**Luật, viết thành hàm THUẦN** (`domain/model_settings.py::chon`):
+
+```
+model đang dùng chạy được            → dùng nó            ("dang-dung")
+không chạy được, dự phòng chạy được   → dùng dự phòng      ("du-phong")
+cả hai không chạy được               → None               ("khong-co")
+```
+
+`san_sang` (tập id chạy được) là ĐO ĐƯỢC, không phải suy đoán: engine Ollama phải có model
+trong `/api/tags`, engine `http` phải có endpoint sống (`main._mark_availability`), còn
+`h264_nvenc` phải qua phép dò 320×240 của chính `tach_nen.co_nvenc()`. `libx264` luôn chạy
+được nên bước burn luôn có đường cùng.
+
+**Đo được — bảng này KHÔNG phải đồ trang trí.** Ba dây nối thật, mỗi dây một bài ghim:
+
+1. **Job `asr`**: client gửi engine không chạy được ⇒ job mang engine dự phòng
+   (`job.engine == "asr-a"`, `phase == "asr:asr-a"`); không có dự phòng ⇒ **409** kèm câu chỉ
+   dẫn, và **không job nào được xếp**.
+2. **Job `dịch`**: cùng luật, và khi đổi sang engine dự phòng thì `spec` phải được đọc LẠI —
+   `prompt_version`, `glossary_prompt` là dữ liệu của CHÍNH engine đó; dùng spec cũ là ghi một
+   hàng `translations` mang engine dự phòng nhưng cấu hình của engine đã chọn.
+3. **Bước burn**: `DubHandler` hỏi `chon_burn(repos, co_gpu=tach_nen.co_nvenc())` rồi truyền
+   `ma_hoa_id` xuống `tach_nen.remux`; máy không NVENC mà đặt `h264_nvenc` ⇒ chạy `libx264` và
+   **ghi ra log** là đang dùng dự phòng.
+
+**Một chỗ phải tách tầng khi làm:** bản đầu tôi để `giai_quyet`/`san_sang`/`mac_dinh_cua` trong
+`domain/model_settings.py`, và `tests/test_layer_boundary.py` đỏ ngay:
+*`domain/ phải là logic thuần — model_settings.py: import app.registry`*. Đúng. Luật thuần ở
+lại domain; phần biết về DANH MỤC chuyển sang `app/chon_model.py` (cùng tầng `app/registry.py`).
+
+**Ghim:** 21 bài backend (`tests/test_model_settings.py`) + 9 bài frontend
+(`CaiDatModel.test.tsx`) + 1 bài trong `Studio.test.tsx`. Bài quan trọng nhất là
+`test_noi_day_job_ASR_dung_model_DU_PHONG` — không có nó thì bảng vẫn "lưu được" mà không đổi
+gì, đúng kiểu khai báo chết.
+
+### Đo cuối
+
+```
+pytest (toàn bộ)      1567 passed, 1 skipped, 15 deselected   EXIT_PYTEST=0
+npm test              296 pass, 0 fail                        EXIT_TEST=0
+npx tsc --noEmit                                              EXIT_TS=0
+```
+
 

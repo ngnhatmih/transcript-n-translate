@@ -245,9 +245,23 @@ def co_nvenc() -> bool:
     return _CO_NVENC
 
 
+#: Tham số mã hoá của TỪNG bộ mã hoá burn, tra theo ID. ID là dữ liệu của bảng "Cài đặt
+#: model" (`domain/model_settings.py::BURN_ENCODERS`) — hai bên phải cùng bộ khoá, và
+#: `tests/test_model_settings.py` ghim điều đó.
+MA_HOA: dict[str, list[str]] = {
+    "h264_nvenc": ["-c:v", "h264_nvenc", "-preset", "p5", "-rc", "vbr", "-cq", "23",
+                   "-b:v", "0"],
+    "libx264": ["-c:v", "libx264", "-preset", "medium", "-crf", "18"],
+}
+
+
 def remux(video: pathlib.Path, audio: pathlib.Path, ra: pathlib.Path,
-          phu_de: pathlib.Path | None = None) -> None:
+          phu_de: pathlib.Path | None = None, ma_hoa_id: str | None = None) -> None:
     """Video COPY (không re-encode), audio `aac 192k` ở `SR_RA`, đệm im lặng cho đủ dài.
+
+    `ma_hoa_id` — bộ mã hoá của bước BURN (`"h264_nvenc"` | `"libx264"`), do bảng "Cài
+    đặt model" quyết (`domain/model_settings.chon_burn`). `None` = giữ hành vi tự chọn cũ
+    (có NVENC thì GPU), để mọi đường gọi cũ không phải biết về cài đặt.
 
     🔴 `-af apad` là BẮT BUỘC, không phải trang trí. Đo được: thiếu nó, `-shortest` cắt theo
     audio NGẮN NHẤT và `remux.mp4` chỉ còn **1150,866 s** thay vì 1249,237 s — mất 98,4 giây
@@ -299,11 +313,8 @@ def remux(video: pathlib.Path, audio: pathlib.Path, ra: pathlib.Path,
     #:
     #: `libx264` VẪN là đường dự phòng, chạy ngay khi NVENC hỏng: máy không có driver
     #: NVIDIA hoặc container không được cấp GPU vẫn phải ra được video, chỉ chậm hơn.
-    ma_hoa = (
-        ["-c:v", "h264_nvenc", "-preset", "p5", "-rc", "vbr", "-cq", "23", "-b:v", "0"]
-        if co_nvenc()
-        else ["-c:v", "libx264", "-preset", "medium", "-crf", "18"]
-    )
+    ma_hoa = MA_HOA.get(ma_hoa_id or ("h264_nvenc" if co_nvenc() else "libx264"),
+                        MA_HOA["libx264"])
 
     def _chay(tham_so_ma_hoa: list[str]) -> None:
         subprocess.run(

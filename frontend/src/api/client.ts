@@ -88,6 +88,9 @@ export const api = {
    */
   del: <T>(path: string) => call<T>("DELETE", path),
 
+  /** `PUT` — hiện dùng cho `PUT /api/model-settings` (ghi cả bảng cài đặt trong MỘT lượt). */
+  put: <T>(path: string, body?: unknown) => call<T>("PUT", path, jsonInit(body)),
+
   /**
    * Tải tệp lên (`POST /api/sources/upload`) — multipart, KHÔNG đặt
    * `content-type`: trình duyệt phải tự thêm `boundary`, và đặt tay thì body

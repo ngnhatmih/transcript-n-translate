@@ -36,6 +36,7 @@ NGUONG_IM_LANG = 0.01
 #: hai noi cung dinh nghia mot khai niem thi khong co gi bao chung lech nhau.
 #: Van xuat ra duoi ten cu vi tests/test_dub.py va cac cho khac import chung.
 from app.domain.nguon_chu import LOP_1, LOP_2
+from app.domain import model_settings as ms
 LOP_MOT_NGUON = LOP_1
 LOP_HAI_NGUON = LOP_2
 def mot_dong_moi_cap(segments: list) -> list:
@@ -579,7 +580,15 @@ class DubHandler:
                 report(0.94, f"không burn được phụ đề ({type(exc).__name__}: {exc}) — "
                              f"video vẫn có tiếng lồng, thiếu chữ")
 
-            tach_nen.remux(video, tron_path, ra, phu_de=phu_de)
+            #: Bộ mã hoá burn do bảng "Cài đặt model" quyết (ERRATA #80). Luật: dùng
+            #: model đang chọn nếu nó chạy được (có NVENC), không thì model dự phòng —
+            #: và `libx264` luôn chạy được nên luôn có đường cùng.
+            ma_hoa_id, ly_do_ma_hoa = ms.chon_burn(self._repos,
+                                                  co_gpu=tach_nen.co_nvenc())
+            if ly_do_ma_hoa == "du-phong":
+                report(0.95, f"burn bằng {ma_hoa_id}: model đang chọn không chạy được ở "
+                             f"máy này — dùng model dự phòng")
+            tach_nen.remux(video, tron_path, ra, phu_de=phu_de, ma_hoa_id=ma_hoa_id)
             report(0.96, f"video lồng tiếng: {ra.name} ({ra.stat().st_size // 1024} kB)"
                          + ("" if phu_de is not None else " · KHÔNG có phụ đề"))
 
