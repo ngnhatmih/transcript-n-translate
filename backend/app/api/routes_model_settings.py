@@ -94,7 +94,6 @@ def _bang(repos, specs: list[EngineSpec]) -> dict:
             "id": task.id,
             "label": task.label,
             "nhom": task.nhom,
-            "note": task.note,
             #: Một ứng viên ⇒ giao diện KHÔNG vẽ ô "dự phòng": ô chỉ có một lựa chọn là
             #: ô nói dối rằng có thể chọn.
             "locked": len(ung_vien) <= 1,

@@ -83,7 +83,6 @@ class Task:
     kind: str = ""
     #: Ứng viên khi `nguon == "fixed"` (một hoặc nhiều id cố định).
     co_dinh: tuple[str, ...] = ()
-    note: str = ""
 
 
 TASKS: tuple[Task, ...] = (
@@ -92,8 +91,7 @@ TASKS: tuple[Task, ...] = (
     Task("dich", "Dịch", "Dịch", "registry", kind="mt"),
     Task("tts", "TTS", "Lồng tiếng", "fixed", co_dinh=(TTS_ENGINE,)),
     Task("tach_giong", "Tách giọng", "Ghép nền", "fixed", co_dinh=(SEP_ENGINE,)),
-    Task("burn", "Burn phụ đề vào video", "Ghép nền", "burn",
-         note="Tự chọn theo máy: có NVENC thì dùng GPU"),
+    Task("burn", "Burn phụ đề", "Ghép nền", "burn"),
 )
 
 #: Nhãn cho ứng viên cố định (registry đã có `label` riêng của nó).

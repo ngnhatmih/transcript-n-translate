@@ -2288,4 +2288,79 @@ npm test              296 pass, 0 fail                        EXIT_TEST=0
 npx tsc --noEmit                                              EXIT_TS=0
 ```
 
+---
+
+## ERRATA #81 — panel "Cài đặt model": trang trí lại, và bốn chỗ THỪA đã bị bỏ
+
+**Yêu cầu:** *"trang trí lại một chút cái panel này cái nhỉ? Và có cái nào bị thừa ko"*.
+
+### Bốn chỗ thừa (mỗi chỗ là một câu lặp lại hoặc một khai báo không ai đọc)
+
+1. **`note` — trường chết VÀ nói sai.** Nó đi từ `domain` → route → `types.ts` → panel, nhưng
+   giao diện chỉ nhét vào `title=` (tooltip của một `<span>` — gần như không ai thấy). Tệ hơn,
+   nội dung của nó là *"Tự chọn theo máy: có NVENC thì dùng GPU"* — câu đó ĐÚNG trước khi có
+   bảng cài đặt, và nay SAI: burn là một lựa chọn tường minh. Đã xoá khỏi cả bốn tầng.
+2. **Tiêu đề cột lặp 12 lần.** Bản đầu để "Model sử dụng" / "Model mặc định (dự phòng)" bên
+   trong TỪNG ô, tức sáu việc × hai nhãn = mười hai lần cùng một câu. Nay còn MỘT hàng tiêu đề
+   dính trên cùng (`sticky top-0`) cho cả bảng.
+3. **Nhãn nhóm lặp 4 lần.** Ở bước giữa, mỗi nhóm lại có thêm một hàng tiêu đề cột riêng. Nay
+   nhãn nhóm là một dòng khắc + đường kẻ, không kèm lại tiêu đề cột.
+4. **"đang chạy: X" lặp lại chính ô chọn.** Sáu dòng, dòng nào cũng in "đang chạy: <model vừa
+   chọn ở trên>" — một câu không nói thêm gì. Nay nó CHỈ hiện khi model đang chạy KHÁC model
+   đang chọn (`du-phong`) hoặc khi không còn đường nào chạy (`khong-co`), kèm một chấm amber.
+
+### Ngôn ngữ thị giác: lấy từ chính ứng dụng
+
+Ứng dụng này là "phòng thu biên tập": graphite ấm, MỘT màu nhấn amber, `Archivo` +
+`IBM Plex Mono`, bán kính 2 px, đường kẻ 1 px, nhãn chữ hoa giãn chữ (`label-engraved`), số
+canh cột (`num`). Bản trang trí lại vẽ bằng ĐÚNG sáu token đó — không bo tròn lớn, không bóng
+đổ, không thẻ (card), không font mới, không màu mới. Cụ thể:
+
+* mỗi việc là MỘT DÒNG của bảng đặc tả: số thứ tự mono `01…06`, tên việc, hai ô chọn;
+* nhóm việc là nhãn khắc + đường kẻ chạy hết bề ngang, KHÔNG phải hộp có viền;
+* vệt amber 2 px ở mép trên (cùng dấu hiệu "bề mặt đang mở" của panel Hàng đợi);
+* nút chính tô amber đặc (`bg-signal`), nút phụ viền mảnh; `active:translate-y-px` cho phản hồi
+  chạm; chuyển động chỉ `transition-colors/transform 150 ms` — không thư viện animation (dự án
+  không có `framer-motion`, và bảng cài đặt không cần);
+* trạng thái nạp là **skeleton đúng hình bảng** (3 nhóm × 2 dòng), không phải vòng xoay;
+* `Esc` đóng bảng — trước đó panel này là hộp thoại DUY NHẤT bắt người dùng đi tìm chuột.
+
+### Một lỗi do CHÍNH việc chụp ảnh bắt được, không phải do test
+
+Lượt đầu của bản trang trí lại làm **cả trang thành "Trang này không tải được"**: tôi gom phần
+nhóm dòng vào một `useMemo` đặt **sau** `if (!open) return null`. Số hook của lần render "đóng"
+khác lần "mở" ⇒ React ném *"Rendered more hooks than during the previous render"* và error
+boundary của app che cả trang. Đúng lỗi repo này đã ghi một lần (`ERRATA` cũ về Rules of Hooks).
+
+Đo được: `npm test` vẫn XANH 12/12 ở tệp panel (mọi bài đều `open` ngay từ đầu, nên số hook
+không đổi), chỉ bài của `Studio` (mở panel TỪ trạng thái đóng) mới lộ. Và vì nó ném ở lần
+render thứ hai, cách duy nhất thấy chắc chắn là **mở panel thật trong Chrome**: ảnh chụp
+1424×1005 qua CDP cho ra đúng màn hình lỗi. Nay phép gom nhóm là vòng lặp thường (sáu dòng thì
+không cần nhớ), kèm ghi chú tại chỗ nói rõ vì sao KHÔNG được dùng hook ở đó.
+
+### Kiểm bằng ảnh thật, không chỉ bằng số
+
+Chụp bằng Chrome headless (CDP, `Runtime.evaluate` bấm nút "Lệnh" rồi lệnh "Cài đặt model"),
+hai trạng thái:
+
+* **bình thường** (mọi engine chạy được): sáu dòng, không dòng nào có câu "đang chạy" — đúng
+  luật bỏ chỗ thừa;
+* **có dự phòng** (đặt `dich.used = deepseek-web` — gateway đang tắt — `fallback = qwen2.5-7b`):
+  dòng Dịch hiện chấm amber + `đang chạy bằng model dự phòng: qwen2.5-7b` dưới dạng mono, và
+  `hieu_luc` của backend trả đúng `qwen2.5-7b (du-phong)`. Cài đặt được khôi phục về mặc định
+  sau khi chụp.
+
+**Ghim:** 3 bài mới trong `CaiDatModel.test.tsx` — (1) dòng "đang chạy" KHÔNG được vẽ khi nó
+chỉ lặp lại model đang chọn; (2) `Esc` đóng bảng; (3) model đang lưu NGOÀI nhóm đang chọn vẫn
+hiện trong ô chọn (nếu lọc thẳng tay thì `<select>` của React hiển thị ô RỖNG và người dùng mất
+lựa chọn cũ mà không hiểu vì sao).
+
+### Đo cuối
+
+```
+pytest (toàn bộ)      1567 passed, 1 skipped, 15 deselected   EXIT_PYTEST=0
+npm test              299 pass, 0 fail                        EXIT_TEST=0
+npx tsc --noEmit                                              EXIT_TS=0
+```
+
 

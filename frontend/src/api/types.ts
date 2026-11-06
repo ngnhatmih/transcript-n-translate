@@ -711,7 +711,6 @@ export interface ModelTask {
   id: string;
   label: string;
   nhom: string;
-  note: string;
   /**
    * Chỉ có MỘT ứng viên ⇒ giao diện KHÔNG vẽ ô "dự phòng": ô chỉ có một lựa chọn là ô
    * nói dối rằng có thể chọn.

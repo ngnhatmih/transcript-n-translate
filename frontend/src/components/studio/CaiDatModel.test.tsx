@@ -27,14 +27,14 @@ const DU_LIEU: ModelSettings = {
   nhom_dich_chon: ["mt", "llm"],
   tasks: [
     {
-      id: "ocr", label: "OCR", nhom: "Phiên âm", note: "", locked: true,
+      id: "ocr", label: "OCR", nhom: "Phiên âm", locked: true,
       candidates: [{ id: "rapidocr", label: "RapidOCR", available: true, nhom: null }],
       used: "rapidocr", fallback: null,
       mac_dinh: { used: "rapidocr", fallback: null },
       hieu_luc: { engine: "rapidocr", ly_do: "dang-dung" },
     },
     {
-      id: "asr", label: "ASR", nhom: "Phiên âm", note: "", locked: false,
+      id: "asr", label: "ASR", nhom: "Phiên âm", locked: false,
       candidates: [
         { id: "fw-large-v3", label: "Whisper large-v3", available: true, nhom: null },
         { id: "fw-medium", label: "Whisper medium", available: true, nhom: null },
@@ -45,7 +45,7 @@ const DU_LIEU: ModelSettings = {
       hieu_luc: { engine: "fw-medium", ly_do: "du-phong" },
     },
     {
-      id: "dich", label: "Dịch", nhom: "Dịch", note: "", locked: false,
+      id: "dich", label: "Dịch", nhom: "Dịch", locked: false,
       candidates: [
         { id: "opus-mt", label: "OPUS-MT", available: true, nhom: "mt" },
         { id: "qwen2.5-7b", label: "Qwen2.5-7B", available: false, nhom: "llm" },
@@ -55,7 +55,7 @@ const DU_LIEU: ModelSettings = {
       hieu_luc: { engine: "opus-mt", ly_do: "dang-dung" },
     },
     {
-      id: "burn", label: "Burn phụ đề vào video", nhom: "Ghép nền", note: "", locked: false,
+      id: "burn", label: "Burn phụ đề", nhom: "Ghép nền", locked: false,
       candidates: [
         { id: "h264_nvenc", label: "GPU NVENC", available: false, nhom: null },
         { id: "libx264", label: "CPU x264", available: true, nhom: null },
@@ -119,7 +119,7 @@ describe("CaiDatModel: bảng dựng từ dữ liệu THẬT của backend", () 
     assert.equal(goi[0].method, "GET");
     assert.match(goi[0].url, /\/api\/model-settings$/);
     const chu = document.body.textContent ?? "";
-    for (const ten of ["Phiên âm", "Dịch", "Ghép nền", "OCR", "ASR", "Dịch", "Burn phụ đề vào video"]) {
+    for (const ten of ["Phiên âm", "Dịch", "Ghép nền", "OCR", "ASR", "Dịch", "Burn phụ đề"]) {
       assert.ok(chu.includes(ten), `thiếu "${ten}" trong panel: ${chu.slice(0, 200)}`);
     }
   });
@@ -143,8 +143,8 @@ describe("CaiDatModel: bảng dựng từ dữ liệu THẬT của backend", () 
     mo();
     await cho();
     const chu = document.body.textContent ?? "";
-    assert.match(chu, /đang chạy: fw-medium \(model dự phòng\)/, chu.slice(0, 400));
-    assert.match(chu, /đang chạy: libx264 \(model dự phòng\)/);
+    assert.match(chu, /đang chạy bằng model dự phòng:\s*fw-medium/, chu.slice(0, 400));
+    assert.match(chu, /đang chạy bằng model dự phòng:\s*libx264/);
   });
 
   it("ứng viên chưa sẵn sàng được ghi rõ ngay trong danh sách", async () => {
@@ -213,5 +213,55 @@ describe("CaiDatModel: hai nút gửi đúng thứ chúng hứa", () => {
     assert.equal(tasks["asr"].fallback, null);
     assert.equal(tasks["burn"].used, "h264_nvenc");
     assert.equal(tasks["ocr"].used, "rapidocr");
+  });
+});
+
+describe("CaiDatModel: chỗ THỪA đã bị bỏ (và phím Escape)", () => {
+  it("dòng 'đang chạy' KHÔNG được vẽ khi nó chỉ lặp lại model đang chọn", async () => {
+    //: Bản đầu in "đang chạy: X" cho CẢ sáu dòng, kể cả khi X chính là giá trị đang hiện
+    //: trong ô chọn ngay trên nó — sáu câu lặp lại không nói thêm gì. Nay dòng đó chỉ hiện
+    //: khi đã rơi về dự phòng hoặc không còn đường nào.
+    stubFetch({
+      ...DU_LIEU,
+      tasks: DU_LIEU.tasks.map((t) => ({
+        ...t,
+        hieu_luc: { engine: t.used, ly_do: "dang-dung" },
+      })),
+    });
+    mo();
+    await cho();
+    assert.doesNotMatch(document.body.textContent ?? "", /đang chạy/);
+  });
+
+  it("Escape đóng bảng (chuột không phải đường duy nhất)", async () => {
+    stubFetch();
+    let dong = 0;
+    render(<CaiDatModel open onClose={() => { dong += 1; }} />);
+    await cho();
+    fireEvent.keyDown(window, { key: "Escape" });
+    assert.equal(dong, 1, "Escape phải đóng bảng");
+  });
+
+  it("model đang lưu NGOÀI nhóm đang chọn vẫn hiện trong ô, không thành ô rỗng", async () => {
+    //: `<select>` của React không có giá trị nằm ngoài `options` thì hiển thị RỖNG. Đổi
+    //: sang nhóm LLM khi đang dùng `opus-mt` (MT) mà lọc thẳng tay thì người dùng thấy ô
+    //: trống và mất luôn lựa chọn cũ, không hiểu vì sao.
+    stubFetch({
+      ...DU_LIEU,
+      nhom_dich: "llm",
+      tasks: DU_LIEU.tasks.map((t) =>
+        t.id === "dich" ? { ...t, used: "opus-mt" } : t,
+      ),
+    });
+    mo();
+    await cho();
+    const chon = [...document.body.querySelectorAll("select")]
+      .find((s) => s.getAttribute("aria-label") === "model sử dụng của Dịch");
+    assert.ok(chon, "không thấy ô chọn của Dịch");
+    const nhan = [...chon.options].map((o) => o.textContent ?? "");
+    assert.ok(
+      nhan.some((t) => t.includes("OPUS-MT")),
+      `giá trị đang lưu bị bỏ khỏi danh sách: ${nhan.join(" | ")}`,
+    );
   });
 });
